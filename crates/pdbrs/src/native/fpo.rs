@@ -160,6 +160,54 @@ impl FrameData {
     }
 }
 
+impl FrameData {
+    /// Decode one 32-byte `FRAMEDATA` record.
+    pub(crate) fn from_bytes(bytes: [u8; FRAME_DATA_SIZE]) -> Self {
+        let half = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let word = |index: usize| {
+            let at = index * 4;
+            u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+        };
+        Self {
+            start: word(0),
+            size: word(1),
+            locals_size: word(2),
+            params_size: word(3),
+            max_stack_size: word(4),
+            program: word(5),
+            prolog_size: half(24),
+            saved_registers_size: half(26),
+            flags: word(7),
+        }
+    }
+
+    /// Append the 32-byte `FRAMEDATA` record to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        out.try_reserve(FRAME_DATA_SIZE).map_err(|_| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("frame data output cannot be allocated")
+        })?;
+        for value in [
+            self.start,
+            self.size,
+            self.locals_size,
+            self.params_size,
+            self.max_stack_size,
+            self.program,
+        ] {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out.extend_from_slice(&self.prolog_size.to_le_bytes());
+        out.extend_from_slice(&self.saved_registers_size.to_le_bytes());
+        out.extend_from_slice(&self.flags.to_le_bytes());
+        Ok(())
+    }
+}
+
 /// Check that `bytes` is an array of `size`-byte records.
 fn check_length(bytes: &[u8], size: usize, stream: StreamId, context: &'static str) -> Result<()> {
     let tail = bytes.len() % size;

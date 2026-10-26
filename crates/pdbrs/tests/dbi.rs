@@ -3,6 +3,7 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::dbi::{Dbi, DebugStream, Module, ModuleStream, Substream};
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::symbols::SymbolOffset;
 
 /// The header offsets of the substream sizes, in disk order.
 const SIZE_FIELDS: [usize; 7] = [24, 28, 32, 36, 40, 52, 48];
@@ -255,7 +256,10 @@ fn module_stream_splits_regions() {
     assert_eq!(records[0].data, [1, 2, 3, 4]);
     assert_eq!(stream.c11_data(), c11);
     assert_eq!(stream.c13_data(), c13);
-    assert_eq!(stream.global_refs(), refs);
+    assert_eq!(stream.global_ref_data(), refs);
+    let global_refs = stream.global_refs().unwrap();
+    assert_eq!(global_refs.len(), 1);
+    assert_eq!(global_refs.get(0), Some(SymbolOffset(0x10)));
 }
 
 #[test]
@@ -268,7 +272,8 @@ fn module_stream_accepts_absent_symbol_region() {
     assert_eq!(stream.symbol_offset(), 0);
     assert!(stream.symbols().next().is_none());
     assert_eq!(stream.c13_data(), c13);
-    assert_eq!(stream.global_refs(), []);
+    assert_eq!(stream.global_ref_data(), []);
+    assert!(stream.global_refs().unwrap().is_empty());
 }
 
 #[test]

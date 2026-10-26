@@ -5,9 +5,9 @@ use pdbrs::native::codeview::index::IdIndex;
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::lines::{
     ALWAYS_STEP_INTO_LINE, ChecksumKind, CoffSymbolRvas, DEBUG_S_COFF_SYMBOL_RVA,
-    DEBUG_S_FILECHKSMS, DEBUG_S_FRAMEDATA, DEBUG_S_IGNORE, DEBUG_S_INLINEELINES, DEBUG_S_LINES,
-    FileChecksums, InlineeLines, InlineeSignature, LineEntry, LineSubsection, LinesSubsection,
-    ModuleLines, SubsectionKind,
+    DEBUG_S_FILECHKSMS, DEBUG_S_IGNORE, DEBUG_S_INLINEE_MDTOKEN_MAP, DEBUG_S_INLINEELINES,
+    DEBUG_S_LINES, FileChecksums, InlineeLines, InlineeSignature, LineEntry, LineSubsection,
+    LinesSubsection, ModuleLines, SubsectionKind,
 };
 
 /// The module stream index in the synthetic module record.
@@ -301,7 +301,7 @@ fn inlinee_lines_reject_invalid_data() {
 }
 
 #[test]
-fn classifier_names_kinds_without_decoding_them() {
+fn classifier_names_kinds_and_keeps_unknown_layouts_raw() {
     assert_eq!(
         SubsectionKind::from_raw(DEBUG_S_LINES),
         SubsectionKind::Lines
@@ -322,25 +322,30 @@ fn classifier_names_kinds_without_decoding_them() {
         SubsectionKind::from_raw(0x42),
         SubsectionKind::Unknown(0x42)
     );
+    for raw in [0xf1, 0xf2, 0xfe, 0x100, 0x8000_00f2, 0x42] {
+        assert_eq!(SubsectionKind::from_raw(raw).raw(), raw);
+    }
     assert!(SubsectionKind::FileChecksums.is_decoded());
-    assert!(!SubsectionKind::FrameData.is_decoded());
+    assert!(SubsectionKind::FrameData.is_decoded());
+    assert!(!SubsectionKind::InlineeTokenMap.is_decoded());
+    assert!(!SubsectionKind::Ignored(DEBUG_S_IGNORE).is_decoded());
 
     let data = [1, 2, 3, 4];
     assert_eq!(
-        LineSubsection::decode(DEBUG_S_FRAMEDATA, &data).unwrap(),
+        LineSubsection::decode(DEBUG_S_INLINEE_MDTOKEN_MAP, &data).unwrap(),
         LineSubsection::Unsupported {
-            kind: SubsectionKind::FrameData,
+            kind: SubsectionKind::InlineeTokenMap,
             data: &data,
         }
     );
-    // The ignore bit keeps even a known kind raw.
-    assert!(matches!(
+    // The ignore bit keeps even a known kind raw, also with malformed data.
+    assert_eq!(
         LineSubsection::decode(DEBUG_S_IGNORE | DEBUG_S_LINES, &data).unwrap(),
-        LineSubsection::Unsupported {
-            kind: SubsectionKind::Ignored(_),
-            ..
+        LineSubsection::Ignored {
+            kind: DEBUG_S_IGNORE | DEBUG_S_LINES,
+            data: &data,
         }
-    ));
+    );
     assert!(matches!(
         LineSubsection::decode(DEBUG_S_INLINEELINES, &u32s(&[0])).unwrap(),
         LineSubsection::InlineeLines(_)
@@ -429,7 +434,7 @@ fn module_c13(checksum_offset: u32, inlinee_offset: u32) -> Vec<u8> {
     [
         subsection(DEBUG_S_LINES, &lines),
         subsection(DEBUG_S_FILECHKSMS, &checksums),
-        subsection(DEBUG_S_FRAMEDATA, &[1, 2]),
+        subsection(DEBUG_S_INLINEE_MDTOKEN_MAP, &[1, 2]),
         subsection(DEBUG_S_INLINEELINES, &inlinees),
     ]
     .concat()
@@ -445,7 +450,7 @@ fn module_lines_decode_and_validate_references() {
         [
             DEBUG_S_LINES,
             DEBUG_S_FILECHKSMS,
-            DEBUG_S_FRAMEDATA,
+            DEBUG_S_INLINEE_MDTOKEN_MAP,
             DEBUG_S_INLINEELINES
         ]
     );
