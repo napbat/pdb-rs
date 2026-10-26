@@ -77,7 +77,7 @@ macro_rules! iterable {
     };
 }
 
-mod blob;
+pub(super) mod blob;
 mod compilation;
 mod documents;
 mod enc;

@@ -299,6 +299,17 @@ row_id!(
     TableId::METHOD_DEF
 );
 row_id!(
+    /// A row of the external `StandAloneSig` table of the assembly, for example the local
+    /// signature of a method.
+    StandAloneSigId,
+    TableId::STAND_ALONE_SIG
+);
+row_id!(
+    /// A row of the external `AssemblyRef` table of the assembly.
+    AssemblyRefId,
+    TableId::ASSEMBLY_REF
+);
+row_id!(
     /// A row of the `Document` table.
     DocumentId,
     TableId::DOCUMENT

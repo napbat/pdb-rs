@@ -177,6 +177,7 @@ internal sealed class Dump
         WriteImportScopes();
         WriteStateMachineMethods();
         WriteCustomDebugInformation();
+        DebugDump.Write(reader, output);
         CustomDebugInfoDump.Write(reader, output);
     }
 

@@ -28,10 +28,10 @@ mod tables;
 
 pub use coded::CodedIndex;
 pub use ids::{
-    BlobOffset, CustomDebugInformationId, DocumentId, GuidIndex, IlOffset, ImportScopeId,
-    LocalConstantId, LocalScopeId, LocalVariableId, MAX_ROW, MetadataToken,
-    MethodDebugInformationId, MethodDefId, StateMachineMethodId, StringOffset, TableId,
-    UserStringOffset,
+    AssemblyRefId, BlobOffset, CustomDebugInformationId, DocumentId, GuidIndex, IlOffset,
+    ImportScopeId, LocalConstantId, LocalScopeId, LocalVariableId, MAX_ROW, MetadataToken,
+    MethodDebugInformationId, MethodDefId, StandAloneSigId, StateMachineMethodId, StringOffset,
+    TableId, UserStringOffset,
 };
 pub use pdb_stream::PdbStream;
 pub use root::{METADATA_SIGNATURE, MetadataRoot, MetadataStream, StreamHeader};

@@ -6,9 +6,15 @@
 //! refers to. It stops with an error at the first value that it cannot read.
 //!
 //! Then it decodes each custom debug information value, encodes it again and compares the
-//! bytes. It stops with an error at a value that does not decode. A value of an unknown kind
-//! is counted, not an error. The example does not decode the other blobs (document names,
-//! sequence points and imports). It reads their bytes only.
+//! bytes. A value of an unknown kind is counted, not an error.
+//!
+//! Then it decodes the debug table blobs: document names, sequence points, local constant
+//! signatures and imports. It encodes each blob again and compares the bytes. It prints each
+//! blob that encodes to other bytes, with the reason. Last, it validates the debug tables with
+//! `Pdb::validate_debug` and prints the report. It stops with an error at the first value that
+//! does not decode and at the first rule violation.
+
+mod debug;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -172,6 +178,7 @@ fn main() -> Outcome {
     };
     reader.all_tables()?;
     reader.custom_debug_information()?;
+    debug::debug_tables(&pdb, &mut reader.counts)?;
     for (name, count) in &reader.counts.0 {
         println!("{name}: {count}");
     }

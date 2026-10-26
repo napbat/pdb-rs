@@ -7,7 +7,9 @@
 //! native PDB age.
 //!
 //! [`compressed`] decodes and encodes the compressed integers of metadata
-//! blobs. [`custom`] decodes and encodes custom debug information blobs.
+//! blobs. [`debug`] has the typed rows, the blob codecs and the validation of
+//! the debug tables. [`custom`] decodes and encodes custom debug information
+//! blobs.
 //! [`embedded`] decodes and encodes embedded Portable PDB payloads and
 //! embedded-source blobs. Windows PDB document records use the same
 //! embedded-source blob format. Decode an `MPDB` payload with
@@ -15,6 +17,7 @@
 
 pub mod compressed;
 pub mod custom;
+pub mod debug;
 pub mod embedded;
 pub mod metadata;
 mod reader;

@@ -282,6 +282,38 @@ The heap size is the size of its stream. SRM removes the zero padding after the 
 `#Strings` from its heap size. The verifier accepts a smaller SRM size only if zero bytes follow
 it.
 
+#### Debug table lines
+
+The decoded debug table sections come after the `row` lines and before the custom debug
+information section (#23). pdbrs decodes the values with `portable::debug`. The verifier uses
+the SRM views of documents, sequence points, scopes and imports. SRM does not decode local
+constant signatures, so the verifier decodes them with `BlobReader` in
+`dotnet/verifier/DebugDump.cs`. Names and text are quoted like the metadata version string.
+GUIDs are lowercase text; a nil GUID index gives `00000000-0000-0000-0000-000000000000`.
+
+| Keyword | Fields |
+| --- | --- |
+| `document` | `id`, `name` (the joined name), `language`, `hash-algorithm` (GUIDs), `hash` (bytes in hexadecimal), for each `Document` row |
+| `method-debug` | `id`, `document` (the `Document` column), `local-signature` (the `StandAloneSig` row), `points` (the count), for each method with a sequence point blob |
+| `sequence-point` | `method`, `il`, `document`, then `hidden` or `start-line`, `start-column`, `end-line`, `end-column` (decimal), after the `method-debug` line of the method |
+| `scope` | `id`, `method`, `import-scope`, `start`, `end` (IL offsets), `variables`, `constants` (the run sizes), for each `LocalScope` row |
+| `scope-variable` | `scope`, `id`, `index`, `attributes`, `name`, for each variable of the scope |
+| `scope-constant` | `scope`, `id`, `name` and the decoded signature, for each constant of the scope |
+| `import-scope` | `id`, `parent`, `imports` (the count), for each `ImportScope` row |
+| `import` | `scope`, `kind` (1 to 9) and the fields of the kind: `alias` and `namespace` (quoted bytes), `assembly` (row), `type` (token) |
+| `state-machine` | `move-next`, `kickoff` (`MethodDef` rows), in `MoveNext` order |
+
+A decoded constant signature has a `modifier=required:<token>` or `modifier=optional:<token>`
+field for each custom modifier, then the value:
+
+- `boolean=true` or `boolean=false`; `char=0xNNNN`; `i1`, `u1`, `i2`, `u2`, `i4`, `u4`, `i8`,
+  `u8` in decimal; `r4` and `r8` as the IEEE 754 bits in hexadecimal.
+- `string=null` or `string="..."` (the UTF-16 text as UTF-8).
+- An integer value with `enum=<token>` for an enum constant.
+- `class=<token>` or `valuetype=<token>`, then `default`, `datetime=<ticks>` or
+  `decimal=<sign>:<scale>:<high>:<mid>:<low>`.
+- `object` for an `OBJECT` constant.
+
 #### Custom debug information lines
 
 The custom debug information section comes last. Each `CustomDebugInformation` row gives a
@@ -308,10 +340,9 @@ syntax offsets, state numbers, slot kinds, ordinals and row IDs are signed decim
 | `primary-constructor` | No detail line |
 | `unknown` | `cdi-raw`: `size`, `bytes` (in hexadecimal) |
 
-To extend the format, add new keywords after the `row` lines, for example decoded documents,
-sequence points or custom debug information. Add each new line type to the verifier and to
-`crates/pdbrs-fixtures/src/verify/dump.rs` together, and increase the version only if an existing
-line changes.
+To extend the format, add new keywords after the `row` lines. Add each new line type to the
+verifier and to `crates/pdbrs-fixtures/src/verify/dump.rs` (or a module below it) together,
+and increase the version only if an existing line changes.
 
 ### Format detection
 

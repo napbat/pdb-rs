@@ -6,6 +6,7 @@
 //! sizes, flags, masks and tokens are hexadecimal.
 
 mod custom;
+mod debug;
 
 use std::fmt::Write as _;
 
@@ -43,6 +44,7 @@ pub fn dump<S: ReadAt>(pdb: &Pdb<S>) -> pdbrs::Result<String> {
     out.line(format_args!("portable-dump version={VERSION}"));
     headers(pdb, &mut out);
     rows(pdb, &mut out)?;
+    debug::debug(pdb, &mut out)?;
     custom::custom(pdb, &mut out)?;
     Ok(out.text)
 }
