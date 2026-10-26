@@ -4,8 +4,9 @@
 //! a GUID with a stamp. The stamp is not a native PDB age.
 //!
 //! [`compressed`] decodes and encodes the compressed integers of metadata
-//! blobs. [`embedded`] decodes and encodes embedded-source blobs. Windows PDB
-//! document records use the same blob format.
+//! blobs. [`embedded`] decodes and encodes embedded Portable PDB payloads and
+//! embedded-source blobs. Windows PDB document records use the same
+//! embedded-source blob format.
 
 pub mod compressed;
 pub mod embedded;

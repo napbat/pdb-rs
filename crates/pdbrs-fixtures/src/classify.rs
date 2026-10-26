@@ -21,6 +21,8 @@ pub enum Kind {
     PortablePdb,
     /// A PE image with an embedded Portable PDB debug payload.
     EmbeddedInImage,
+    /// The `MPDB` payload of an embedded Portable PDB, taken from its image.
+    EmbeddedPdbPayload,
     /// A PE image without an embedded Portable PDB.
     Image,
     /// Data with none of the known signatures.
@@ -34,6 +36,7 @@ impl Kind {
             Self::NativePdb => "native-pdb",
             Self::PortablePdb => "portable-pdb",
             Self::EmbeddedInImage => "embedded-in-image",
+            Self::EmbeddedPdbPayload => "embedded-pdb-payload",
             Self::Image => "image",
             Self::Unknown => "unknown",
         }
@@ -46,8 +49,10 @@ pub fn classify(bytes: &[u8]) -> Kind {
         Kind::NativePdb
     } else if bytes.starts_with(METADATA_SIGNATURE) {
         Kind::PortablePdb
+    } else if bytes.starts_with(EMBEDDED_SIGNATURE) {
+        Kind::EmbeddedPdbPayload
     } else if bytes.starts_with(b"MZ") {
-        match embedded_pdb_offset(bytes) {
+        match embedded_pdb_payload(bytes) {
             Some(_) => Kind::EmbeddedInImage,
             None => Kind::Image,
         }
@@ -56,8 +61,11 @@ pub fn classify(bytes: &[u8]) -> Kind {
     }
 }
 
-/// Find the file offset of an `MPDB` payload through the PE debug directory.
-pub fn embedded_pdb_offset(image: &[u8]) -> Option<usize> {
+/// Find the `MPDB` payload of an image through the PE debug directory.
+///
+/// The payload is the data of the first debug directory entry of type 17. Its size is the
+/// `SizeOfData` field of the entry.
+pub fn embedded_pdb_payload(image: &[u8]) -> Option<&[u8]> {
     let pe = to_usize(read_u32(image, 0x3c)?)?;
     if image.get(pe..pe + 4)? != b"PE\0\0" {
         return None;
@@ -83,8 +91,10 @@ pub fn embedded_pdb_offset(image: &[u8]) -> Option<usize> {
         if read_u32(image, entry + 12)? != DEBUG_TYPE_EMBEDDED_PORTABLE_PDB {
             return None;
         }
+        let size = to_usize(read_u32(image, entry + 16)?)?;
         let payload = to_usize(read_u32(image, entry + 24)?)?;
-        (image.get(payload..payload + 4)? == EMBEDDED_SIGNATURE).then_some(payload)
+        let data = image.get(payload..payload.checked_add(size)?)?;
+        data.starts_with(EMBEDDED_SIGNATURE).then_some(data)
     })
 }
 
@@ -120,7 +130,7 @@ fn to_usize(value: u32) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, classify, embedded_pdb_offset};
+    use super::{EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, classify, embedded_pdb_payload};
 
     fn put_u16(image: &mut [u8], offset: usize, value: u16) {
         image[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -172,9 +182,16 @@ mod tests {
 
     #[test]
     fn finds_embedded_portable_pdb_through_debug_directory() {
-        let embedded = image(17, EMBEDDED_SIGNATURE);
-        assert_eq!(embedded_pdb_offset(&embedded), Some(0x300));
+        let embedded = image(17, b"MPDB\x03\x00\x00\x00");
+        assert_eq!(
+            embedded_pdb_payload(&embedded),
+            Some(&b"MPDB\x03\x00\x00\x00"[..])
+        );
         assert_eq!(classify(&embedded), Kind::EmbeddedInImage);
+        assert_eq!(
+            classify(embedded_pdb_payload(&embedded).unwrap()),
+            Kind::EmbeddedPdbPayload
+        );
     }
 
     #[test]
@@ -182,5 +199,13 @@ mod tests {
         assert_eq!(classify(&image(2, b"RSDS")), Kind::Image);
         assert_eq!(classify(&image(17, b"XXXX")), Kind::Image);
         assert_eq!(classify(b"MZ"), Kind::Image);
+    }
+
+    #[test]
+    fn payloads_outside_the_image_are_absent() {
+        let mut truncated = image(17, EMBEDDED_SIGNATURE);
+        truncated.truncate(0x304);
+        assert_eq!(embedded_pdb_payload(&truncated), None);
+        assert_eq!(classify(&truncated), Kind::Image);
     }
 }

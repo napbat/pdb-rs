@@ -92,12 +92,17 @@ the fixture directory as the artifacts path, so no `bin/` or `obj/` directory ap
 - the tool versions, for example the `cl` banner, `clang-cl --version`, `rustc -V` and
   `dotnet --version`
 - each command with its working directory, environment source and extra variables
-- each output with its kind (`native-pdb`, `portable-pdb`, `embedded-in-image` or `image`),
-  its path relative to the output root and its size in bytes
+- each output with its kind (`native-pdb`, `portable-pdb`, `embedded-in-image`,
+  `embedded-pdb-payload` or `image`), its path relative to the output root and its size in bytes
 
-The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature or
-an `MPDB` payload in the PE debug directory. The manifest also records the workspace commit
-and the host.
+The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature, the
+`MPDB` signature or an `MPDB` payload in the PE debug directory. The manifest also records the
+workspace commit and the host.
+
+For an `embedded-in-image` output, the generator writes the data of the debug directory entry
+of type 17 to a file next to the image, with the extension `.mpdb` (for example
+`CSharpDemo.mpdb`). The manifest records this file as an `embedded-pdb-payload` output. Tests
+and examples read the payload from this file, so pdbrs does not need a PE parser.
 
 The `consumer_tools` section of `manifest.json` copies the tool records of
 `target/tools/manifest.json` (see [Consumer tools](#consumer-tools)). If that file is missing,
