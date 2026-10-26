@@ -226,7 +226,6 @@ impl<'a> Fields<'a> {
     pub(crate) fn id_index(&mut self) -> Result<IdIndex> {
         Ok(IdIndex(self.u32()?))
     }
-
     /// Read `count` bytes.
     pub(crate) fn bytes(&mut self, count: usize) -> Result<&'a [u8]> {
         if count > self.bytes.len() {
@@ -252,6 +251,11 @@ impl<'a> Fields<'a> {
         let (name, rest) = self.bytes.split_at(end);
         self.bytes = &rest[1..];
         Ok(name)
+    }
+
+    /// Return `true` if all bytes are read.
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
     }
 
     /// Make sure that the remaining bytes are type-record padding.
