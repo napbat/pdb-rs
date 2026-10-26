@@ -321,7 +321,9 @@ pub enum Numeric<'a> {
     Complex128([u8; 32]),
     /// `LF_DECIMAL`.
     Decimal([u8; 16]),
-    /// `LF_DATE`: an OLE automation date.
+    /// `LF_DATE`: 8 value bytes. `cvinfo.h` names an OLE automation date
+    /// ([`Numeric::date`]); Roslyn writes a .NET tick count
+    /// ([`Numeric::date_ticks`]).
     Date([u8; 8]),
     /// `LF_VARSTRING`: the string bytes, without the `u16` count.
     VarString(&'a [u8]),
@@ -566,10 +568,27 @@ impl<'a> Numeric<'a> {
 
     /// Return the OLE automation date of an `LF_DATE` leaf: the days since
     /// 30 December 1899, with the time of day as the fraction.
+    ///
+    /// This is the meaning of `DATE` in `cvinfo.h`. Roslyn does not write
+    /// this form: see [`Numeric::date_ticks`].
     #[must_use]
     pub const fn date(&self) -> Option<f64> {
         match self {
             Self::Date(bytes) => Some(f64::from_le_bytes(*bytes)),
+            _ => None,
+        }
+    }
+
+    /// Return the bytes of an `LF_DATE` leaf as a little-endian `i64`.
+    ///
+    /// Roslyn writes the `S_MANCONSTANT` value of a Visual Basic `Date`
+    /// constant in this form: the .NET `DateTime.Ticks` value, in 100 ns
+    /// intervals since 1 January 0001. DIA returns the same bytes as a
+    /// `VT_DATE` variant.
+    #[must_use]
+    pub const fn date_ticks(&self) -> Option<i64> {
+        match self {
+            Self::Date(bytes) => Some(i64::from_le_bytes(*bytes)),
             _ => None,
         }
     }

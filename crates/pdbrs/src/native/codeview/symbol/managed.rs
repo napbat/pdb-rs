@@ -238,7 +238,9 @@ pub struct ManagedConstant<'a> {
     /// constant signature (`StandAloneSig`, table `0x11`).
     pub type_or_token: u32,
     /// The value: a numeric leaf with its exact encoding. Roslyn writes
-    /// integers, `LF_VARSTRING` strings and real, decimal and date leaves.
+    /// integers, `LF_VARSTRING` strings (UTF-8 bytes) and real, decimal and
+    /// date leaves. A null reference is `LF_LONG` 0. A date leaf holds the
+    /// .NET tick count ([`Numeric::date_ticks`]).
     pub value: Numeric<'a>,
     /// The name.
     pub name: &'a [u8],
