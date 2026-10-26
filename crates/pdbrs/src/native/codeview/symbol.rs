@@ -83,8 +83,14 @@ pub use frame::{CookieKind, FrameCookie, HeapAllocationSite};
 pub use global::{CoffGroup, ProcedureReference, Public, PublicFlags, Section};
 pub use link::{FastLink, FastLinkFlags, Trampoline, TrampolineKind};
 pub use managed::{
-    MANAGED_ATTRIBUTE_OEM_ID, ManagedConstant, ManagedConstantValue, ManagedProcedure, ManagedSlot,
-    Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_TOKENREF,
+    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,
+    AttributeValue, CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData,
+    CustomDebugInfoKind, CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal,
+    DynamicLocalIter, DynamicLocals, HoistedLocalScope, HoistedLocalScopes,
+    MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant, ManagedConstantValue,
+    ManagedProcedure, ManagedSlot, Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM,
+    S_TOKENREF, SymbolAttribute, TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter,
+    UsingGroups, Utf8NameIter, Utf8Names,
 };
 pub use procedure::{
     Block, CallSiteInfo, FramePointer, FrameProcedure, FrameProcedureFlags, IdList, IdListIter,

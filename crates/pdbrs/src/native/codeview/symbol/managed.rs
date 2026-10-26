@@ -7,15 +7,87 @@
 //! `REFSYM2` layout of `S_PROCREF` and decodes as a
 //! [`ProcedureReference`](super::ProcedureReference).
 //!
+//! The `S_OEM` records of the .NET symbol writers hold symbol attributes:
+//! [`Oem::attribute`] and the child modules decode them.
+//!
 //! A metadata token is a raw `u32`: the high byte is the metadata table and
 //! the low 24 bits are the row number. For example, `0x0600_0001` is the first
 //! `MethodDef` row.
+
+/// Define an iterator that decodes fixed-size chunks of a checked slice.
+macro_rules! chunk_iter {
+    ($(#[$meta:meta])* $iter:ident, $size:expr, $item:ty, $decode:expr) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug)]
+        pub struct $iter<'a>(core::slice::Iter<'a, [u8; $size]>);
+
+        impl<'a> $iter<'a> {
+            /// Create an iterator over the whole chunks of `bytes`.
+            fn new(bytes: &'a [u8]) -> Self {
+                Self(bytes.as_chunks::<{ $size }>().0.iter())
+            }
+        }
+
+        impl Iterator for $iter<'_> {
+            type Item = $item;
+
+            fn next(&mut self) -> Option<$item> {
+                self.0.next().map($decode)
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl ExactSizeIterator for $iter<'_> {}
+
+        impl core::iter::FusedIterator for $iter<'_> {}
+    };
+}
+
+/// Implement `IntoIterator` for a list type and its reference through its `iter` method.
+macro_rules! iterable {
+    ($list:ident, $iter:ident) => {
+        impl<'a> IntoIterator for $list<'a> {
+            type Item = <$iter<'a> as Iterator>::Item;
+            type IntoIter = $iter<'a>;
+
+            fn into_iter(self) -> $iter<'a> {
+                self.iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &$list<'a> {
+            type Item = <$iter<'a> as Iterator>::Item;
+            type IntoIter = $iter<'a>;
+
+            fn into_iter(self) -> $iter<'a> {
+                self.iter()
+            }
+        }
+    };
+}
+
+mod attribute;
+mod custom_debug_info;
+
+pub use attribute::{
+    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,
+    AttributeValue, MD2_ATTRIBUTE, SymbolAttribute,
+};
+pub use custom_debug_info::{
+    CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData, CustomDebugInfoKind,
+    CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal, DynamicLocalIter, DynamicLocals,
+    HoistedLocalScope, HoistedLocalScopes, TupleElementNames, TupleElementNamesEntry,
+    TupleElementNamesIter, UsingGroups, Utf8NameIter, Utf8Names,
+};
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Integer;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
-use crate::Result;
+use crate::{Error, ErrorKind, Result};
 
 /// The kind of an OEM-defined record (`S_OEM`).
 pub const S_OEM: u16 = 0x0404;
@@ -245,9 +317,7 @@ pub struct Oem<'a> {
     pub type_index: TypeIndex,
     /// The OEM data after the type index, raw, with the record padding.
     ///
-    /// For [`MANAGED_ATTRIBUTE_OEM_ID`], the fixtures show a NUL-terminated
-    /// UTF-16 attribute name and then the attribute value. No public document
-    /// describes this layout, so the bytes stay raw.
+    /// For [`MANAGED_ATTRIBUTE_OEM_ID`], [`Oem::attribute`] decodes it.
     pub data: &'a [u8],
 }
 
@@ -264,4 +334,55 @@ impl<'a> Oem<'a> {
             data,
         })
     }
+
+    /// Decode the data as a symbol attribute of the Microsoft native symbol writer.
+    ///
+    /// Returns `None` if [`Oem::id`] is not [`MANAGED_ATTRIBUTE_OEM_ID`].
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`SymbolAttribute::parse`].
+    #[must_use]
+    pub fn attribute(&self) -> Option<Result<SymbolAttribute<'a>>> {
+        (self.id == MANAGED_ATTRIBUTE_OEM_ID).then(|| SymbolAttribute::parse(self.data))
+    }
+}
+
+/// The error context for an attribute value that is too short for its fields.
+const SHORT_VALUE: &str = "symbol attribute value is shorter than its fields";
+
+/// Return an [`ErrorKind::InvalidFormat`] error without a location.
+fn invalid(context: &'static str) -> Error {
+    Error::new(ErrorKind::InvalidFormat, None).with_context(context)
+}
+
+/// Split `bytes` at the first NUL UTF-16 code unit.
+///
+/// Return the code units before it and the bytes after it, or `None` if
+/// there is no NUL code unit.
+fn split_utf16(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    let end = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|unit| *unit == [0, 0])?
+        .checked_mul(2)?;
+    Some((&bytes[..end], &bytes[end + 2..]))
+}
+
+/// Make sure that `rest` is record padding: at most three zero bytes.
+fn zero_padding(rest: &[u8], context: &'static str) -> Result<()> {
+    if rest.len() < 4 && rest.iter().all(|&byte| byte == 0) {
+        Ok(())
+    } else {
+        Err(invalid(context))
+    }
+}
+
+/// Convert a stored `i32` count to `usize`. A negative count is an error.
+fn count(value: u32) -> Result<usize> {
+    i32::try_from(value)
+        .ok()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| invalid("custom debug information count is negative"))
 }

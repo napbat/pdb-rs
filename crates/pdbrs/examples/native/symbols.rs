@@ -9,7 +9,8 @@ use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
 use pdbrs::native::codeview::symbol::{
-    Annotation, ModuleSymbols, Symbol, SymbolData, Trampoline, TrampolineKind,
+    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbols, Oem, Symbol, SymbolData,
+    Trampoline, TrampolineKind,
 };
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
@@ -107,6 +108,7 @@ pub(crate) fn modules(
                 }
                 SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
                 SymbolData::FastLink(_) => report.add("FASTLINK references", 1),
+                SymbolData::Oem(oem) => oem_attribute(oem, report)?,
                 _ => {}
             }
             report.add("module symbols", 1);
@@ -116,6 +118,39 @@ pub(crate) fn modules(
         }
     }
     Ok(procedures)
+}
+
+/// Decode the symbol attribute of an `S_OEM` record and its Roslyn value.
+fn oem_attribute(oem: &Oem<'_>, report: &mut Report) -> Outcome {
+    let Some(attribute) = oem.attribute() else {
+        report.undecoded("S_OEM record with an unknown OEM ID".to_owned());
+        return Ok(());
+    };
+    let attribute = attribute?;
+    match report.supported(attribute.decode(), "symbol attribute")? {
+        Some(AttributeValue::CustomDebugInfo(info)) => {
+            for record in info.records() {
+                let data = report.supported(record.decode(), "custom debug information")?;
+                if let Some(CustomDebugInfoData::Unknown(_)) = data {
+                    report.undecoded(format!("custom debug information kind {}", record.kind.0));
+                }
+                report.add("custom debug information records", 1);
+            }
+        }
+        Some(AttributeValue::AsyncMethodInfo(info)) => {
+            report.add("async methods", 1);
+            report.add("async method steps", info.steps.len());
+        }
+        Some(_) => {
+            let name: Vec<u16> = attribute.name_units().collect();
+            report.undecoded(format!(
+                "symbol attribute {}",
+                String::from_utf16_lossy(&name)
+            ));
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 /// Resolve the file names and inlinees of one module's line data.
