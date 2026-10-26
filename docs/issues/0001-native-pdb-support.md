@@ -53,6 +53,16 @@ The GitHub sub-issues of #1 track complete reading of the Rust-produced samples.
 
 The samples do not contain every format variant. The checklists below stay open for variants outside them.
 
+## Producer fixture milestone
+
+`cargo run -p pdbrs-fixtures` builds MSVC, Clang/LLD, Rust and .NET fixtures from `fixtures/`.
+The full-read example reads every native fixture to the end and lists the remaining gaps.
+
+- [x] #11 LLD and clang-cl kinds: `S_SKIP`, `LF_VFTABLE` and `LF_LABEL`.
+- [x] #12 Fixture demo programs and generator.
+- [ ] #13 MSVC and Clang C/C++ record kinds, FPO streams, incremental and FASTLINK data.
+- [ ] #14 .NET Windows PDB records, compressed injected sources and `sourcelink`.
+
 ## Implementation map and starting point
 
 Start with integer numeric leaves, then field lists and typed TPI records.
