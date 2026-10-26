@@ -205,6 +205,7 @@ The `msfz_convert` target ran on branch `msfz-writer` (#38, based on `main` ceff
 (the MSF 7.0 PDBs and the 63 PDZ files). Most seeds are whole PDB files, and libFuzzer took the
 limit of 1 MiB for new inputs. Each run compresses every chunk three times, so the target runs
 about 8 inputs each second.
+
 After the merge of `main` 64a0a2d into `msfz-writer`, the target ran once over its whole
 corpus (`-runs=0`, 755 inputs) without a finding.
 
