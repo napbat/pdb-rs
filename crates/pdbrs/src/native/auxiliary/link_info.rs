@@ -14,12 +14,27 @@
 //! layout, so each byte of the record has a field. `DBI1::AddLinkInfoW` writes the record size
 //! of the caller's wide-character record, which can be larger than `cb`. The bytes after `cb`
 //! stay available as [`LinkInfo::trailing`]. LLVM writes an empty stream.
+//!
+//! # Versions
+//!
+//! `pdb.h` defines `vliOne` (1) and `vliTwo` (2). Both versions use the same layout:
+//! `GetUTF8LinkInfo` copies `ver` from the caller and always writes the six fields and the
+//! UTF-8 strings. `DBI1::QueryLinkInfo` does not read `ver`. The wide-character form
+//! (`LinkInfoW`) exists only in memory; the stream always holds the narrow form. MSVC
+//! `link.exe` 14.51 writes version 2. No producer that is available writes version 1, so the
+//! tests use synthetic records for it.
+
+use alloc::vec::Vec;
 
 use crate::native::hash_table::Cursor;
 use crate::native::msf::StreamId;
-use crate::{ErrorKind, Result};
+use crate::native::output::{Output, to_u32};
+use crate::{Error, ErrorKind, Result};
 
-/// The record version that this reader decodes (`vliTwo`, `vliCur`).
+/// The record version `vliOne`.
+pub const LINK_INFO_VERSION_ONE: u32 = 1;
+
+/// The record version `vliTwo` (`vliCur`), which MSVC `link.exe` writes.
 pub const LINK_INFO_VERSION_TWO: u32 = 2;
 
 /// The size of the fixed fields in bytes (`sizeof(LinkInfo)`).
@@ -30,6 +45,8 @@ const HEADER_SIZE: u32 = 24;
 pub struct LinkInfo<'a> {
     /// The record size `cb`.
     pub size: u32,
+    /// The record version `ver`: [`LINK_INFO_VERSION_ONE`] or [`LINK_INFO_VERSION_TWO`].
+    pub version: u32,
     /// The current directory of the link, without its NUL.
     pub current_directory: &'a [u8],
     /// The linker command, without its NUL.
@@ -43,11 +60,41 @@ pub struct LinkInfo<'a> {
 }
 
 impl<'a> LinkInfo<'a> {
+    /// Make a record with the layout of `GetUTF8LinkInfo` and no trailing bytes.
+    ///
+    /// The function calculates [`LinkInfo::size`].
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::UnsupportedVersion`] if `version` is not 1 or 2.
+    /// - [`ErrorKind::InvalidFormat`] if a string contains a NUL byte or `output_file_offset`
+    ///   is after the end of `command`.
+    /// - [`ErrorKind::LimitExceeded`] if the record size does not fit in `u32`.
+    pub fn new(
+        version: u32,
+        current_directory: &'a [u8],
+        command: &'a [u8],
+        output_file_offset: u32,
+        libraries: &'a [u8],
+    ) -> Result<Self> {
+        let mut record = Self {
+            size: 0,
+            version,
+            current_directory,
+            command,
+            output_file_offset,
+            libraries,
+            trailing: &[],
+        };
+        record.size = record.layout()?[3];
+        Ok(record)
+    }
+
     /// Decode the `/LinkInfo` stream `stream`. Returns `Ok(None)` for an empty stream.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::UnsupportedVersion`] if `ver` is not [`LINK_INFO_VERSION_TWO`].
+    /// - [`ErrorKind::UnsupportedVersion`] if `ver` is not 1 or 2.
     /// - [`ErrorKind::UnexpectedEof`] if the stream is shorter than the fixed fields or `cb`.
     /// - [`ErrorKind::InvalidFormat`] if an offset does not match the layout, a string has no
     ///   NUL inside the record, or `ichOutfile` is after the end of the command.
@@ -62,7 +109,7 @@ impl<'a> LinkInfo<'a> {
         let command_offset = cursor.u32()?;
         let output_file_offset = cursor.u32()?;
         let libraries_offset = cursor.u32()?;
-        if version != LINK_INFO_VERSION_TWO {
+        if !matches!(version, LINK_INFO_VERSION_ONE | LINK_INFO_VERSION_TWO) {
             return Err(cursor.fail(ErrorKind::UnsupportedVersion, 4, "/LinkInfo version"));
         }
         if size < HEADER_SIZE {
@@ -100,6 +147,7 @@ impl<'a> LinkInfo<'a> {
             .ok_or_else(|| cursor.fail(ErrorKind::InvalidFormat, 20, "/LinkInfo library offset"))?;
         Ok(Some(Self {
             size,
+            version,
             current_directory,
             command,
             output_file_offset,
@@ -113,6 +161,73 @@ impl<'a> LinkInfo<'a> {
     pub fn output_file(&self) -> &'a [u8] {
         let start = usize::try_from(self.output_file_offset).unwrap_or(usize::MAX);
         self.command.get(start..).unwrap_or_default()
+    }
+
+    /// Append the record and the trailing bytes to `out`.
+    ///
+    /// The function writes the layout of `GetUTF8LinkInfo`. A decoded stream gives the same
+    /// bytes again. An empty `/LinkInfo` stream has no record: do not call this function for
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::UnsupportedVersion`] if [`LinkInfo::version`] is not 1 or 2.
+    /// - [`ErrorKind::InvalidFormat`] if a string contains a NUL byte, the output file offset
+    ///   is after the end of the command, or [`LinkInfo::size`] differs from the size of the
+    ///   fields.
+    /// - [`ErrorKind::LimitExceeded`] if an offset does not fit in `u32` or the output cannot
+    ///   grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let [directory, command, libraries, size] = self.layout()?;
+        if size != self.size {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("/LinkInfo record size differs from the size of its fields"));
+        }
+        let mut output = Output::new(out);
+        output.reserve(
+            usize::try_from(size)
+                .unwrap_or(usize::MAX)
+                .saturating_add(self.trailing.len()),
+        )?;
+        for word in [
+            size,
+            self.version,
+            directory,
+            command,
+            self.output_file_offset,
+            libraries,
+        ] {
+            output.u32(word)?;
+        }
+        output.c_string(self.current_directory)?;
+        output.c_string(self.command)?;
+        output.bytes(self.libraries)?;
+        output.bytes(self.trailing)
+    }
+
+    /// Check the fields and return the directory, command and library offsets and `cb`.
+    fn layout(&self) -> Result<[u32; 4]> {
+        if !matches!(self.version, LINK_INFO_VERSION_ONE | LINK_INFO_VERSION_TWO) {
+            return Err(Error::new(ErrorKind::UnsupportedVersion, None)
+                .with_context("/LinkInfo version is not 1 or 2"));
+        }
+        let invalid = |context| Error::new(ErrorKind::InvalidFormat, None).with_context(context);
+        if self.current_directory.contains(&0) || self.command.contains(&0) {
+            return Err(invalid("/LinkInfo string contains a NUL byte"));
+        }
+        if usize::try_from(self.output_file_offset).map_or(true, |at| at > self.command.len()) {
+            return Err(invalid("/LinkInfo output file offset is after the command"));
+        }
+        let too_large = || {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("/LinkInfo record size overflows u32")
+        };
+        let command = next(HEADER_SIZE, self.current_directory).ok_or_else(too_large)?;
+        let libraries = next(command, self.command).ok_or_else(too_large)?;
+        let size = libraries
+            .checked_add(to_u32(self.libraries.len(), "/LinkInfo library size")?)
+            .ok_or_else(too_large)?;
+        Ok([HEADER_SIZE, command, libraries, size])
     }
 }
 

@@ -22,10 +22,15 @@
 //! An entry (16 bytes) has a `u16` slot in the stream table, 6 zero bytes and the 64-bit type
 //! section checksum of an input object file. Two inputs with the same checksum share one entry.
 //! The PDB does not contain the input of the checksum, so this reader does not verify it.
+//!
+//! [`TmCache`] keeps the table offsets and the stream size, so [`TmCache::encode`] gives the
+//! same bytes again. [`TmCacheBuilder`] makes a new stream with the layout of `link.exe`.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use crate::native::msf::StreamId;
+use crate::native::output::{Output, no_memory, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// The `/TMCache` version that `link.exe` writes (`0x20200229`).
@@ -59,6 +64,12 @@ pub struct TmCache<'a> {
     streams: &'a [[u8; 2]],
     /// The entry table.
     entries: &'a [[u8; ENTRY_SIZE]],
+    /// The offset of the stream table.
+    stream_table_offset: usize,
+    /// The offset of the entry table.
+    entry_table_offset: usize,
+    /// The size of the stream in bytes.
+    size: usize,
 }
 
 impl<'a> TmCache<'a> {
@@ -88,6 +99,9 @@ impl<'a> TmCache<'a> {
             return Ok(Self {
                 streams: &[],
                 entries: &[],
+                stream_table_offset: 0,
+                entry_table_offset: 0,
+                size: 0,
             });
         }
         let Some(header) = bytes.first_chunk::<HEADER_SIZE>() else {
@@ -155,8 +169,11 @@ impl<'a> TmCache<'a> {
             }
         }
         let cache = Self {
-            streams: bytes[table].as_chunks::<2>().0,
+            streams: bytes[table.clone()].as_chunks::<2>().0,
             entries: bytes[list.clone()].as_chunks::<ENTRY_SIZE>().0,
+            stream_table_offset: table.start,
+            entry_table_offset: list.start,
+            size: bytes.len(),
         };
         for (index, entry) in cache.entries.iter().enumerate() {
             let offset = list.start + index * ENTRY_SIZE;
@@ -178,10 +195,24 @@ impl<'a> TmCache<'a> {
         Ok(cache)
     }
 
-    /// Return `true` if the stream has no slots and no entries.
+    /// Return `true` if the stream is empty.
+    ///
+    /// MSVC `link.exe` writes an empty stream for a link without `/INCREMENTAL`.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.streams.is_empty() && self.entries.is_empty()
+        self.size == 0
+    }
+
+    /// Return the offsets of the stream table and the entry table.
+    #[must_use]
+    pub const fn table_offsets(&self) -> (usize, usize) {
+        (self.stream_table_offset, self.entry_table_offset)
+    }
+
+    /// Return the size of the stream in bytes.
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        self.size
     }
 
     /// Return the stream of each slot of the stream table, in slot order.
@@ -209,6 +240,194 @@ impl<'a> TmCache<'a> {
             }
         })
     }
+
+    /// Append the stream bytes to `out`.
+    ///
+    /// The function keeps the table offsets and the zero bytes around the tables, so a decoded
+    /// stream gives the same bytes again. An empty stream gives no bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        if self.size == 0 {
+            return Ok(());
+        }
+        let start = out.len();
+        let mut output = Output::new(out);
+        output.reserve(self.size)?;
+        output.u32(TM_CACHE_VERSION)?;
+        output.u32(to_u32(
+            self.stream_table_offset,
+            "/TMCache stream table offset",
+        )?)?;
+        output.u32(to_u32(
+            self.streams.len() * 2,
+            "/TMCache stream table size",
+        )?)?;
+        output.u32(to_u32(
+            self.entry_table_offset,
+            "/TMCache entry table offset",
+        )?)?;
+        output.u32(to_u32(
+            self.entries.len() * ENTRY_SIZE,
+            "/TMCache entry table size",
+        )?)?;
+        // `parse` checked that the tables are in order and inside the stream.
+        pad_to(out, start, self.stream_table_offset)?;
+        Output::new(out).bytes(self.streams.as_flattened())?;
+        pad_to(out, start, self.entry_table_offset)?;
+        Output::new(out).bytes(self.entries.as_flattened())?;
+        pad_to(out, start, self.size)
+    }
+}
+
+/// An owned `/TMCache` stream that grows and encodes with the layout of `link.exe`.
+///
+/// The layout is the 20-byte header, the stream table, zero bytes to the next multiple of 4,
+/// and the entry table. The `msvc-x64-incremental` fixture has this layout.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TmCacheBuilder {
+    /// The stream table slots: stream numbers or `0xffff`.
+    streams: Vec<u16>,
+    /// The entries: a slot and a checksum.
+    entries: Vec<(u16, u64)>,
+}
+
+impl TmCacheBuilder {
+    /// Create a builder with no slots and no entries.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            streams: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+
+    /// Copy the slots and the entries of a decoded stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
+    pub fn from_cache(cache: &TmCache<'_>) -> Result<Self> {
+        let mut builder = Self::new();
+        builder
+            .streams
+            .try_reserve_exact(cache.streams.len())
+            .map_err(|_| no_memory())?;
+        builder
+            .entries
+            .try_reserve_exact(cache.entries.len())
+            .map_err(|_| no_memory())?;
+        builder
+            .streams
+            .extend(cache.streams.iter().map(|slot| u16::from_le_bytes(*slot)));
+        builder
+            .entries
+            .extend(cache.entries().map(|entry| (entry.slot, entry.checksum)));
+        Ok(builder)
+    }
+
+    /// Add a slot to the stream table and return its number.
+    ///
+    /// `None` makes a slot without a stream (`0xffff`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the stream number does not fit in a `u16`
+    /// other than `0xffff`, if the table has `0xffff` slots, or if an allocation fails.
+    pub fn push_stream(&mut self, stream: Option<StreamId>) -> Result<u16> {
+        let value = match stream {
+            None => u16::MAX,
+            Some(id) => u16::try_from(id.0)
+                .ok()
+                .filter(|&value| value != u16::MAX)
+                .ok_or_else(|| limit("/TMCache stream number does not fit in u16"))?,
+        };
+        let slot = u16::try_from(self.streams.len())
+            .ok()
+            .filter(|&slot| slot != u16::MAX)
+            .ok_or_else(|| limit("/TMCache stream table is full"))?;
+        self.streams.try_reserve(1).map_err(|_| no_memory())?;
+        self.streams.push(value);
+        Ok(slot)
+    }
+
+    /// Add an entry for the type section checksum `checksum` that uses slot `slot`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidReference`] if `slot` is not in the stream table.
+    /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
+    pub fn push_entry(&mut self, slot: u16, checksum: u64) -> Result<()> {
+        if usize::from(slot) >= self.streams.len() {
+            return Err(Error::new(ErrorKind::InvalidReference, None)
+                .with_context("/TMCache entry selects a slot past the stream table"));
+        }
+        self.entries.try_reserve(1).map_err(|_| no_memory())?;
+        self.entries.push((slot, checksum));
+        Ok(())
+    }
+
+    /// Append the stream bytes to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if a table size does not fit in `u32` or the output
+    /// cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let table_end = self
+            .streams
+            .len()
+            .checked_mul(2)
+            .and_then(|size| size.checked_add(HEADER_SIZE))
+            .ok_or_else(|| limit("/TMCache stream size"))?;
+        let entry_offset = table_end
+            .checked_next_multiple_of(4)
+            .ok_or_else(|| limit("/TMCache stream size"))?;
+        let entry_size = self
+            .entries
+            .len()
+            .checked_mul(ENTRY_SIZE)
+            .ok_or_else(|| limit("/TMCache entry table size"))?;
+        let end = entry_offset
+            .checked_add(entry_size)
+            .ok_or_else(|| limit("/TMCache stream size"))?;
+        to_u32(end, "/TMCache stream size")?;
+        let mut output = Output::new(out);
+        output.reserve(end)?;
+        output.u32(TM_CACHE_VERSION)?;
+        for value in [
+            HEADER_SIZE,
+            table_end - HEADER_SIZE,
+            entry_offset,
+            entry_size,
+        ] {
+            output.u32(to_u32(value, "/TMCache stream size")?)?;
+        }
+        for slot in &self.streams {
+            output.u16(*slot)?;
+        }
+        output.zeros(entry_offset - table_end)?;
+        for (slot, checksum) in &self.entries {
+            output.u16(*slot)?;
+            output.zeros(6)?;
+            output.u64(*checksum)?;
+        }
+        Ok(())
+    }
+}
+
+/// Return a [`ErrorKind::LimitExceeded`] error with `context`.
+fn limit(context: &'static str) -> Error {
+    Error::new(ErrorKind::LimitExceeded, None).with_context(context)
+}
+
+/// Append zero bytes until `out` holds `offset` bytes after `start`.
+fn pad_to(out: &mut Vec<u8>, start: usize, offset: usize) -> Result<()> {
+    let target = start.saturating_add(offset);
+    let count = target.saturating_sub(out.len());
+    Output::new(out).zeros(count)
 }
 
 /// Convert a stream table slot to a stream ID.
