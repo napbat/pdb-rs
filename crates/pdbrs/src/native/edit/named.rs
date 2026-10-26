@@ -10,11 +10,15 @@ use crate::{Error, ErrorKind, Result};
 /// Decode `bytes` with the decoder of the kind of `name`, if the kind has one.
 ///
 /// The edit API rejects the kinds that other records refer to, so only
-/// `srcsrv`, `sourcelink`, `/LinkInfo` and names without a decoder come here.
+/// `srcsrv`, `sourcelink`, `sourcelink$<n>`, `/LinkInfo` and names without a
+/// decoder come here.
 fn check_contents(name: &[u8], bytes: &[u8], stream: StreamId) -> Result<()> {
     match NamedStreamKind::classify(name) {
         NamedStreamKind::SourceServer => SourceServer::parse(bytes, stream).map(|_| ()),
         NamedStreamKind::SourceLink => SourceLink::parse(bytes, stream).map(|_| ()),
+        NamedStreamKind::NumberedSourceLink { .. } => {
+            SourceLink::parse_numbered(bytes, stream).map(|_| ())
+        }
         NamedStreamKind::LinkInfo => LinkInfo::parse(bytes, stream).map(|_| ()),
         _ => Ok(()),
     }

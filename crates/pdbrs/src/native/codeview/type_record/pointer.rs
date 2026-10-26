@@ -138,6 +138,13 @@ pub struct Pointer<'a> {
     /// This value is present if [`PointerKind::is_based`] is `true` for the
     /// kind and the mode is not a member-pointer mode.
     pub based: Option<BasedPointer<'a>>,
+    /// The number of zero bytes after the pointer data and before the record
+    /// padding.
+    ///
+    /// Most producers write none. The Microsoft macro assemblers (`ml64` and
+    /// `ml` 14.51) write 6 zero bytes in each `LF_POINTER` record. LLVM, DIA
+    /// and `pdbtool` ignore these bytes. The encoder writes them again.
+    pub trailing_zeros: usize,
 }
 
 impl<'a> Pointer<'a> {
@@ -156,12 +163,15 @@ impl<'a> Pointer<'a> {
         } else {
             based = BasedPointer::decode(attributes.kind(), &mut fields)?;
         }
+        let trailing_zeros = fields.rest().iter().take_while(|&&byte| byte == 0).count();
+        fields.bytes(trailing_zeros)?;
         fields.finish_type_padding()?;
         Ok(Self {
             referent_type,
             attributes,
             member,
             based,
+            trailing_zeros,
         })
     }
 
@@ -184,9 +194,12 @@ impl<'a> Pointer<'a> {
             writer.type_index(member.containing_type)?;
             writer.u16(member.representation.raw())?;
         }
-        match self.based {
-            Some(based) => based.encode(writer),
-            None => Ok(()),
+        if let Some(based) = self.based {
+            based.encode(writer)?;
         }
+        for _ in 0..self.trailing_zeros {
+            writer.u8(0)?;
+        }
+        Ok(())
     }
 }

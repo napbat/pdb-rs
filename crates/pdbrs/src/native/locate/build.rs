@@ -2,25 +2,23 @@
 
 use alloc::vec::Vec;
 
+use super::inlinee::{MERGED_IDS, inlinee_names};
 use super::range::{RangeIndex, Span};
 use super::scope::optional_rva;
 use super::{
-    InlineeName, LineKey, MAX_SCOPE_DEPTH, ModuleData, ProcedureKey, SeparatedChunk, SymbolLocator,
-    push,
+    LineKey, MAX_SCOPE_DEPTH, ModuleData, ProcedureKey, SeparatedChunk, SymbolLocator, push,
 };
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::address::{AddressMap, SectionOffset};
-use crate::native::codeview::id_record::{IdRecord, IdTable};
 use crate::native::codeview::index::IdIndex;
-use crate::native::codeview::symbol::{ModuleSymbols, SymbolData};
-use crate::native::codeview::type_record::TypeLeaf;
+use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, SymbolData};
 use crate::native::dbi::{DebugStream, Module};
+use crate::native::info::Feature;
 use crate::native::lines::{LineSubsection, ModuleLines};
 use crate::native::names::StringTable;
 use crate::native::section::SectionHeaders;
 use crate::native::symbols::PublicSymbolIndex;
-use crate::native::types::TypeTable;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of a C13 subsection header.
@@ -37,8 +35,14 @@ struct Lists {
     separated: Vec<Span<ProcedureKey>>,
     /// The line subsection ranges.
     lines: Vec<Span<LineKey>>,
-    /// The inlinees of all inline sites, with duplicates.
-    inlinees: Vec<IdIndex>,
+    /// The inlinees of all inline sites, with duplicates: the ID scope (the
+    /// module in a `NOTM` PDB, else [`MERGED_IDS`]) and the inlinee.
+    inlinees: Vec<(u32, IdIndex)>,
+    /// The `S_MOD_TYPEREF` source of each module that has one.
+    sources: Vec<(u32, ModuleTypeSource)>,
+    /// `true` if the PDB has the `NOTM` feature: the inlinee IDs of a module
+    /// refer to the ID records of the module.
+    no_type_merge: bool,
     /// The modules whose walk stopped at an undecoded scope kind.
     incomplete: Vec<u32>,
 }
@@ -49,14 +53,17 @@ impl SymbolLocator {
     /// The function loads the DBI stream, the section headers, `/names`, all
     /// module streams, the symbol record stream and the global and public
     /// symbol indexes. It loads the IPI and TPI streams to name the
-    /// inlinees of `S_INLINESITE` records.
+    /// inlinees of `S_INLINESITE` records. In a PDB without type merging
+    /// (`NOTM`), it loads the ID records that the `S_MOD_TYPEREF` record of
+    /// the module names instead.
     ///
     /// # Errors
     ///
     /// - [`ErrorKind::MissingStream`] if the PDB has no DBI stream or no
     ///   section header stream, or if it has inline sites but no IPI stream.
     /// - [`ErrorKind::InvalidReference`] if an inlinee is not a function ID,
-    ///   or if a member function ID does not name a class, union or enum.
+    ///   if a member function ID does not name a class, union or enum, or if
+    ///   a module of a `NOTM` PDB has inline sites but no ID records.
     /// - [`ErrorKind::LimitExceeded`] if an index cannot be allocated.
     /// - The loading and decoding errors of the streams, the module records,
     ///   the line subsections and the address translation.
@@ -71,7 +78,11 @@ impl SymbolLocator {
             .map(|bytes| copy(StringTable::parse(&bytes)?.strings()))
             .transpose()?;
         let map = AddressMap::new(SectionHeaders::parse(&section_headers)?, &dbi);
-        let mut lists = Lists::default();
+        let no_type_merge = pdb.info().has_feature(Feature::NoTypeMerge);
+        let mut lists = Lists {
+            no_type_merge,
+            ..Lists::default()
+        };
         for module in dbi.modules() {
             lists.module(pdb, &module?, &map)?;
         }
@@ -92,7 +103,7 @@ impl SymbolLocator {
                 }
             }
         }
-        let inlinees = inlinee_names(pdb, &mut lists.inlinees)?;
+        let inlinees = inlinee_names(pdb, &mut lists.inlinees, &lists.sources)?;
         let symbol_records = dbi
             .header()
             .symbol_stream
@@ -116,6 +127,7 @@ impl SymbolLocator {
             strings,
             modules: lists.modules,
             inlinees,
+            no_type_merge,
             symbol_records,
             global_index,
             public_index,
@@ -246,7 +258,16 @@ impl Lists {
                     continue;
                 }
                 SymbolData::InlineSite(site) => {
-                    push(&mut self.inlinees, site.inlinee, LIMIT)?;
+                    let scope = if self.no_type_merge {
+                        index
+                    } else {
+                        MERGED_IDS
+                    };
+                    push(&mut self.inlinees, (scope, site.inlinee), LIMIT)?;
+                    continue;
+                }
+                SymbolData::ModuleTypeReference(reference) => {
+                    push(&mut self.sources, (index, reference.source()), LIMIT)?;
                     continue;
                 }
                 _ => continue,
@@ -275,61 +296,6 @@ impl Lists {
         }
         Ok(walk_end)
     }
-}
-
-/// Resolve the qualified names of the inlinees in `ids`.
-fn inlinee_names<S: ReadAt>(pdb: &Pdb<S>, ids: &mut Vec<IdIndex>) -> Result<Vec<InlineeName>> {
-    ids.sort_unstable();
-    ids.dedup();
-    let mut names = Vec::new();
-    if ids.is_empty() {
-        return Ok(names);
-    }
-    let ipi = pdb.ids()?.ok_or_else(|| missing("IPI"))?;
-    let table = IdTable::new(&ipi)?;
-    let tpi = pdb.types()?;
-    let types = tpi.as_ref().map(TypeTable::new).transpose()?;
-    for &id in ids.iter() {
-        let mut qualified = Vec::new();
-        let name = match table.decode(id)? {
-            IdRecord::Function(function) => {
-                if let Some(scope) = function.scope {
-                    table.resolve_string(scope, &mut qualified)?;
-                    extend(&mut qualified, b"::")?;
-                }
-                function.name
-            }
-            IdRecord::MemberFunction(function) => {
-                let types = types.as_ref().ok_or_else(|| missing("TPI"))?;
-                let class = match types.leaf(function.parent_type)? {
-                    TypeLeaf::Class(value) => value.name,
-                    TypeLeaf::Union(value) => value.name,
-                    TypeLeaf::Enum(value) => value.name,
-                    _ => {
-                        return Err(Error::new(ErrorKind::InvalidReference, None).with_context(
-                            "member function ID does not name a class, union or enum",
-                        ));
-                    }
-                };
-                extend(&mut qualified, class)?;
-                extend(&mut qualified, b"::")?;
-                function.name
-            }
-            _ => {
-                return Err(Error::new(ErrorKind::InvalidReference, None)
-                    .with_context("inline site inlinee is not a function ID"));
-            }
-        };
-        let name_start = qualified.len();
-        extend(&mut qualified, name)?;
-        let entry = InlineeName {
-            id,
-            qualified,
-            name_start,
-        };
-        push(&mut names, entry, LIMIT)?;
-    }
-    Ok(names)
 }
 
 /// Return a range of length 1 for each public symbol with an RVA.

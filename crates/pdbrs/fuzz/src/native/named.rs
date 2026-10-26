@@ -107,6 +107,9 @@ pub(crate) fn named(
         NamedStreamKind::SourceLink => {
             let _ = SourceLink::parse(bytes, id);
         }
+        NamedStreamKind::NumberedSourceLink { .. } => {
+            let _ = SourceLink::parse_numbered(bytes, id);
+        }
         NamedStreamKind::SourceHeaderBlock => header_block(bytes, names, content),
         _ => {}
     }

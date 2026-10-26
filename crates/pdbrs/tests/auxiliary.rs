@@ -142,7 +142,11 @@ fn named_streams_are_classified_by_exact_name_bytes() {
         (SOURCE_SERVER_STREAM_NAME, NamedStreamKind::SourceServer),
         (b"SRCSRV", NamedStreamKind::Other),
         (b"/linkinfo", NamedStreamKind::Other),
-        (b"sourcelink$1", NamedStreamKind::Other),
+        (
+            b"sourcelink$1",
+            NamedStreamKind::NumberedSourceLink { number: 1 },
+        ),
+        (b"sourcelink$01", NamedStreamKind::Other),
     ];
     for (name, expected) in cases {
         assert_eq!(NamedStreamKind::classify(name), expected);

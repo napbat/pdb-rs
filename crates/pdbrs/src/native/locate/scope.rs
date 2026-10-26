@@ -250,7 +250,7 @@ impl SymbolLocator {
             let scope = &scopes[position];
             if let ScopeKind::Site { inlinee, ranges } = &scope.kind {
                 let found = ranges.iter().find_map(holding);
-                let (name, qualified_name) = self.inlinee_name(*inlinee)?;
+                let (name, qualified_name) = self.inlinee_name(procedure.module, *inlinee)?;
                 let line = found
                     .map(|(range, start, length)| self.range_line(module, start, length, &range))
                     .transpose()?;

@@ -61,6 +61,7 @@ use crate::{Error, ErrorKind, Result};
 
 mod build;
 mod inline;
+mod inlinee;
 mod lines;
 mod name;
 mod range;
@@ -99,8 +100,11 @@ pub struct SymbolLocator {
     contributions: RangeIndex<u32>,
     /// The public symbols by RVA. Each range has a length of 1.
     publics: RangeIndex<SymbolOffset>,
-    /// The inlinee names, sorted by ID.
+    /// The inlinee names, sorted by ID scope and ID.
     inlinees: Vec<InlineeName>,
+    /// `true` if the PDB has the `NOTM` feature: the inlinee IDs of a module
+    /// refer to the ID records of the module, not to IPI.
+    no_type_merge: bool,
     /// The symbol record stream.
     symbol_records: Vec<u8>,
     /// The global symbol index, if the DBI stream names one.
@@ -166,6 +170,9 @@ struct LineKey {
 /// The name of one inlinee.
 #[derive(Clone, Debug)]
 struct InlineeName {
+    /// The ID scope: the module whose ID records hold the inlinee in a `NOTM`
+    /// PDB, else `inlinee::MERGED_IDS` (IPI).
+    scope: u32,
     /// The inlinee.
     id: IdIndex,
     /// The qualified name.
@@ -524,11 +531,17 @@ impl SymbolLocator {
             })
     }
 
-    /// Return the name of an inlinee: the unqualified and the qualified name.
-    fn inlinee_name(&self, id: IdIndex) -> Result<(&[u8], &[u8])> {
+    /// Return the name of an inlinee of the module `module`: the unqualified
+    /// and the qualified name.
+    fn inlinee_name(&self, module: u32, id: IdIndex) -> Result<(&[u8], &[u8])> {
+        let scope = if self.no_type_merge {
+            module
+        } else {
+            inlinee::MERGED_IDS
+        };
         let position = self
             .inlinees
-            .binary_search_by_key(&id, |name| name.id)
+            .binary_search_by_key(&(scope, id), |name| (name.scope, name.id))
             .map_err(|_| internal("inlinee name was not resolved"))?;
         let name = &self.inlinees[position];
         Ok((&name.qualified[name.name_start..], &name.qualified))

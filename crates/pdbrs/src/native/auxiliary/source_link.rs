@@ -1,10 +1,14 @@
-//! The `sourcelink` stream: Source Link JSON.
+//! The `sourcelink` and `sourcelink$<n>` streams: Source Link JSON.
 //!
 //! The .NET symbol writers store the Source Link file of the build in the named stream
 //! `sourcelink`. The Portable PDB Source Link custom debug information
 //! (`cc110556-a091-4d38-9fec-25ab9a351a6a`) holds the same UTF-8 JSON text. The JSON maps
 //! local document paths to URLs. This reader keeps the bytes. It does not parse the JSON and
 //! does not fetch the URLs.
+//!
+//! `link /SOURCELINK:<file>` (MSVC 14.51) writes the streams `sourcelink$1`, `sourcelink$2`
+//! and so on: one stream for each `/SOURCELINK` file, in the order of the options. After
+//! the last file, it writes one more empty stream with the next number.
 
 use alloc::vec::Vec;
 
@@ -43,6 +47,27 @@ impl<'a> SourceLink<'a> {
             return Err(invalid("Source Link stream is not a JSON object"));
         }
         Ok(Self { json })
+    }
+
+    /// Decode the numbered Source Link stream `stream` (`sourcelink$<n>`).
+    ///
+    /// The bytes must have the shape that [`SourceLink::parse`] accepts, or be empty. The
+    /// empty stream is the end marker of `link /SOURCELINK`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`SourceLink::parse`] for bytes that are not empty.
+    pub fn parse_numbered(bytes: &'a [u8], stream: StreamId) -> Result<Self> {
+        if bytes.is_empty() {
+            return Ok(Self { json: "" });
+        }
+        Self::parse(bytes, stream)
+    }
+
+    /// Return `true` for the empty end marker of the numbered streams.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.json.is_empty()
     }
 
     /// Return the JSON text with its original bytes.

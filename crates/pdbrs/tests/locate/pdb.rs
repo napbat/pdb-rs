@@ -24,7 +24,8 @@ use pdbrs::native::address::{Rva, SectionOffset};
 use pdbrs::native::codeview::id_record::LF_FUNC_ID;
 use pdbrs::native::codeview::index::IdIndex;
 use pdbrs::native::codeview::symbol::{
-    S_END, S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_PROC_ID_END, S_SEPCODE,
+    S_END, S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_MOD_TYPEREF, S_PROC_ID_END,
+    S_SEPCODE,
 };
 use pdbrs::native::lines::{DEBUG_S_FILECHKSMS, DEBUG_S_INLINEELINES, DEBUG_S_LINES};
 use pdbrs::native::locate::{Location, SourceLine, SymbolLocator};
@@ -244,8 +245,8 @@ fn info() -> Vec<u8> {
     bytes
 }
 
-/// Build an IPI stream with the `LF_FUNC_ID` records of the three functions.
-fn ipi() -> Vec<u8> {
+/// Build the `LF_FUNC_ID` records of the three functions, without a stream header.
+fn id_records() -> Vec<u8> {
     let mut body = Vec::new();
     for name in [&b"outer"[..], b"inner", b"leaf"] {
         let mut payload = u32s(&[0, 0x74]);
@@ -259,18 +260,28 @@ fn ipi() -> Vec<u8> {
         body.extend_from_slice(&LF_FUNC_ID.to_le_bytes());
         body.extend_from_slice(&payload);
     }
+    body
+}
+
+/// Build an IPI stream with `count` records in `body`.
+fn id_stream(body: &[u8], count: u32) -> Vec<u8> {
     let mut bytes = u32s(&[
         20_040_203,
         56,
         0x1000,
-        0x1003,
+        0x1000 + count,
         u32::try_from(body.len()).unwrap(),
     ]);
     bytes.extend_from_slice(&0xffff_u16.to_le_bytes());
     bytes.extend_from_slice(&0xffff_u16.to_le_bytes());
     bytes.extend_from_slice(&u32s(&[4, 0x3_ffff, 0, u32::MAX, 0, u32::MAX, 0, u32::MAX]));
-    bytes.extend_from_slice(&body);
+    bytes.extend_from_slice(body);
     bytes
+}
+
+/// Build an IPI stream with the `LF_FUNC_ID` records of the three functions.
+fn ipi() -> Vec<u8> {
+    id_stream(&id_records(), 3)
 }
 
 /// Build the `/names` stream with `a.cpp` at offset 1 and `b.h` at offset 7.
@@ -309,6 +320,44 @@ fn pdb_bytes(inlinee_lines: bool, ids: bool, separated: bool) -> Vec<u8> {
             Some(bytes) => builder.push(bytes.as_slice()).unwrap(),
             None => builder.push_nil().unwrap(),
         };
+    }
+    builder
+        .plan(WriteOptions::default())
+        .unwrap()
+        .to_vec()
+        .unwrap()
+}
+
+/// Build a PDB without type merging (`NOTM`, as `link /DEBUG:LAZY` writes it).
+///
+/// IPI is empty. The `S_MOD_TYPEREF` record of the module (`fOwnTMR`) names
+/// stream 8, which holds the `LF_FUNC_ID` records of the inline sites.
+fn notm_pdb_bytes() -> Vec<u8> {
+    let reference = symbol(S_MOD_TYPEREF, [&u32s(&[0x08])[..], &[8, 0, 0, 0]].concat());
+    let symbols = [symbols(false), reference].concat();
+    let c13 = c13(true, false);
+    let mut record = vec![0; 64];
+    record[34..36].copy_from_slice(&5_u16.to_le_bytes());
+    record[36..40].copy_from_slice(&u32::try_from(symbols.len()).unwrap().to_le_bytes());
+    record[44..48].copy_from_slice(&u32::try_from(c13.len()).unwrap().to_le_bytes());
+    record.extend_from_slice(b"m.obj\0m.obj\0");
+    let module_stream = [symbols, c13, vec![0; 4]].concat();
+    // The `NOTM` feature code after the named-stream map.
+    let info = [info(), u32s(&[0x4d54_4f4e])].concat();
+    let streams = [
+        Vec::new(),
+        info,
+        id_stream(&[], 0),
+        dbi(&record),
+        id_stream(&[], 0),
+        module_stream,
+        section_headers(),
+        names(),
+        id_records(),
+    ];
+    let mut builder = MsfBuilder::new();
+    for stream in &streams {
+        builder.push(stream.as_slice()).unwrap();
     }
     builder
         .plan(WriteOptions::default())
@@ -559,6 +608,25 @@ fn inline_sites_need_the_ipi_stream() {
     let pdb = Pdb::parse(&bytes).unwrap();
     let error = SymbolLocator::new(&pdb).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::MissingStream);
+}
+
+/// `link /DEBUG:LAZY` keeps the inline sites of the object files. Their
+/// inlinees refer to the ID records of the module, not to the empty IPI
+/// stream (#30, #39: `msvc-x64-modern-lazy`).
+#[test]
+fn inline_sites_of_a_pdb_without_type_merging_use_the_module_ids() {
+    let bytes = notm_pdb_bytes();
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let locator = SymbolLocator::new(&pdb).unwrap();
+    let nested = locate(&locator, 0x1012);
+    assert_eq!(
+        frames(&nested),
+        [
+            (&b"leaf"[..], Some(200), Some(101)),
+            (&b"inner"[..], Some(101), Some(11))
+        ]
+    );
+    assert_eq!(nested.inline_frames[0].inlinee, IdIndex(LEAF));
 }
 
 #[test]

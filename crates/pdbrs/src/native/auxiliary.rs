@@ -1,5 +1,5 @@
-//! Auxiliary named streams: `/LinkInfo`, `/TMCache`, `/UDTSRCLINEUNDONE`, `sourcelink` and
-//! `srcsrv`.
+//! Auxiliary named streams: `/LinkInfo`, `/TMCache`, `/UDTSRCLINEUNDONE`, `sourcelink`,
+//! `sourcelink$<n>` and `srcsrv`.
 //!
 //! The PDB Info stream maps these names to stream indices. [`NamedStreamKind::classify`] maps a
 //! named-stream name to the decoder for its contents. Each decoder takes the stream bytes and
@@ -38,6 +38,10 @@ pub const UDT_SOURCE_LINE_UNDONE_STREAM_NAME: &[u8] = b"/UDTSRCLINEUNDONE";
 /// The name of the Source Link stream of .NET Windows PDBs.
 pub const SOURCE_LINK_STREAM_NAME: &[u8] = b"sourcelink";
 
+/// The prefix of the numbered Source Link streams of `link /SOURCELINK`: `sourcelink$1`,
+/// `sourcelink$2` and so on.
+pub const NUMBERED_SOURCE_LINK_PREFIX: &[u8] = b"sourcelink$";
+
 /// The name of the source server stream that source indexing tools add.
 pub const SOURCE_SERVER_STREAM_NAME: &[u8] = b"srcsrv";
 
@@ -62,6 +66,14 @@ pub enum NamedStreamKind<'a> {
     },
     /// The `sourcelink` stream: [`SourceLink`].
     SourceLink,
+    /// A `sourcelink$<n>` stream of `link /SOURCELINK`: [`SourceLink::parse_numbered`].
+    ///
+    /// `link` writes one stream for each `/SOURCELINK` file, numbered from 1, and then one
+    /// empty stream with the next number.
+    NumberedSourceLink {
+        /// The number after the `$`.
+        number: u32,
+    },
     /// The `srcsrv` stream: [`SourceServer`].
     SourceServer,
     /// A name that this reader does not recognize.
@@ -77,6 +89,12 @@ impl<'a> NamedStreamKind<'a> {
         if let Some(virtual_file_name) = name.strip_prefix(SOURCE_FILE_STREAM_PREFIX) {
             return Self::SourceFile { virtual_file_name };
         }
+        if let Some(number) = name
+            .strip_prefix(NUMBERED_SOURCE_LINK_PREFIX)
+            .and_then(stream_number)
+        {
+            return Self::NumberedSourceLink { number };
+        }
         match name {
             b"/names" => Self::Names,
             LINK_INFO_STREAM_NAME => Self::LinkInfo,
@@ -88,4 +106,21 @@ impl<'a> NamedStreamKind<'a> {
             _ => Self::Other,
         }
     }
+}
+
+/// Decode the number of a `sourcelink$<n>` name: decimal digits, from 1, without leading
+/// zeros, and not larger than `u32::MAX`.
+fn stream_number(digits: &[u8]) -> Option<u32> {
+    if digits
+        .first()
+        .is_none_or(|&first| !(b'1'..=b'9').contains(&first))
+    {
+        return None;
+    }
+    digits.iter().try_fold(0_u32, |number, &digit| {
+        if !digit.is_ascii_digit() {
+            return None;
+        }
+        number.checked_mul(10)?.checked_add(u32::from(digit - b'0'))
+    })
 }

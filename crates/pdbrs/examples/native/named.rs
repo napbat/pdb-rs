@@ -148,6 +148,13 @@ pub(crate) fn named_streams(
                 link.encode(&mut encoded)?;
                 report.reencoded("sourcelink streams", &bytes, &encoded);
             }
+            NamedStreamKind::NumberedSourceLink { .. } => {
+                let link = SourceLink::parse_numbered(&bytes, named.stream)?;
+                report.add("numbered Source Link streams", 1);
+                let mut encoded = Vec::new();
+                link.encode(&mut encoded)?;
+                report.reencoded("sourcelink$<n> streams", &bytes, &encoded);
+            }
             NamedStreamKind::SourceServer => {
                 let server = SourceServer::parse(&bytes, named.stream)?;
                 report.add("source server files", server.source_files().count());

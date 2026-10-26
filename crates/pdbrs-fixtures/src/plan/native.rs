@@ -1,6 +1,7 @@
-//! Plans for the MSVC and `clang-cl` builds of `fixtures/native`.
+//! Plans for the MSVC, `clang-cl`, `flang` and MASM builds of `fixtures/native`.
 
 mod generated;
+mod producers;
 mod variant;
 
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use super::{Expected, Paths, Plan};
 use crate::classify::Kind;
 use crate::environment::Environment;
-use crate::matrix::{Compiler, Linker, Native, Variant};
+use crate::matrix::{Arch, Compiler, Linker, Native, Variant};
 use crate::step::{Step, quote};
 use crate::toolchain::{Toolchains, vcvars_argument};
 
@@ -18,6 +19,9 @@ const CPP_SOURCES: [&str; 4] = ["main.cpp", "types.cpp", "control.cpp", "big_enu
 const C_SOURCES: [&str; 1] = ["c_api.c"];
 /// The header that the precompiled header variant precompiles. Each C++ file includes it first.
 const PRECOMPILED_HEADER: &str = "demo.h";
+/// The Source Link files of the `SourceLink` variant, in the order of the `/SOURCELINK`
+/// options.
+const SOURCE_LINK_FILES: [&str; 2] = ["sourcelink/first.json", "sourcelink/second.json"];
 
 /// Make the plan of a native fixture.
 pub fn plan(recipe: &Native, paths: &Paths, toolchains: &mut Toolchains) -> Result<Plan, String> {
@@ -32,6 +36,24 @@ pub fn plan(recipe: &Native, paths: &Paths, toolchains: &mut Toolchains) -> Resu
     let compiler = match recipe.compiler {
         Compiler::Msvc => msvc_tool(toolchains, &environment, &label, "cl.exe", &mut plan)?,
         Compiler::ClangCl => llvm_tool(toolchains, studio.llvm_tool("clang-cl.exe")?, &mut plan),
+        Compiler::Masm => {
+            let file = if recipe.arch == Arch::X86 {
+                "ml.exe"
+            } else {
+                "ml64.exe"
+            };
+            msvc_tool(toolchains, &environment, &label, file, &mut plan)?
+        }
+    };
+    // `flang` is in the Visual Studio LLVM component, next to `clang-cl`.
+    let flang = if recipe.variant == Variant::Primitives {
+        Some(llvm_tool(
+            toolchains,
+            studio.llvm_tool("flang.exe")?,
+            &mut plan,
+        ))
+    } else {
+        None
     };
     let linker = match recipe.linker {
         Linker::Msvc => msvc_tool(toolchains, &environment, &label, "link.exe", &mut plan)?,
@@ -49,7 +71,11 @@ pub fn plan(recipe: &Native, paths: &Paths, toolchains: &mut Toolchains) -> Resu
     };
     plan.directories.push(build.objects.clone());
     match recipe.variant {
-        Variant::Demo | Variant::PrecompiledHeader | Variant::Stripped | Variant::Natvis => {
+        Variant::Demo
+        | Variant::PrecompiledHeader
+        | Variant::Stripped
+        | Variant::Natvis
+        | Variant::SourceLink => {
             demo(&build, &mut plan);
         }
         Variant::SourceServer => variant::source_server(&build, &mut plan)?,
@@ -58,6 +84,15 @@ pub fn plan(recipe: &Native, paths: &Paths, toolchains: &mut Toolchains) -> Resu
         Variant::Clr => variant::clr(&build, &mut plan)?,
         Variant::Annotation => variant::annotation(&build, &mut plan),
         Variant::Generated => generated::generated(&build, &mut plan),
+        Variant::Amp => producers::amp(&build, &mut plan)?,
+        Variant::Modern => producers::modern(&build, &mut plan),
+        Variant::Masm => producers::masm(&build, &mut plan)?,
+        Variant::Hybrid => producers::hybrid(&build, &mut plan),
+        Variant::Primitives => {
+            let flang = flang.ok_or("the primitive types variant needs flang")?;
+            producers::primitives(&build, &flang, &mut plan);
+        }
+        Variant::FastLinkConverted => producers::fastlink_converted(&build, &mut plan)?,
     }
     Ok(plan)
 }
@@ -162,7 +197,7 @@ impl Build<'_> {
 
 /// Plan the demo program: compile, link `demo.exe` and `demo.pdb`.
 ///
-/// The `Stripped` and `Natvis` variants add linker options and outputs.
+/// The `Stripped`, `Natvis` and `SourceLink` variants add linker options and outputs.
 fn demo(build: &Build<'_>, plan: &mut Plan) {
     let objects = build.compile_demo(plan);
     let image = build.fixture.join("demo.exe");
@@ -174,6 +209,12 @@ fn demo(build: &Build<'_>, plan: &mut Plan) {
             build.fixture.join("demo.stripped.pdb").display()
         )),
         Variant::Natvis => extra.push(format!("/NATVIS:{}", build.source("demo.natvis").display())),
+        // `link` writes one `sourcelink$<n>` stream for each file and one empty stream.
+        Variant::SourceLink => extra.extend(
+            SOURCE_LINK_FILES
+                .iter()
+                .map(|file| format!("/SOURCELINK:{}", build.source(file).display())),
+        ),
         _ => {}
     }
     let mut link = build.link(&extra, &image, &pdb, &objects);
@@ -213,6 +254,8 @@ fn compile_options(recipe: &Native, language: &str, objects: &Path) -> Vec<Strin
     match recipe.compiler {
         Compiler::Msvc => options.push(format!("/Fd{}", objects.join("compile.pdb").display())),
         Compiler::ClangCl => options.push(format!("--target={}", recipe.arch.clang_target())),
+        // The MASM variant writes its own assembler options.
+        Compiler::Masm => {}
     }
     // A trailing separator tells the compiler that /Fo names a directory.
     options.push(format!(

@@ -373,6 +373,9 @@ impl PdbContents {
                 NamedStreamKind::SourceLink => {
                     SourceLink::parse(bytes, *stream)?.encode(&mut encoded)?;
                 }
+                NamedStreamKind::NumberedSourceLink { .. } => {
+                    SourceLink::parse_numbered(bytes, *stream)?.encode(&mut encoded)?;
+                }
                 NamedStreamKind::SourceServer => {
                     SourceServer::parse(bytes, *stream)?.encode(&mut encoded)?;
                 }

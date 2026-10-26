@@ -1,233 +1,13 @@
 //! The fixture matrix: one entry for each producer, architecture and configuration.
 
+mod recipe;
+
+pub use recipe::{
+    Arch, Compiler, Dotnet, Encoder, Fixture, Hlsl, Linker, Native, Pdz, Recipe, Rust,
+    ShaderCompiler, Studio, Variant,
+};
+
 use crate::classify::Kind;
-
-/// A target architecture of a native or Rust fixture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Arch {
-    /// AMD64.
-    X64,
-    /// 32-bit x86.
-    X86,
-    /// ARM64.
-    Arm64,
-}
-
-impl Arch {
-    /// The name in fixture names and in the manifest.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::X64 => "x64",
-            Self::X86 => "x86",
-            Self::Arm64 => "arm64",
-        }
-    }
-
-    /// The `clang-cl` target triple.
-    pub fn clang_target(self) -> &'static str {
-        match self {
-            Self::X64 => "x86_64-pc-windows-msvc",
-            Self::X86 => "i686-pc-windows-msvc",
-            Self::Arm64 => "aarch64-pc-windows-msvc",
-        }
-    }
-
-    /// The Rust target triple.
-    pub fn rust_target(self) -> &'static str {
-        // Rust and clang use the same triples for these targets.
-        self.clang_target()
-    }
-}
-
-/// The Visual Studio installation that provides the MSVC and LLVM tools.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Studio {
-    /// The latest installation with the x64 C++ tools.
-    Latest,
-    /// The latest Visual Studio 2022 (version 17) installation with the x64 C++ tools.
-    Vs2022,
-}
-
-impl Studio {
-    /// The `vswhere.exe` options that select the installation.
-    pub fn vswhere_filter(self) -> &'static [&'static str] {
-        match self {
-            Self::Latest => &["-latest"],
-            Self::Vs2022 => &["-latest", "-version", "[17.0,18.0)"],
-        }
-    }
-
-    /// The prefix of environment labels in the manifest.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Latest => "latest Visual Studio",
-            Self::Vs2022 => "Visual Studio 2022",
-        }
-    }
-}
-
-/// The C and C++ compiler of a native fixture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Compiler {
-    /// MSVC `cl.exe`.
-    Msvc,
-    /// `clang-cl.exe` from the Visual Studio LLVM component.
-    ClangCl,
-}
-
-/// The linker of a native or Rust fixture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Linker {
-    /// MSVC `link.exe`.
-    Msvc,
-    /// `lld-link.exe` from the Visual Studio LLVM component.
-    Lld,
-}
-
-/// The sources and steps of a native fixture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Variant {
-    /// Compile the demo and link `demo.exe`.
-    Demo,
-    /// Like `Demo`, but `main.cpp` makes a precompiled header from `demo.h` (`/Yc`) and the
-    /// other C++ files use it (`/Yu`).
-    PrecompiledHeader,
-    /// Like `Demo`, and the linker also writes `demo.stripped.pdb` (`/PDBSTRIPPED`).
-    Stripped,
-    /// Like `Demo`, and the linker adds `demo.natvis` to the PDB (`/NATVIS`).
-    Natvis,
-    /// Like `Demo`, then `pdbstr` adds a `srcsrv` stream to `demo.srcsrv.pdb`, a copy of the
-    /// PDB.
-    SourceServer,
-    /// Profile-guided optimization of the demo: an instrumented link, a training run of the
-    /// instrumented program and an optimized link.
-    ProfileGuided,
-    /// The DLL `dll/exports.cpp` with the exports of `dll/exports.def`.
-    Dll,
-    /// The C++/CLI program `clr/managed.cpp`.
-    Clr,
-    /// The program `annotation/annotation.cpp`, which calls the `__annotation` intrinsic.
-    Annotation,
-    /// A large program from C++ sources that the generator writes. Its PDB has more pages than
-    /// one free page map interval covers.
-    Generated,
-}
-
-impl Variant {
-    /// The source languages.
-    pub const fn language(self) -> &'static str {
-        match self {
-            Self::Dll | Self::Annotation | Self::Generated => "c++20",
-            Self::Clr => "c++/cli",
-            _ => "c++20, c17",
-        }
-    }
-}
-
-/// A native C and C++ build.
-#[derive(Debug, Clone, Copy)]
-pub struct Native {
-    /// The Visual Studio installation.
-    pub studio: Studio,
-    /// The compiler.
-    pub compiler: Compiler,
-    /// The linker.
-    pub linker: Linker,
-    /// The target architecture.
-    pub arch: Arch,
-    /// Compiler options for debug information, optimization and the runtime library.
-    pub compile: &'static [&'static str],
-    /// Linker options.
-    pub link: &'static [&'static str],
-    /// The sources and steps.
-    pub variant: Variant,
-}
-
-/// A Cargo build of `fixtures/rust`.
-#[derive(Debug)]
-pub struct Rust {
-    /// The linker.
-    pub linker: Linker,
-    /// The target architecture.
-    pub arch: Arch,
-    /// Build with the release profile.
-    pub release: bool,
-}
-
-/// A `dotnet build` of one project in `fixtures/dotnet`.
-#[derive(Debug)]
-pub struct Dotnet {
-    /// The project directory below `fixtures/dotnet`.
-    pub directory: &'static str,
-    /// The project file and assembly name, without extension.
-    pub project: &'static str,
-    /// The project file extension.
-    pub extension: &'static str,
-    /// Build properties in `Name=Value` form.
-    pub properties: &'static [&'static str],
-    /// The expected kind of the separate PDB, or `None` if the image embeds it.
-    pub pdb: Option<Kind>,
-}
-
-/// An HLSL shader compiler from the Windows SDK.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShaderCompiler {
-    /// `fxc.exe`, the DXBC compiler for shader models 5.1 and older.
-    Fxc,
-    /// `dxc.exe`, the DXIL compiler for shader model 6.
-    Dxc,
-}
-
-/// A build of each shader stage in `fixtures/hlsl` with one compiler.
-#[derive(Debug)]
-pub struct Hlsl {
-    /// The compiler.
-    pub compiler: ShaderCompiler,
-    /// The shader model in profile form, for example `5_0`.
-    pub model: &'static str,
-    /// Compiler options for debug information and optimization.
-    pub options: &'static [&'static str],
-}
-
-/// The program that writes the MSFZ file of a [`Pdz`] fixture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Encoder {
-    /// `pdbtool pdz-encode`.
-    PdzEncode,
-    /// `msfz-encode` in `fixtures/tools/msfz-encode/`: Microsoft's `ms-pdb-msfz` writer with
-    /// options that `pdz-encode` does not give.
-    MsfzEncode,
-}
-
-impl Encoder {
-    /// The tool name in the tools manifest.
-    pub fn tool(self) -> &'static str {
-        match self {
-            Self::PdzEncode => "pdbtool",
-            Self::MsfzEncode => "msfz-encode",
-        }
-    }
-
-    /// The arguments before the options of the recipe.
-    pub fn command(self) -> &'static [&'static str] {
-        match self {
-            Self::PdzEncode => &["--quiet", "pdz-encode"],
-            Self::MsfzEncode => &[],
-        }
-    }
-}
-
-/// A conversion of the MSF 7.0 PDBs of other fixtures to MSFZ.
-#[derive(Debug)]
-pub struct Pdz {
-    /// The program that writes the MSFZ files.
-    pub encoder: Encoder,
-    /// The options of the encoder.
-    pub options: &'static [&'static str],
-    /// The source fixtures. An empty list selects each fixture with an MSF 7.0 PDB output,
-    /// except [`PDZ_EXCLUDED`].
-    pub sources: &'static [&'static str],
-}
 
 /// The fixtures that a PDZ fixture does not convert, even with an empty source list.
 ///
@@ -256,38 +36,6 @@ const MSFZ_SAMPLE: &[&str] = &[
 /// The sources of the `--pad16k` fixture: PDBs that give a PDZ file smaller than 16 KiB.
 const PDZ_SMALL: &[&str] = &["hlsl-fxc-sm50-debug", "dotnet-csharp-full"];
 
-/// How to build a fixture.
-#[derive(Debug)]
-pub enum Recipe {
-    /// A native C and C++ build.
-    Native(Native),
-    /// A Rust build.
-    Rust(Rust),
-    /// A .NET build.
-    Dotnet(Dotnet),
-    /// An HLSL shader build.
-    Hlsl(Hlsl),
-    /// A conversion to MSFZ.
-    Pdz(Pdz),
-}
-
-/// One fixture of the matrix.
-#[derive(Debug)]
-pub struct Fixture {
-    /// The unique name. It is also the directory name below the output root.
-    pub name: &'static str,
-    /// The producer family.
-    pub producer: &'static str,
-    /// The source languages.
-    pub language: &'static str,
-    /// The architecture name.
-    pub arch: &'static str,
-    /// The configuration name.
-    pub configuration: &'static str,
-    /// How to build the fixture.
-    pub recipe: Recipe,
-}
-
 const DEBUG: &[&str] = &["/Zi", "/Od", "/MDd"];
 const RELEASE: &[&str] = &["/Zi", "/O2", "/MD"];
 const LINK_DEBUG: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO"];
@@ -296,6 +44,11 @@ const LINK_RELEASE: &[&str] = &["/DEBUG:FULL", "/OPT:REF", "/OPT:ICF", "/INCREME
 const LINK_PAGE_8192: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:8192"];
 const LINK_PAGE_16384: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:16384"];
 const LINK_PAGE_32768: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:32768"];
+// The undocumented option /DEBUG:LAZY writes the Info feature NOTM: the module type streams keep
+// the type records and the symbols of the object files.
+const LINK_LAZY: &[&str] = &["/DEBUG:LAZY", "/INCREMENTAL:NO"];
+// amp.h stops with an error for C++17 unless the program accepts the deprecation of C++ AMP.
+const AMP_DEBUG: &[&str] = &["/Zi", "/Od", "/MDd", "/D_SILENCE_AMP_DEPRECATION_WARNINGS"];
 
 const fn native(
     name: &'static str,
@@ -349,6 +102,15 @@ const fn clang(
 /// Build a native recipe with the tools of another Visual Studio installation.
 const fn in_studio(studio: Studio, native: Native) -> Native {
     Native { studio, ..native }
+}
+
+/// Build a MASM recipe: assemble with `/Zi` and link with `link`.
+const fn masm(arch: Arch) -> Native {
+    Native {
+        compiler: Compiler::Masm,
+        variant: Variant::Masm,
+        ..msvc(arch, &["/Zi"], LINK_DEBUG)
+    }
 }
 
 /// Build a native recipe with other sources or steps.
@@ -743,6 +505,113 @@ pub static FIXTURES: &[Fixture] = &[
         // The static runtime has objects from MASM (`ml64`). Some of their `LF_STRUCTURE`
         // records end with `f1` and two stale bytes instead of the `LF_PAD` run (#29).
         clang(Linker::Lld, Arch::X64, &["/Zi", "/Od", "/MTd"], LINK_DEBUG),
+    ),
+    // The local producers of #39: each fixture holds record kinds or stream forms that the
+    // fixtures above do not have.
+    native(
+        "msvc-x64-amp",
+        "msvc (vs 2022)",
+        "debug, c++ amp",
+        // MSVC 14.50 removed amp.h, so this fixture needs the 14.4x tools.
+        in_studio(
+            Studio::Vs2022,
+            with_variant(Variant::Amp, msvc(Arch::X64, AMP_DEBUG, LINK_DEBUG)),
+        ),
+    ),
+    native(
+        "msvc-x64-amp-lazy",
+        "msvc (vs 2022)",
+        "debug, c++ amp, lazy (no type merge)",
+        // Only /DEBUG:LAZY keeps the S_LPROC32_DPC_ID records of the object file.
+        in_studio(
+            Studio::Vs2022,
+            with_variant(Variant::Amp, msvc(Arch::X64, AMP_DEBUG, LINK_LAZY)),
+        ),
+    ),
+    native(
+        "msvc-x64-modern",
+        "msvc",
+        "debug, c++20 coroutine and structured bindings",
+        with_variant(Variant::Modern, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x86-modern-zi",
+        "msvc",
+        "debug, edit and continue, c++20 coroutine and structured bindings",
+        with_variant(
+            Variant::Modern,
+            msvc(
+                Arch::X86,
+                &["/ZI", "/Od", "/MDd"],
+                &["/DEBUG:FULL", "/INCREMENTAL"],
+            ),
+        ),
+    ),
+    native(
+        "msvc-x64-modern-lazy",
+        "msvc",
+        "release, lazy (no type merge), c++20 function-local statics",
+        // `link` drops the S_STATICLOCAL records of the object file unless /DEBUG:LAZY is set.
+        with_variant(Variant::Modern, msvc(Arch::X64, RELEASE, LINK_LAZY)),
+    ),
+    native(
+        "masm-x64-debug",
+        "masm (ml64) + link",
+        "debug",
+        masm(Arch::X64),
+    ),
+    native(
+        "masm-x86-debug",
+        "masm (ml) + link",
+        "debug",
+        masm(Arch::X86),
+    ),
+    native(
+        "msvc-arm64ec-debug",
+        "msvc",
+        "debug, arm64ec",
+        with_variant(
+            Variant::Hybrid,
+            msvc(
+                Arch::Arm64Ec,
+                &["/Zi", "/Od", "/MDd", "/arm64EC"],
+                &["/DEBUG:FULL", "/INCREMENTAL:NO", "/MACHINE:ARM64EC"],
+            ),
+        ),
+    ),
+    native(
+        "clang-flang-lld-x64-primitives",
+        "clang-cl + flang + lld-link",
+        "debug, primitive types of c and fortran",
+        // -mlong-double-80 gives a 16-byte long double, which LLVM writes as T_REAL128.
+        with_variant(
+            Variant::Primitives,
+            clang(
+                Linker::Lld,
+                Arch::X64,
+                &["/Zi", "/Od", "/MD", "/clang:-mlong-double-80"],
+                LINK_DEBUG,
+            ),
+        ),
+    ),
+    native(
+        "msvc-x64-sourcelink",
+        "msvc",
+        "debug, sourcelink",
+        with_variant(Variant::SourceLink, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-fastlink-full",
+        "msvc (vs 2022) + mspdbcmf",
+        "debug, fastlink converted to a full pdb",
+        // `mspdbcmf` writes TPI hash adjusters. MSVC 14.50 and later ignore /DEBUG:FASTLINK.
+        in_studio(
+            Studio::Vs2022,
+            with_variant(
+                Variant::FastLinkConverted,
+                msvc(Arch::X64, DEBUG, &["/DEBUG:FASTLINK", "/INCREMENTAL:NO"]),
+            ),
+        ),
     ),
     rust("rust-link-x64-debug", Linker::Msvc, Arch::X64, false),
     rust("rust-link-x64-release", Linker::Msvc, Arch::X64, true),

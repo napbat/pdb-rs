@@ -62,14 +62,16 @@ impl VisualStudio {
 }
 
 /// The `vcvarsall.bat` argument for a target on a host architecture.
+///
+/// ARM64EC has no argument of its own: the ARM64 tools build it.
 pub fn vcvars_argument(host: &str, target: Arch) -> Option<&'static str> {
     match (host, target) {
         ("x86_64", Arch::X64) => Some("x64"),
         ("x86_64", Arch::X86) => Some("x64_x86"),
-        ("x86_64", Arch::Arm64) => Some("x64_arm64"),
+        ("x86_64", Arch::Arm64 | Arch::Arm64Ec) => Some("x64_arm64"),
         ("aarch64", Arch::X64) => Some("arm64_x64"),
         ("aarch64", Arch::X86) => Some("arm64_x86"),
-        ("aarch64", Arch::Arm64) => Some("arm64"),
+        ("aarch64", Arch::Arm64 | Arch::Arm64Ec) => Some("arm64"),
         _ => None,
     }
 }

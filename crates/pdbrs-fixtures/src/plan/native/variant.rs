@@ -149,18 +149,19 @@ pub fn clr(build: &Build<'_>, plan: &mut Plan) -> Result<(), String> {
             build.label
         ));
     }
-    single_source(build, plan, CLR_SOURCE);
+    single_source(build, plan, CLR_SOURCE, "/std:c++20");
     Ok(())
 }
 
 /// Plan the program `demo.exe` from `annotation/annotation.cpp`.
 pub fn annotation(build: &Build<'_>, plan: &mut Plan) {
-    single_source(build, plan, ANNOTATION_SOURCE);
+    single_source(build, plan, ANNOTATION_SOURCE, "/std:c++20");
 }
 
-/// Compile one C++ source below `fixtures/native` and link `demo.exe` and `demo.pdb`.
-fn single_source(build: &Build<'_>, plan: &mut Plan, source: &str) {
-    plan.steps.push(build.compile("/std:c++20", &[], &[source]));
+/// Compile one C++ source below `fixtures/native` with the language option `language` and
+/// link `demo.exe` and `demo.pdb`.
+pub(super) fn single_source(build: &Build<'_>, plan: &mut Plan, source: &str, language: &str) {
+    plan.steps.push(build.compile(language, &[], &[source]));
     plan.steps.push(build.link(
         &[],
         &build.fixture.join("demo.exe"),

@@ -134,6 +134,7 @@ pub fn build() -> Result<PdbBuilder<'static>> {
             attributes: PointerAttributes::from_raw(0x0c | (8 << 13))?,
             member: None,
             based: None,
+            trailing_zeros: 0,
         })
         .encode(out)
     })?;

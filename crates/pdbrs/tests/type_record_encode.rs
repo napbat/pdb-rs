@@ -265,24 +265,28 @@ fn pointer_encoder_rejects_data_that_does_not_match_the_kind() {
             attributes: near64,
             member: None,
             based: Some(BasedPointer::Segment(1)),
+            trailing_zeros: 0,
         },
         Pointer {
             referent_type: TypeIndex(0x74),
             attributes: segment,
             member: None,
             based: None,
+            trailing_zeros: 0,
         },
         Pointer {
             referent_type: TypeIndex(0x74),
             attributes: segment,
             member: None,
             based: Some(BasedPointer::SelfBased),
+            trailing_zeros: 0,
         },
         Pointer {
             referent_type: TypeIndex(0x74),
             attributes: segment,
             member: None,
             based: Some(BasedPointer::Symbol(&[2, 0])),
+            trailing_zeros: 0,
         },
     ] {
         let error = TypeLeaf::Pointer(pointer)
@@ -290,6 +294,35 @@ fn pointer_encoder_rejects_data_that_does_not_match_the_kind() {
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     }
+}
+
+/// `ml64 /Zi` 14.51 writes 6 zero bytes after the pointer data of each
+/// `LF_POINTER` record (#29, #39). The record must decode and encode again.
+#[test]
+fn masm_pointer_keeps_its_trailing_zero_bytes() {
+    let full = [
+        0x12, 0x00, 0x02, 0x10, 0x03, 0x10, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0xf2, 0xf1,
+    ];
+    let TypeLeaf::Pointer(pointer) = decode(&full) else {
+        panic!("not a pointer");
+    };
+    assert_eq!(pointer.referent_type, TypeIndex(0x1003));
+    assert_eq!(pointer.trailing_zeros, 6);
+    assert_eq!(pointer.based, None);
+    let mut out = Vec::new();
+    TypeLeaf::Pointer(pointer).encode(&mut out).unwrap();
+    assert_eq!(out, full);
+    // A byte other than zero after the pointer data is still an error.
+    let mut bad = full;
+    bad[15] = 1;
+    let error = TypeLeaf::decode(Record {
+        offset: 0,
+        kind: LF_POINTER,
+        data: &bad[4..],
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }
 
 #[test]
