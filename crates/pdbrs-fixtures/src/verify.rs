@@ -19,10 +19,12 @@
 mod dump;
 mod edit;
 mod native;
+mod native_edit;
 mod rebuild;
 
 pub use edit::verify_edit;
 pub use native::build::verify_native_build;
+pub use native_edit::verify_native_edit;
 pub use rebuild::verify_rebuild;
 
 use std::fs;

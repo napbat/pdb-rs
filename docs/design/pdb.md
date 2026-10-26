@@ -4,7 +4,8 @@ Status: the full reader/writer design remains proposed. The library reads every 
 Formats and record kinds outside those samples remain incomplete. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
 The library reads the metadata of standalone Portable PDBs and the raw rows of their eight debug tables (see [Implemented Portable PDB reading](#implemented-portable-pdb-reading)).
 The library writes Portable PDBs: exact copies, new layouts from raw rows and heaps, semantic builds and edits (see [Implemented Portable PDB writing](#implemented-portable-pdb-writing)).
-Portable PDB blob decoding is partial. The library builds new native PDBs from semantic records (see [Implemented native building](#implemented-native-building)). Native semantic editing is not implemented.
+Portable PDB blob decoding is partial. The library builds new native PDBs from semantic records (see [Implemented native building](#implemented-native-building)).
+It edits native PDBs and keeps the streams that an edit does not change (see [Implemented native editing](#implemented-native-editing)).
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
@@ -277,6 +278,35 @@ cargo run -p pdbrs --example native_synthetic -- synthetic.pdb
 
 DIA lists a procedure only if its record names a TPI type (`S_GPROC32`), as `link.exe` writes it.
 DIA2Dump does not list `S_GPROC32_ID` procedures of the synthetic PDB.
+
+## Implemented native editing
+
+`native::Pdb::edit` makes a `native::PdbEditor` ([#34](https://github.com/napbat/pdbrs/issues/34)). The editor borrows the source PDB and owns only the changes.
+`PdbEditor::plan` checks all changes and encodes the changed streams. It returns a `PdbEditPlan`, which writes like `PdbWritePlan`.
+The module documentation of `native::edit` gives all rules.
+
+- The output keeps the stream ID of each source stream. The plan reads each unchanged stream from the source when it writes, so `pdbtool compare` shows it as identical.
+  A removed stream becomes a nil stream. A new stream gets the next stream ID. `PdbEditPlan::changed_streams` lists the changed, removed and new streams.
+- Named streams: `set_named_stream` adds or replaces a stream, and `remove_named_stream` removes it. The Info named-stream map changes. The plan decodes new `srcsrv`, `sourcelink` and `/LinkInfo` bytes with their decoders.
+- Symbols: `add_public`, `add_global`, `rename_public` and `rename_global`. A renamed record stays at its position, and an added record goes to the end of the symbol record stream.
+  The plan builds the global and public indexes again with the source buckets, reference counts, thunk map and section starts. It writes moved offsets into the global references of the module streams.
+- Types and IDs: `add_type` and `add_id` append records. The hash stream keeps the source hash values, index offsets and adjusters, and gets the values of the new records.
+- Identity: the caller gives an `IdentityPolicy` to `Pdb::edit`. The Info and DBI ages stay consistent. `PdbEditPlan::pe_match` returns the values for the image.
+- Strip: `strip_private` writes the streams that `link /PDBSTRIPPED` (MSVC 14.51) writes: no types or IDs, only `S_PUB32` and `S_LPROCREF` records, local procedures without types in the module streams, no source files, lines or EC names, zero section contribution CRCs and the DBI stripped flag.
+
+The plan rejects these edits before it writes a byte. A planning error writes nothing.
+
+- An edit that moves a symbol record, and a strip, if opaque data can refer to the changed offsets or indices: a stream that no other stream names and that does not decode as a type map,
+  a named stream of an unknown kind, and for moved records also a symbol record or a C13 subsection of an unknown kind.
+  A type map without an owner holds type indices only, so it does not block an edit. The strip removes it. Stream 61 of the `msvc-x64-incremental` fixture is such a type map: `/TMCache` does not name it.
+- A change of `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a rename of a reference record such as `S_PROCREF`, a strip together with another symbol or type edit, and a reference that does not resolve.
+
+Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
+Use `IncrementAge` or `Replace` for a semantic change, and write the returned `PeMatch` to the image.
+
+```sh
+cargo run -p pdbrs-fixtures -- verify-native-edit
+```
 
 ## Required formats and scope
 
@@ -588,7 +618,7 @@ GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 
 Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (see [MSF writing](#implemented-msf-writing)).
 Exact copies, new layouts, semantic builds and semantic edits are implemented for Portable PDBs (see [Portable PDB writing](#implemented-portable-pdb-writing)).
-Native semantic builds are implemented (see [Implemented native building](#implemented-native-building)). Native semantic edits are not implemented.
+Native semantic builds and edits are implemented (see [Implemented native building](#implemented-native-building) and [Implemented native editing](#implemented-native-editing)).
 
 Keep these operations explicit. Do not silently fall back from preservation to normalization.
 An exact copy is a copy operation, not proof that the source is a valid PDB.

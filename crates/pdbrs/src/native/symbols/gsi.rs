@@ -58,4 +58,10 @@ impl GlobalSymbolIndex {
     pub const fn hash_table(&self) -> HashTable<'_> {
         self.table.view(self.bytes.as_slice())
     }
+
+    /// Return the stream bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
 }
