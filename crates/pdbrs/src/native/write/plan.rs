@@ -58,7 +58,7 @@ impl Default for BuildOptions {
 /// # Errors and partial output
 ///
 /// [`PdbWritePlan::write_to`] writes in file order. An output error can
-/// leave a partial output. Under `std`, [`PdbWritePlan::write_file`] writes
+/// leave a partial output. Under `std`, `PdbWritePlan::write_file` writes
 /// a temporary file and renames it; on error the destination does not change.
 #[derive(Clone, Debug)]
 pub struct PdbWritePlan<'b> {

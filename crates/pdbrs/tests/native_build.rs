@@ -109,7 +109,7 @@ fn rebuild_of_a_built_pdb_gives_the_same_bytes() {
     let bytes = synthetic();
     let pdb = Pdb::parse(&bytes).expect("parse");
     let contents = pdb.contents().expect("contents");
-    assert!(contents.unclaimed_streams().is_empty());
+    assert_eq!(contents.unclaimed_streams(), []);
     let rebuilt = contents
         .to_builder(IdentityPolicy::Preserve)
         .and_then(|builder| builder.plan(&contents.build_options())?.to_vec())
