@@ -99,6 +99,42 @@ It fails if any record kind, subsection kind or stream has no typed decoder.
 It reports a decoded stream that no other stream names, with the reason, and does not fail for it.
 It runs the checks of `codeview::symbol::validate` on each module stream and on the shared symbols, and reports each broken rule as an inconsistency.
 
+Print the type information of a native PDB in a C-like form with:
+
+```sh
+cargo run -p pdbrs --example types -- path/to/input.pdb
+cargo run -p pdbrs --example types -- --type <name> path/to/input.pdb
+cargo run -p pdbrs --example types -- --functions path/to/input.pdb
+```
+
+The `types` example uses only the public API: `TypeTable`, `ForwardRefs`, `TypeLeaf`, `TypeTable::members` and `Numeric`.
+Without an option, it prints each UDT definition and each enum of the TPI stream in index order. `--type` selects the definitions with one name.
+A UDT gives its size and one line for each member: base classes, virtual base classes, the virtual function table pointer, data members with their offsets, static members, nested types and methods with their signatures.
+A bit field also gives its width and its first bit.
+An enum gives its underlying type and each enumerator. The example reads each value as the underlying integer type, up to 128 bits.
+For example, MSVC writes `-1` for the largest value of an `unsigned __int64` enum, and the example prints `18446744073709551615`.
+`--functions` prints the signature of each procedure symbol (`S_GPROC32`, `S_LPROC32` and their `_ID` kinds through `LF_FUNC_ID` and `LF_MFUNC_ID`), then the signature of each `LF_FUNC_ID` and `LF_MFUNC_ID` record.
+
+Type names use C declarators, for example `void (__cdecl *callback)(void *)` or `char name[16]`.
+A member function gives its qualifiers after the arguments and its `this` type in brackets.
+The type index `0x0103` prints as `std::nullptr_t`, as in LLVM. A procedure without a type, for example an MSVC unwind funclet, gives only its name.
+Sizes follow forward references to their definitions. The example stops at 64 nested types and prints `<...>` there.
+
+Evidence (#1): the example printed every UDT definition, enum and procedure of four fixtures.
+The table gives the items that agree with DIA2Dump (`-t` and `-s`) and with `llvm-pdbutil pretty` (`-classes -enums` and `-module-syms`).
+
+| Fixture | UDTs: DIA2Dump, llvm | Enums: DIA2Dump, llvm | Procedures: DIA2Dump, llvm |
+| --- | --- | --- | --- |
+| `msvc-x64-debug` | 275, 309 of 331 | 49, 52 of 54 | 222, 362 of 523 |
+| `msvc-x86-debug` | 246, 281 of 302 | 48, 51 of 53 | 243, 156 of 482 |
+| `clang-lld-x64-debug` | 233, 241 of 263 | 42, 44 of 45 | 247, 322 of 487 |
+| `rust-link-x64-debug` | 395, 274 of 422 | 59, 61 of 61 | 459, 405 of 509 |
+
+Each other item differs in printing style only. No difference shows another offset, size, value or type record.
+Examples: DIA2Dump prints `&&` as `*` and a function pointer as `function *`, and takes many signatures from the decorated name.
+`llvm-pdbutil` moves a pointer `const` to the front, omits `__thiscall`, and prints the parameter symbols instead of the `LF_ARGLIST`.
+The comment on #1 lists each difference class with its count.
+
 `Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
