@@ -14,8 +14,10 @@
 //!
 //! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
 //! repacks and new layouts of arbitrary streams. [`portable::write`] writes
-//! Portable PDBs: exact copies and new layouts from raw rows and heaps. PDB
-//! semantic building and editing are not implemented.
+//! Portable PDBs: exact copies and new layouts from raw rows and heaps.
+//! [`portable::PdbBuilder`] and [`portable::PdbEditor`] build and edit
+//! Portable PDBs from typed records. Native PDB semantic building and editing
+//! are not implemented.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification

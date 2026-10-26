@@ -54,7 +54,7 @@ pub fn verify_rebuild(workspace: &Path, fixtures: &Path) -> Result<bool, String>
 }
 
 /// Return the bytes as lowercase hexadecimal text.
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().fold(String::new(), |mut text, byte| {
         let _ = write!(text, "{byte:02x}");
         text
@@ -62,7 +62,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Return `yes` or `NO`.
-const fn yes(value: bool) -> &'static str {
+pub(super) const fn yes(value: bool) -> &'static str {
     if value { "yes" } else { "NO" }
 }
 

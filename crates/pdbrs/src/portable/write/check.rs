@@ -174,12 +174,17 @@ impl Rows<'_> {
         ))
     }
 
-    /// Check a list start: nil (0) or 1 to the row count of `target` plus 1.
+    /// Check a list start: 1 to the row count of `target` plus 1, or nil (0) if `target` has
+    /// no rows.
     ///
     /// `System.Reflection.Metadata` writes nil if the producer gives no list, for example
-    /// the F# compiler for `ConstantList`.
+    /// the F# compiler for `ConstantList`. Readers reject nil if the table has rows.
     fn list(&self, row: usize, column: &'static str, target: TableId, value: u32) -> Result<()> {
-        if u64::from(value) <= u64::from(self.counts.get(target)) + 1 {
+        let count = self.counts.get(target);
+        if value == 0 && count != 0 {
+            return Err(self.reference(row, column, "list is nil, but its table has rows"));
+        }
+        if u64::from(value) <= u64::from(count) + 1 {
             return Ok(());
         }
         Err(self.reference(row, column, "list start is after the end of its table"))

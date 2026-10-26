@@ -17,8 +17,11 @@
 //!
 //! [`write`](mod@write) writes Portable PDBs: exact copies with [`Pdb::copy_exact`], and
 //! new layouts from raw parts with [`write::PdbParts::plan`]. [`Pdb::to_parts`] reads a
-//! Portable PDB into such parts.
+//! Portable PDB into such parts. [`PdbBuilder`] builds a Portable PDB from records with typed
+//! handles, and [`Pdb::edit`] makes a [`PdbEditor`] that changes an existing one (see
+//! [`build`]).
 
+pub mod build;
 pub mod compressed;
 pub mod custom;
 pub mod debug;
@@ -27,6 +30,7 @@ pub mod metadata;
 mod reader;
 pub mod write;
 
+pub use build::{PdbBuilder, PdbEditor};
 pub use reader::{Pdb, ReadOptions, Rows};
 
 /// The 20-byte identity stored at the start of a Portable PDB's `#Pdb` stream.

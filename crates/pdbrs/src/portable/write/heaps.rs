@@ -15,6 +15,10 @@ use crate::portable::metadata::{
 };
 use crate::{Error, ErrorKind, Result};
 
+mod seed;
+
+pub(super) use seed::walk_entries;
+
 /// Make an [`ErrorKind::LimitExceeded`] error in a heap.
 fn limit(stream: MetadataStream, context: &'static str) -> Error {
     Error::new(ErrorKind::LimitExceeded, None)
@@ -43,8 +47,12 @@ fn append(bytes: &mut Vec<u8>, value: &[u8], stream: MetadataStream) -> Result<(
 /// A string that is a suffix of the string before it uses the end of that string. This is the
 /// rule of `System.Reflection.Metadata`, applied to bytes. For ASCII strings, both rules give
 /// the same heap.
+///
+/// A builder with a base heap (see [`Pdb::edit`](crate::portable::Pdb::edit)) keeps the base
+/// bytes and their offsets. It adds the strings that the base does not have after the base.
 #[derive(Clone, Debug, Default)]
 pub struct StringHeapBuilder {
+    base: Option<StringHeap>,
     strings: BTreeSet<Vec<u8>>,
 }
 
@@ -67,7 +75,11 @@ impl StringHeapBuilder {
                 .with_context("a #Strings value contains a zero byte")
                 .with_portable(MetadataStream::Strings.location()));
         }
-        if value.is_empty() || self.strings.contains(value) {
+        let in_base = self
+            .base
+            .as_ref()
+            .is_some_and(|base| base.offsets.contains_key(value));
+        if value.is_empty() || in_base || self.strings.contains(value) {
             return Ok(());
         }
         let mut owned = Vec::new();
@@ -87,7 +99,10 @@ impl StringHeapBuilder {
     pub fn finish(self) -> Result<StringHeap> {
         let mut sorted: Vec<Vec<u8>> = self.strings.into_iter().collect();
         sorted.sort_unstable_by(|left, right| suffix_order(left, right));
-        let mut bytes = Vec::from([0]);
+        let StringHeap {
+            mut bytes,
+            offsets: mut map,
+        } = self.base.unwrap_or_default();
         let mut offsets = Vec::new();
         offsets
             .try_reserve_exact(sorted.len())
@@ -110,8 +125,19 @@ impl StringHeapBuilder {
             previous = value;
         }
         heap_size(&bytes, MetadataStream::Strings)?;
-        let offsets = sorted.into_iter().zip(offsets).collect();
-        Ok(StringHeap { bytes, offsets })
+        map.extend(sorted.into_iter().zip(offsets));
+        Ok(StringHeap {
+            bytes,
+            offsets: map,
+        })
+    }
+
+    /// Make a builder that keeps the bytes and the offsets of `base`.
+    pub(crate) fn with_base(base: StringHeap) -> Self {
+        Self {
+            base: Some(base),
+            strings: BTreeSet::new(),
+        }
     }
 }
 

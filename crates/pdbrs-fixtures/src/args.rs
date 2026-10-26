@@ -8,6 +8,7 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- tools
        cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
+       cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
@@ -28,6 +29,11 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   verify-rebuild Rebuild each Portable PDB fixture with the pdbrs writer, write it to
                  target/verify-rebuild/ and compare its bytes, its ID and its verifier dump
                  with the original.
+
+  verify-edit    Edit and build each Portable PDB fixture with the pdbrs editor, compare
+                 the verifier dumps with the expected change, and run each standalone fixture
+                 program with the built and the edited PDB. Write the results to
+                 target/verify-edit/.
 
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
                  with the manifest. The CLI metadata of each image must be rejected.
@@ -56,6 +62,9 @@ pub enum Action {
     /// Rebuild each Portable PDB fixture with the pdbrs writer and compare it with the
     /// original. The value is the fixture root, if the user gave one.
     VerifyRebuild(Option<PathBuf>),
+    /// Edit and build each Portable PDB fixture and compare the results with the verifier.
+    /// The value is the fixture root, if the user gave one.
+    VerifyEdit(Option<PathBuf>),
 }
 
 /// The options of a build.
@@ -86,6 +95,7 @@ where
         ("verify-portable", Action::VerifyPortable as fn(_) -> _),
         ("detect", Action::Detect),
         ("verify-rebuild", Action::VerifyRebuild),
+        ("verify-edit", Action::VerifyEdit),
     ] {
         if arguments.next_if(|argument| argument == command).is_some() {
             return fixture_root(command, &mut arguments).map(action);
@@ -194,6 +204,7 @@ mod tests {
     fn fixture_commands_take_an_optional_fixture_root() {
         assert_eq!(run(&["verify-portable"]), Ok(Action::VerifyPortable(None)));
         assert_eq!(run(&["verify-rebuild"]), Ok(Action::VerifyRebuild(None)));
+        assert_eq!(run(&["verify-edit"]), Ok(Action::VerifyEdit(None)));
         assert_eq!(
             run(&["detect", "--fixtures", "D:/f"]),
             Ok(Action::Detect(Some(PathBuf::from("D:/f"))))

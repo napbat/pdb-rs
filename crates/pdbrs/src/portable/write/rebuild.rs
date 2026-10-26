@@ -5,19 +5,19 @@
 //! keeps its offsets. It adds each string that a row refers to into a new `#Strings` heap and
 //! gives the rows the new offsets.
 //!
-//! Document name blobs and import blobs contain `#Blob` offsets. This module does not decode
-//! them, so it cannot change these offsets. If a `#Blob` offset changes and the `Document` or
-//! `ImportScope` table has rows, the rebuild fails.
+//! Document name blobs and import blobs contain `#Blob` offsets. If a `#Blob` offset changes,
+//! the rebuild decodes these blobs with [`DocumentName`] and [`Imports`], gives them the new
+//! offsets and adds the encoded blobs.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use super::heaps::{BlobHeap, GuidHeap, StringHeapBuilder, UserStringHeap};
+use super::heaps::{BlobHeap, GuidHeap, StringHeapBuilder, UserStringHeap, walk_entries};
 use super::parts::{DebugTables, ExternalRowCounts, PdbParts};
 use crate::error::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::compressed;
+use crate::portable::debug::{DocumentName, Import, Imports, encode_imports};
 use crate::portable::metadata::{
     BlobOffset, GuidIndex, MetadataStream, StringOffset, TableId, TableRow, UserStringOffset,
 };
@@ -55,15 +55,66 @@ impl BlobMap {
     }
 }
 
+/// Return the location of a cell.
+fn cell(table: TableId, row: usize, column: &'static str) -> PortableLocation {
+    PortableLocation::new()
+        .with_stream(MetadataStream::Tables)
+        .with_table(table)
+        .with_row(u32::try_from(row + 1).unwrap_or(u32::MAX))
+        .with_column(column)
+}
+
 /// Make an [`ErrorKind::InvalidReference`] error at a cell.
 fn cell_error(table: TableId, row: usize, column: &'static str) -> Error {
-    Error::new(ErrorKind::InvalidReference, None).with_portable(
-        PortableLocation::new()
-            .with_stream(MetadataStream::Tables)
-            .with_table(table)
-            .with_row(u32::try_from(row + 1).unwrap_or(u32::MAX))
-            .with_column(column),
-    )
+    Error::new(ErrorKind::InvalidReference, None).with_portable(cell(table, row, column))
+}
+
+/// Give each `#Blob` offset of an import a new value.
+fn map_import(
+    import: Import,
+    mut map: impl FnMut(BlobOffset) -> Result<BlobOffset>,
+) -> Result<Import> {
+    Ok(match import {
+        Import::Namespace { namespace } => Import::Namespace {
+            namespace: map(namespace)?,
+        },
+        Import::AssemblyNamespace {
+            assembly,
+            namespace,
+        } => Import::AssemblyNamespace {
+            assembly,
+            namespace: map(namespace)?,
+        },
+        Import::Type { target_type } => Import::Type { target_type },
+        Import::XmlNamespace { alias, namespace } => Import::XmlNamespace {
+            alias: map(alias)?,
+            namespace: map(namespace)?,
+        },
+        Import::AssemblyReferenceAlias { alias } => {
+            Import::AssemblyReferenceAlias { alias: map(alias)? }
+        }
+        Import::AliasAssemblyReference { alias, assembly } => Import::AliasAssemblyReference {
+            alias: map(alias)?,
+            assembly,
+        },
+        Import::AliasNamespace { alias, namespace } => Import::AliasNamespace {
+            alias: map(alias)?,
+            namespace: map(namespace)?,
+        },
+        Import::AliasAssemblyNamespace {
+            alias,
+            assembly,
+            namespace,
+        } => Import::AliasAssemblyNamespace {
+            alias: map(alias)?,
+            assembly,
+            namespace: map(namespace)?,
+        },
+        Import::AliasType { alias, target_type } => Import::AliasType {
+            alias: map(alias)?,
+            target_type,
+        },
+    })
 }
 
 /// Read all rows of a table.
@@ -79,26 +130,10 @@ fn walk_prefixed(
     mut add: impl FnMut(&[u8]) -> Result<u32>,
 ) -> Result<BTreeMap<u32, u32>> {
     let mut map = BTreeMap::from([(0, 0)]);
-    let mut position = 0;
-    while position < bytes.len() {
-        let rest = &bytes[position..];
-        let invalid = || {
-            Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("heap is not a sequence of length-prefixed entries")
-                .with_portable(
-                    stream
-                        .location()
-                        .with_heap_offset(u32::try_from(position).unwrap_or(u32::MAX)),
-                )
-        };
-        let (length, after) = compressed::decode_unsigned(rest).map_err(|_| invalid())?;
-        let start = rest.len() - after.len();
-        let length = usize::try_from(length).map_err(|_| invalid())?;
-        let entry = after.get(..length).ok_or_else(invalid)?;
-        let old = u32::try_from(position).map_err(|_| invalid())?;
-        map.insert(old, add(entry)?);
-        position += start + length;
-    }
+    walk_entries(bytes, stream, |offset, entry| {
+        map.insert(offset, add(entry)?);
+        Ok(())
+    })?;
     Ok(map)
 }
 
@@ -116,10 +151,10 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// - [`ErrorKind::InvalidFormat`] if a `#Blob` or `#US` heap is not a sequence of
     ///   length-prefixed entries, or a `#US` entry has an even length.
-    /// - [`ErrorKind::InvalidReference`] if a row refers to a blob offset that is not the
-    ///   start of an entry, or if a `#Blob` offset changes and the `Document` or
-    ///   `ImportScope` table has rows. The document name and import blobs contain `#Blob`
-    ///   offsets, and this function cannot change them.
+    /// - [`ErrorKind::InvalidReference`] if a row or a document name or imports blob refers
+    ///   to a blob offset that is not the start of an entry.
+    /// - The errors of [`DocumentName::decode`], [`Imports`] and the encoders, if a `#Blob`
+    ///   offset changes and a document name or an imports blob does not decode.
     /// - [`ErrorKind::LimitExceeded`] if a heap is larger than
     ///   [`ReadOptions::max_stream_bytes`](crate::portable::ReadOptions::max_stream_bytes)
     ///   or an allocation fails.
@@ -142,15 +177,20 @@ impl<S: ReadAt> Pdb<S> {
             blobs.add(entry).map(BlobOffset::get)
         })?);
         drop(source);
-        let has_blob_references = !tables.documents.is_empty() || !tables.import_scopes.is_empty();
-        if has_blob_references && !blob_map.is_stable(blobs.size()) {
-            return Err(Error::new(ErrorKind::InvalidReference, None)
-                .with_context(
-                    "the rebuild changes #Blob offsets, and document name or import blobs can contain them",
-                )
-                .with_portable(MetadataStream::Blob.location()));
-        }
+        let containers = if blob_map.is_stable(blobs.size()) {
+            None
+        } else {
+            Some(self.rewrite_containers(&tables, &blob_map, &mut blobs)?)
+        };
         rewrite_blobs(&mut tables, &blob_map)?;
+        if let Some((names, imports)) = containers {
+            for (row, name) in tables.documents.iter_mut().zip(names) {
+                row.name = name;
+            }
+            for (row, blob) in tables.import_scopes.iter_mut().zip(imports) {
+                row.imports = blob;
+            }
+        }
 
         let mut user_strings = UserStringHeap::new();
         let source = self
@@ -228,6 +268,43 @@ impl<S: ReadAt> Pdb<S> {
             row.name = new(row.name);
         }
         Ok(heap)
+    }
+
+    /// Decode the document name and imports blobs, give them the new `#Blob` offsets and add
+    /// the encoded blobs. Return the new offsets of the `Name` and `Imports` columns.
+    fn rewrite_containers(
+        &self,
+        tables: &DebugTables,
+        map: &BlobMap,
+        blobs: &mut BlobHeap,
+    ) -> Result<(Vec<BlobOffset>, Vec<BlobOffset>)> {
+        let mut names = Vec::with_capacity(tables.documents.len());
+        for (row, document) in tables.documents.iter().enumerate() {
+            let (table, column) = (TableId::DOCUMENT, "Name");
+            let blob = self.blob(document.name)?;
+            let name = DocumentName::decode(&blob)
+                .map_err(|error| error.with_portable(cell(table, row, column)))?;
+            let parts = name
+                .parts()
+                .map(|part| map.get(part, table, row, column))
+                .collect::<Result<Vec<_>>>()?;
+            let encoded = DocumentName::encode(name.separator(), &parts)
+                .map_err(|error| error.with_portable(cell(table, row, column)))?;
+            names.push(blobs.add(&encoded)?);
+        }
+        let mut imports = Vec::with_capacity(tables.import_scopes.len());
+        for (row, scope) in tables.import_scopes.iter().enumerate() {
+            let (table, column) = (TableId::IMPORT_SCOPE, "Imports");
+            let blob = self.blob(scope.imports)?;
+            let mapped = Imports::decode(&blob)
+                .map(|import| map_import(import?, |offset| map.get(offset, table, row, column)))
+                .collect::<Result<Vec<_>>>()
+                .map_err(|error| error.with_portable(cell(table, row, column)))?;
+            let encoded = encode_imports(&mapped)
+                .map_err(|error| error.with_portable(cell(table, row, column)))?;
+            imports.push(blobs.add(&encoded)?);
+        }
+        Ok((names, imports))
     }
 }
 

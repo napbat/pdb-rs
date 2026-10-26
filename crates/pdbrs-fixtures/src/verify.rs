@@ -14,8 +14,10 @@
 //! compares the bytes, the ID and the verifier dump with the original.
 
 mod dump;
+mod edit;
 mod rebuild;
 
+pub use edit::verify_edit;
 pub use rebuild::verify_rebuild;
 
 use std::fs;

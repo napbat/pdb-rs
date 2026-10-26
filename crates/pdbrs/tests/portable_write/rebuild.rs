@@ -1,9 +1,9 @@
 //! Exact copies and the rebuild of an existing Portable PDB with `Pdb::to_parts`.
 
-use pdbrs::ErrorKind;
 use pdbrs::portable::Pdb;
+use pdbrs::portable::debug::Import;
 use pdbrs::portable::metadata::{
-    CustomDebugInformationRow, LocalVariableRow, MetadataStream, MethodDefId, TableId,
+    CustomDebugInformationRow, DocumentId, ImportScopeId, LocalVariableRow, MethodDefId, TableId,
 };
 use pdbrs::portable::write::IdPolicy;
 
@@ -14,6 +14,8 @@ use crate::{location, open};
 const DOCUMENT: u8 = 0x30;
 /// The `LocalVariable` table number.
 const LOCAL_VARIABLE: u8 = 0x33;
+/// The `ImportScope` table number.
+const IMPORT_SCOPE: u8 = 0x35;
 /// The `CustomDebugInformation` table number.
 const CUSTOM_DEBUG_INFORMATION: u8 = 0x37;
 
@@ -101,12 +103,58 @@ fn rebuild_keeps_rows_and_values() {
     assert_eq!(again, output);
 }
 
+/// A source whose `#Blob` heap has "x" twice (offsets 1 and 3), a document name `x/x` at
+/// offset 5 that uses both copies and an imports blob at offset 9 with the namespace at
+/// offset 3.
+fn duplicate_parts() -> Builder {
+    let builder = Builder {
+        blobs: Some(vec![0, 1, b'x', 1, b'x', 3, b'/', 1, 3, 2, 1, 3]),
+        ..Builder::default()
+    };
+    let document = row(&[value(2, 5), value(2, 0), value(2, 0), value(2, 0)]);
+    let import_scope = row(&[value(2, 0), value(2, 9)]);
+    builder
+        .table(DOCUMENT, 1, document)
+        .table(IMPORT_SCOPE, 1, import_scope)
+}
+
 #[test]
-fn rebuild_fails_if_a_document_blob_offset_could_change() {
-    // Name at offset 3, the duplicate copy of "a".
+fn rebuild_rewrites_document_names_and_imports_if_blob_offsets_change() {
+    let bytes = duplicate_parts().build();
+    let pdb = Pdb::parse(&bytes).unwrap();
+    assert_eq!(pdb.document(DocumentId::new(1)).unwrap().name(), b"x/x");
+    let parts = pdb.to_parts().unwrap();
+    // The duplicate "x" is gone, so the name and the imports move. The rebuild adds the
+    // encoded name ("/", 1, 1) and imports (1, 1) with the new offset of "x".
+    assert_ne!(parts.tables.documents[0].name.get(), 5);
+    let output = parts
+        .plan(IdPolicy::ContentDerived)
+        .unwrap()
+        .to_vec()
+        .unwrap();
+    let rebuilt = open(&output);
+    let document = rebuilt.document(DocumentId::new(1)).unwrap();
+    assert_eq!(document.name(), b"x/x");
+    let scope = rebuilt.import_scope(ImportScopeId::new(1)).unwrap();
+    let imports: Vec<Import> = scope.imports().map(Result::unwrap).collect();
+    let [Import::Namespace { namespace }] = imports[..] else {
+        panic!("unexpected imports {imports:?}");
+    };
+    assert_eq!(namespace.get(), 1);
+    assert_eq!(rebuilt.blob(namespace).unwrap(), b"x");
+}
+
+#[test]
+fn rebuild_fails_if_a_moved_document_name_does_not_decode() {
+    // The document name is the duplicate blob "x": its separator has no part.
     let document = row(&[value(2, 3), value(2, 0), value(2, 0), value(2, 0)]);
-    let bytes = source().table(DOCUMENT, 1, document).build();
+    let bytes = Builder {
+        blobs: Some(vec![0, 1, b'x', 1, b'x']),
+        ..Builder::default()
+    }
+    .table(DOCUMENT, 1, document)
+    .build();
     let error = Pdb::parse(&bytes).unwrap().to_parts().unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::InvalidReference);
-    assert_eq!(location(&error).stream(), Some(MetadataStream::Blob));
+    assert_eq!(location(&error).table(), Some(TableId::DOCUMENT));
+    assert_eq!(location(&error).column(), Some("Name"));
 }

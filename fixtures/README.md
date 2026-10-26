@@ -277,6 +277,36 @@ The command writes `<fixture>.pdb`, `<fixture>.original.srm.txt` and
 `<fixture>.rebuilt.srm.txt` to `target/verify-rebuild/`. It exits with a failure code if a
 check fails.
 
+### Edit check
+
+The `verify-edit` command checks the Portable PDB builder and editor of pdbrs with the same
+inputs:
+
+```sh
+cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>]
+```
+
+For each input, the command checks these items:
+
+1. `Pdb::edit` and `PdbEditor::plan` without a change give the original bytes.
+2. `PdbBuilder::plan` of the same records writes new heaps. The decoded lines of its verifier
+   dump (all lines after the `row` lines) are the same as those of the original.
+3. An edit renames document 1 (suffix `.edited`), moves each visible sequence point 1000 lines
+   down, adds the local constant `pdbrsAdded` (`i4=42`) to the last local scope and adds a
+   custom debug information value of the unknown kind `70646272-7365-4564-6974-2d636865636b`
+   to `MethodDef` 1. The same edit again gives the same bytes. The decoded lines of the
+   verifier dump are the expected change of the original lines. The command compares the
+   custom debug information lines without their row IDs, as a sorted list.
+4. For a standalone fixture, the command copies the program directory to
+   `target/verify-edit/<fixture>-<variant>/`, puts in the original, the built (item 2) or the
+   moved PDB (item 3 without the other changes) and runs `dotnet <program>.dll stack`. The
+   built and moved PDBs use the original PDB ID, so the runtime accepts them. The built PDB
+   gives the original trace. The moved PDB gives each line number plus 1000 in the frames of
+   the fixture documents; frames of other assemblies, for example `FSharp.Core`, do not change.
+
+The command writes the PDBs, the dumps and the traces to `target/verify-edit/`. It exits with a
+failure code if a check fails.
+
 ### Dump format
 
 The dump is UTF-8 text with `\n` line ends. Each line has a keyword and `name=value` fields.
