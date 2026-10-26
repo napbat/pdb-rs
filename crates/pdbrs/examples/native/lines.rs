@@ -4,11 +4,84 @@
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::dbi::{Dbi, ModuleRegionSizes};
-use pdbrs::native::lines::{LineSubsection, ModuleLines};
+use pdbrs::native::info::Feature;
+use pdbrs::native::lines::{
+    CrossScopeContext, CrossScopeModules, LineSubsection, ModuleLines, validate_cross_scope,
+};
 use pdbrs::native::symbols::RecordOffsets;
 
 use crate::dbi::translate;
 use crate::{Context, Outcome, Report};
+
+/// Validate the cross-scope imports and exports of all modules (#31).
+///
+/// The first pass collects the names and the exports of all modules, so that
+/// an import can name a later module. The second pass reports each finding
+/// of [`validate_cross_scope`] as an inconsistency.
+pub(crate) fn cross_scope(
+    pdb: &Pdb<impl ReadAt>,
+    dbi: &Dbi,
+    context: &Context<'_>,
+    report: &mut Report,
+) -> Outcome {
+    let mut modules = CrossScopeModules::new();
+    let mut streams = Vec::new();
+    for module in dbi.modules() {
+        let module = module?;
+        let Some(stream) = pdb.module_stream(&module)? else {
+            modules.add(module.name, module.object_file, None)?;
+            continue;
+        };
+        let Ok(lines) = ModuleLines::parse(&stream) else {
+            modules.add(module.name, module.object_file, None)?;
+            continue;
+        };
+        let exports = lines
+            .subsections()
+            .iter()
+            .find_map(|subsection| match &subsection.data {
+                LineSubsection::CrossScopeExports(exports) => Some(*exports),
+                _ => None,
+            });
+        modules.add(module.name, module.object_file, exports.as_ref())?;
+        streams.push(stream);
+    }
+    let info = pdb.info();
+    let base = CrossScopeContext::new(context.tpi_end, context.ids.index_end())
+        .with_names(&context.names)
+        .with_modules(&modules);
+    let validation =
+        if info.has_feature(Feature::NoTypeMerge) || info.has_feature(Feature::MinimalDebugInfo) {
+            base.without_export_mapping()
+        } else {
+            base
+        };
+    for stream in &streams {
+        let lines = ModuleLines::parse(stream)?;
+        let count = lines
+            .subsections()
+            .iter()
+            .filter(|subsection| {
+                matches!(
+                    subsection.data,
+                    LineSubsection::CrossScopeExports(_) | LineSubsection::CrossScopeImports(_)
+                )
+            })
+            .count();
+        report.add("cross-scope subsections validated", count);
+        for violation in validate_cross_scope(&lines, &validation)? {
+            report.inconsistency(format!(
+                "module stream {}: {} (subsection at {:#x}, entry {}, value {:#x})",
+                stream.stream().0,
+                violation.rule.description(),
+                violation.subsection,
+                violation.entry,
+                violation.value
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Check one C13 subsection of a kind that `module_lines` does not resolve.
 ///

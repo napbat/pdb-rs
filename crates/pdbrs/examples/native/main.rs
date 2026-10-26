@@ -19,6 +19,7 @@ mod external;
 #[path = "../support/input.rs"]
 mod input;
 mod lines;
+mod module_types;
 mod named;
 mod symbol_encoding;
 mod symbol_indexes;
@@ -38,6 +39,7 @@ use pdbrs::native::codeview::id_record::IdTable;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::msf::{OldDirectory, StreamId};
 use pdbrs::native::names::StringTable;
+use pdbrs::native::types::{ForwardRefs, TypeTable, type_size};
 use pdbrs::{ErrorKind, Result as PdbResult};
 
 use dbi::{debug_info_tables, frame_data, reencode_dbi, section_header_bytes};
@@ -123,6 +125,8 @@ struct Context<'a> {
     ids: IdTable<'a>,
     addresses: Option<AddressMap<'a>>,
     module_count: usize,
+    /// The size of a TPI type, for the subfield def-range checks.
+    type_size: &'a dyn Fn(TypeIndex) -> Option<u64>,
 }
 
 fn main() -> Outcome {
@@ -186,16 +190,21 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     let tables = pdb.address_tables(&dbi)?;
     let addresses = tables.as_ref().map(AddressTables::map);
     let module_count = debug_info_tables(&dbi, addresses.as_ref(), &mut report)?;
+    let type_table = TypeTable::new(&tpi)?;
+    let forward = ForwardRefs::new(&type_table, None)?;
+    let size_of_type = |index| type_size(&type_table, Some(&forward), index).ok().flatten();
     let context = Context {
         names,
         tpi_end: TypeIndex(tpi.header().index_end),
         ids,
         addresses,
         module_count,
+        type_size: &size_of_type,
     };
     frame_data(pdb, &dbi, &context, &mut report)?;
     let procedures = modules(pdb, &dbi, &context, &mut report)?;
     lines::module_streams(pdb, &dbi, &mut report)?;
+    lines::cross_scope(pdb, &dbi, &context, &mut report)?;
     shared_symbols(pdb, &dbi, &context, &procedures, &mut report)?;
     external_dependencies(pdb, &dbi, &mut report)?;
     unclaimed_streams(pdb, &mut report)?;

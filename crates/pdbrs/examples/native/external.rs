@@ -33,5 +33,12 @@ pub(crate) fn external_dependencies(
         "external FASTLINK object files",
         dependencies.fastlink_objects.len(),
     );
+    if dependencies.no_type_merge {
+        report.add("PDBs without type merging (NOTM)", 1);
+    }
+    report.add(
+        "modules with S_MOD_TYPEREF type records",
+        dependencies.module_types.len(),
+    );
     Ok(())
 }
