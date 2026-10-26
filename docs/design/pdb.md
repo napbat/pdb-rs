@@ -71,7 +71,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map, EC names, and FPO and new-FPO (frame data) streams | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
-| Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
+| Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts. Writing: GSI and PSI builders with the producer bucket order and the MSVC or LLVM conventions for empty tables and address order (`IndexProducer`); the GSI and PSI of every native fixture rebuild to the same bytes (#30) | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoding of 57 symbol kinds, including every kind in the Rust sample PDBs, the MSVC, Clang and rustc producer fixtures (#13), the LLD `S_SKIP` filler and the managed kinds of .NET Windows PDBs (#14: `S_GMANPROC`, `S_LMANPROC`, `S_MANSLOT`, `S_MANCONSTANT`, `S_TOKENREF`, `S_OEM` with the Roslyn `MD2` custom debug information and `asyncMethodInfo` attributes); zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations. `S_FRAMEREG`, `S_FASTLINK` and `S_REGREL32_ENCTMP` layouts come from fixtures (#13) | Other symbol kinds (kept raw as `Unsupported`) |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines, COFF symbol RVAs (`0xfd`) and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists; `S_MANCONSTANT` also keeps `LF_VARSTRING` and fixed-size real, complex, decimal and date leaves | Non-integer leaves in other records |
@@ -866,7 +866,8 @@ entries, and resolves the `S_FILESTATIC` file name in `/names`.
 The fixtures also exposed a producer defect that pdbrs reports without failing:
 
 - LLD 22.1.3 puts some public symbols (`__chkstk`, `g_c_name`, `___favor`) in the wrong hash bucket.
-  LLD 22.1.6 puts `__chkstk` in the correct bucket.
+  LLD 22.1.6 puts `__chkstk` in the correct bucket. Each of these names has exactly 8 bytes. LLD hashes the
+  name together with the bytes after the short name in the COFF symbol table, up to a NUL byte (#30).
 
 The fixtures found two reader defects, now fixed. Incremental links give end markers and empty COFF groups an
 offset equal to the section size; `AddressMap::rva` now accepts the end of a section. Managed procedures open

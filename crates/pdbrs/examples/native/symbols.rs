@@ -269,6 +269,7 @@ pub(crate) fn shared_symbols(
         "shared symbols outside both indexes",
         offsets.len() - indexed.len(),
     );
+    crate::symbol_indexes::symbol_indexes(pdb, dbi, &bytes, report)?;
     Ok(())
 }
 

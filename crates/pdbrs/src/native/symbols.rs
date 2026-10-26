@@ -12,6 +12,11 @@
 //! the candidate records with [`HashTable::lookup`]. Then decode each
 //! candidate record and compare its name with the name that you look for.
 //!
+//! [`GlobalSymbolIndex::build`] and [`PublicSymbolIndex::build`] write the
+//! index streams from a symbol record stream and a list of [`HashEntry`]
+//! values. [`IndexProducer`] selects the conventions of MSVC or LLVM where
+//! the two producers differ.
+//!
 //! The layouts follow `GSIHashHdr`, `HRFile` and `PSGSIHDR` in `PDB/dbi/gsi.h`
 //! and `PDB/dbi/gsi.cpp`, and `SO` in `langapi/include/pdb.h`, of
 //! `microsoft/microsoft-pdb` (commit `805655a`). They also follow LLVM
@@ -31,7 +36,10 @@ mod psi;
 mod table;
 
 pub use gsi::GlobalSymbolIndex;
-pub use psi::{AddressMap, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap};
+pub use psi::{
+    AddressMap, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap, ThunkTable,
+};
+pub use table::write::{HashEntry, IndexProducer, indexed_name};
 pub use table::{Bucket, Buckets, HashHeader, HashRecord, HashRecords, HashTable};
 
 /// The PDB Info stream feature code for minimal debug information (`MINI`).
