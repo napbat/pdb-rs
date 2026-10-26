@@ -211,7 +211,17 @@ impl<'a> Symbol<'a> {
     /// blocks, separated code, thunks and inline sites start a scope.
     #[must_use]
     pub const fn scope(&self) -> Option<ScopeLinks> {
-        let (parent, end) = match self.data {
+        self.data.scope_links()
+    }
+}
+
+impl SymbolData<'_> {
+    /// Return the parent and end links, if the fields start a scope.
+    ///
+    /// See [`Symbol::scope`].
+    #[must_use]
+    pub const fn scope_links(&self) -> Option<ScopeLinks> {
+        let (parent, end) = match *self {
             SymbolData::Procedure(value) => (value.parent, value.end),
             SymbolData::MipsProcedure(value) => (value.header.parent, value.header.end),
             SymbolData::Ia64Procedure(value) => (value.header.parent, value.header.end),

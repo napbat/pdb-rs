@@ -30,9 +30,12 @@ use super::super::Records;
 use super::super::id_record::{LF_BUILDINFO, LF_FUNC_ID, LF_MFUNC_ID};
 use super::super::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
 use super::{
-    S_BUILDINFO, S_GDATA32, S_GMANPROC, S_GPROC32, S_GPROC32_ID, S_GTHREAD32, S_LDATA32,
-    S_LMANPROC, S_LPROC32, S_LPROC32_ID, S_LPROCREF, S_LTHREAD32, S_PROCREF, S_TOKENREF, Symbol,
-    SymbolData,
+    S_ANNOTATION, S_ANNOTATIONREF, S_BUILDINFO, S_DATAREF, S_GDATA32, S_GMANDATA, S_GMANPROC,
+    S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,
+    S_GPROCMIPS_ID, S_GTHREAD32, S_LDATA32, S_LMANDATA, S_LMANPROC, S_LPROC32, S_LPROC32_DPC,
+    S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROC32EX, S_LPROC32EX_ID, S_LPROCIA64, S_LPROCIA64_ID,
+    S_LPROCMIPS, S_LPROCMIPS_ID, S_LPROCREF, S_LTHREAD32, S_PROCREF, S_SOURCELINK, S_TOKENREF,
+    Symbol, SymbolData,
 };
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
@@ -42,42 +45,43 @@ pub use rule::{Rule, Violation};
 /// The nesting limit of [`ValidationContext::new`].
 pub const DEFAULT_MAX_DEPTH: usize = 256;
 
-/// The kind of `S_DATAREF`: a reference to a data record in a module.
-const S_DATAREF: u16 = 0x1126;
-/// The kind of `S_ANNOTATIONREF`: a reference to an `S_ANNOTATION` record.
-const S_ANNOTATIONREF: u16 = 0x1128;
-/// The kind of `S_ANNOTATION`.
-const S_ANNOTATION: u16 = 0x1019;
+/// The global procedure kinds of all architectures.
+const GLOBAL_PROCEDURES: &[u16] = &[
+    S_GPROC32,
+    S_GPROC32_ID,
+    S_GPROC32EX,
+    S_GPROC32EX_ID,
+    S_GPROCMIPS,
+    S_GPROCIA64,
+    S_GPROCMIPS_ID,
+    S_GPROCIA64_ID,
+];
 
-/// The global procedure kinds: `S_GPROC32`, `S_GPROC32_ID`, `S_GPROCMIPS`
-/// (0x1115), `S_GPROCIA64` (0x1119), `S_GPROCMIPS_ID` (0x1149) and
-/// `S_GPROCIA64_ID` (0x114b).
-const GLOBAL_PROCEDURES: &[u16] = &[S_GPROC32, S_GPROC32_ID, 0x1115, 0x1119, 0x1149, 0x114b];
-
-/// The module-local procedure kinds: `S_LPROC32`, `S_LPROC32_ID`,
-/// `S_LPROCMIPS` (0x1114), `S_LPROCIA64` (0x1118), `S_LPROCMIPS_ID`
-/// (0x1148), `S_LPROCIA64_ID` (0x114a), `S_LPROC32_DPC` (0x1155) and
-/// `S_LPROC32_DPC_ID` (0x1156).
+/// The module-local procedure kinds of all architectures.
 const LOCAL_PROCEDURES: &[u16] = &[
     S_LPROC32,
     S_LPROC32_ID,
-    0x1114,
-    0x1118,
-    0x1148,
-    0x114a,
-    0x1155,
-    0x1156,
+    S_LPROC32EX,
+    S_LPROC32EX_ID,
+    S_LPROCMIPS,
+    S_LPROCIA64,
+    S_LPROCMIPS_ID,
+    S_LPROCIA64_ID,
+    S_LPROC32_DPC,
+    S_LPROC32_DPC_ID,
 ];
 
 /// The procedure kinds with an ID index. `S_PROC_ID_END` ends their scope.
 const ID_PROCEDURES: &[u16] = &[
     S_GPROC32_ID,
     S_LPROC32_ID,
-    0x1148,
-    0x1149,
-    0x114a,
-    0x114b,
-    0x1156,
+    S_GPROC32EX_ID,
+    S_LPROC32EX_ID,
+    S_LPROCMIPS_ID,
+    S_GPROCMIPS_ID,
+    S_LPROCIA64_ID,
+    S_GPROCIA64_ID,
+    S_LPROC32_DPC_ID,
 ];
 
 /// The managed procedure kinds.
@@ -91,10 +95,12 @@ const MANAGED_PROCEDURES: &[u16] = &[S_GMANPROC, S_LMANPROC];
 const GLOBAL_REFERENCE_TARGETS: &[u16] = &[
     S_GPROC32,
     S_GPROC32_ID,
-    0x1115,
-    0x1119,
-    0x1149,
-    0x114b,
+    S_GPROC32EX,
+    S_GPROC32EX_ID,
+    S_GPROCMIPS,
+    S_GPROCIA64,
+    S_GPROCMIPS_ID,
+    S_GPROCIA64_ID,
     S_GMANPROC,
 ];
 
@@ -103,17 +109,26 @@ const GLOBAL_REFERENCE_TARGETS: &[u16] = &[
 const LOCAL_REFERENCE_TARGETS: &[u16] = &[
     S_LPROC32,
     S_LPROC32_ID,
-    0x1114,
-    0x1118,
-    0x1148,
-    0x114a,
-    0x1155,
-    0x1156,
+    S_LPROC32EX,
+    S_LPROC32EX_ID,
+    S_LPROCMIPS,
+    S_LPROCIA64,
+    S_LPROCMIPS_ID,
+    S_LPROCIA64_ID,
+    S_LPROC32_DPC,
+    S_LPROC32_DPC_ID,
     S_LMANPROC,
 ];
 
 /// The data kinds that `S_DATAREF` can identify.
-const DATA: &[u16] = &[S_LDATA32, S_GDATA32, S_LTHREAD32, S_GTHREAD32];
+const DATA: &[u16] = &[
+    S_LDATA32,
+    S_GDATA32,
+    S_LTHREAD32,
+    S_GTHREAD32,
+    S_LMANDATA,
+    S_GMANDATA,
+];
 
 /// The IPI kinds of a function ID.
 const FUNCTION_IDS: &[u16] = &[LF_FUNC_ID, LF_MFUNC_ID];
@@ -360,19 +375,23 @@ fn check_references(
         }
     }
     if let Some(id) = symbol.id_index() {
-        let expected = if kind == S_BUILDINFO {
-            &[LF_BUILDINFO][..]
-        } else {
-            FUNCTION_IDS
+        // No reference gives the IPI kind of an `S_SOURCELINK` record.
+        let expected = match kind {
+            S_BUILDINFO => Some(&[LF_BUILDINFO][..]),
+            S_SOURCELINK => None,
+            _ => Some(FUNCTION_IDS),
         };
         check_id(id, expected, offset, kind, context, report)?;
     }
-    if let SymbolData::Inlinees(list) | SymbolData::Callees(list) = symbol.data() {
-        for id in list {
-            check_id(id, FUNCTION_IDS, offset, kind, context, report)?;
-        }
+    let functions = match symbol.data() {
+        SymbolData::Inlinees(list) => Some(*list),
+        SymbolData::Callees(list) | SymbolData::Callers(list) => Some(list.functions()),
+        _ => None,
+    };
+    for id in functions.into_iter().flatten() {
+        check_id(id, Some(FUNCTION_IDS), offset, kind, context, report)?;
     }
-    if let Some(reference) = symbol.procedure_reference() {
+    if let Some(reference) = symbol.reference() {
         check_module_reference(
             kind,
             reference.module,
@@ -388,7 +407,7 @@ fn check_references(
 /// Check that `id` is in the IPI stream and has one of the `expected` kinds.
 fn check_id(
     id: IdIndex,
-    expected: &[u16],
+    expected: Option<&[u16]>,
     offset: u32,
     kind: u16,
     context: &ValidationContext<'_>,
@@ -400,7 +419,7 @@ fn check_id(
     if let Some(id_kind) = context.id_kind {
         match id_kind(id) {
             None => report.violate(Rule::IdIndexRange, offset, kind)?,
-            Some(found) if !expected.contains(&found) => {
+            Some(found) if expected.is_some_and(|expected| !expected.contains(&found)) => {
                 report.violate(Rule::IdKind, offset, kind)?;
             }
             Some(_) => {}

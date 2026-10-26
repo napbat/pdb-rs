@@ -24,17 +24,6 @@ use super::super::{BucketCount, SymbolOffset};
 use super::{HEADER_SIZE, HashRecord, MAX_SIGNED, OFFSET_SCALE, RECORD_SIZE, SIGNATURE, VERSION};
 use crate::{Error, ErrorKind, Result};
 
-/// The kind of a local managed data record (`S_LMANDATA`).
-const S_LMANDATA: u16 = 0x111c;
-/// The kind of a global managed data record (`S_GMANDATA`).
-const S_GMANDATA: u16 = 0x111d;
-/// The kind of a data reference record (`S_DATAREF`).
-const S_DATAREF: u16 = 0x1126;
-/// The kind of an annotation reference record (`S_ANNOTATIONREF`).
-const S_ANNOTATIONREF: u16 = 0x1128;
-/// The size of the fields before the name in `DATASYM32` and `REFSYM2`.
-const NAMED_FIELDS_SIZE: usize = 10;
-
 /// The producer conventions that a symbol index builder follows.
 ///
 /// The producers write the same bytes for most inputs. They differ only in
@@ -196,42 +185,22 @@ pub(in crate::native::symbols) fn append_table(
 
 /// Return the name that the symbol indexes hash for the record at `symbol`.
 ///
-/// The function uses [`Symbol::name`](crate::native::codeview::symbol::Symbol::name)
-/// for a kind with a decoder. Some kinds that the producers index have no
-/// decoder in this crate. The function reads the name of these kinds from
-/// their layout in `cvinfo.h`:
-///
-/// - `S_LMANDATA` and `S_GMANDATA` (`DATASYM32`).
-/// - `S_DATAREF` and `S_ANNOTATIONREF` (`REFSYM2`).
-///
-/// Both layouts have 10 bytes of fields before the name.
+/// The function decodes the record and returns
+/// [`Symbol::name`](crate::native::codeview::symbol::Symbol::name).
 ///
 /// # Errors
 ///
 /// - The errors of [`SymbolOffset::record`] and of the symbol decoder.
-/// - [`ErrorKind::InvalidFormat`] for a record without a name, or a name
-///   without a NUL terminator.
+/// - [`ErrorKind::InvalidFormat`] for a record without a name.
 pub fn indexed_name(symbol_records: &[u8], symbol: SymbolOffset) -> Result<&[u8]> {
-    let record = symbol.record(symbol_records)?;
-    let decoded = record.symbol()?;
-    if let Some(name) = decoded.name() {
-        return Ok(name);
-    }
-    let no_name = || {
-        Error::new(ErrorKind::InvalidFormat, None).with_context("indexed symbol record has no name")
-    };
-    if !matches!(
-        record.kind,
-        S_LMANDATA | S_GMANDATA | S_DATAREF | S_ANNOTATIONREF
-    ) {
-        return Err(no_name());
-    }
-    let fields = record.data.get(NAMED_FIELDS_SIZE..).ok_or_else(no_name)?;
-    let end = fields
-        .iter()
-        .position(|&byte| byte == 0)
-        .ok_or_else(no_name)?;
-    Ok(&fields[..end])
+    symbol
+        .record(symbol_records)?
+        .symbol()?
+        .name()
+        .ok_or_else(|| {
+            Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("indexed symbol record has no name")
+        })
 }
 
 /// Check each entry, decode its name and select its bucket.

@@ -9,15 +9,15 @@ use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
 use pdbrs::native::codeview::symbol::{
-    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbols, Oem, Symbol, SymbolData,
-    Trampoline, TrampolineKind,
+    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
+    Symbol, SymbolData, Trampoline, TrampolineKind,
 };
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::symbols::{HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets};
 
 use crate::dbi::translate;
-use crate::symbol_encoding::reencode;
+use crate::symbol_encoding::{reencode, rewrite_module};
 use crate::{Context, Outcome, Report};
 
 /// The deepest scope nesting that the example accepts in a module.
@@ -83,6 +83,7 @@ pub(crate) fn modules(
         crate::symbol_validation::module(&stream, index, context, &mut procedures.records, report)?;
         let symbols =
             ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+        let mut writer = Some(ModuleSymbolWriter::new(base));
         for scoped in symbols {
             let Some(scoped) = report.supported(scoped, "module symbol scope")? else {
                 procedures.incomplete.insert(index);
@@ -91,6 +92,9 @@ pub(crate) fn modules(
             let symbol = scoped.symbol;
             check_symbol(&symbol, context, report)?;
             reencode(&symbol, report)?;
+            if let Some(writer) = &mut writer {
+                writer.push(symbol.kind(), symbol.data())?;
+            }
             match symbol.data() {
                 SymbolData::Unsupported(_) => {
                     report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
@@ -117,6 +121,9 @@ pub(crate) fn modules(
                 _ => {}
             }
             report.add("module symbols", 1);
+        }
+        if !procedures.incomplete.contains(&index) {
+            rewrite_module(writer.take(), stream.symbol_data(), report)?;
         }
         if let Some(lines) = &lines {
             module_lines(lines, context, report)?;

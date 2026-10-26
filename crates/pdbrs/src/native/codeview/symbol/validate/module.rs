@@ -8,7 +8,8 @@ use alloc::vec::Vec;
 
 use super::super::{
     AddressGaps, AddressRange, Annotation, BinaryAnnotations, LocalFlags, ModuleSymbols, S_BLOCK32,
-    S_END, S_INLINESITE, S_PROC_ID_END, S_THUNK32, ScopedSymbol, Symbol, SymbolData,
+    S_END, S_INLINESITE, S_INLINESITE2, S_PROC_ID_END, S_SEPCODE, S_THUNK32, ScopedSymbol, Symbol,
+    SymbolData,
 };
 use super::{
     GLOBAL_PROCEDURES, ID_PROCEDURES, LOCAL_PROCEDURES, MANAGED_PROCEDURES, Rule,
@@ -17,11 +18,6 @@ use super::{
 use crate::native::address::SectionOffset;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
-
-/// The kind of `S_SEPCODE`: a scope of separated code.
-const S_SEPCODE: u16 = 0x1132;
-/// The kind of `S_INLINESITE2`: an inline site with an invocation count.
-const S_INLINESITE2: u16 = 0x115d;
 
 /// The bits of `CV_LVARFLAGS` that `cvinfo.h` reserves (`unused`).
 const RESERVED_LOCAL_FLAGS: u16 = 0xf800;
@@ -97,6 +93,12 @@ struct Checker<'r, 'c> {
     /// The offset, kind and `next` link of each procedure and thunk with a
     /// link that is not 0.
     nexts: Vec<(u32, u16, u32)>,
+    /// The procedure start, code range, offset and kind of each def-range
+    /// outside its procedure. [`Checker::finish`] checks them against the
+    /// separated code of the procedure.
+    outside: Vec<(SectionOffset, CodeRange, u32, u16)>,
+    /// The parent address and the code range of each `S_SEPCODE` scope.
+    separated: Vec<(SectionOffset, CodeRange)>,
     /// The CPU of the first compile record.
     cpu: Option<u16>,
     /// The flags of the local that the next def-range record belongs to.
@@ -116,6 +118,8 @@ pub(super) fn validate(
         stack: Vec::new(),
         starts: Vec::new(),
         nexts: Vec::new(),
+        outside: Vec::new(),
+        separated: Vec::new(),
         cpu: None,
         local: None,
     };
@@ -149,8 +153,12 @@ fn push<T>(values: &mut Vec<T>, value: T) -> Result<()> {
 fn scope_code(symbol: &Symbol<'_>) -> Option<(SectionOffset, u32)> {
     match symbol.data() {
         SymbolData::Procedure(value) => Some((value.address, value.code_length)),
+        SymbolData::MipsProcedure(value) => Some((value.address, value.header.code_length)),
+        SymbolData::Ia64Procedure(value) => Some((value.address, value.header.code_length)),
         SymbolData::ManagedProcedure(value) => Some((value.address, value.code_length)),
         SymbolData::Block(value) => Some((value.address, value.code_length)),
+        SymbolData::With(value) => Some((value.address, value.code_length)),
+        SymbolData::SeparatedCode(value) => Some((value.address, value.code_length)),
         SymbolData::Thunk(value) => Some((value.address, u32::from(value.length))),
         _ => None,
     }
@@ -160,6 +168,8 @@ fn scope_code(symbol: &Symbol<'_>) -> Option<(SectionOffset, u32)> {
 fn next_link(symbol: &Symbol<'_>) -> Option<u32> {
     match symbol.data() {
         SymbolData::Procedure(value) => Some(value.next),
+        SymbolData::MipsProcedure(value) => Some(value.header.next),
+        SymbolData::Ia64Procedure(value) => Some(value.header.next),
         SymbolData::ManagedProcedure(value) => Some(value.next),
         SymbolData::Thunk(value) => Some(value.next),
         _ => None,
@@ -167,6 +177,8 @@ fn next_link(symbol: &Symbol<'_>) -> Option<u32> {
 }
 
 /// Return the register number of a record, if it has one.
+///
+/// HLSL def-ranges have HLSL register types, not `CV_HREG_e` numbers.
 fn register_number(symbol: &Symbol<'_>) -> Option<u16> {
     match symbol.data() {
         SymbolData::DefRangeRegister(value) => Some(value.register),
@@ -174,7 +186,10 @@ fn register_number(symbol: &Symbol<'_>) -> Option<u16> {
         SymbolData::DefRangeRegisterRelative(value) => Some(value.register),
         SymbolData::DefRangeRegisterRelativeIndirect(value) => Some(value.register),
         SymbolData::RegisterRelative(value) => Some(value.register),
+        SymbolData::RegisterRelativeIndirect(value) => Some(value.register),
         SymbolData::Register(value) => Some(value.register),
+        SymbolData::AttributedRegister(value) => Some(value.register),
+        SymbolData::AttributedRegisterRelative(value) => Some(value.register),
         SymbolData::FrameCookie(value) => Some(value.register),
         SymbolData::FrameRegister(register) => Some(*register),
         _ => None,
@@ -182,6 +197,9 @@ fn register_number(symbol: &Symbol<'_>) -> Option<u16> {
 }
 
 /// Return the location fields of a def-range record.
+///
+/// The `_ON_ENTRY` kinds give a value at the procedure entry, so they have
+/// no code range.
 fn def_range<'a>(symbol: &Symbol<'a>) -> Option<DefRange<'a>> {
     let (range, gaps) = match *symbol.data() {
         SymbolData::DefRangeFramePointerRelative(value) => (value.range, value.gaps),
@@ -189,7 +207,11 @@ fn def_range<'a>(symbol: &Symbol<'a>) -> Option<DefRange<'a>> {
         SymbolData::DefRangeSubfieldRegister(value) => (value.range, value.gaps),
         SymbolData::DefRangeRegisterRelative(value) => (value.range, value.gaps),
         SymbolData::DefRangeRegisterRelativeIndirect(value) => (value.range, value.gaps),
-        SymbolData::DefRangeFramePointerRelativeFullScope(_) => {
+        SymbolData::DefRangeProgram(value) => (value.range, value.gaps),
+        SymbolData::DefRangeHlsl(value) => (value.range, value.gaps),
+        SymbolData::DefRangeFramePointerRelativeFullScope(_)
+        | SymbolData::DefRangeConstantOnEntry(_)
+        | SymbolData::DefRangeGlobalOnEntry(_) => {
             return Some(DefRange {
                 range: None,
                 gaps: None,
@@ -262,6 +284,7 @@ impl Checker<'_, '_> {
             // The def-ranges after an `S_FILESTATIC` record give the location
             // of an enregistered static (`FILESTATICSYM` in `cvinfo.h`).
             SymbolData::FileStatic(value) => self.local = Some(value.flags),
+            SymbolData::DpcGroupSharedLocal(value) => self.local = Some(value.flags),
             // LLD replaces a record that it cannot remap with `S_SKIP`, also
             // between a local and its def-ranges (Rust LLD fixture of #12).
             SymbolData::Skip(_) => {}
@@ -319,8 +342,23 @@ impl Checker<'_, '_> {
             None => self.violate(Rule::CodeRangeOverflow, offset, kind)?,
             Some(code) => {
                 self.check_section(&code, offset, kind)?;
-                if procedure.is_some_and(|outer| !outer.contains(&code)) {
-                    self.violate(Rule::DefRangeOutsideProcedure, offset, kind)?;
+                // A variable in separated code lives in the range of its
+                // `S_SEPCODE` scope, outside the procedure (MSVC PGO fixture
+                // of #27).
+                let separated = self.stack.iter().any(|frame| {
+                    frame.kind == S_SEPCODE
+                        && frame.range.is_some_and(|outer| outer.contains(&code))
+                });
+                if let Some(outer) = procedure.filter(|outer| !outer.contains(&code) && !separated)
+                {
+                    // MSVC also writes the `S_SEPCODE` record after the end of
+                    // its procedure, and the procedure has def-ranges in the
+                    // separated code. `finish` checks these def-ranges.
+                    let start = SectionOffset {
+                        section: outer.section,
+                        offset: outer.start,
+                    };
+                    push(&mut self.outside, (start, code, offset, kind))?;
                 }
             }
         }
@@ -390,6 +428,9 @@ impl Checker<'_, '_> {
         if let Some(next) = next_link(symbol).filter(|&next| next != 0) {
             push(&mut self.nexts, (offset, kind, next))?;
         }
+        if let (SymbolData::SeparatedCode(separated), Some(code)) = (symbol.data(), range) {
+            push(&mut self.separated, (separated.parent_address, code))?;
+        }
         push(&mut self.starts, (offset, kind))?;
         let empty = match symbol.data() {
             SymbolData::InlineSite(site) => inline_site_is_empty(site.annotations),
@@ -415,6 +456,16 @@ impl Checker<'_, '_> {
 
     /// Check the `next` links and return the report.
     fn finish(mut self) -> Result<ValidationReport> {
+        let outside = core::mem::take(&mut self.outside);
+        for (procedure, code, offset, kind) in outside {
+            let separated = self
+                .separated
+                .iter()
+                .any(|&(parent, range)| parent == procedure && range.contains(&code));
+            if !separated {
+                self.violate(Rule::DefRangeOutsideProcedure, offset, kind)?;
+            }
+        }
         let nexts = core::mem::take(&mut self.nexts);
         for (offset, kind, next) in nexts {
             let target = self

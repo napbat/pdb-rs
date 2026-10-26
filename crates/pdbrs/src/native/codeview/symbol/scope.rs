@@ -22,6 +22,10 @@ use super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
+mod write;
+
+pub use write::ModuleSymbolWriter;
+
 /// A symbol with its place in the scope tree.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]

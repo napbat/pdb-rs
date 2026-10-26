@@ -1,8 +1,27 @@
 //! Encode each decoded symbol record again and compare the bytes.
 
-use pdbrs::native::codeview::symbol::Symbol;
+use pdbrs::native::codeview::symbol::{ModuleSymbolWriter, Symbol};
 
 use crate::{Outcome, Report};
+
+/// Compare the records of `writer`, with recomputed scope links, with the
+/// symbol records of a module stream.
+pub(crate) fn rewrite_module(
+    writer: Option<ModuleSymbolWriter>,
+    original: &[u8],
+    report: &mut Report,
+) -> Outcome {
+    let Some(writer) = writer else {
+        return Ok(());
+    };
+    report.add("module symbol streams rewritten", 1);
+    // The run stops at the first difference, so a finished run prints 0.
+    report.add("module symbol streams rewritten with different bytes", 0);
+    if writer.finish()? != original {
+        return Err("a module symbol stream rewrites to different bytes".into());
+    }
+    Ok(())
+}
 
 /// Encode `symbol` and make sure that the bytes equal the original record.
 ///

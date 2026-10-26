@@ -143,7 +143,7 @@ pub use procedure::{
     ProcedureFlags, ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2,
     S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
 };
-pub use scope::{ModuleSymbols, ScopedSymbol};
+pub use scope::{ModuleSymbolWriter, ModuleSymbols, ScopedSymbol};
 pub use storage::{
     BasePointerRelative, BasePointerRelativeIndirect, FileStatic, RegisterRelativeIndirect,
     RegisterVariable, S_BPREL32_ENCTMP, S_BPREL32_INDIR, S_BPREL32_INDIR_ENCTMP, S_REGREL32_INDIR,
