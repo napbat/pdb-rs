@@ -2,10 +2,15 @@
 
 use alloc::vec::Vec;
 
+use super::address::AddressTables;
 use super::dbi::{Dbi, DebugStream, Module, ModuleStream};
+use super::debug_stream::{
+    DebugRecord, FixupStream, FunctionEntryStream, OmapStream, RecordStream, RvaVaBlob, TokenRidMap,
+};
 use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
 use super::msf::{Msf, MsfLimits, Stream, StreamId};
+use super::section::SectionHeaderStream;
 use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
 use super::types::TypeStream;
 use crate::io::ReadAt;
@@ -213,18 +218,23 @@ impl<S: ReadAt> Pdb<S> {
 
     /// Load DBI metadata and check its age and referenced stream IDs.
     ///
+    /// The DBI age must not be larger than the PDB Info age. Writers that change only
+    /// named streams, for example `pdbstr -w`, increment the Info age and keep the DBI
+    /// age. Image matching uses the DBI age.
+    ///
     /// # Errors
     ///
-    /// Returns errors for I/O, limits, malformed DBI, age mismatch or invalid
-    /// references. Module payloads are checked only when explicitly loaded.
+    /// Returns errors for I/O, limits, malformed DBI, a DBI age that is larger
+    /// than the Info age or invalid references. Module payloads are checked
+    /// only when explicitly loaded.
     pub fn debug_info(&self) -> Result<Option<Dbi>> {
         let Some(stream) = self.optional_stream(StreamId(3))? else {
             return Ok(None);
         };
         let dbi = Dbi::parse(stream.read_all(self.options.max_stream_bytes)?)?;
-        if dbi.header().age != self.info.identity().age() {
+        if dbi.header().age > self.info.identity().age() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("PDB Info and DBI ages differ")
+                .with_context("DBI age is larger than the PDB Info age")
                 .with_stream(3, 8));
         }
         let header = dbi.header();
@@ -268,6 +278,122 @@ impl<S: ReadAt> Pdb<S> {
             return Ok(None);
         }
         self.msf.stream(id)
+    }
+
+    /// Load the exception data stream of the [`DebugStream::Exception`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
+    pub fn exception_data(&self, dbi: &Dbi) -> Result<Option<FunctionEntryStream>> {
+        self.debug_records(dbi, DebugStream::Exception)
+    }
+
+    /// Load the fixup stream of the [`DebugStream::Fixup`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
+    pub fn fixups(&self, dbi: &Dbi) -> Result<Option<FixupStream>> {
+        self.debug_records(dbi, DebugStream::Fixup)
+    }
+
+    /// Load the OMAP table of the [`DebugStream::OmapToSource`] or
+    /// [`DebugStream::OmapFromSource`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if `kind` is not an OMAP slot.
+    /// - The errors of [`Pdb::stream_bytes`] and [`OmapStream::parse`].
+    pub fn omap(&self, dbi: &Dbi, kind: DebugStream) -> Result<Option<OmapStream>> {
+        if !matches!(
+            kind,
+            DebugStream::OmapToSource | DebugStream::OmapFromSource
+        ) {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("the debug stream slot is not an OMAP slot"));
+        }
+        dbi.debug_stream(kind)
+            .map(|id| OmapStream::parse(self.stream_bytes(id)?, id))
+            .transpose()
+    }
+
+    /// Load the section headers of the [`DebugStream::SectionHeader`] or
+    /// [`DebugStream::OriginalSectionHeader`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if `kind` is not a section header slot.
+    /// - The errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
+    pub fn section_headers(
+        &self,
+        dbi: &Dbi,
+        kind: DebugStream,
+    ) -> Result<Option<SectionHeaderStream>> {
+        if !matches!(
+            kind,
+            DebugStream::SectionHeader | DebugStream::OriginalSectionHeader
+        ) {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("the debug stream slot is not a section header slot"));
+        }
+        self.debug_records(dbi, kind)
+    }
+
+    /// Load the token to RID map of the [`DebugStream::TokenRidMap`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
+    pub fn token_rid_map(&self, dbi: &Dbi) -> Result<Option<TokenRidMap>> {
+        self.debug_records(dbi, DebugStream::TokenRidMap)
+    }
+
+    /// Load the blob of the [`DebugStream::Xdata`] or [`DebugStream::Pdata`] slot, if any.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if `kind` is not a blob slot.
+    /// - The errors of [`Pdb::stream_bytes`] and [`RvaVaBlob::parse`].
+    pub fn debug_blob(&self, dbi: &Dbi, kind: DebugStream) -> Result<Option<RvaVaBlob>> {
+        if !matches!(kind, DebugStream::Xdata | DebugStream::Pdata) {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("the debug stream slot is not a blob slot"));
+        }
+        dbi.debug_stream(kind)
+            .map(|id| RvaVaBlob::parse(self.stream_bytes(id)?, id))
+            .transpose()
+    }
+
+    /// Load the section headers and OMAP tables for address translation.
+    ///
+    /// Return `None` if the DBI stream names no [`DebugStream::SectionHeader`]
+    /// stream. Use [`AddressTables::map`] for the translation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::section_headers`] and [`Pdb::omap`].
+    pub fn address_tables(&self, dbi: &Dbi) -> Result<Option<AddressTables>> {
+        let Some(sections) = self.section_headers(dbi, DebugStream::SectionHeader)? else {
+            return Ok(None);
+        };
+        Ok(Some(AddressTables {
+            sections,
+            original: self.section_headers(dbi, DebugStream::OriginalSectionHeader)?,
+            to_source: self.omap(dbi, DebugStream::OmapToSource)?,
+            from_source: self.omap(dbi, DebugStream::OmapFromSource)?,
+        }))
+    }
+
+    /// Load the record stream of the `kind` slot of `dbi`, if any.
+    fn debug_records<R: DebugRecord>(
+        &self,
+        dbi: &Dbi,
+        kind: DebugStream,
+    ) -> Result<Option<RecordStream<R>>> {
+        dbi.debug_stream(kind)
+            .map(|id| RecordStream::parse(self.stream_bytes(id)?, id))
+            .transpose()
     }
 }
 

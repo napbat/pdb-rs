@@ -17,8 +17,11 @@
 //! The embedded-source blob has the Portable PDB format:
 //! [`EmbeddedSource`]. The GUIDs are in serialized order.
 
+use alloc::vec::Vec;
+
 use crate::crypto::sha256;
 use crate::native::codeview::Fields;
+use crate::native::output::{Output, to_u32};
 use crate::portable::embedded::EmbeddedSource;
 use crate::{Error, ErrorKind, Result};
 
@@ -78,6 +81,69 @@ pub struct DotNetDocument<'a> {
 }
 
 impl<'a> DotNetDocument<'a> {
+    /// Make a record from its fields.
+    #[must_use]
+    pub const fn new(
+        language: [u8; 16],
+        language_vendor: [u8; 16],
+        document_type: [u8; 16],
+        checksum_algorithm: [u8; 16],
+        checksum: &'a [u8],
+        embedded: Option<EmbeddedSource<'a>>,
+    ) -> Self {
+        Self {
+            language,
+            language_vendor,
+            document_type,
+            checksum_algorithm,
+            checksum,
+            embedded,
+        }
+    }
+
+    /// Append the record, the full stream contents, to `out`.
+    ///
+    /// The embedded source is written as a blob with its 4-byte format field. A decoded record
+    /// gives the same bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if a size does not fit in `u32` or the output
+    /// cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let (format, data) = match self.embedded {
+            None => (None, &[][..]),
+            Some(EmbeddedSource::Raw(data)) => (Some(0), data),
+            Some(EmbeddedSource::Deflate { size, data }) => (Some(size), data),
+        };
+        let source_size = match format {
+            None => 0,
+            Some(_) => to_u32(data.len(), ".NET embedded source size")?
+                .checked_add(4)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::LimitExceeded, None)
+                        .with_context(".NET embedded source size overflows u32")
+                })?,
+        };
+        let mut output = Output::new(out);
+        for guid in [
+            &self.language,
+            &self.language_vendor,
+            &self.document_type,
+            &self.checksum_algorithm,
+        ] {
+            output.bytes(guid)?;
+        }
+        output.u32(to_u32(self.checksum.len(), ".NET document checksum size")?)?;
+        output.u32(source_size)?;
+        output.bytes(self.checksum)?;
+        if let Some(format) = format {
+            output.u32(format)?;
+            output.bytes(data)?;
+        }
+        Ok(())
+    }
+
     /// Decode the record in `bytes`: the full stream contents.
     ///
     /// The stream must end exactly after the checksum and the embedded source.

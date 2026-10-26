@@ -1,8 +1,8 @@
 //! Tests for the string table of `/names` and the DBI EC substream.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::hash::hash_string_v1;
-use pdbrs::native::names::{HashVersion, SIGNATURE, StringEntry, StringTable};
+use pdbrs::native::hash::{hash_string_v1, hash_string_v2};
+use pdbrs::native::names::{HashVersion, SIGNATURE, StringEntry, StringTable, StringTableBuilder};
 
 /// Serialize a string table from its parts.
 fn table(version: u32, strings: &[u8], buckets: &[u32], name_count: u32) -> Vec<u8> {
@@ -140,14 +140,30 @@ fn empty_table_has_no_entries() {
 }
 
 #[test]
-fn v2_table_resolves_offsets_but_not_hashes() {
-    let bytes = table(2, b"\0a\0", &[1, 0], 1);
+fn v2_table_uses_the_version_2_hash() {
+    // Values from the `HasherV2::lhashPbCb` algorithm of Microsoft `misc.h`.
+    for (name, hash) in [
+        (&b""[..], 0xeb40_4412),
+        (b"a", 0x42c5_f9e7),
+        (b"abcd", 0x5bce_33cf),
+        (b"/names", 0xf8ed_89fb),
+        (b"main.cpp", 0x341b_5ab1),
+    ] {
+        assert_eq!(hash_string_v2(name), hash, "{name:?}");
+        assert_eq!(HashVersion::V2.hash(name), hash);
+    }
+    // `hash_string_v2(b"a") % 2` is 1, so a version 2 lookup starts at bucket 1.
+    let bytes = table(2, b"\0a\0", &[0, 1], 1);
     let table = StringTable::parse(&bytes).unwrap();
     assert_eq!(table.hash_version(), HashVersion::V2);
     assert_eq!(table.get(1).unwrap(), b"a");
-    assert_eq!(table.entries().count(), 1);
-    assert_error(table.find(b"a"), ErrorKind::UnsupportedVersion);
-    assert_error(table.verify_buckets(), ErrorKind::UnsupportedVersion);
+    assert_eq!(table.find(b"a").unwrap(), Some(1));
+    assert_eq!(table.find(b"b").unwrap(), None);
+    let placement = table.verify_buckets().unwrap();
+    assert_eq!((placement.home, placement.probed), (1, 0));
+    let moved_bytes = self::table(2, b"\0a\0", &[1, 0], 1);
+    let moved = StringTable::parse(&moved_bytes).unwrap();
+    assert_error(moved.verify_buckets(), ErrorKind::InvalidFormat);
 }
 
 #[test]
@@ -210,4 +226,63 @@ fn bucket_and_count_errors() {
     let table = StringTable::parse(&bytes).unwrap();
     assert_error(table.get(1), ErrorKind::InvalidReference);
     assert_error(table.get(u32::MAX), ErrorKind::InvalidReference);
+}
+
+#[test]
+fn decoded_tables_encode_to_the_same_bytes() {
+    let (strings, buckets, _) = place(&[b"one", b"two", b"three"], 7);
+    for version in [1, 2] {
+        let bytes = table(version, &strings, &buckets, 3);
+        let parsed = StringTable::parse(&bytes).unwrap();
+        let mut out = Vec::new();
+        parsed.encode(&mut out).unwrap();
+        assert_eq!(out, bytes);
+        let mut copy = Vec::new();
+        StringTableBuilder::from_table(&parsed)
+            .unwrap()
+            .encode(&mut copy)
+            .unwrap();
+        assert_eq!(copy, bytes);
+    }
+}
+
+#[test]
+fn builder_grows_like_the_microsoft_name_table() {
+    for version in [HashVersion::V1, HashVersion::V2] {
+        let mut builder = StringTableBuilder::new(version).unwrap();
+        assert_eq!(builder.strings(), b"\0");
+        let mut counts = Vec::new();
+        let mut offsets = Vec::new();
+        for index in 0..10 {
+            offsets.push(builder.insert(format!("name{index}").as_bytes()).unwrap());
+            counts.push(builder.bucket_count());
+        }
+        // The bucket counts of `NMT::grow`.
+        assert_eq!(counts, [2, 4, 4, 7, 7, 11, 11, 11, 17, 17]);
+        assert_eq!(offsets[1], 7);
+        assert_eq!(builder.insert(b"name1").unwrap(), 7);
+        assert_eq!(builder.name_count(), 10);
+        assert_eq!(builder.get(7), Some(&b"name1"[..]));
+        let mut bytes = Vec::new();
+        builder.encode(&mut bytes).unwrap();
+        let parsed = StringTable::parse(&bytes).unwrap();
+        assert_eq!(parsed.hash_version(), version);
+        let placement = parsed.verify_buckets().unwrap();
+        assert_eq!(placement.home + placement.probed, 10);
+        for (index, offset) in offsets.iter().enumerate() {
+            let name = format!("name{index}");
+            assert_eq!(parsed.find(name.as_bytes()).unwrap(), Some(*offset));
+        }
+    }
+    let mut builder = StringTableBuilder::new(HashVersion::V1).unwrap();
+    assert_error(builder.insert(b"a\0b"), ErrorKind::InvalidFormat);
+    // As in `NMT`, the empty name gets its own NUL byte; offset 0 marks an empty bucket.
+    assert_eq!(builder.insert(b"").unwrap(), 1);
+    assert_eq!(builder.insert(b"").unwrap(), 1);
+    assert_eq!(builder.strings(), b"\0\0");
+    assert_eq!(builder.name_count(), 1);
+    assert_error(
+        StringTableBuilder::from_table(&StringTable::parse(&table(1, b"\0", &[], 0)).unwrap()),
+        ErrorKind::InvalidFormat,
+    );
 }

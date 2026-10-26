@@ -1,7 +1,9 @@
 //! Tests for the `/TMCache` stream and the type map streams that it names.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::auxiliary::{TM_CACHE_VERSION, TmCache, TypeMapKind, TypeMapStream};
+use pdbrs::native::auxiliary::{
+    TM_CACHE_VERSION, TmCache, TmCacheBuilder, TypeMapKind, TypeMapStream,
+};
 use pdbrs::native::msf::StreamId;
 
 /// The stream ID of the synthetic streams.
@@ -322,4 +324,113 @@ fn type_map_errors_have_stream_locations() {
         ErrorKind::InvalidFormat,
         12,
     );
+}
+
+fn encode_cache(cache: &TmCache<'_>) -> Vec<u8> {
+    let mut out = Vec::new();
+    cache.encode(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn tm_cache_encodes_the_decoded_layout_again() {
+    let bytes = cache();
+    let decoded = TmCache::parse(&bytes, STREAM).unwrap();
+    assert_eq!(decoded.table_offsets(), (20, ENTRIES));
+    assert_eq!(decoded.size(), bytes.len());
+    assert_eq!(encode_cache(&decoded), bytes);
+    assert_eq!(encode_cache(&TmCache::parse(&[], STREAM).unwrap()), b"");
+
+    // Zero gaps before, between and after the tables stay as decoded.
+    let mut moved = words(&[TM_CACHE_VERSION, 24, 2, 32, 16, 0]);
+    moved.extend_from_slice(&[17, 0, 0, 0, 0, 0, 0, 0]);
+    moved.extend_from_slice(&entry(0, 5));
+    moved.extend_from_slice(&[0; 3]);
+    let decoded = TmCache::parse(&moved, STREAM).unwrap();
+    assert_eq!(decoded.table_offsets(), (24, 32));
+    assert_eq!(encode_cache(&decoded), moved);
+
+    // A header without tables is not an empty stream.
+    let header = words(&[TM_CACHE_VERSION, 20, 0, 20, 0]);
+    let decoded = TmCache::parse(&header, STREAM).unwrap();
+    assert!(!decoded.is_empty());
+    assert_eq!(encode_cache(&decoded), header);
+}
+
+#[test]
+fn tm_cache_builder_uses_the_link_exe_layout() {
+    let mut builder = TmCacheBuilder::new();
+    assert_eq!(builder.push_stream(Some(StreamId(14))).unwrap(), 0);
+    assert_eq!(builder.push_stream(None).unwrap(), 1);
+    assert_eq!(builder.push_stream(Some(StreamId(17))).unwrap(), 2);
+    builder.push_entry(0, 0xde36_d0b8_1ade_e5a9).unwrap();
+    builder.push_entry(0, 0xab8e_5077_b708_a0e0).unwrap();
+    builder.push_entry(2, 1).unwrap();
+    builder.push_entry(1, u64::MAX).unwrap();
+    let mut out = Vec::new();
+    builder.encode(&mut out).unwrap();
+    assert_eq!(out, cache());
+
+    let bytes = cache();
+    let copy = TmCacheBuilder::from_cache(&TmCache::parse(&bytes, STREAM).unwrap()).unwrap();
+    assert_eq!(copy, builder);
+
+    // An even slot count needs no padding.
+    let mut even = TmCacheBuilder::new();
+    even.push_stream(Some(StreamId(3))).unwrap();
+    even.push_stream(Some(StreamId(4))).unwrap();
+    even.push_entry(1, 9).unwrap();
+    let mut out = Vec::new();
+    even.encode(&mut out).unwrap();
+    let decoded = TmCache::parse(&out, STREAM).unwrap();
+    assert_eq!(decoded.table_offsets(), (20, 24));
+    assert_eq!(decoded.entries().next().unwrap().stream, Some(StreamId(4)));
+
+    // A builder without slots writes the header only.
+    let mut out = Vec::new();
+    TmCacheBuilder::new().encode(&mut out).unwrap();
+    assert_eq!(out, words(&[TM_CACHE_VERSION, 20, 0, 20, 0]));
+}
+
+#[test]
+fn tm_cache_builder_rejects_wide_values_and_bad_slots() {
+    let mut builder = TmCacheBuilder::new();
+    for id in [0xffff, 0x1_0000] {
+        let error = builder.push_stream(Some(StreamId(id))).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::LimitExceeded);
+    }
+    let error = builder.push_entry(0, 1).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidReference);
+    builder.push_stream(Some(StreamId(0xfffe))).unwrap();
+    builder.push_entry(0, 1).unwrap();
+    assert_eq!(
+        builder.push_entry(1, 1).unwrap_err().kind(),
+        ErrorKind::InvalidReference
+    );
+    for _ in 1..0xffff {
+        builder.push_stream(None).unwrap();
+    }
+    let error = builder.push_stream(None).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::LimitExceeded);
+}
+
+fn encode_map(map: &TypeMapStream<'_>) -> Vec<u8> {
+    let mut out = Vec::new();
+    map.encode(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn type_maps_encode_the_decoded_bytes_again() {
+    let server = words(&[1, 2, 3, 0x10ac, 0, 0x1003, 0x1004, 0, 0x1002, 0x1238]);
+    let empty = words(&[1, 0, 0]);
+    let object = object_map(0xffff, &[0x1000, 0x1003, 0x1108], &[0x1002, 0x1003]);
+    let precompiled = object_map(66, &[], &[]);
+    let mut padded = object.clone();
+    padded[6] = 0xab;
+    padded[7] = 0xcd;
+    for bytes in [server, empty, object, precompiled, padded] {
+        let map = TypeMapStream::parse(&bytes, STREAM).unwrap();
+        assert_eq!(encode_map(&map), bytes);
+    }
 }

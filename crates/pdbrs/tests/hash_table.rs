@@ -1,6 +1,8 @@
 //! Behavior tests for the serialized PDB hash table.
 
-use pdbrs::native::hash_table::{HashTable, HashTableEntry, HashTableValue};
+use pdbrs::native::hash_table::{
+    HashTable, HashTableEntry, HashTableKeys, HashTableProducer, HashTableValue, OwnedHashTable,
+};
 use pdbrs::native::msf::StreamId;
 use pdbrs::{Error, ErrorKind, Result};
 
@@ -20,6 +22,35 @@ impl HashTableValue<'_> for Small {
             Err(Error::new(ErrorKind::InvalidFormat, None).with_context("small value"))
         }
     }
+
+    fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        out.extend([self.0, 0]);
+        Ok(())
+    }
+}
+
+/// Keys that hash to themselves.
+struct Identity;
+
+impl HashTableKeys for Identity {
+    fn hash(&self, key: u32) -> Result<u32> {
+        Ok(key)
+    }
+}
+
+/// Return the bit vector words and the buckets of an encoded `u32` table.
+fn layout(table: &OwnedHashTable<u32>) -> (u32, Vec<u8>, Vec<(u32, u32)>) {
+    let mut bytes = Vec::new();
+    table.encode(&mut bytes).unwrap();
+    let (parsed, end) = HashTable::<u32>::parse(&bytes, 0, STREAM).unwrap();
+    assert_eq!(end, bytes.len());
+    let entries = parsed
+        .entries()
+        .iter()
+        .map(|entry| (entry.bucket, entry.key))
+        .collect();
+    let bits = bytes[8..bytes.len() - parsed.len() * 8].to_vec();
+    (parsed.capacity(), bits, entries)
 }
 
 fn words(values: &[u32]) -> Vec<u8> {
@@ -180,4 +211,93 @@ fn an_empty_table_with_one_bucket_is_valid() {
     assert_eq!(end, 16);
     assert!(table.is_empty());
     table.check_placement(|_| unreachable!()).unwrap();
+}
+
+#[test]
+fn a_decoded_table_encodes_to_the_same_bytes() {
+    let bytes = table();
+    let (parsed, _) = HashTable::<u32>::parse(&bytes, 0, STREAM).unwrap();
+    let mut out = Vec::new();
+    parsed.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
+    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+        let owned = OwnedHashTable::from_table(&parsed, producer).unwrap();
+        let mut out = Vec::new();
+        owned.encode(&mut out).unwrap();
+        assert_eq!(out, bytes);
+    }
+    let mut small = Vec::new();
+    let input = words(&[1, 1, 1, 1, 0, 7, 0x0009]);
+    let (parsed, _) = HashTable::<Small>::parse(&input, 0, STREAM).unwrap();
+    parsed.encode(&mut small).unwrap();
+    assert_eq!(small, [&words(&[1, 1, 1, 1, 0, 7])[..], &[9, 0]].concat());
+}
+
+#[test]
+fn microsoft_tables_start_with_one_bucket_and_grow_at_two_thirds() {
+    let mut table = OwnedHashTable::<u32>::new(HashTableProducer::Microsoft).unwrap();
+    assert_eq!(table.capacity(), 1);
+    let mut capacities = Vec::new();
+    for key in 1..=6 {
+        assert_eq!(table.insert(key, key * 10, &Identity).unwrap(), None);
+        capacities.push(table.capacity());
+    }
+    // Growth to `2 * (capacity * 2 / 3 + 1)` when the count reaches `capacity * 2 / 3 + 1`.
+    assert_eq!(capacities, [2, 4, 6, 6, 10, 10]);
+    let (capacity, bits, entries) = layout(&table);
+    assert_eq!(capacity, 10);
+    // One present word and no deleted word, as `ISet` after a growth.
+    assert_eq!(bits, words(&[1, 0b111_1110, 0]));
+    assert_eq!(entries, [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)]);
+    assert_eq!(table.get(4, &Identity).unwrap(), Some(&40));
+    assert_eq!(table.insert(4, 41, &Identity).unwrap(), Some(40));
+    assert_eq!(table.len(), 6);
+}
+
+#[test]
+fn llvm_tables_start_with_eight_buckets_and_trim_bit_vectors() {
+    let mut table = OwnedHashTable::<u32>::new(HashTableProducer::Llvm).unwrap();
+    assert_eq!(table.capacity(), 8);
+    let (_, bits, _) = layout(&table);
+    assert_eq!(bits, words(&[0, 0]));
+    for key in [3, 11] {
+        table.insert(key, 0, &Identity).unwrap();
+    }
+    let (capacity, bits, entries) = layout(&table);
+    assert_eq!(capacity, 8);
+    // Key 11 collides with key 3 and moves to the next bucket.
+    assert_eq!(entries, [(3, 3), (4, 11)]);
+    assert_eq!(bits, words(&[1, 0b1_1000, 0]));
+    for key in 20..24 {
+        table.insert(key, 0, &Identity).unwrap();
+    }
+    assert_eq!(table.capacity(), 12);
+}
+
+#[test]
+fn removal_marks_a_deleted_bucket_that_lookups_pass_and_insertions_reuse() {
+    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+        let mut table = OwnedHashTable::<u32>::with_capacity(producer, 40).unwrap();
+        for key in [33, 73] {
+            table.insert(key, key, &Identity).unwrap();
+        }
+        assert_eq!(table.remove(33, &Identity).unwrap(), Some(33));
+        assert_eq!(table.remove(33, &Identity).unwrap(), None);
+        // Key 73 is after the deleted bucket 33 in its probe sequence.
+        assert_eq!(table.get(73, &Identity).unwrap(), Some(&73));
+        let (_, bits, entries) = layout(&table);
+        assert_eq!(entries, [(34, 73)]);
+        assert_eq!(bits, words(&[2, 0, 1 << 2, 2, 0, 1 << 1]));
+        table.insert(113, 1, &Identity).unwrap();
+        let (_, bits, entries) = layout(&table);
+        assert_eq!(entries, [(33, 113), (34, 73)]);
+        let deleted = match producer {
+            // `ISet::remove` does not shrink the word vector.
+            HashTableProducer::Microsoft => words(&[2, 0, 0]),
+            HashTableProducer::Llvm => words(&[0]),
+        };
+        assert_eq!(bits, [&words(&[2, 0, 0b110])[..], &deleted].concat());
+    }
+    let error = OwnedHashTable::<u32>::with_capacity(HashTableProducer::Llvm, 0).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

@@ -1,9 +1,13 @@
 //! Tests for image section headers and address translation.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
+use pdbrs::native::address::{AddressMap, PdbRva, Rva, SectionOffset, Translation};
 use pdbrs::native::dbi::{Dbi, DebugStream};
-use pdbrs::native::section::{SECTION_HEADER_SIZE, SectionHeaders};
+use pdbrs::native::debug_stream::DebugRecord;
+use pdbrs::native::msf::StreamId;
+use pdbrs::native::section::{
+    SECTION_HEADER_SIZE, SectionHeader, SectionHeaderStream, SectionHeaders,
+};
 
 /// The header offsets of the substream sizes, in disk order.
 const SIZE_FIELDS: [usize; 7] = [24, 28, 32, 36, 40, 52, 48];
@@ -101,6 +105,50 @@ fn section_header_stream_length_must_be_a_multiple_of_40() {
 }
 
 #[test]
+fn section_headers_encode_the_same_bytes() {
+    let bytes = image();
+    let headers = SectionHeaders::parse(&bytes).unwrap();
+    let mut out = vec![0xaa];
+    headers.encode(&mut out).unwrap();
+    assert_eq!(out[0], 0xaa);
+    assert_eq!(&out[1..], bytes.as_slice());
+
+    let stream = SectionHeaderStream::parse(bytes.clone(), StreamId(12)).unwrap();
+    assert_eq!(stream.len(), 3);
+    assert_eq!(stream.to_bytes().unwrap(), bytes);
+    assert_eq!(stream.headers().section(2), headers.section(2));
+    assert_eq!(stream.get(2), headers.section(3));
+    assert_eq!(stream.get(3), None);
+
+    let records: Vec<_> = headers.iter().collect();
+    let rebuilt = SectionHeaderStream::from_records(&records).unwrap();
+    assert_eq!(rebuilt.as_bytes(), bytes.as_slice());
+
+    let mut header = SectionHeader::new(*b".data\0\0\0", 0x20, 0x5000);
+    header.characteristics = 0xc000_0040;
+    let mut one = Vec::new();
+    header.encode(&mut one).unwrap();
+    assert_eq!(one.len(), SectionHeader::SIZE);
+    let decoded = SectionHeaders::parse(&one).unwrap().section(1).unwrap();
+    assert_eq!(decoded, header);
+    assert_eq!(decoded.size_of_raw_data, 0);
+}
+
+#[test]
+fn section_header_stream_rejects_partial_records_with_a_location() {
+    assert!(
+        SectionHeaderStream::parse(Vec::new(), StreamId(5))
+            .unwrap()
+            .is_empty()
+    );
+    for (length, offset) in [(39, 0), (41, 40), (79, 40)] {
+        let error = SectionHeaderStream::parse(vec![0; length], StreamId(5)).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+        assert_eq!(error.stream_location(), Some((5, offset)));
+    }
+}
+
+#[test]
 fn address_translation_round_trips_inside_sections() {
     let bytes = image();
     let dbi = dbi_with_slots(&[0xffff; 11]);
@@ -108,9 +156,25 @@ fn address_translation_round_trips_inside_sections() {
     assert_eq!(map.sections().len(), 3);
     for (section, offset, rva) in [(1, 0, 0x1000), (1, 0x14ff, 0x24ff), (2, 0x80, 0x3080)] {
         let address = SectionOffset { section, offset };
-        assert_eq!(map.rva(address).unwrap(), Rva(rva));
-        assert_eq!(map.section_offset(Rva(rva)).unwrap(), address);
+        assert_eq!(map.rva(address).unwrap(), Translation::Mapped(Rva(rva)));
+        assert_eq!(
+            map.section_offset(Rva(rva)).unwrap(),
+            Translation::Mapped(address)
+        );
+        assert_eq!(map.pdb_rva(address).unwrap(), PdbRva(rva));
+        assert_eq!(map.pdb_section_offset(PdbRva(rva)).unwrap(), address);
+        assert_eq!(map.image_section_rva(address).unwrap(), Rva(rva));
+        assert_eq!(map.image_section_offset(Rva(rva)).unwrap(), address);
+        assert_eq!(
+            map.image_rva(PdbRva(rva)).unwrap(),
+            Translation::Mapped(Rva(rva))
+        );
+        assert_eq!(
+            map.to_pdb_rva(Rva(rva)).unwrap(),
+            Translation::Mapped(PdbRva(rva))
+        );
     }
+    assert!(!map.is_remapped());
 }
 
 #[test]
@@ -122,33 +186,48 @@ fn address_translation_checks_bounds() {
     assert_error(map.rva(at(0, 0)), ErrorKind::InvalidReference);
     assert_error(map.rva(at(4, 0)), ErrorKind::InvalidReference);
     // The end of a section has an RVA; addresses after the end do not.
-    assert_eq!(map.rva(at(1, 0x1500)).unwrap(), Rva(0x2500));
+    assert_eq!(
+        map.rva(at(1, 0x1500)).unwrap(),
+        Translation::Mapped(Rva(0x2500))
+    );
     assert_error(map.rva(at(1, 0x1501)), ErrorKind::InvalidReference);
     assert_error(map.rva(at(3, 0x8)), ErrorKind::OffsetOverflow);
-    assert_eq!(map.rva(at(3, 0x7)).unwrap(), Rva(u32::MAX));
+    assert_eq!(
+        map.rva(at(3, 0x7)).unwrap(),
+        Translation::Mapped(Rva(u32::MAX))
+    );
     assert_error(map.section_offset(Rva(0xfff)), ErrorKind::InvalidReference);
     assert_error(map.section_offset(Rva(0x2500)), ErrorKind::InvalidReference);
     assert_error(map.section_offset(Rva(0x3100)), ErrorKind::InvalidReference);
 }
 
 #[test]
-fn omap_slots_make_translation_unsupported() {
+fn omap_slots_without_tables_make_translation_fail() {
     let bytes = image();
     for slot in [DebugStream::OmapToSource, DebugStream::OmapFromSource] {
         let mut slots = [0xffff; 11];
         slots[slot.index()] = 9;
         let dbi = dbi_with_slots(&slots);
         let map = AddressMap::new(SectionHeaders::parse(&bytes).unwrap(), &dbi);
+        assert!(map.is_remapped());
         assert_error(
             map.rva(SectionOffset {
                 section: 1,
                 offset: 0,
             }),
-            ErrorKind::UnsupportedVersion,
+            ErrorKind::MissingStream,
         );
-        assert_error(
-            map.section_offset(Rva(0x1000)),
-            ErrorKind::UnsupportedVersion,
+        assert_error(map.section_offset(Rva(0x1000)), ErrorKind::MissingStream);
+        assert_error(map.image_rva(PdbRva(0x1000)), ErrorKind::MissingStream);
+        assert_error(map.to_pdb_rva(Rva(0x1000)), ErrorKind::MissingStream);
+        // The image section headers do not need OMAP.
+        assert_eq!(
+            map.image_section_rva(SectionOffset {
+                section: 1,
+                offset: 0
+            })
+            .unwrap(),
+            Rva(0x1000)
         );
     }
 }
