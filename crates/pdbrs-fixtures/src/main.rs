@@ -12,8 +12,10 @@
 //! The `verify-portable` command compares the pdbrs and verifier dumps of the Portable PDB
 //! fixtures. The `verify-rebuild` command rebuilds them with the pdbrs writer and compares the
 //! result with the original. The `verify-edit` command edits and builds them with the pdbrs
-//! editor and checks the result with the verifier and the fixture programs. The `detect`
-//! command opens each fixture output with the format facade of pdbrs.
+//! editor and checks the result with the verifier and the fixture programs. The
+//! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs builder and
+//! compares each result with the original through the consumer tools. The `detect` command
+//! opens each fixture output with the format facade of pdbrs.
 
 mod args;
 mod classify;
@@ -71,6 +73,11 @@ fn main() -> ExitCode {
             let workspace = workspace_root();
             let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
             exit_code(verify::verify_edit(&workspace, &fixtures))
+        }
+        Ok(Action::VerifyNativeBuild(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_native_build(&workspace, &fixtures))
         }
         Ok(Action::Detect(fixtures)) => {
             let fixtures =
