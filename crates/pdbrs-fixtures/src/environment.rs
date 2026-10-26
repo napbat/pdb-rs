@@ -55,8 +55,13 @@ impl Environment {
 
     /// Find `file` in the directories of `PATH`, in order.
     pub fn find_program(&self, file: &str) -> Option<PathBuf> {
-        let path = self.get("PATH")?;
-        path.split(';')
+        self.find_file("PATH", file)
+    }
+
+    /// Find `file` in the directories of the list variable `variable`, for example `LIB`.
+    pub fn find_file(&self, variable: &str, file: &str) -> Option<PathBuf> {
+        let list = self.get(variable)?;
+        list.split(';')
             .map(|directory| directory.trim().trim_matches('"'))
             .filter(|directory| !directory.is_empty())
             .map(|directory| Path::new(directory).join(file))
@@ -117,8 +122,11 @@ mod tests {
             "PATH",
             &format!("C:\\missing-dir;;\"{}\"", directory.display()),
         );
-        assert_eq!(environment.find_program("tool.exe"), Some(program));
+        assert_eq!(environment.find_program("tool.exe"), Some(program.clone()));
         assert_eq!(environment.find_program("other.exe"), None);
+        environment.set("LIB", &directory.display().to_string());
+        assert_eq!(environment.find_file("LIB", "tool.exe"), Some(program));
+        assert_eq!(environment.find_file("MISSING", "tool.exe"), None);
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }
