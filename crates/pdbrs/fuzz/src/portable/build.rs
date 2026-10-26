@@ -130,7 +130,7 @@ impl Build {
                 let mut info = MethodInfo::default();
                 info.local_signature = StandAloneSigId(u32::from(input.u8() % 2));
                 info.local_signature_form = form;
-                info.sequence_points = points.clone();
+                info.sequence_points.clone_from(&points);
                 self.builder.set_method(method, info);
                 self.methods.retain(|(id, _)| *id != method);
                 self.methods.push((method, points));
