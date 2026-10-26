@@ -29,7 +29,6 @@
 mod validate;
 
 use alloc::vec::Vec;
-use core::iter::FusedIterator;
 
 use crate::native::msf::StreamId;
 use crate::native::output::{Output, to_u32};
@@ -188,34 +187,43 @@ impl<'a> TypeMapStream<'a> {
     /// Return the PDB index of each input type, from [`TypeMapStream::first_index`] up.
     ///
     /// For an object file, the map covers all record indices of the `.debug$T` section.
-    pub fn types(&self) -> impl ExactSizeIterator<Item = u32> + FusedIterator + 'a {
-        self.types.iter().map(|word| u32::from_le_bytes(*word))
+    #[must_use]
+    pub fn types(&self) -> TypeMapWords<'a> {
+        TypeMapWords(self.types.iter())
     }
 
     /// Return the PDB ID index of each type server ID, from `0x1000` up.
     ///
     /// The iterator is empty for an object file map.
-    pub fn ids(&self) -> impl ExactSizeIterator<Item = u32> + FusedIterator + 'a {
-        self.ids.iter().map(|word| u32::from_le_bytes(*word))
+    #[must_use]
+    pub fn ids(&self) -> TypeMapWords<'a> {
+        TypeMapWords(self.ids.iter())
     }
 
     /// Return the byte offsets of the object file records.
     ///
     /// The iterator has one item more than [`TypeMapStream::types`] for an object file map.
     /// It is empty for a type server map.
-    pub fn record_offsets(&self) -> impl ExactSizeIterator<Item = u32> + FusedIterator + 'a {
-        self.offsets.iter().map(|word| u32::from_le_bytes(*word))
+    #[must_use]
+    pub fn record_offsets(&self) -> TypeMapWords<'a> {
+        TypeMapWords(self.offsets.iter())
     }
 
     /// Return the function ID pairs: an input function ID and a PDB type index.
-    pub fn function_types(&self) -> impl ExactSizeIterator<Item = (u32, u32)> + FusedIterator + 'a {
-        self.functions.iter().map(|pair| {
-            let [a0, a1, a2, a3, b0, b1, b2, b3] = *pair;
+    #[must_use]
+    pub fn function_types(&self) -> FunctionTypes<'a> {
+        FunctionTypes(self.functions.iter())
+    }
+
+    /// Decode a function ID pair.
+    fn function_type(pair: [u8; 8]) -> (u32, u32) {
+        {
+            let [a0, a1, a2, a3, b0, b1, b2, b3] = pair;
             (
                 u32::from_le_bytes([a0, a1, a2, a3]),
                 u32::from_le_bytes([b0, b1, b2, b3]),
             )
-        })
+        }
     }
 
     /// Append the stream bytes to `out`.
@@ -264,3 +272,43 @@ impl<'a> TypeMapStream<'a> {
         output.bytes(self.functions.as_flattened())
     }
 }
+
+/// An iterator over the 32-bit values of one table of a [`TypeMapStream`].
+#[derive(Clone, Debug)]
+pub struct TypeMapWords<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for TypeMapWords<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TypeMapWords<'_> {}
+
+impl core::iter::FusedIterator for TypeMapWords<'_> {}
+
+/// An iterator over the function ID pairs of a [`TypeMapStream`].
+#[derive(Clone, Debug)]
+pub struct FunctionTypes<'a>(core::slice::Iter<'a, [u8; 8]>);
+
+impl Iterator for FunctionTypes<'_> {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<(u32, u32)> {
+        self.0.next().map(|x| TypeMapStream::function_type(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for FunctionTypes<'_> {}
+
+impl core::iter::FusedIterator for FunctionTypes<'_> {}

@@ -48,8 +48,41 @@ pub(super) fn row_error(
 pub(super) fn each_row<'a, S: ReadAt, T>(
     pdb: &'a Pdb<S>,
     table: TableId,
-    read: impl Fn(&'a Pdb<S>, u32) -> Result<T> + 'a,
-) -> impl ExactSizeIterator<Item = Result<T>> + 'a {
-    let rows = pdb.tables().row_count(table);
-    (0..rows).map(move |index| read(pdb, index + 1))
+    read: fn(&'a Pdb<S>, u32) -> Result<T>,
+) -> TypedRows<'a, S, T> {
+    TypedRows {
+        pdb,
+        rows: 0..pdb.tables().row_count(table),
+        read,
+    }
 }
+
+/// An iterator over the typed rows of one debug table of a [`Pdb`], in row order.
+///
+/// Each item is a typed row, or the error of that row.
+#[derive(Debug)]
+pub struct TypedRows<'a, S, T> {
+    /// The PDB.
+    pdb: &'a Pdb<S>,
+    /// The 0-based row numbers that are not returned yet.
+    rows: core::ops::Range<u32>,
+    /// The reader of one row.
+    read: fn(&'a Pdb<S>, u32) -> Result<T>,
+}
+
+impl<S: ReadAt, T> Iterator for TypedRows<'_, S, T> {
+    type Item = Result<T>;
+
+    fn next(&mut self) -> Option<Result<T>> {
+        let index = self.rows.next()?;
+        Some((self.read)(self.pdb, index + 1))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.rows.size_hint()
+    }
+}
+
+impl<S: ReadAt, T> ExactSizeIterator for TypedRows<'_, S, T> {}
+
+impl<S: ReadAt, T> core::iter::FusedIterator for TypedRows<'_, S, T> {}

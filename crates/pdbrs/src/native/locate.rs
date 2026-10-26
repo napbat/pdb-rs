@@ -355,11 +355,12 @@ impl SymbolLocator {
     /// Return the indexed procedures and thunks in RVA order.
     ///
     /// Procedures with the same RVA come in module order.
-    pub fn procedures(&self) -> impl Iterator<Item = Result<ProcedureInfo<'_>>> + '_ {
-        self.procedures
-            .spans()
-            .iter()
-            .map(|span| self.procedure_info(span.value))
+    #[must_use]
+    pub fn procedures(&self) -> Procedures<'_> {
+        Procedures {
+            locator: self,
+            spans: self.procedures.spans().iter(),
+        }
     }
 
     /// Return the address map of the image sections.
@@ -567,3 +568,29 @@ fn push<T>(list: &mut Vec<T>, value: T, context: &'static str) -> Result<()> {
     list.push(value);
     Ok(())
 }
+
+/// An iterator over the indexed procedures and thunks of a [`SymbolLocator`] in RVA order.
+#[derive(Clone, Debug)]
+pub struct Procedures<'a> {
+    /// The locator.
+    locator: &'a SymbolLocator,
+    /// The procedure spans that are not returned yet.
+    spans: core::slice::Iter<'a, range::Span<ProcedureKey>>,
+}
+
+impl<'a> Iterator for Procedures<'a> {
+    type Item = Result<ProcedureInfo<'a>>;
+
+    fn next(&mut self) -> Option<Result<ProcedureInfo<'a>>> {
+        let span = self.spans.next()?;
+        Some(self.locator.procedure_info(span.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.spans.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Procedures<'_> {}
+
+impl core::iter::FusedIterator for Procedures<'_> {}

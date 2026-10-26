@@ -174,22 +174,21 @@ impl<'a> ModuleSources<'a> {
     }
 
     /// Return the name offset of each file, in substream order.
-    pub fn name_offsets(&self) -> impl ExactSizeIterator<Item = u32> + FusedIterator + 'a {
-        self.offsets
-            .iter()
-            .map(|offset| u32::from_le_bytes(*offset))
+    #[must_use]
+    pub fn name_offsets(&self) -> NameOffsets<'a> {
+        NameOffsets(self.offsets.iter())
     }
 
     /// Return the name of each file, in substream order.
     ///
     /// An item is an [`ErrorKind::InvalidReference`] error if its offset
     /// does not refer to a NUL-terminated name in the names buffer.
-    pub fn file_names(
-        &self,
-    ) -> impl ExactSizeIterator<Item = Result<&'a [u8]>> + FusedIterator + 'a {
-        let names = self.names;
-        self.name_offsets()
-            .map(move |offset| file_name(names, offset))
+    #[must_use]
+    pub fn file_names(&self) -> FileNames<'a> {
+        FileNames {
+            names: self.names,
+            offsets: self.name_offsets(),
+        }
     }
 }
 
@@ -418,3 +417,52 @@ fn file_name(names: &[u8], offset: u32) -> Result<&[u8]> {
                 .with_context("DBI source file name offset does not refer to a NUL-terminated name")
         })
 }
+
+/// An iterator over the name offsets of the files of a [`ModuleSources`] value.
+#[derive(Clone, Debug)]
+pub struct NameOffsets<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for NameOffsets<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for NameOffsets<'_> {}
+
+impl core::iter::FusedIterator for NameOffsets<'_> {}
+
+/// An iterator over the file names of a [`ModuleSources`] value.
+///
+/// An item is an [`ErrorKind::InvalidReference`] error if its offset does not refer to a
+/// NUL-terminated name in the names buffer.
+#[derive(Clone, Debug)]
+pub struct FileNames<'a> {
+    /// The names buffer.
+    names: &'a [u8],
+    /// The name offsets that are not returned yet.
+    offsets: NameOffsets<'a>,
+}
+
+impl<'a> Iterator for FileNames<'a> {
+    type Item = Result<&'a [u8]>;
+
+    fn next(&mut self) -> Option<Result<&'a [u8]>> {
+        let offset = self.offsets.next()?;
+        Some(file_name(self.names, offset))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.offsets.size_hint()
+    }
+}
+
+impl ExactSizeIterator for FileNames<'_> {}
+
+impl FusedIterator for FileNames<'_> {}

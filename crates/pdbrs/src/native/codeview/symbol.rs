@@ -123,15 +123,16 @@ pub use global::{
     CoffGroup, ProcedureReference, Public, PublicFlags, S_ANNOTATIONREF, S_DATAREF, Section,
 };
 pub use hlsl::{
-    DefRangeHlsl, DpcGroupSharedLocal, DpcTag, DpcTagMap, DpcTagMapIter, HlslData, HlslDataEx,
-    S_DEFRANGE_DPC_PTR_TAG, S_DEFRANGE_HLSL, S_DPC_SYM_TAG_MAP, S_GDATA_HLSL, S_GDATA_HLSL32,
-    S_GDATA_HLSL32_EX, S_LDATA_HLSL, S_LDATA_HLSL32, S_LDATA_HLSL32_EX, S_LOCAL_DPC_GROUPSHARED,
+    DefRangeHlsl, DefRangeHlslOffsets, DpcGroupSharedLocal, DpcTag, DpcTagMap, DpcTagMapIter,
+    HlslData, HlslDataEx, S_DEFRANGE_DPC_PTR_TAG, S_DEFRANGE_HLSL, S_DPC_SYM_TAG_MAP, S_GDATA_HLSL,
+    S_GDATA_HLSL32, S_GDATA_HLSL32_EX, S_LDATA_HLSL, S_LDATA_HLSL32, S_LDATA_HLSL32_EX,
+    S_LOCAL_DPC_GROUPSHARED,
 };
 pub use link::{FastLink, FastLinkFlags, S_REF_MINIPDB, Trampoline, TrampolineKind};
 pub use linker::{
     DiscardReason, Discarded, Export, ExportFlags, ModuleTypeReference, ModuleTypeReferenceFlags,
-    ModuleTypeSource, PdbMap, ProfileData, S_DISCARDED, S_EXPORT, S_MOD_TYPEREF, S_PDBMAP,
-    S_POGODATA, S_SOURCELINK,
+    ModuleTypeSource, ModuleTypeStreams, PdbMap, ProfileData, S_DISCARDED, S_EXPORT, S_MOD_TYPEREF,
+    S_PDBMAP, S_POGODATA, S_SOURCELINK,
 };
 pub use managed::{
     ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncSteps, AsyncStepsIter,
@@ -139,15 +140,15 @@ pub use managed::{
     CustomDebugInfoKind, CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal,
     DynamicLocals, DynamicLocalsIter, HoistedLocalScope, HoistedLocalScopes,
     HoistedLocalScopesIter, MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant,
-    ManagedProcedure, ManagedSlot, Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM,
-    S_TOKENREF, SymbolAttribute, TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter,
-    UsingGroups, UsingGroupsIter, Utf8Names, Utf8NamesIter,
+    ManagedProcedure, ManagedSlot, NameUnits, Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT,
+    S_MANSLOT, S_OEM, S_TOKENREF, SymbolAttribute, TupleElementNames, TupleElementNamesEntry,
+    TupleElementNamesIter, UsingGroups, UsingGroupsIter, Utf8Names, Utf8NamesIter,
 };
 pub use procedure::{
     Block, CallSiteInfo, ExtendedProcedureFlags, FramePointer, FrameProcedure, FrameProcedureFlags,
-    FunctionList, InlineSite, JumpTable, JumpTableEntry, Label, Procedure, ProcedureFlags,
-    ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2, S_LPROC32_DPC,
-    S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
+    FunctionList, InlineSite, Invocations, JumpTable, JumpTableEntry, Label, Procedure,
+    ProcedureFlags, ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2,
+    S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
 };
 pub use scope::{ModuleSymbolWriter, ModuleSymbols, ScopedSymbol};
 pub use storage::{

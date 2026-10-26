@@ -33,7 +33,7 @@ pub use ids::{
     MethodDebugInformationId, MethodDefId, StandAloneSigId, StateMachineMethodId, StringOffset,
     TableId, UserStringOffset,
 };
-pub use pdb_stream::PdbStream;
+pub use pdb_stream::{ExternalTables, PdbStream};
 pub use root::{METADATA_SIGNATURE, MetadataRoot, MetadataStream, StreamHeader};
 pub use rows::{
     CustomDebugInformationRow, DocumentRow, ImportScopeRow, LocalConstantRow, LocalScopeRow,

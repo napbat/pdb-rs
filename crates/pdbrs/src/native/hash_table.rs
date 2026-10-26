@@ -26,7 +26,7 @@
 
 mod owned;
 
-pub use owned::{HashTableKeys, OwnedHashTable};
+pub use owned::{HashTableKeys, OwnedHashTable, OwnedHashTableEntries};
 
 use alloc::vec::Vec;
 

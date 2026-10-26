@@ -218,14 +218,23 @@ impl<'a> TmCache<'a> {
     /// Return the stream of each slot of the stream table, in slot order.
     ///
     /// A slot can be `None` (`0xffff`). Two slots can name the same stream.
-    pub fn streams(&self) -> impl ExactSizeIterator<Item = Option<StreamId>> + FusedIterator + 'a {
-        self.streams.iter().map(|&slot| slot_stream(slot))
+    #[must_use]
+    pub fn streams(&self) -> TmCacheStreams<'a> {
+        TmCacheStreams(self.streams.iter())
     }
 
     /// Return the entries in entry table order.
-    pub fn entries(&self) -> impl ExactSizeIterator<Item = TmCacheEntry> + FusedIterator + 'a {
-        let streams = self.streams;
-        self.entries.iter().enumerate().map(move |(index, entry)| {
+    #[must_use]
+    pub fn entries(&self) -> TmCacheEntries<'a> {
+        TmCacheEntries {
+            streams: self.streams,
+            entries: self.entries.iter().enumerate(),
+        }
+    }
+
+    /// Decode entry `index`. `streams` is the stream table.
+    fn entry(streams: &[[u8; 2]], index: usize, entry: &[u8; ENTRY_SIZE]) -> TmCacheEntry {
+        {
             let [s0, s1, _, _, _, _, _, _, c @ ..] = *entry;
             let slot = u16::from_le_bytes([s0, s1]);
             TmCacheEntry {
@@ -238,7 +247,7 @@ impl<'a> TmCache<'a> {
                     .and_then(slot_stream),
                 checksum: u64::from_le_bytes(c),
             }
-        })
+        }
     }
 
     /// Append the stream bytes to `out`.
@@ -444,3 +453,49 @@ fn region(end: usize, offset: u32, size: u32) -> Option<core::ops::Range<usize>>
     let stop = start.checked_add(usize::try_from(size).ok()?)?;
     (stop <= end).then_some(start..stop)
 }
+
+/// An iterator over the stream table of a [`TmCache`].
+#[derive(Clone, Debug)]
+pub struct TmCacheStreams<'a>(core::slice::Iter<'a, [u8; 2]>);
+
+impl Iterator for TmCacheStreams<'_> {
+    type Item = Option<StreamId>;
+
+    fn next(&mut self) -> Option<Option<StreamId>> {
+        self.0.next().map(|x| slot_stream(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TmCacheStreams<'_> {}
+
+impl core::iter::FusedIterator for TmCacheStreams<'_> {}
+
+/// An iterator over the entries of a [`TmCache`] in entry table order.
+#[derive(Clone, Debug)]
+pub struct TmCacheEntries<'a> {
+    /// The stream table.
+    streams: &'a [[u8; 2]],
+    /// The entries that are not returned yet, with their indices.
+    entries: core::iter::Enumerate<core::slice::Iter<'a, [u8; ENTRY_SIZE]>>,
+}
+
+impl Iterator for TmCacheEntries<'_> {
+    type Item = TmCacheEntry;
+
+    fn next(&mut self) -> Option<TmCacheEntry> {
+        let (index, entry) = self.entries.next()?;
+        Some(TmCache::entry(self.streams, index, entry))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TmCacheEntries<'_> {}
+
+impl FusedIterator for TmCacheEntries<'_> {}

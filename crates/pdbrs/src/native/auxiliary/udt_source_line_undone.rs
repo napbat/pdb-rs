@@ -52,12 +52,9 @@ impl<'a> UdtSourceLineUndone<'a> {
     }
 
     /// Iterate the type indices in stream order.
-    pub fn type_indices(&self) -> impl ExactSizeIterator<Item = TypeIndex> + 'a {
-        self.bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| TypeIndex(u32::from_le_bytes(*word)))
+    #[must_use]
+    pub fn type_indices(&self) -> TypeIndices<'a> {
+        TypeIndices(self.bytes.as_chunks::<4>().0.iter())
     }
 
     /// Append the stream bytes to `out`. A decoded stream gives the same bytes again.
@@ -85,3 +82,23 @@ impl<'a> UdtSourceLineUndone<'a> {
         Ok(())
     }
 }
+
+/// An iterator over the type indices of an [`UdtSourceLineUndone`] stream.
+#[derive(Clone, Debug)]
+pub struct TypeIndices<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for TypeIndices<'_> {
+    type Item = TypeIndex;
+
+    fn next(&mut self) -> Option<TypeIndex> {
+        self.0.next().map(|x| TypeIndex(u32::from_le_bytes(*x)))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TypeIndices<'_> {}
+
+impl core::iter::FusedIterator for TypeIndices<'_> {}

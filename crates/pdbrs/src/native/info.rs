@@ -18,7 +18,7 @@
 
 mod builder;
 
-pub use builder::InfoBuilder;
+pub use builder::{InfoBuilder, InfoBuilderFeatures};
 
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -186,12 +186,12 @@ impl Info {
     }
 
     /// Iterate named streams in bytewise name order.
-    pub fn named_streams(&self) -> impl ExactSizeIterator<Item = NamedStream<'_>> {
-        self.entries.iter().map(|entry| NamedStream {
-            name: &self.bytes[entry.name.clone()],
-            name_offset: entry.offset,
-            stream: entry.stream,
-        })
+    #[must_use]
+    pub fn named_streams(&self) -> NamedStreams<'_> {
+        NamedStreams {
+            bytes: &self.bytes,
+            entries: self.entries.iter(),
+        }
     }
 
     /// Find a named stream without decoding its name as text.
@@ -218,12 +218,9 @@ impl Info {
     }
 
     /// Return the feature codes in stream order, including codes unknown to this reader.
-    pub fn features(&self) -> impl ExactSizeIterator<Item = Feature> + '_ {
-        self.bytes[self.features.clone()]
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| Feature(u32::from_le_bytes(*word)))
+    #[must_use]
+    pub fn features(&self) -> Features<'_> {
+        Features(self.bytes[self.features.clone()].as_chunks::<4>().0.iter())
     }
 
     /// Return `true` if the stream has the feature code of `feature`.
@@ -289,3 +286,53 @@ fn invalid(kind: ErrorKind, offset: usize) -> Error {
         .with_context("PDB Info")
         .with_stream(INFO_STREAM, u64::try_from(offset).unwrap_or(u64::MAX))
 }
+
+/// An iterator over the feature codes of an [`Info`] stream, in stream order.
+#[derive(Clone, Debug)]
+pub struct Features<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for Features<'_> {
+    type Item = Feature;
+
+    fn next(&mut self) -> Option<Feature> {
+        self.0.next().map(|x| Feature(u32::from_le_bytes(*x)))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Features<'_> {}
+
+impl core::iter::FusedIterator for Features<'_> {}
+
+/// An iterator over the named streams of an [`Info`] stream, in bytewise name order.
+#[derive(Clone, Debug)]
+pub struct NamedStreams<'a> {
+    /// The stream bytes.
+    bytes: &'a [u8],
+    /// The entries that are not returned yet.
+    entries: core::slice::Iter<'a, Entry>,
+}
+
+impl<'a> Iterator for NamedStreams<'a> {
+    type Item = NamedStream<'a>;
+
+    fn next(&mut self) -> Option<NamedStream<'a>> {
+        let entry = self.entries.next()?;
+        Some(NamedStream {
+            name: &self.bytes[entry.name.clone()],
+            name_offset: entry.offset,
+            stream: entry.stream,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+
+impl ExactSizeIterator for NamedStreams<'_> {}
+
+impl core::iter::FusedIterator for NamedStreams<'_> {}

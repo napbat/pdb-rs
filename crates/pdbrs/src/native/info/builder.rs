@@ -247,8 +247,9 @@ impl InfoBuilder {
     }
 
     /// Return the feature codes in stream order.
-    pub fn features(&self) -> impl ExactSizeIterator<Item = Feature> + '_ {
-        self.features.iter().copied()
+    #[must_use]
+    pub fn features(&self) -> InfoBuilderFeatures<'_> {
+        InfoBuilderFeatures(self.features.iter())
     }
 
     /// Replace the feature codes.
@@ -367,3 +368,23 @@ impl InfoBuilder {
         }
     }
 }
+
+/// An iterator over the feature codes of an [`InfoBuilder`], in stream order.
+#[derive(Clone, Debug)]
+pub struct InfoBuilderFeatures<'a>(core::slice::Iter<'a, Feature>);
+
+impl Iterator for InfoBuilderFeatures<'_> {
+    type Item = Feature;
+
+    fn next(&mut self) -> Option<Feature> {
+        self.0.next().copied()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for InfoBuilderFeatures<'_> {}
+
+impl core::iter::FusedIterator for InfoBuilderFeatures<'_> {}

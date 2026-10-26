@@ -61,12 +61,9 @@ impl<'a> SymbolAttribute<'a> {
     }
 
     /// Return the UTF-16 code units of the name.
-    pub fn name_units(&self) -> impl Iterator<Item = u16> + 'a {
-        self.name
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|unit| u16::from_le_bytes(*unit))
+    #[must_use]
+    pub fn name_units(&self) -> NameUnits<'a> {
+        NameUnits(self.name.as_chunks::<2>().0.iter())
     }
 
     /// Decode the value of the attributes that Roslyn writes.
@@ -198,3 +195,23 @@ chunk_iter!(
         }
     }
 );
+
+/// An iterator over the UTF-16 code units of the name of a [`SymbolAttribute`].
+#[derive(Clone, Debug)]
+pub struct NameUnits<'a>(core::slice::Iter<'a, [u8; 2]>);
+
+impl Iterator for NameUnits<'_> {
+    type Item = u16;
+
+    fn next(&mut self) -> Option<u16> {
+        self.0.next().map(|x| u16::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for NameUnits<'_> {}
+
+impl core::iter::FusedIterator for NameUnits<'_> {}

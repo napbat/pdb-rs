@@ -18,11 +18,17 @@ mod udt_source_line_undone;
 pub use link_info::{LINK_INFO_VERSION_ONE, LINK_INFO_VERSION_TWO, LinkInfo};
 pub use source_link::SourceLink;
 pub use source_server::{
-    SourceServer, SourceServerFile, SourceServerSection, SourceServerVariable,
+    SourceServer, SourceServerFields, SourceServerFile, SourceServerFiles, SourceServerSection,
+    SourceServerVariable, SourceServerVariables,
 };
-pub use tm_cache::{TM_CACHE_VERSION, TmCache, TmCacheBuilder, TmCacheEntry};
-pub use type_map::{TypeMapContext, TypeMapKind, TypeMapRule, TypeMapStream, TypeMapViolation};
-pub use udt_source_line_undone::UdtSourceLineUndone;
+pub use tm_cache::{
+    TM_CACHE_VERSION, TmCache, TmCacheBuilder, TmCacheEntries, TmCacheEntry, TmCacheStreams,
+};
+pub use type_map::{
+    FunctionTypes, TypeMapContext, TypeMapKind, TypeMapRule, TypeMapStream, TypeMapViolation,
+    TypeMapWords,
+};
+pub use udt_source_line_undone::{TypeIndices, UdtSourceLineUndone};
 
 use super::injected_source::{HEADER_BLOCK_STREAM_NAME, SOURCE_FILE_STREAM_PREFIX};
 

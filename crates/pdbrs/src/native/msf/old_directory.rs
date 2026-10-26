@@ -139,12 +139,9 @@ impl OldStream<'_> {
     }
 
     /// Iterate the page numbers of the stream. The pages are not checked or read.
-    pub fn pages(&self) -> impl ExactSizeIterator<Item = u32> + '_ {
-        self.pages
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| u32::from_le_bytes(*word))
+    #[must_use]
+    pub fn pages(&self) -> OldStreamPages<'_> {
+        OldStreamPages(self.pages.as_chunks::<4>().0.iter())
     }
 }
 
@@ -197,3 +194,23 @@ fn words(bytes: &[u8]) -> impl Iterator<Item = u32> + '_ {
         .iter()
         .map(|word| u32::from_le_bytes(*word))
 }
+
+/// An iterator over the page numbers of an [`OldStream`].
+#[derive(Clone, Debug)]
+pub struct OldStreamPages<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for OldStreamPages<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for OldStreamPages<'_> {}
+
+impl core::iter::FusedIterator for OldStreamPages<'_> {}

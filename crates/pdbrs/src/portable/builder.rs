@@ -202,17 +202,15 @@ impl PdbBuilder {
     }
 
     /// Return the methods with sequence points, in `MethodDef` order.
-    pub fn methods(&self) -> impl Iterator<Item = (MethodDefId, &MethodInfo)> {
-        self.methods
-            .iter()
-            .map(|(&method, info)| (MethodDefId(method), info))
+    #[must_use]
+    pub fn methods(&self) -> Methods<'_> {
+        Methods(self.methods.iter())
     }
 
     /// Return the methods with sequence points for a change, in `MethodDef` order.
-    pub fn methods_mut(&mut self) -> impl Iterator<Item = (MethodDefId, &mut MethodInfo)> {
-        self.methods
-            .iter_mut()
-            .map(|(&method, info)| (MethodDefId(method), info))
+    #[must_use]
+    pub fn methods_mut(&mut self) -> MethodsMut<'_> {
+        MethodsMut(self.methods.iter_mut())
     }
 
     /// Add a local scope and return its handle.
@@ -238,8 +236,9 @@ impl PdbBuilder {
     }
 
     /// Return each local scope with its handle, in the order of addition.
-    pub fn local_scopes(&self) -> impl Iterator<Item = (LocalScopeHandle, &LocalScopeInfo)> {
-        (0..).map(LocalScopeHandle).zip(&self.scopes)
+    #[must_use]
+    pub fn local_scopes(&self) -> LocalScopes<'_> {
+        LocalScopes((0..).zip(&self.scopes))
     }
 
     /// Add a local variable to the end of the variables of `scope`. Return its handle.
@@ -394,13 +393,9 @@ impl PdbBuilder {
     }
 
     /// Return each custom debug information record with its handle, in the order of addition.
-    pub fn custom_debug_informations(
-        &self,
-    ) -> impl Iterator<Item = (CustomDebugHandle, &CustomDebugInfo)> {
-        (0..)
-            .map(CustomDebugHandle)
-            .zip(&self.custom)
-            .filter_map(|(handle, information)| Some((handle, information.as_ref()?)))
+    #[must_use]
+    pub fn custom_debug_informations(&self) -> CustomDebugInformations<'_> {
+        CustomDebugInformations((0..).zip(&self.custom))
     }
 
     /// Resolve the handles and make the raw parts with new heaps.
@@ -428,3 +423,90 @@ impl PdbBuilder {
         self.to_parts()?.plan(id)
     }
 }
+
+/// An iterator over the methods of a [`PdbBuilder`] with sequence points, in `MethodDef` order.
+#[derive(Clone, Debug)]
+pub struct Methods<'a>(alloc::collections::btree_map::Iter<'a, u32, MethodInfo>);
+
+impl<'a> Iterator for Methods<'a> {
+    type Item = (MethodDefId, &'a MethodInfo);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|(&method, info)| (MethodDefId(method), info))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Methods<'_> {}
+
+impl core::iter::FusedIterator for Methods<'_> {}
+
+/// An iterator over the methods of a [`PdbBuilder`] for a change, in `MethodDef` order.
+#[derive(Debug)]
+pub struct MethodsMut<'a>(alloc::collections::btree_map::IterMut<'a, u32, MethodInfo>);
+
+impl<'a> Iterator for MethodsMut<'a> {
+    type Item = (MethodDefId, &'a mut MethodInfo);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|(&method, info)| (MethodDefId(method), info))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for MethodsMut<'_> {}
+
+impl core::iter::FusedIterator for MethodsMut<'_> {}
+
+/// An iterator over the local scopes of a [`PdbBuilder`] with their handles.
+#[derive(Clone, Debug)]
+pub struct LocalScopes<'a>(
+    core::iter::Zip<core::ops::RangeFrom<u32>, core::slice::Iter<'a, LocalScopeInfo>>,
+);
+
+impl<'a> Iterator for LocalScopes<'a> {
+    type Item = (LocalScopeHandle, &'a LocalScopeInfo);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|(index, scope)| (LocalScopeHandle(index), scope))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LocalScopes<'_> {}
+
+impl core::iter::FusedIterator for LocalScopes<'_> {}
+
+/// An iterator over the custom debug information records of a [`PdbBuilder`] with their
+/// handles.
+#[derive(Clone, Debug)]
+pub struct CustomDebugInformations<'a>(
+    core::iter::Zip<core::ops::RangeFrom<u32>, core::slice::Iter<'a, Option<CustomDebugInfo>>>,
+);
+
+impl<'a> Iterator for CustomDebugInformations<'a> {
+    type Item = (CustomDebugHandle, &'a CustomDebugInfo);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.by_ref().find_map(|(index, information)| {
+            Some((CustomDebugHandle(index), information.as_ref()?))
+        })
+    }
+}
+
+impl core::iter::FusedIterator for CustomDebugInformations<'_> {}

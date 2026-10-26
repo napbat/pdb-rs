@@ -198,12 +198,9 @@ impl<'a> ModifierEx<'a> {
     }
 
     /// Return an iterator over the raw modifier values.
-    pub fn modifiers(&self) -> impl ExactSizeIterator<Item = u16> + 'a {
-        self.modifiers
-            .as_chunks::<MODIFIER_SIZE>()
-            .0
-            .iter()
-            .map(|chunk| u16::from_le_bytes(*chunk))
+    #[must_use]
+    pub fn modifiers(&self) -> Modifiers<'a> {
+        Modifiers(self.modifiers.as_chunks::<MODIFIER_SIZE>().0.iter())
     }
 }
 
@@ -301,3 +298,23 @@ impl<'a> Matrix<'a> {
         writer.c_string(self.name)
     }
 }
+
+/// An iterator over the raw modifier values of a [`ModifierEx`] record.
+#[derive(Clone, Debug)]
+pub struct Modifiers<'a>(core::slice::Iter<'a, [u8; MODIFIER_SIZE]>);
+
+impl Iterator for Modifiers<'_> {
+    type Item = u16;
+
+    fn next(&mut self) -> Option<u16> {
+        self.0.next().map(|x| u16::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Modifiers<'_> {}
+
+impl core::iter::FusedIterator for Modifiers<'_> {}

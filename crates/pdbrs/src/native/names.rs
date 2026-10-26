@@ -222,26 +222,18 @@ impl<'a> StringTable<'a> {
     }
 
     /// Return the value of each bucket in order; 0 marks an empty bucket.
-    pub fn bucket_offsets(&self) -> impl ExactSizeIterator<Item = u32> + FusedIterator + 'a {
-        self.buckets
-            .iter()
-            .map(|bucket| u32::from_le_bytes(*bucket))
+    #[must_use]
+    pub fn bucket_offsets(&self) -> BucketOffsets<'a> {
+        BucketOffsets(self.buckets.iter())
     }
 
     /// Return the names in the non-empty buckets, in bucket order.
-    pub fn entries(&self) -> impl FusedIterator<Item = StringEntry<'a>> + 'a {
-        let strings = self.strings;
-        self.bucket_offsets()
-            .zip(0_u32..)
-            .filter(|&(offset, _)| offset != 0)
-            // `parse` checked every non-empty bucket, so `filter_map` keeps all of them.
-            .filter_map(move |(offset, bucket)| {
-                name_at(strings, offset).map(|name| StringEntry {
-                    bucket,
-                    offset: NameOffset(offset),
-                    name,
-                })
-            })
+    #[must_use]
+    pub fn entries(&self) -> StringEntries<'a> {
+        StringEntries {
+            strings: self.strings,
+            buckets: self.bucket_offsets().zip(0_u32..),
+        }
     }
 
     /// Return the NUL-terminated name at a byte offset of the string buffer.
@@ -353,3 +345,53 @@ fn to_usize(value: u32) -> Result<usize> {
             .with_context("string table size does not fit in memory")
     })
 }
+
+/// An iterator over the bucket values of a [`StringTable`]; 0 marks an empty bucket.
+#[derive(Clone, Debug)]
+pub struct BucketOffsets<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for BucketOffsets<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for BucketOffsets<'_> {}
+
+impl core::iter::FusedIterator for BucketOffsets<'_> {}
+
+/// An iterator over the names in the non-empty buckets of a [`StringTable`], in bucket order.
+#[derive(Clone, Debug)]
+pub struct StringEntries<'a> {
+    /// The string buffer.
+    strings: &'a [u8],
+    /// The buckets that are not visited yet, with their numbers.
+    buckets: core::iter::Zip<BucketOffsets<'a>, core::ops::RangeFrom<u32>>,
+}
+
+impl<'a> Iterator for StringEntries<'a> {
+    type Item = StringEntry<'a>;
+
+    fn next(&mut self) -> Option<StringEntry<'a>> {
+        let strings = self.strings;
+        // `parse` checked every non-empty bucket, so the search keeps all of them.
+        self.buckets.by_ref().find_map(|(offset, bucket)| {
+            if offset == 0 {
+                return None;
+            }
+            name_at(strings, offset).map(|name| StringEntry {
+                bucket,
+                offset: NameOffset(offset),
+                name,
+            })
+        })
+    }
+}
+
+impl FusedIterator for StringEntries<'_> {}

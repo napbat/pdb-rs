@@ -50,7 +50,8 @@ pub use section_contribution::{
 };
 pub use section_map::{OwnedSectionMap, SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
 pub use sources::{
-    ModuleSourceIter, ModuleSources, OwnedModuleSources, OwnedSourceInfo, SourceInfo,
+    FileNames, ModuleSourceIter, ModuleSources, NameOffsets, OwnedModuleSources, OwnedSourceInfo,
+    SourceInfo,
 };
 pub use type_server::TypeServer;
 

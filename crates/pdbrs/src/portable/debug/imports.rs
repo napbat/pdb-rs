@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{each_row, in_blob};
+use super::rows::{TypedRows, each_row, in_blob};
 use super::type_handle;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
@@ -346,7 +346,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `ImportScope` rows in row order.
-    pub fn import_scopes(&self) -> impl ExactSizeIterator<Item = Result<ImportScope>> + '_ {
+    #[must_use]
+    pub fn import_scopes(&self) -> TypedRows<'_, S, ImportScope> {
         each_row(self, TableId::IMPORT_SCOPE, |pdb, row| {
             pdb.import_scope(ImportScopeId(row))
         })

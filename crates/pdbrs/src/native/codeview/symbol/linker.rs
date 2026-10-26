@@ -274,7 +274,8 @@ impl ModuleTypeSource {
     /// [`ModuleTypeSource::TypeRecords`] and of the precompiled-type
     /// sources, the type and the ID stream of
     /// [`ModuleTypeSource::TypeServer`], and no stream for the other sources.
-    pub fn streams(&self) -> impl Iterator<Item = StreamId> {
+    #[must_use]
+    pub fn streams(&self) -> ModuleTypeStreams {
         let pair = match *self {
             Self::TypeRecords { stream }
             | Self::PrecompiledTypeOwner { stream }
@@ -282,7 +283,7 @@ impl ModuleTypeSource {
             Self::TypeServer { types, ids } => [Some(types), Some(ids)],
             Self::NoTypes | Self::OtherModule { .. } | Self::Other(_) => [None, None],
         };
-        pair.into_iter().flatten()
+        ModuleTypeStreams(pair.into_iter())
     }
 
     /// Return `true` if the type and ID indices of the module refer to
@@ -461,3 +462,17 @@ fn write_utf16(out: &mut Output<'_>, units: &[u8]) -> Result<()> {
     out.bytes(units)?;
     out.u16(0)
 }
+
+/// An iterator over the streams of a [`ModuleTypeSource`].
+#[derive(Clone, Debug)]
+pub struct ModuleTypeStreams(core::array::IntoIter<Option<StreamId>, 2>);
+
+impl Iterator for ModuleTypeStreams {
+    type Item = StreamId;
+
+    fn next(&mut self) -> Option<StreamId> {
+        self.0.by_ref().flatten().next()
+    }
+}
+
+impl core::iter::FusedIterator for ModuleTypeStreams {}

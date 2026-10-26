@@ -12,7 +12,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{each_row, in_blob};
+use super::rows::{TypedRows, each_row, in_blob};
 use super::type_handle;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
@@ -541,7 +541,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `LocalConstant` rows in row order.
-    pub fn local_constants(&self) -> impl ExactSizeIterator<Item = Result<LocalConstant>> + '_ {
+    #[must_use]
+    pub fn local_constants(&self) -> TypedRows<'_, S, LocalConstant> {
         each_row(self, TableId::LOCAL_CONSTANT, |pdb, row| {
             pdb.local_constant(LocalConstantId(row))
         })

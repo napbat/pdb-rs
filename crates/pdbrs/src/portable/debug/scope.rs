@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use super::rows::{each_row, row_error};
+use super::rows::{TypedRows, each_row, row_error};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::metadata::{
@@ -75,13 +75,15 @@ impl LocalScope {
     }
 
     /// Return the local variables of the scope in row order.
-    pub fn variables(&self) -> impl ExactSizeIterator<Item = LocalVariableId> + use<> {
-        self.variables.clone().map(LocalVariableId)
+    #[must_use]
+    pub fn variables(&self) -> LocalVariableIds {
+        LocalVariableIds(self.variables.clone())
     }
 
     /// Return the local constants of the scope in row order.
-    pub fn constants(&self) -> impl ExactSizeIterator<Item = LocalConstantId> + use<> {
-        self.constants.clone().map(LocalConstantId)
+    #[must_use]
+    pub fn constants(&self) -> LocalConstantIds {
+        LocalConstantIds(self.constants.clone())
     }
 }
 
@@ -228,7 +230,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `LocalScope` rows in row order.
-    pub fn local_scopes(&self) -> impl ExactSizeIterator<Item = Result<LocalScope>> + '_ {
+    #[must_use]
+    pub fn local_scopes(&self) -> TypedRows<'_, S, LocalScope> {
         each_row(self, TableId::LOCAL_SCOPE, |pdb, row| {
             pdb.local_scope(LocalScopeId(row))
         })
@@ -249,7 +252,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `LocalVariable` rows in row order.
-    pub fn local_variables(&self) -> impl ExactSizeIterator<Item = Result<LocalVariable>> + '_ {
+    #[must_use]
+    pub fn local_variables(&self) -> TypedRows<'_, S, LocalVariable> {
         each_row(self, TableId::LOCAL_VARIABLE, |pdb, row| {
             pdb.local_variable(LocalVariableId(row))
         })
@@ -268,11 +272,50 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `StateMachineMethod` rows in row order.
-    pub fn state_machine_methods(
-        &self,
-    ) -> impl ExactSizeIterator<Item = Result<StateMachineMethod>> + '_ {
+    #[must_use]
+    pub fn state_machine_methods(&self) -> TypedRows<'_, S, StateMachineMethod> {
         each_row(self, TableId::STATE_MACHINE_METHOD, |pdb, row| {
             pdb.state_machine_method(StateMachineMethodId(row))
         })
     }
 }
+
+/// An iterator over the local variables of a [`LocalScope`] in row order.
+#[derive(Clone, Debug)]
+pub struct LocalVariableIds(core::ops::Range<u32>);
+
+impl Iterator for LocalVariableIds {
+    type Item = LocalVariableId;
+
+    fn next(&mut self) -> Option<LocalVariableId> {
+        self.0.next().map(LocalVariableId)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LocalVariableIds {}
+
+impl core::iter::FusedIterator for LocalVariableIds {}
+
+/// An iterator over the local constants of a [`LocalScope`] in row order.
+#[derive(Clone, Debug)]
+pub struct LocalConstantIds(core::ops::Range<u32>);
+
+impl Iterator for LocalConstantIds {
+    type Item = LocalConstantId;
+
+    fn next(&mut self) -> Option<LocalConstantId> {
+        self.0.next().map(LocalConstantId)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LocalConstantIds {}
+
+impl core::iter::FusedIterator for LocalConstantIds {}

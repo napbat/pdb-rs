@@ -609,10 +609,9 @@ impl<'a> FunctionList<'a> {
 
     /// Return the stored invocation counts. A function without a count has
     /// the count 0.
-    pub fn invocations(&self) -> impl ExactSizeIterator<Item = u32> + 'a {
-        self.invocations
-            .iter()
-            .map(|bytes| u32::from_le_bytes(*bytes))
+    #[must_use]
+    pub fn invocations(&self) -> Invocations<'a> {
+        Invocations(self.invocations.iter())
     }
 
     /// Write the count, the functions and the invocation counts.
@@ -770,3 +769,23 @@ pub(super) fn count_u32(count: usize) -> Result<u32> {
             .with_context("symbol list count does not fit in 32 bits")
     })
 }
+
+/// An iterator over the invocation counts of a [`FunctionList`].
+#[derive(Clone, Debug)]
+pub struct Invocations<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for Invocations<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Invocations<'_> {}
+
+impl core::iter::FusedIterator for Invocations<'_> {}

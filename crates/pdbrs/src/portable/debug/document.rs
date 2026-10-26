@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{each_row, in_blob, row_error};
+use super::rows::{TypedRows, each_row, in_blob, row_error};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid, too_large, truncated};
@@ -404,7 +404,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `Document` rows in row order.
-    pub fn documents(&self) -> impl ExactSizeIterator<Item = Result<Document>> + '_ {
+    #[must_use]
+    pub fn documents(&self) -> TypedRows<'_, S, Document> {
         each_row(self, TableId::DOCUMENT, |pdb, row| {
             pdb.document(DocumentId(row))
         })

@@ -131,8 +131,9 @@ impl<'a> DefRangeHlsl<'a> {
     }
 
     /// Return the offsets in the register space.
-    pub fn offsets(&self) -> impl ExactSizeIterator<Item = u32> + 'a {
-        self.offsets.iter().map(|bytes| u32::from_le_bytes(*bytes))
+    #[must_use]
+    pub fn offsets(&self) -> DefRangeHlslOffsets<'a> {
+        DefRangeHlslOffsets(self.offsets.iter())
     }
 }
 
@@ -434,3 +435,23 @@ impl<'a> IntoIterator for &DpcTagMap<'a> {
         self.iter()
     }
 }
+
+/// An iterator over the register space offsets of a [`DefRangeHlsl`] record.
+#[derive(Clone, Debug)]
+pub struct DefRangeHlslOffsets<'a>(core::slice::Iter<'a, [u8; 4]>);
+
+impl Iterator for DefRangeHlslOffsets<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for DefRangeHlslOffsets<'_> {}
+
+impl core::iter::FusedIterator for DefRangeHlslOffsets<'_> {}

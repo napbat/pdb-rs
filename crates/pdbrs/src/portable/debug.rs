@@ -54,7 +54,10 @@ pub use document::{
     split_document_name,
 };
 pub use imports::{Import, ImportScope, Imports};
-pub use scope::{LocalScope, LocalVariable, StateMachineMethod};
+pub use rows::TypedRows;
+pub use scope::{
+    LocalConstantIds, LocalScope, LocalVariable, LocalVariableIds, StateMachineMethod,
+};
 pub use sequence::{
     EncodedSequencePoints, HIDDEN_LINE, LocalSignatureForm, MAX_COLUMN, MAX_IL_OFFSET, MAX_LINE,
     MethodDebugInformation, SequencePoint, SequencePoints, SourceSpan,

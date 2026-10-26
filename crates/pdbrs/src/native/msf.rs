@@ -48,7 +48,7 @@ mod old_directory;
 mod write;
 
 pub use free_page_map::FreePageMapReport;
-pub use old_directory::{OldDirectory, OldStream, OldStreams};
+pub use old_directory::{OldDirectory, OldStream, OldStreamPages, OldStreams};
 pub use write::{MsfBuilder, MsfWriteOptions, MsfWritePlan, OldDirectoryPolicy};
 pub(crate) use write::{StreamSource, plan_sizes};
 

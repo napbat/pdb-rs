@@ -74,7 +74,7 @@ mod custom_debug_info;
 
 pub use attribute::{
     ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncSteps, AsyncStepsIter,
-    AttributeValue, MD2_ATTRIBUTE, SymbolAttribute,
+    AttributeValue, MD2_ATTRIBUTE, NameUnits, SymbolAttribute,
 };
 pub use custom_debug_info::{
     CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData, CustomDebugInfoKind,

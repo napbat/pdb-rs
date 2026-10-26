@@ -47,10 +47,10 @@ pub use attributes::{
     PointerAttributes, PointerKind, PointerMode, VtableSlotKind,
 };
 pub use basic::{Array, Bitfield, MemberFunction, Modifier, Procedure};
-pub use hlsl::{Hlsl, Matrix, ModifierEx, NumericList, Vector};
+pub use hlsl::{Hlsl, Matrix, ModifierEx, Modifiers, NumericList, Vector};
 pub use list::{
-    ArgumentList, ArgumentListIter, MethodList, MethodListEntry, MethodListIter, TypeIndexList,
-    TypeIndexListIter, VirtualFunctionTable, VtableShape,
+    ArgumentList, ArgumentListIter, MethodList, MethodListEntry, MethodListIter, MethodNames,
+    TypeIndexList, TypeIndexListIter, VirtualFunctionTable, VtableShape, VtableSlots,
 };
 pub use oem::{Cobol0, Oem, Oem2, Skip};
 pub use pointer::{BasedPointer, MemberPointer, Pointer};

@@ -170,12 +170,9 @@ impl<V: Clone> OwnedHashTable<V> {
     }
 
     /// Return the present entries in bucket order.
-    pub fn entries(&self) -> impl ExactSizeIterator<Item = HashTableEntry<&V>> + '_ {
-        self.entries.iter().map(|entry| HashTableEntry {
-            bucket: entry.bucket,
-            key: entry.key,
-            value: &entry.value,
-        })
+    #[must_use]
+    pub fn entries(&self) -> OwnedHashTableEntries<'_, V> {
+        OwnedHashTableEntries(self.entries.iter())
     }
 
     /// Find the value of `key`.
@@ -376,3 +373,33 @@ fn words_of(bytes: &[u8]) -> Result<Vec<u32>> {
     words.extend(chunks.iter().map(|word| u32::from_le_bytes(*word)));
     Ok(words)
 }
+
+/// An iterator over the present entries of an [`OwnedHashTable`] in bucket order.
+#[derive(Debug)]
+pub struct OwnedHashTableEntries<'a, V>(core::slice::Iter<'a, HashTableEntry<V>>);
+
+impl<V> Clone for OwnedHashTableEntries<'_, V> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<'a, V> Iterator for OwnedHashTableEntries<'a, V> {
+    type Item = HashTableEntry<&'a V>;
+
+    fn next(&mut self) -> Option<HashTableEntry<&'a V>> {
+        self.0.next().map(|entry| HashTableEntry {
+            bucket: entry.bucket,
+            key: entry.key,
+            value: &entry.value,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl<V> ExactSizeIterator for OwnedHashTableEntries<'_, V> {}
+
+impl<V> core::iter::FusedIterator for OwnedHashTableEntries<'_, V> {}

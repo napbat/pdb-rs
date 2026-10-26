@@ -79,8 +79,11 @@ pub struct SourceServerFile<'a> {
 
 impl<'a> SourceServerFile<'a> {
     /// Return the fields of the line: `VAR1`, `VAR2` and so on.
-    pub fn fields(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
-        self.line.split(|&byte| byte == b'*')
+    #[must_use]
+    pub fn fields(&self) -> SourceServerFields<'a> {
+        SourceServerFields {
+            rest: Some(self.line),
+        }
     }
 
     /// Return the first field: the source path in the PDB.
@@ -189,21 +192,21 @@ impl<'a> SourceServer<'a> {
     }
 
     /// Return the `KEY=value` lines of the `ini` section. Blank lines are not returned.
-    pub fn ini(&self) -> impl FusedIterator<Item = SourceServerVariable<'a>> + 'a {
-        self.lines(SourceServerSection::Ini).filter_map(variable)
+    #[must_use]
+    pub fn ini(&self) -> SourceServerVariables<'a> {
+        SourceServerVariables(self.lines(SourceServerSection::Ini))
     }
 
     /// Return the `KEY=value` lines of the `variables` section. Blank lines are not returned.
-    pub fn variables(&self) -> impl FusedIterator<Item = SourceServerVariable<'a>> + 'a {
-        self.lines(SourceServerSection::Variables)
-            .filter_map(variable)
+    #[must_use]
+    pub fn variables(&self) -> SourceServerVariables<'a> {
+        SourceServerVariables(self.lines(SourceServerSection::Variables))
     }
 
     /// Return the lines of the `source files` section. Blank lines are not returned.
-    pub fn source_files(&self) -> impl FusedIterator<Item = SourceServerFile<'a>> + 'a {
-        self.lines(SourceServerSection::SourceFiles)
-            .filter(|line| !is_blank(line))
-            .map(|line| SourceServerFile { line })
+    #[must_use]
+    pub fn source_files(&self) -> SourceServerFiles<'a> {
+        SourceServerFiles(self.lines(SourceServerSection::SourceFiles))
     }
 
     /// Return the bytes after the `SRCSRV: end` line.
@@ -224,15 +227,14 @@ impl<'a> SourceServer<'a> {
     }
 
     /// Return the lines of the body of `section`, without their line ends.
-    fn lines(&self, section: SourceServerSection) -> impl FusedIterator<Item = &'a [u8]> + 'a {
+    fn lines(&self, section: SourceServerSection) -> Lines<'a> {
         let body = self.sections[section as usize]
             .clone()
             .map_or(&[][..], |range| &self.bytes[range]);
         let body = body.strip_suffix(b"\n").unwrap_or(body);
-        body.split(|&byte| byte == b'\n')
-            .filter(move |_| !body.is_empty())
-            .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
-            .fuse()
+        Lines {
+            rest: (!body.is_empty()).then_some(body),
+        }
     }
 }
 
@@ -298,3 +300,79 @@ fn variable(line: &[u8]) -> Option<SourceServerVariable<'_>> {
 fn is_blank(line: &[u8]) -> bool {
     line.iter().all(u8::is_ascii_whitespace)
 }
+
+/// Split `rest` at the first `separator`. Return the part before it and the rest after it, or
+/// `None` as the rest after the last part.
+fn split_once(rest: &[u8], separator: u8) -> (&[u8], Option<&[u8]>) {
+    match rest.iter().position(|&byte| byte == separator) {
+        Some(end) => (&rest[..end], Some(&rest[end + 1..])),
+        None => (rest, None),
+    }
+}
+
+/// An iterator over the lines of a section body, without their line ends.
+#[derive(Clone, Debug)]
+struct Lines<'a> {
+    /// The lines that are not returned yet, or `None` after the last line.
+    rest: Option<&'a [u8]>,
+}
+
+impl<'a> Iterator for Lines<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let (line, rest) = split_once(self.rest?, b'\n');
+        self.rest = rest;
+        Some(line.strip_suffix(b"\r").unwrap_or(line))
+    }
+}
+
+impl FusedIterator for Lines<'_> {}
+
+/// An iterator over the `KEY=value` lines of a section of a [`SourceServer`].
+#[derive(Clone, Debug)]
+pub struct SourceServerVariables<'a>(Lines<'a>);
+
+impl<'a> Iterator for SourceServerVariables<'a> {
+    type Item = SourceServerVariable<'a>;
+
+    fn next(&mut self) -> Option<SourceServerVariable<'a>> {
+        self.0.by_ref().find_map(variable)
+    }
+}
+
+impl FusedIterator for SourceServerVariables<'_> {}
+
+/// An iterator over the lines of the `source files` section of a [`SourceServer`].
+#[derive(Clone, Debug)]
+pub struct SourceServerFiles<'a>(Lines<'a>);
+
+impl<'a> Iterator for SourceServerFiles<'a> {
+    type Item = SourceServerFile<'a>;
+
+    fn next(&mut self) -> Option<SourceServerFile<'a>> {
+        let line = self.0.by_ref().find(|line| !is_blank(line))?;
+        Some(SourceServerFile { line })
+    }
+}
+
+impl FusedIterator for SourceServerFiles<'_> {}
+
+/// An iterator over the fields of a [`SourceServerFile`] line.
+#[derive(Clone, Debug)]
+pub struct SourceServerFields<'a> {
+    /// The fields that are not returned yet, or `None` after the last field.
+    rest: Option<&'a [u8]>,
+}
+
+impl<'a> Iterator for SourceServerFields<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let (field, rest) = split_once(self.rest?, b'*');
+        self.rest = rest;
+        Some(field)
+    }
+}
+
+impl FusedIterator for SourceServerFields<'_> {}

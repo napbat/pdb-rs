@@ -463,18 +463,25 @@ impl<'a> VtableShape<'a> {
     }
 
     /// Return an iterator over the slot kinds.
-    pub fn slots(&self) -> impl Iterator<Item = VtableSlotKind> + 'a {
-        let descriptors = self.descriptors;
-        // `new` validated each descriptor, so `filter_map` keeps all slots.
-        (0..usize::from(self.count)).filter_map(move |slot| {
+    #[must_use]
+    pub fn slots(&self) -> VtableSlots<'a> {
+        VtableSlots {
+            descriptors: self.descriptors,
+            slots: 0..usize::from(self.count),
+        }
+    }
+
+    /// Return the kind of `slot`. `new` validated each descriptor, so each slot has a kind.
+    fn slot(descriptors: &[u8], slot: usize) -> Option<VtableSlotKind> {
+        {
             let byte = descriptors.get(slot / 2)?;
-            let nibble = if slot % 2 == 0 {
+            let nibble = if slot.is_multiple_of(2) {
                 byte >> 4
             } else {
                 byte & 0x0f
             };
             VtableSlotKind::from_raw(nibble).ok()
-        })
+        }
     }
 }
 
@@ -568,14 +575,65 @@ impl<'a> VirtualFunctionTable<'a> {
     }
 
     /// Return an iterator over the method names, in table order.
-    pub fn method_names(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
-        self.all_names().skip(1)
+    #[must_use]
+    pub fn method_names(&self) -> MethodNames<'a> {
+        let mut names = self.all_names();
+        names.next();
+        names
     }
 
     /// Return all names, the table name first.
-    fn all_names(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
+    fn all_names(&self) -> MethodNames<'a> {
         // `new` makes sure that the bytes end with a NUL byte.
         let names = self.names;
-        names[..names.len() - 1].split(|&byte| byte == 0)
+        MethodNames {
+            rest: Some(&names[..names.len() - 1]),
+        }
     }
 }
+
+/// An iterator over the slot kinds of a [`VtableShape`].
+#[derive(Clone, Debug)]
+pub struct VtableSlots<'a> {
+    /// The 4-bit descriptors.
+    descriptors: &'a [u8],
+    /// The slots that are not returned yet.
+    slots: core::ops::Range<usize>,
+}
+
+impl Iterator for VtableSlots<'_> {
+    type Item = VtableSlotKind;
+
+    fn next(&mut self) -> Option<VtableSlotKind> {
+        let descriptors = self.descriptors;
+        self.slots
+            .by_ref()
+            .find_map(|slot| VtableShape::slot(descriptors, slot))
+    }
+}
+
+impl core::iter::FusedIterator for VtableSlots<'_> {}
+
+/// An iterator over the method names of a [`VirtualFunctionTable`], in table order.
+#[derive(Clone, Debug)]
+pub struct MethodNames<'a> {
+    /// The names that are not returned yet, or `None` after the last name.
+    rest: Option<&'a [u8]>,
+}
+
+impl<'a> Iterator for MethodNames<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let rest = self.rest?;
+        if let Some(end) = rest.iter().position(|&byte| byte == 0) {
+            self.rest = Some(&rest[end + 1..]);
+            Some(&rest[..end])
+        } else {
+            self.rest = None;
+            Some(rest)
+        }
+    }
+}
+
+impl core::iter::FusedIterator for MethodNames<'_> {}

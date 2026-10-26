@@ -148,11 +148,12 @@ impl PdbStream {
     }
 
     /// Return each referenced table with its row count, in table number order.
-    pub fn external_tables(&self) -> impl Iterator<Item = (TableId, u32)> + '_ {
-        (0_u8..64)
-            .filter_map(TableId::from_raw)
-            .filter(|table| self.referenced_tables & table.bit() != 0)
-            .map(|table| (table, self.rows[table.index()]))
+    #[must_use]
+    pub fn external_tables(&self) -> ExternalTables<'_> {
+        ExternalTables {
+            stream: self,
+            tables: 0..64,
+        }
     }
 
     /// Return the external row counts, indexed by table number.
@@ -167,3 +168,28 @@ fn invalid(offset: u64, context: &'static str) -> Error {
         .with_context(context)
         .with_portable(PortableLocation::new().with_stream(MetadataStream::Pdb))
 }
+
+/// An iterator over the referenced external tables of a [`PdbStream`] with their row counts, in
+/// table number order.
+#[derive(Clone, Debug)]
+pub struct ExternalTables<'a> {
+    /// The stream.
+    stream: &'a PdbStream,
+    /// The table numbers that are not visited yet.
+    tables: core::ops::Range<u8>,
+}
+
+impl Iterator for ExternalTables<'_> {
+    type Item = (TableId, u32);
+
+    fn next(&mut self) -> Option<(TableId, u32)> {
+        let stream = self.stream;
+        self.tables.by_ref().find_map(|number| {
+            let table = TableId::from_raw(number)?;
+            (stream.referenced_tables & table.bit() != 0)
+                .then(|| (table, stream.rows[table.index()]))
+        })
+    }
+}
+
+impl core::iter::FusedIterator for ExternalTables<'_> {}

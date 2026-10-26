@@ -29,7 +29,7 @@ mod validate;
 mod write;
 
 pub use forward::ForwardRefs;
-pub use hash::{HashAdjuster, IndexOffset, TypeHashes, type_record_hash};
+pub use hash::{HashAdjuster, HashValues, IndexOffset, IndexOffsets, TypeHashes, type_record_hash};
 pub use lookup::{FieldMembers, TypeTable};
 pub use size::type_size;
 pub use validate::{ReferenceLimits, ReferenceSummary, validate_type_references};

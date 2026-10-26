@@ -158,12 +158,9 @@ impl<'a> TypeHashes<'a> {
     /// Return the stored hash values in record order.
     ///
     /// The iterator is empty if the stream stores no hash values.
-    pub fn hash_values(&self) -> impl ExactSizeIterator<Item = u32> + 'a {
-        self.values
-            .as_chunks::<VALUE_SIZE>()
-            .0
-            .iter()
-            .map(|chunk| u32::from_le_bytes(*chunk))
+    #[must_use]
+    pub fn hash_values(&self) -> HashValues<'a> {
+        HashValues(self.values.as_chunks::<VALUE_SIZE>().0.iter())
     }
 
     /// Return the stored hash value of the record with a raw record index.
@@ -174,15 +171,19 @@ impl<'a> TypeHashes<'a> {
     }
 
     /// Return the index offset pairs in index order.
-    pub fn index_offsets(&self) -> impl ExactSizeIterator<Item = IndexOffset> + 'a {
-        self.index_offsets
-            .as_chunks::<PAIR_SIZE>()
-            .0
-            .iter()
-            .map(|chunk| IndexOffset {
+    #[must_use]
+    pub fn index_offsets(&self) -> IndexOffsets<'a> {
+        IndexOffsets(self.index_offsets.as_chunks::<PAIR_SIZE>().0.iter())
+    }
+
+    /// Decode an index offset pair.
+    fn index_offset(chunk: [u8; PAIR_SIZE]) -> IndexOffset {
+        {
+            IndexOffset {
                 index: u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
                 offset: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
-            })
+            }
+        }
     }
 
     /// Return the hash adjusters in bucket order.
@@ -644,3 +645,43 @@ pub fn type_record_hash(bytes: &[u8]) -> Result<u32> {
         _ => Ok(hash_buffer_v8(bytes)),
     }
 }
+
+/// An iterator over the stored hash values of a [`TypeHashes`] value.
+#[derive(Clone, Debug)]
+pub struct HashValues<'a>(core::slice::Iter<'a, [u8; VALUE_SIZE]>);
+
+impl Iterator for HashValues<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.0.next().map(|x| u32::from_le_bytes(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for HashValues<'_> {}
+
+impl core::iter::FusedIterator for HashValues<'_> {}
+
+/// An iterator over the index offset pairs of a [`TypeHashes`] value, in index order.
+#[derive(Clone, Debug)]
+pub struct IndexOffsets<'a>(core::slice::Iter<'a, [u8; PAIR_SIZE]>);
+
+impl Iterator for IndexOffsets<'_> {
+    type Item = IndexOffset;
+
+    fn next(&mut self) -> Option<IndexOffset> {
+        self.0.next().map(|x| TypeHashes::index_offset(*x))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for IndexOffsets<'_> {}
+
+impl core::iter::FusedIterator for IndexOffsets<'_> {}

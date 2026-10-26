@@ -9,7 +9,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{each_row, in_blob};
+use super::rows::{TypedRows, each_row, in_blob};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid};
@@ -479,9 +479,8 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Read all `MethodDebugInformation` rows in row order.
-    pub fn method_debug_informations(
-        &self,
-    ) -> impl ExactSizeIterator<Item = Result<MethodDebugInformation>> + '_ {
+    #[must_use]
+    pub fn method_debug_informations(&self) -> TypedRows<'_, S, MethodDebugInformation> {
         each_row(self, TableId::METHOD_DEBUG_INFORMATION, |pdb, row| {
             pdb.method_debug_information(MethodDebugInformationId(row))
         })

@@ -12,7 +12,8 @@
 //!   [`LocalVariableHandle`], [`LocalConstantHandle`] and [`CustomDebugHandle`].
 
 pub use super::builder::{
-    CustomDebugHandle, CustomDebugInfo, CustomDebugParent, DocumentInfo, ImportInfo,
-    ImportScopeInfo, LocalConstantHandle, LocalConstantInfo, LocalScopeHandle, LocalScopeInfo,
-    LocalVariableHandle, LocalVariableInfo, MethodInfo,
+    CustomDebugHandle, CustomDebugInfo, CustomDebugInformations, CustomDebugParent, DocumentInfo,
+    ImportInfo, ImportScopeInfo, LocalConstantHandle, LocalConstantInfo, LocalScopeHandle,
+    LocalScopeInfo, LocalScopes, LocalVariableHandle, LocalVariableInfo, MethodInfo, Methods,
+    MethodsMut,
 };
