@@ -2,8 +2,10 @@
 //!
 //! [`Dbi::parse`] decodes the modern DBI header and checks the ranges of all
 //! seven substreams. Each substream stays available as raw bytes through
-//! [`Dbi::substream`], also when no typed decoder exists for it yet.
-//! [`Dbi::modules`] decodes the module info substream lazily.
+//! [`Dbi::substream`]. [`Dbi::modules`] decodes the module info substream
+//! lazily. [`Dbi::section_contributions`], [`Dbi::section_map`],
+//! [`Dbi::source_info`], [`Dbi::verify_type_server_map`] and [`Dbi::ec_names`]
+//! decode the other substreams on request.
 //!
 //! [`ModuleStream`] splits one module stream into its symbol, C11 line, C13
 //! line and global reference regions. This module does not decode the C11 or
@@ -17,10 +19,20 @@ use core::iter::FusedIterator;
 use core::ops::Range;
 
 use super::msf::StreamId;
+use super::names::StringTable;
 use crate::{Error, ErrorKind, Result};
 
 mod module;
+mod section_contribution;
+mod section_map;
+mod sources;
 pub use module::{ModuleStream, Subsection, Subsections};
+pub use section_contribution::{
+    SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
+    SectionContributionIter, SectionContributionVersion, SectionContributions,
+};
+pub use section_map::{SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
+pub use sources::{ModuleSourceIter, ModuleSources, SourceInfo};
 
 /// The fixed MSF stream index of the DBI stream.
 const DBI_STREAM: u32 = 3;
@@ -54,15 +66,15 @@ const SUBSTREAM_COUNT: usize = 7;
 pub enum Substream {
     /// The module info records. [`Dbi::modules`] decodes them.
     ModuleInfo,
-    /// The section contribution records.
+    /// The section contribution records. [`Dbi::section_contributions`] decodes them.
     SectionContributions,
-    /// The section map.
+    /// The section map. [`Dbi::section_map`] decodes it.
     SectionMap,
-    /// The source file info for all modules.
+    /// The source file info for all modules. [`Dbi::source_info`] decodes it.
     SourceInfo,
-    /// The type server map.
+    /// The type server map. [`Dbi::verify_type_server_map`] checks it.
     TypeServerMap,
-    /// The EC substream, a string table of names.
+    /// The EC substream, a string table of names. [`Dbi::ec_names`] decodes it.
     Ec,
     /// The optional debug header. [`Dbi::debug_streams`] decodes it.
     OptionalDebugHeader,
@@ -256,6 +268,107 @@ impl Dbi {
     #[must_use]
     pub fn debug_stream(&self, kind: DebugStream) -> Option<StreamId> {
         self.debug_streams().nth(kind.index()).flatten()
+    }
+
+    /// Decode the section contribution substream.
+    ///
+    /// Return `None` if the substream is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`SectionContributions::parse`], located at
+    /// the start of the substream in stream 3.
+    pub fn section_contributions(&self) -> Result<Option<SectionContributions<'_>>> {
+        self.decode(Substream::SectionContributions, SectionContributions::parse)
+    }
+
+    /// Decode the section map substream.
+    ///
+    /// Return `None` if the substream is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`SectionMap::parse`], located at the start of
+    /// the substream in stream 3.
+    pub fn section_map(&self) -> Result<Option<SectionMap<'_>>> {
+        self.decode(Substream::SectionMap, SectionMap::parse)
+    }
+
+    /// Decode the source file info substream.
+    ///
+    /// Return `None` if the substream is empty. The module count of the
+    /// substream must equal the number of module info records.
+    ///
+    /// # Errors
+    ///
+    /// - The errors of [`SourceInfo::parse`] and of [`Dbi::modules`].
+    /// - [`ErrorKind::InvalidFormat`] if the module counts differ.
+    ///
+    /// Source info errors are located at the start of the substream in stream 3.
+    pub fn source_info(&self) -> Result<Option<SourceInfo<'_>>> {
+        let Some(info) = self.decode(Substream::SourceInfo, SourceInfo::parse)? else {
+            return Ok(None);
+        };
+        let mut modules = 0_usize;
+        for module in self.modules() {
+            module?;
+            modules += 1;
+        }
+        if modules != info.module_count() {
+            return Err(dbi_error(
+                ErrorKind::InvalidFormat,
+                self.substream_offset(Substream::SourceInfo),
+                "DBI source info module count differs from the module info count",
+            ));
+        }
+        Ok(Some(info))
+    }
+
+    /// Check the type server map substream.
+    ///
+    /// Linkers that do not use type servers write an empty map. No pinned
+    /// reference documents the layout of a non-empty map.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedVersion`] if the map is not empty.
+    pub fn verify_type_server_map(&self) -> Result<()> {
+        if self.substream(Substream::TypeServerMap).is_empty() {
+            Ok(())
+        } else {
+            Err(dbi_error(
+                ErrorKind::UnsupportedVersion,
+                self.substream_offset(Substream::TypeServerMap),
+                "DBI type server map is not empty",
+            ))
+        }
+    }
+
+    /// Decode the EC substream as a string table.
+    ///
+    /// Return `None` if the substream is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`StringTable::parse`], located at the start of
+    /// the substream in stream 3.
+    pub fn ec_names(&self) -> Result<Option<StringTable<'_>>> {
+        self.decode(Substream::Ec, StringTable::parse)
+    }
+
+    /// Decode a non-empty substream and add the substream location to errors.
+    fn decode<'a, T>(
+        &'a self,
+        kind: Substream,
+        parse: impl FnOnce(&'a [u8]) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let bytes = self.substream(kind);
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        parse(bytes)
+            .map(Some)
+            .map_err(|error| error.with_stream(DBI_STREAM, logical(self.substream_offset(kind))))
     }
 }
 

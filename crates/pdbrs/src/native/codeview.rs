@@ -209,6 +209,21 @@ impl<'a> Fields<'a> {
         Ok(i32::from_le_bytes(self.array()?))
     }
 
+    /// Read `count` bytes.
+    pub(crate) fn bytes(&mut self, count: usize) -> Result<&'a [u8]> {
+        if count > self.bytes.len() {
+            return Err(self.short());
+        }
+        let (head, rest) = self.bytes.split_at(count);
+        self.bytes = rest;
+        Ok(head)
+    }
+
+    /// Return `true` if all bytes are read.
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
     /// Return the bytes that are not read yet.
     pub(crate) const fn rest(&self) -> &'a [u8] {
         self.bytes

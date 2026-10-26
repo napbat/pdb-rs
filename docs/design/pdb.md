@@ -58,7 +58,9 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks | Free-page-map allocation consistency |
 | PDB Info | Identity, named streams, feature codes and named-stream reference checks | Older Info layouts |
 | TPI and IPI | Modern headers, type-indexed record iteration and hash-stream references | Leaf decoding, type graphs and hash lookup |
-| DBI | Modern header, module records, debug-stream references and raw substream views | Source tables, section contributions, section maps and address translation |
+| DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
+| String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
+| Sections and addresses | Section header streams and section-offset to RVA translation in both directions | OMAP translation |
 | Symbols | Record framing and common data, public and procedure symbol decoding | Remaining symbol families and global/public index lookup |
 | Module lines | Region bounds and C13 subsection framing | Lines, checksums and inline information |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding | Non-integer leaves and integration into typed records |
@@ -157,7 +159,9 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `native/msf.rs` and `native/msf/` | Superblock, directory, block maps, stream access and container writing |
 | `native/codeview.rs` and `native/codeview/` | Record framing, type records, symbol records and numeric leaves |
 | `native/types.rs` and `native/types/` | TPI/IPI access, type lookup and hash generation |
-| `native/dbi.rs` and `native/dbi/` | Modules, contributions, section maps and debug stream references |
+| `native/dbi.rs` and `native/dbi/` | Modules, contributions, section maps, source file info and debug stream references |
+| `native/names.rs` | String tables of `/names` and the DBI EC substream |
+| `native/section.rs` | Image section headers from DBI debug streams |
 | `native/symbols.rs` and `native/symbols/` | Shared symbols, global/public indexes and lookup |
 | `native/lines.rs` and `native/lines/` | C13 subsections, checksums, line tables and inline annotations |
 | `native/address.rs` | Section offsets, RVAs and OMAP mappings |

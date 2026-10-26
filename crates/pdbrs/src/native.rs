@@ -3,12 +3,16 @@
 //! Container versions, stream versions and record kinds are independent.
 //! Typed decoders report unsupported versions rather than guessing a layout.
 
+pub mod address;
 pub mod codeview;
 pub mod dbi;
 pub mod hash;
 pub mod info;
 pub mod msf;
+pub mod names;
+pub mod section;
 pub mod types;
+mod words;
 
 mod reader;
 pub use reader::{Pdb, ReadOptions};
