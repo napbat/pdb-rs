@@ -118,7 +118,7 @@ impl<'a> SourceServer<'a> {
         let invalid = |offset: usize, context| {
             Error::new(ErrorKind::InvalidFormat, None)
                 .with_context(context)
-                .with_stream(stream.0, u64::try_from(offset).unwrap_or(u64::MAX))
+                .with_stream(stream, u64::try_from(offset).unwrap_or(u64::MAX))
         };
         let start = if bytes.starts_with(BOM) { BOM.len() } else { 0 };
         let mut sections: [Option<Range<usize>>; 4] = Default::default();

@@ -21,6 +21,7 @@ use alloc::vec::Vec;
 use super::{HEADER_SIZE, TypeTable};
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::type_record::{ReferenceRole, TypeLeaf};
+use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
 /// The stream index of the TPI stream.
@@ -65,7 +66,7 @@ fn located(error: Error, offset: u32) -> Error {
     let location = u64::try_from(HEADER_SIZE)
         .unwrap_or(u64::MAX)
         .saturating_add(u64::from(offset));
-    error.with_stream(TPI_STREAM, location)
+    error.with_stream(StreamId(TPI_STREAM), location)
 }
 
 /// Return an invalid-reference error with `context`.

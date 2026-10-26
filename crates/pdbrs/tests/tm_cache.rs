@@ -63,7 +63,7 @@ fn assert_error<T: core::fmt::Debug>(result: pdbrs::Result<T>, kind: ErrorKind, 
     assert_eq!(error.offset(), None);
     assert_eq!(
         error.stream_location(),
-        Some((STREAM.0, u64::try_from(offset).unwrap())),
+        Some((STREAM, u64::try_from(offset).unwrap())),
         "{error}"
     );
 }

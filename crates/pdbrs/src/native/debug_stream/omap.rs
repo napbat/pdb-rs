@@ -101,7 +101,7 @@ impl OmapStream {
         let records = RecordStream::parse(bytes, stream)?;
         if let Some(index) = first_unsorted(records.iter()) {
             let offset = u64::try_from(index * OMAP_RECORD_SIZE).unwrap_or(u64::MAX);
-            return Err(unsorted().with_stream(stream.0, offset));
+            return Err(unsorted().with_stream(stream, offset));
         }
         Ok(Self { records })
     }

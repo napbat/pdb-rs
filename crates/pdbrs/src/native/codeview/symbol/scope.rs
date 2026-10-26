@@ -109,7 +109,7 @@ impl<'a> ModuleSymbols<'a> {
     fn error(&self, kind: ErrorKind, offset: u32, context: &'static str) -> Error {
         Error::new(kind, None)
             .with_context(context)
-            .with_stream(self.stream, u64::from(offset))
+            .with_stream(StreamId(self.stream), u64::from(offset))
     }
 
     /// Return the module stream offset of `record`.
@@ -117,7 +117,7 @@ impl<'a> ModuleSymbols<'a> {
         self.base.checked_add(record.offset).ok_or_else(|| {
             Error::new(ErrorKind::OffsetOverflow, None)
                 .with_context("module symbol offset does not fit in 32 bits")
-                .with_stream(self.stream, u64::from(self.base))
+                .with_stream(StreamId(self.stream), u64::from(self.base))
         })
     }
 
@@ -126,7 +126,7 @@ impl<'a> ModuleSymbols<'a> {
         let offset = self.offset(record)?;
         let symbol = record
             .symbol()
-            .map_err(|error| error.with_stream(self.stream, u64::from(offset)))?;
+            .map_err(|error| error.with_stream(StreamId(self.stream), u64::from(offset)))?;
         let depth = self.stack.len();
         let scope = self.stack.last().map(|open| open.offset);
         if let Some(links) = symbol.scope() {
@@ -226,7 +226,7 @@ impl<'a> Iterator for ModuleSymbols<'a> {
                 let position = u64::try_from(self.records.position())
                     .unwrap_or(u64::MAX)
                     .saturating_add(u64::from(self.base));
-                Err(error.with_stream(self.stream, position))
+                Err(error.with_stream(StreamId(self.stream), position))
             }
             Some(Ok(record)) => self.step(record),
         };

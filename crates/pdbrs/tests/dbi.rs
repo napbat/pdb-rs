@@ -70,7 +70,10 @@ fn assert_error<T: core::fmt::Debug>(
 ) {
     let error = result.unwrap_err();
     assert_eq!(error.kind(), kind);
-    assert_eq!(error.stream_location(), Some(location));
+    assert_eq!(
+        error.stream_location(),
+        Some((StreamId(location.0), location.1))
+    );
     assert_eq!(error.offset(), None);
 }
 

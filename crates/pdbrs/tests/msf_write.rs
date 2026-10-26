@@ -4,9 +4,8 @@
 //! structure, and `check_free_page_map` checks the active free page map.
 
 use pdbrs::io::ReadAt;
-use pdbrs::native::msf::{
-    Msf, MsfBuilder, MsfLimits, OldDirectoryPolicy, StreamId, WriteOptions, copy_exact,
-};
+use pdbrs::io::copy_exact;
+use pdbrs::native::msf::{Msf, MsfBuilder, MsfLimits, OldDirectoryPolicy, StreamId, WriteOptions};
 use pdbrs::{Error, ErrorKind, Result};
 
 /// The page sizes that the writer writes. The reader also accepts 65536.
@@ -88,7 +87,7 @@ fn builder(streams: &[Option<Vec<u8>>]) -> MsfBuilder<&[u8]> {
 
 /// Open `bytes` and compare the streams with `expected`.
 fn check_streams<'a>(bytes: &'a [u8], expected: &[Option<Vec<u8>>]) -> Msf<&'a [u8]> {
-    let msf = Msf::open(bytes).unwrap();
+    let msf = Msf::read(bytes).unwrap();
     assert_eq!(msf.stream_count(), u32::try_from(expected.len()).unwrap());
     for (index, content) in expected.iter().enumerate() {
         let stream = msf.stream(StreamId(u32::try_from(index).unwrap())).unwrap();
@@ -225,7 +224,7 @@ fn multi_interval_files_keep_fpm_pages_in_each_interval() {
         let plan = builder.plan(options(page_size)).unwrap();
         assert!(plan.page_count() > 2 * page_size);
         let bytes = plan.to_vec().unwrap();
-        let msf = Msf::open(bytes.as_slice()).unwrap();
+        let msf = Msf::read(bytes.as_slice()).unwrap();
         check_layout(&bytes, &msf, 0);
         for (id, source) in [(1, Pattern(size)), (3, Pattern(12_345))] {
             let stream = msf.stream(StreamId(id)).unwrap().unwrap();
@@ -248,7 +247,7 @@ fn a_last_page_at_an_interval_start_adds_the_fpm_pages() {
         // The data pages of interval 0 end at page 511. Page 512 starts interval 1.
         seen |= plan.page_count() == 515;
         let bytes = plan.to_vec().unwrap();
-        let msf = Msf::open(bytes.as_slice()).unwrap();
+        let msf = Msf::read(bytes.as_slice()).unwrap();
         check_layout(&bytes, &msf, 0);
     }
     assert!(seen, "one layout ends at the first page of interval 1");
@@ -333,7 +332,7 @@ fn streams_that_are_too_large_are_rejected() {
         builder.push(Pattern(size)).unwrap();
         let error = builder.plan(WriteOptions::default()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded);
-        assert_eq!(error.stream_location(), Some((1, 0)));
+        assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
     }
     let mut builder = MsfBuilder::new();
     builder.push(Pattern(0)).unwrap();
@@ -369,7 +368,7 @@ fn page_size_65536_is_not_written() {
         .unwrap()
         .to_vec()
         .unwrap();
-    let msf = Msf::open(source.as_slice()).unwrap();
+    let msf = Msf::read(source.as_slice()).unwrap();
     for policy in [OldDirectoryPolicy::Empty, OldDirectoryPolicy::Preserve] {
         let error = msf.repack(options(65_536), policy).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
@@ -384,7 +383,7 @@ fn source_read_errors_stop_the_write() {
     let plan = builder.plan(WriteOptions::default()).unwrap();
     let error = plan.to_vec().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Io);
-    assert_eq!(error.stream_location(), Some((1, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
 }
 
 #[test]
@@ -396,7 +395,7 @@ fn repack_preserves_stream_ids_sizes_and_bytes() {
         .unwrap()
         .to_vec()
         .unwrap();
-    let msf = Msf::open(source.as_slice()).unwrap();
+    let msf = Msf::read(source.as_slice()).unwrap();
     let mut expected = streams.clone();
     expected[0] = Some(Vec::new());
     for page_size in PAGE_SIZES {
@@ -420,7 +419,7 @@ fn repack_preserves_stream_0_with_the_source_page_size() {
             .unwrap()
             .to_vec()
             .unwrap();
-        let msf = Msf::open(source.as_slice()).unwrap();
+        let msf = Msf::read(source.as_slice()).unwrap();
         let plan = msf
             .repack(options(page_size), OldDirectoryPolicy::Preserve)
             .unwrap();
@@ -434,7 +433,7 @@ fn repack_preserves_stream_0_with_the_source_page_size() {
             .repack(options(other), OldDirectoryPolicy::Preserve)
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-        assert_eq!(error.stream_location(), Some((0, 0)));
+        assert_eq!(error.stream_location(), Some((StreamId(0), 0)));
     }
 }
 
@@ -446,7 +445,7 @@ fn repack_preserves_a_nil_stream_0() {
         .unwrap()
         .to_vec()
         .unwrap();
-    let msf = Msf::open(source.as_slice()).unwrap();
+    let msf = Msf::read(source.as_slice()).unwrap();
     // A nil stream 0 has no page lists, so the page size can change.
     let preserved = msf
         .repack(options(4096), OldDirectoryPolicy::Preserve)
@@ -470,13 +469,13 @@ fn repack_of_a_repack_is_identical() {
         .unwrap()
         .to_vec()
         .unwrap();
-    let first = Msf::open(source.as_slice()).unwrap();
+    let first = Msf::read(source.as_slice()).unwrap();
     for (options, policy) in [
         (WriteOptions::default(), OldDirectoryPolicy::Empty),
         (options(2048), OldDirectoryPolicy::Preserve),
     ] {
         let once = first.repack(options, policy).unwrap().to_vec().unwrap();
-        let second = Msf::open(once.as_slice()).unwrap();
+        let second = Msf::read(once.as_slice()).unwrap();
         let twice = second.repack(options, policy).unwrap().to_vec().unwrap();
         assert_eq!(once, twice);
     }
@@ -504,7 +503,8 @@ mod file {
 
     use pdbrs::ErrorKind;
     use pdbrs::io::FileReader;
-    use pdbrs::native::msf::{Msf, MsfBuilder, OldDirectoryPolicy, WriteOptions, copy_exact_file};
+    use pdbrs::io::copy_exact_file;
+    use pdbrs::native::msf::{Msf, MsfBuilder, OldDirectoryPolicy, WriteOptions};
 
     use super::{Failing, Pattern, builder, sample_streams};
 
@@ -561,7 +561,7 @@ mod file {
         assert_eq!(fs::read(&copy).unwrap(), written);
 
         let repacked = temp.0.join("repacked.pdb");
-        let msf = Msf::open(FileReader::open(&copy).unwrap()).unwrap();
+        let msf = Msf::read(FileReader::open(&copy).unwrap()).unwrap();
         msf.repack(WriteOptions::default(), OldDirectoryPolicy::Preserve)
             .unwrap()
             .write_file(&repacked)

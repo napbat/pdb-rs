@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use super::super::header::HEADER_SIZE;
 use super::layout::{Layout, Span};
 use super::{WriteOptions, WritePlan, plan_allocation_failed};
-use crate::format::ContainerKind;
+use crate::ContainerKind;
 use crate::io::Write;
 use crate::native::msf::StreamSource;
 use crate::{Error, ErrorKind, Result};

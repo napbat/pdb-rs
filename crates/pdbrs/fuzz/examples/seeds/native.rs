@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use pdbrs::format::ContainerKind;
+use pdbrs::ContainerKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::auxiliary::NamedStreamKind;
 use pdbrs::native::codeview::Records;

@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 
 use super::root::{MetadataRoot, MetadataStream};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::compressed;
 use crate::{Error, ErrorKind, Result};

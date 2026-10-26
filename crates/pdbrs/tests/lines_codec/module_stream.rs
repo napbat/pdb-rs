@@ -152,7 +152,7 @@ fn global_refs_validate_against_the_symbol_record_stream() {
             let error = result.unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidReference);
             // The size field is at offset 0, the second reference at 8.
-            assert_eq!(error.stream_location(), Some((5, 8)));
+            assert_eq!(error.stream_location(), Some((StreamId(5), 8)));
         }
     }
 }
@@ -164,6 +164,6 @@ fn global_refs_reject_a_partial_reference() {
     assert_eq!(stream.global_ref_data(), [0, 0]);
     let error = stream.global_refs().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((5, 4)));
+    assert_eq!(error.stream_location(), Some((StreamId(5), 4)));
     assert_eq!(error_kind(stream.encode()), ErrorKind::InvalidFormat);
 }

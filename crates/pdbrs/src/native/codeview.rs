@@ -24,7 +24,10 @@ pub mod type_record;
 
 pub(crate) mod writer;
 
+mod kind;
 pub mod symbol;
+
+pub use kind::{LeafKind, SymbolKind};
 
 use index::{IdIndex, TypeIndex};
 use numeric::Numeric;

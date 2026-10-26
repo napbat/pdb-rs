@@ -1,9 +1,9 @@
 //! The MSFZ container: the header, the stream directory, the Chunk Table and chunk decoding.
 
-use pdbrs::format::ContainerKind;
+use pdbrs::ContainerKind;
 use pdbrs::io::ReadAt;
-use pdbrs::native::container::Container;
-use pdbrs::native::msf::{MsfLimits, StreamId};
+use pdbrs::native::container::{Container, ContainerLimits};
+use pdbrs::native::msf::StreamId;
 use pdbrs::native::msfz::{Msfz, MsfzLimits};
 
 use crate::input::Input;
@@ -36,11 +36,11 @@ pub fn limits() -> MsfzLimits {
 /// Panics if a container opens with other limits and gives another stream count, if the
 /// stream readers of `Msfz` and `Container` disagree, or if a second read gives another result.
 pub fn read(data: &[u8]) {
-    let _ = pdbrs::format::probe(data);
+    let _ = pdbrs::probe(data);
     let Some(msfz) = ok(Msfz::with_limits(data, limits())) else {
         return;
     };
-    let container = Container::with_limits(data, MsfLimits::default(), limits())
+    let container = Container::with_limits(data, ContainerLimits::default().with_msfz(limits()))
         .expect("the container opens through Container");
     assert_eq!(container.kind(), ContainerKind::NativeMsfz);
     assert_eq!(container.stream_count(), msfz.stream_count());

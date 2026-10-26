@@ -168,11 +168,11 @@ impl RecordOffsets {
         let mut records = Records::new(symbol_records);
         while let Some(record) = records.next() {
             let record =
-                record.map_err(|error| error.with_stream(stream.0, logical(records.position())))?;
+                record.map_err(|error| error.with_stream(stream, logical(records.position())))?;
             offsets.try_reserve(1).map_err(|_| {
                 Error::new(ErrorKind::LimitExceeded, None)
                     .with_context("symbol record offsets cannot be allocated")
-                    .with_stream(stream.0, u64::from(record.offset))
+                    .with_stream(stream, u64::from(record.offset))
             })?;
             offsets.push(record.offset);
         }
@@ -226,7 +226,7 @@ impl RecordOffsets {
         };
         Err(Error::new(ErrorKind::InvalidReference, None)
             .with_context(context)
-            .with_stream(stream.0, logical(location)))
+            .with_stream(stream, logical(location)))
     }
 }
 
@@ -244,7 +244,7 @@ fn region(start: usize, size: u32, end: usize) -> core::result::Result<Range<usi
 fn index_error(kind: ErrorKind, stream: StreamId, offset: usize, context: &'static str) -> Error {
     Error::new(kind, None)
         .with_context(context)
-        .with_stream(stream.0, logical(offset))
+        .with_stream(stream, logical(offset))
 }
 
 /// Convert a logical offset to the error representation.

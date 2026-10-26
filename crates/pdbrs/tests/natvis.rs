@@ -102,14 +102,14 @@ fn verify_natvis_checks_the_entry_and_the_text() {
     // The entry check comes first: a size or CRC mismatch is reported before the text.
     let error = file.verify_natvis(&XML[1..], stream).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((85, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(85), 0)));
 
     let text = b"<NotNatvis/>";
     let error = source(text, SourceCompression::None)
         .verify_natvis(text, stream)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((85, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(85), 0)));
 
     let error = source(XML, SourceCompression::Lz)
         .verify_natvis(XML, stream)

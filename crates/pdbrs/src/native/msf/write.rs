@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 
 use super::{Msf, MsfLimits, NIL_STREAM_SIZE, StreamId};
-use crate::io::{ReadAt, Write, copy_all};
+use crate::io::{ReadAt, Write};
 use crate::{Error, ErrorKind, Result};
 
 mod builder;
@@ -15,8 +15,6 @@ mod file;
 mod layout;
 
 pub use builder::MsfBuilder;
-#[cfg(feature = "std")]
-pub use file::copy_exact_file;
 
 use layout::{Layout, check_page_size};
 
@@ -139,7 +137,7 @@ pub(crate) fn plan_sizes<'a>(
 fn stream_too_large(id: u32) -> Error {
     Error::new(ErrorKind::LimitExceeded, None)
         .with_context("stream is too large for an MSF stream")
-        .with_stream(id, 0)
+        .with_stream(StreamId(id), 0)
 }
 
 /// The frozen layout of a new container and the source of its stream bytes.
@@ -152,7 +150,7 @@ fn stream_too_large(id: u32) -> Error {
 ///
 /// | Operation | Guarantee | Not guaranteed |
 /// | --- | --- | --- |
-/// | [`copy_exact`] | Every source byte, including free pages and padding | Any validation of the source |
+/// | [`copy_exact`](crate::io::copy_exact) | Every source byte, including free pages and padding | Any validation of the source |
 /// | [`Msf::repack`] | Stream IDs, nil and empty streams, sizes and all stream bytes | Page positions, free page bytes and padding of the source |
 /// | [`MsfBuilder`] | A consistent container with the given streams | PDB semantic validity of the stream contents |
 ///
@@ -190,9 +188,10 @@ fn stream_too_large(id: u32) -> Error {
 ///
 /// # Errors and partial output
 ///
-/// A planning error writes nothing. [`WritePlan::write_to`] and [`copy_exact`] write in file
-/// order. A read error or an output error can leave a partial output in the writer. Under
-/// `std`, `WritePlan::write_file` and `copy_exact_file` write a temporary file and rename it.
+/// A planning error writes nothing. [`WritePlan::write_to`] and
+/// [`copy_exact`](crate::io::copy_exact) write in file order. A read error or an output error
+/// can leave a partial output in the writer. Under `std`, `WritePlan::write_file` and
+/// `io::copy_exact_file` write a temporary file and rename it.
 /// On error, they delete the temporary file and do not change the destination.
 ///
 /// Writing over the source file is not supported.
@@ -330,7 +329,7 @@ impl<S: ReadAt> Msf<S> {
             {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("a preserved stream 0 needs the page size of the source")
-                    .with_stream(0, 0));
+                    .with_stream(StreamId(0), 0));
             }
             _ => {}
         }
@@ -343,29 +342,10 @@ impl<S: ReadAt> StreamSource for Msf<S> {
         let Some(stream) = self.stream(StreamId(id))? else {
             return Err(Error::new(ErrorKind::MissingStream, None)
                 .with_context("planned stream is nil in the source")
-                .with_stream(id, offset));
+                .with_stream(StreamId(id), offset));
         };
         stream.read_exact_at(offset, buffer)
     }
-}
-
-/// Copy all bytes of `source` to `output` without a change.
-///
-/// The function does not check that `source` is a valid container. It copies through one
-/// buffer of at most 64 KiB and returns the number of bytes.
-///
-/// # Errors
-///
-/// - An error from `source` if a read fails.
-/// - [`ErrorKind::Io`] if `output` fails. The error offset is the file offset of the buffer.
-/// - [`ErrorKind::LimitExceeded`] if the buffer allocation fails.
-///
-/// After an error, `output` can hold a part of the source.
-pub fn copy_exact<S: ReadAt + ?Sized, W: Write + ?Sized>(
-    source: &S,
-    output: &mut W,
-) -> Result<u64> {
-    copy_all(source, output)
 }
 
 /// Return the error for an output that does not fit in memory.

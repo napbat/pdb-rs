@@ -9,7 +9,7 @@ use super::{
     LocalConstantHandle, LocalConstantInfo, LocalScopeHandle, LocalScopeInfo, LocalVariableHandle,
     LocalVariableInfo, MethodInfo, PdbBuilder,
 };
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::{self, CustomDebugValue};

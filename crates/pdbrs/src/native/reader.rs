@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 
 use super::address::AddressTables;
-use super::container::{Container, Stream};
+use super::container::{Container, ContainerLimits, Stream};
 use super::dbi::{Dbi, DebugStream, Module, ModuleStream};
 use super::debug_stream::{
     DebugRecord, FixupStream, FunctionEntryStream, OmapStream, RecordStream, RvaVaBlob, TokenRidMap,
@@ -71,7 +71,12 @@ impl<S: ReadAt> Pdb<S> {
     /// Returns an error for malformed or unsupported input, missing Info,
     /// invalid named-stream references, exceeded limits or failed I/O.
     pub fn with_options(source: S, options: ReadOptions) -> Result<Self> {
-        let container = Container::with_limits(source, options.msf, options.msfz)?;
+        let container = Container::with_limits(
+            source,
+            ContainerLimits::default()
+                .with_msf(options.msf)
+                .with_msfz(options.msfz),
+        )?;
         if container.stream_count() <= 1 {
             return Err(Error::new(ErrorKind::MissingStream, None).with_context("PDB Info"));
         }
@@ -227,7 +232,7 @@ impl<S: ReadAt> Pdb<S> {
             return Ok(None);
         };
         let types = TypeStream::parse(stream.read_all(self.options.max_stream_bytes)?)
-            .map_err(|error| error.with_stream(id.0, 0))?;
+            .map_err(|error| error.with_stream(id, 0))?;
         for reference in [types.header().hash_stream, types.header().hash_aux_stream]
             .into_iter()
             .flatten()
@@ -256,7 +261,7 @@ impl<S: ReadAt> Pdb<S> {
         if dbi.header().age > self.info.identity().age() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("DBI age is larger than the PDB Info age")
-                .with_stream(3, 8));
+                .with_stream(StreamId(3), 8));
         }
         let header = dbi.header();
         for reference in [
@@ -445,5 +450,5 @@ fn require_stream<S: ReadAt>(container: &Container<S>, id: StreamId) -> Result<S
     container
         .stream(id)
         .map_err(|error| error.with_context("PDB stream reference"))?
-        .ok_or_else(|| Error::new(ErrorKind::InvalidReference, None).with_stream(id.0, 0))
+        .ok_or_else(|| Error::new(ErrorKind::InvalidReference, None).with_stream(id, 0))
 }

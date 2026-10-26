@@ -7,7 +7,7 @@ use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use super::parts::PdbParts;
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::portable::metadata::{
     BlobOffset, CodedIndex, GuidIndex, MAX_ROW, MetadataStream, MetadataToken, StringOffset,
     TableId,

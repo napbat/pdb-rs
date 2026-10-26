@@ -1,7 +1,7 @@
 //! Behavior tests for the previous stream directory snapshot in stream 0.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::msf::OldDirectory;
+use pdbrs::native::msf::{OldDirectory, StreamId};
 
 fn words(values: &[u32]) -> Vec<u8> {
     values
@@ -68,7 +68,11 @@ fn malformed_snapshots_are_rejected_in_stream_zero() {
     for (bytes, kind, offset) in cases {
         let error = OldDirectory::parse(&bytes, 512).unwrap_err();
         assert_eq!(error.kind(), kind, "{bytes:?}");
-        assert_eq!(error.stream_location(), Some((0, offset)), "{bytes:?}");
+        assert_eq!(
+            error.stream_location(),
+            Some((StreamId(0), offset)),
+            "{bytes:?}"
+        );
         assert_eq!(error.offset(), None);
     }
 }

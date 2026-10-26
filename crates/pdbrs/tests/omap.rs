@@ -44,7 +44,7 @@ fn truncated_tables_fail_with_the_record_offset() {
     for (length, offset) in [(1, 0), (7, 0), (9, 8), (15, 8), (20, 16)] {
         let error = OmapStream::parse(vec![0; length], STREAM).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnexpectedEof, "{error}");
-        assert_eq!(error.stream_location(), Some((STREAM.0, offset)));
+        assert_eq!(error.stream_location(), Some((STREAM, offset)));
     }
 }
 
@@ -53,7 +53,7 @@ fn unsorted_tables_fail_with_the_record_offset() {
     let error =
         OmapStream::parse(bytes(&[(0x1000, 1), (0x2000, 2), (0x1fff, 3)]), STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((STREAM.0, 16)));
+    assert_eq!(error.stream_location(), Some((STREAM, 16)));
     let error =
         OmapStream::from_records(&[OmapRecord::new(2, 0), OmapRecord::new(1, 0)]).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);

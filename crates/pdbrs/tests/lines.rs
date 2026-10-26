@@ -9,6 +9,7 @@ use pdbrs::native::lines::{
     DEBUG_S_LINES, FileChecksums, InlineeLines, InlineeSignature, LineEntry, LineSubsection,
     LinesSubsection, ModuleLines, SubsectionKind,
 };
+use pdbrs::native::msf::StreamId;
 
 /// The module stream index in the synthetic module record.
 const MODULE_STREAM: u16 = 5;
@@ -476,7 +477,7 @@ fn module_lines_reject_invalid_file_references() {
         let lines = ModuleLines::parse(&stream).unwrap();
         let error = lines.validate().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidReference);
-        assert_eq!(error.stream_location(), Some((5, location)));
+        assert_eq!(error.stream_location(), Some((StreamId(5), location)));
     }
 
     // Line blocks without a file checksum subsection.
@@ -497,7 +498,7 @@ fn module_lines_locate_decode_errors() {
     let stream = module_stream(&twice);
     let error = ModuleLines::parse(&stream).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((5, 8 + 16)));
+    assert_eq!(error.stream_location(), Some((StreamId(5), 8 + 16)));
 
     let bad = [
         subsection(DEBUG_S_FILECHKSMS, &checksums),
@@ -507,5 +508,5 @@ fn module_lines_locate_decode_errors() {
     let stream = module_stream(&bad);
     let error = ModuleLines::parse(&stream).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
-    assert_eq!(error.stream_location(), Some((5, 8 + 16)));
+    assert_eq!(error.stream_location(), Some((StreamId(5), 8 + 16)));
 }

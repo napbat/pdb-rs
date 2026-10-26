@@ -16,8 +16,8 @@ mod convert;
 
 use super::msf::{self, Msf, MsfLimits, StreamId};
 use super::msfz::{self, Msfz, MsfzLimits};
-use crate::format::{ContainerKind, probe};
 use crate::io::ReadAt;
+use crate::{ContainerKind, probe};
 use crate::{Error, ErrorKind, Result};
 
 /// A native stream container: MSF 7.00 or MSFZ.
@@ -30,17 +30,56 @@ pub enum Container<S> {
     Msfz(Msfz<S>),
 }
 
+/// Resource limits for [`Container::with_limits`].
+///
+/// The value holds the limits of each container format. The default holds
+/// [`MsfLimits::default`] and [`MsfzLimits::default`].
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct ContainerLimits {
+    msf: MsfLimits,
+    msfz: MsfzLimits,
+}
+
+impl ContainerLimits {
+    /// Return the limits for an MSF 7.00 container.
+    #[must_use]
+    pub const fn msf(self) -> MsfLimits {
+        self.msf
+    }
+
+    /// Set the limits for an MSF 7.00 container.
+    #[must_use]
+    pub const fn with_msf(mut self, limits: MsfLimits) -> Self {
+        self.msf = limits;
+        self
+    }
+
+    /// Return the limits for an MSFZ container.
+    #[must_use]
+    pub const fn msfz(self) -> MsfzLimits {
+        self.msfz
+    }
+
+    /// Set the limits for an MSFZ container.
+    #[must_use]
+    pub const fn with_msfz(mut self, limits: MsfzLimits) -> Self {
+        self.msfz = limits;
+        self
+    }
+}
+
 impl<S: ReadAt> Container<S> {
-    /// Open a container with the default limits.
+    /// Read a container with the default limits.
     ///
     /// # Errors
     ///
     /// Returns the errors of [`Container::with_limits`].
-    pub fn open(source: S) -> Result<Self> {
-        Self::with_limits(source, MsfLimits::default(), MsfzLimits::default())
+    pub fn read(source: S) -> Result<Self> {
+        Self::with_limits(source, ContainerLimits::default())
     }
 
-    /// Open an MSF 7.00 container with `msf` or an MSFZ container with `msfz`.
+    /// Read an MSF 7.00 container with [`ContainerLimits::msf`] or an MSFZ container with
+    /// [`ContainerLimits::msfz`].
     ///
     /// # Errors
     ///
@@ -48,10 +87,10 @@ impl<S: ReadAt> Container<S> {
     /// - [`ErrorKind::UnsupportedVersion`] for a small MSF 2.00 container.
     /// - [`ErrorKind::InvalidSignature`] for other signatures.
     /// - The errors of [`Msf::with_limits`] or [`Msfz::with_limits`].
-    pub fn with_limits(source: S, msf: MsfLimits, msfz: MsfzLimits) -> Result<Self> {
+    pub fn with_limits(source: S, limits: ContainerLimits) -> Result<Self> {
         match probe(&source)? {
-            ContainerKind::NativeMsfz => Msfz::with_limits(source, msfz).map(Self::Msfz),
-            ContainerKind::NativeMsf7 => Msf::with_limits(source, msf).map(Self::Msf),
+            ContainerKind::NativeMsfz => Msfz::with_limits(source, limits.msfz).map(Self::Msfz),
+            ContainerKind::NativeMsf7 => Msf::with_limits(source, limits.msf).map(Self::Msf),
             ContainerKind::LegacyMsf2 => Err(Error::new(ErrorKind::UnsupportedVersion, Some(0))
                 .with_context("small MSF 2.00 container")),
             _ => Err(Error::new(ErrorKind::InvalidSignature, Some(0))

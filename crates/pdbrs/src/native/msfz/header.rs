@@ -1,6 +1,6 @@
 //! The 80-byte MSFZ file header and the compression codes.
 
-use crate::format::ContainerKind;
+use crate::ContainerKind;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 

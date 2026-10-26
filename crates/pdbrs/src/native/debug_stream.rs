@@ -299,5 +299,5 @@ pub(crate) fn check_length(
     let offset = u64::try_from(bytes.len() - tail).unwrap_or(u64::MAX);
     Err(Error::new(ErrorKind::UnexpectedEof, None)
         .with_context(context)
-        .with_stream(stream.0, offset))
+        .with_stream(stream, offset))
 }

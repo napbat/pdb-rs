@@ -144,7 +144,7 @@ fn section_header_stream_rejects_partial_records_with_a_location() {
     for (length, offset) in [(39, 0), (41, 40), (79, 40)] {
         let error = SectionHeaderStream::parse(vec![0; length], StreamId(5)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-        assert_eq!(error.stream_location(), Some((5, offset)));
+        assert_eq!(error.stream_location(), Some((StreamId(5), offset)));
     }
 }
 

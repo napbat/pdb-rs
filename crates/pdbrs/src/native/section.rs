@@ -26,6 +26,27 @@ pub const SECTION_HEADER_SIZE: usize = 40;
 /// The number of 4-byte words in one section header.
 const WORDS: usize = SECTION_HEADER_SIZE / 4;
 
+/// A PE/COFF machine type (`IMAGE_FILE_MACHINE_*` in `winnt.h`).
+///
+/// The value set is open: the type keeps values without a constant.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Machine(pub u16);
+
+impl Machine {
+    /// `IMAGE_FILE_MACHINE_UNKNOWN`.
+    pub const UNKNOWN: Self = Self(0);
+    /// `IMAGE_FILE_MACHINE_I386`.
+    pub const I386: Self = Self(0x014c);
+    /// `IMAGE_FILE_MACHINE_ARMNT`.
+    pub const ARMNT: Self = Self(0x01c4);
+    /// `IMAGE_FILE_MACHINE_IA64`.
+    pub const IA64: Self = Self(0x0200);
+    /// `IMAGE_FILE_MACHINE_AMD64`.
+    pub const AMD64: Self = Self(0x8664);
+    /// `IMAGE_FILE_MACHINE_ARM64`.
+    pub const ARM64: Self = Self(0xaa64);
+}
+
 /// One image section header.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]

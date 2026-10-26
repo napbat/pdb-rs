@@ -156,7 +156,7 @@ pub(crate) fn native_output(example: &Path, pdb: &Path) -> Result<Run, String> {
 /// Read all streams of the container in `bytes`.
 pub(crate) fn read_streams(bytes: &[u8]) -> Result<Streams, String> {
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
-    let container = Container::open(bytes).map_err(pdbrs)?;
+    let container = Container::read(bytes).map_err(pdbrs)?;
     (0..container.stream_count())
         .map(|id| {
             container

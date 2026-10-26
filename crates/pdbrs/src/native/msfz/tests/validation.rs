@@ -8,8 +8,8 @@ use super::{
     DIRECTORY_COMPRESSION_FIELD, DIRECTORY_OFFSET_FIELD, DIRECTORY_SIZE_FIELD, Image, Part, STORED,
     Spec, ZSTD, expect_error, pattern, read,
 };
+use crate::ContainerKind;
 use crate::ErrorKind;
-use crate::format::ContainerKind;
 use crate::native::msfz::{Msfz, MsfzLimits};
 
 /// Return the streams of [`sample`].
@@ -78,7 +78,7 @@ fn every_truncation_fails_without_a_panic() {
     let image = sample();
     for length in 0..image.bytes.len() {
         let bytes = &image.bytes[..length];
-        let error = Msfz::open(bytes).unwrap_err();
+        let error = Msfz::read(bytes).unwrap_err();
         assert!(
             matches!(
                 error.kind(),
@@ -88,7 +88,7 @@ fn every_truncation_fails_without_a_panic() {
         );
     }
     expect_error(
-        Msfz::open(&image.bytes[..79]),
+        Msfz::read(&image.bytes[..79]),
         ErrorKind::UnexpectedEof,
         "MSFZ header is incomplete",
     );
@@ -174,7 +174,7 @@ fn unknown_versions_and_compression_codes_are_unsupported() {
     }
     let mut other = image.bytes.clone();
     other[..32].copy_from_slice(ContainerKind::NativeMsf7.signature());
-    let error = Msfz::open(other.as_slice()).unwrap_err();
+    let error = Msfz::read(other.as_slice()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidSignature);
 }
 

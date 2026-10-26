@@ -33,8 +33,9 @@ use std::error::Error;
 use std::path::Path;
 
 use pdbrs::io::FileReader;
+use pdbrs::io::copy_exact_file;
 use pdbrs::native::container::Container;
-use pdbrs::native::msf::{OldDirectoryPolicy, StreamId, WriteOptions, copy_exact_file};
+use pdbrs::native::msf::{OldDirectoryPolicy, StreamId, WriteOptions};
 use pdbrs::native::msfz::{self, Codec};
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
@@ -99,7 +100,7 @@ fn repack(arguments: &[String]) -> Outcome {
         return Err(usage());
     };
     check_paths(input, output)?;
-    let container = Container::open(FileReader::open(input)?)?;
+    let container = Container::read(FileReader::open(input)?)?;
     if source_page_size {
         let msf = container
             .msf()
@@ -142,7 +143,7 @@ fn pdz_encode(arguments: &[String]) -> Outcome {
         return Err(usage());
     };
     check_paths(input, output)?;
-    let container = Container::open(FileReader::open(input)?)?;
+    let container = Container::read(FileReader::open(input)?)?;
     let plan = container.to_msfz(options, policy)?;
     plan.write_file(output)?;
     println!(
@@ -210,8 +211,8 @@ fn compare(arguments: &[String]) -> Outcome {
     let [original, written] = arguments else {
         return Err(usage());
     };
-    let first = Container::open(FileReader::open(original)?)?;
-    let second = Container::open(FileReader::open(written)?)?;
+    let first = Container::read(FileReader::open(original)?)?;
+    let second = Container::read(FileReader::open(written)?)?;
     describe("original", &first);
     describe("written", &second);
     if first.stream_count() != second.stream_count() {

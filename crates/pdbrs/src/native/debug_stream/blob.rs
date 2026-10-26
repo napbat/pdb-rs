@@ -99,7 +99,7 @@ impl RvaVaBlob {
         let located = |kind: ErrorKind, context: &'static str, offset: u64| {
             Error::new(kind, None)
                 .with_context(context)
-                .with_stream(stream.0, offset)
+                .with_stream(stream, offset)
         };
         let Some(fixed) = bytes.first_chunk::<BLOB_HEADER_SIZE>() else {
             return Err(located(
@@ -243,7 +243,7 @@ impl RvaVaBlob {
             let mut error = Error::new(ErrorKind::UnexpectedEof, None).with_context(R::TRUNCATED);
             if let Some(stream) = self.stream {
                 let offset = self.data_start + data.len() - tail;
-                error = error.with_stream(stream.0, u64::try_from(offset).unwrap_or(u64::MAX));
+                error = error.with_stream(stream, u64::try_from(offset).unwrap_or(u64::MAX));
             }
             return Err(error);
         }

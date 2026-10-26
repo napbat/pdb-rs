@@ -290,7 +290,7 @@ impl PdbBuilder<'_> {
                 global_refs: &refs,
             }
             .encode()
-            .map_err(|error| error.with_stream(stream.0, 0))?;
+            .map_err(|error| error.with_stream(stream, 0))?;
             record.symbol_bytes = encoded.sizes.symbol_bytes;
             record.c11_bytes = encoded.sizes.c11_bytes;
             record.c13_bytes = encoded.sizes.c13_bytes;

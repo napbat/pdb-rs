@@ -9,7 +9,7 @@
 #[path = "../examples/native_synthetic/program.rs"]
 mod program;
 
-use pdbrs::format::ContainerKind;
+use pdbrs::ContainerKind;
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::container::Container;
@@ -33,7 +33,7 @@ fn synthetic() -> Vec<u8> {
 
 /// Return the streams of an MSF 7.00 PDB. `None` is a nil stream.
 fn streams(msf: &[u8]) -> Vec<Option<Vec<u8>>> {
-    let msf = Msf::open(msf).expect("MSF 7.00");
+    let msf = Msf::read(msf).expect("MSF 7.00");
     (0..msf.stream_count())
         .map(|id| {
             msf.stream(StreamId(id))

@@ -63,6 +63,28 @@ impl IdIndex {
     pub const NONE: Self = Self(0);
 }
 
+/// The 0-based index of a module in the DBI module list.
+///
+/// Some records store a 1-based module number. A decoder converts the number 0 of such a
+/// record to `None` and the number `n` to `ModuleIndex(n - 1)`.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ModuleIndex(pub u32);
+
+/// The byte offset of a symbol record in the symbol substream of a module stream.
+///
+/// The offset starts at the start of the module stream, so the first record after the
+/// signature has offset 4. It is not an offset in the global symbol stream.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ModuleSymbolOffset(pub u32);
+
+/// The byte offset of a string in the string buffer of the `/names` stream.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NameOffset(pub u32);
+
+/// The byte offset of an entry in the `DEBUG_S_FILECHKSMS` subsection of a module.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ChecksumOffset(pub u32);
+
 /// A decoded primitive type index.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Primitive {

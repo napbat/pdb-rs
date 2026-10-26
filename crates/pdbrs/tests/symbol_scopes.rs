@@ -87,7 +87,7 @@ fn failure(builder: &Builder, max_depth: usize) -> (ErrorKind, u64) {
     let error = results.last().unwrap().as_ref().unwrap_err();
     assert!(results[..results.len() - 1].iter().all(Result::is_ok));
     let (stream, offset) = error.stream_location().unwrap();
-    assert_eq!(stream, STREAM.0);
+    assert_eq!(stream, STREAM);
     (error.kind(), offset)
 }
 

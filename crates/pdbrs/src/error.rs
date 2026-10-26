@@ -2,13 +2,14 @@
 
 use core::fmt;
 
+use crate::native::msf::StreamId;
 use crate::portable::metadata::{MetadataStream, TableId};
 
 /// A result returned by this crate.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// The reason an operation failed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// The input ends before the requested bytes are available.
@@ -33,6 +34,8 @@ pub enum ErrorKind {
     InvalidReference,
     /// A configured resource limit or allocation capacity was exceeded.
     LimitExceeded,
+    /// An edit asks for a change that the editor does not support.
+    UnsupportedEdit,
 }
 
 /// The location of an error in Portable PDB metadata.
@@ -40,7 +43,7 @@ pub enum ErrorKind {
 /// Each field is optional. The stream is a metadata stream, for example `#~` or `#Blob`. The
 /// table, row and column identify a table cell. The heap offset is an offset into the heap
 /// that the stream names, or into the heap that the column refers to.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct PortableLocation {
     stream: Option<MetadataStream>,
     table: Option<TableId>,
@@ -180,7 +183,7 @@ pub struct Error {
     offset: Option<u64>,
     source: Option<nostdio::IoError>,
     context: Option<&'static str>,
-    stream: Option<(u32, u64)>,
+    stream: Option<(StreamId, u64)>,
     portable: Option<PortableLocation>,
 }
 
@@ -240,14 +243,14 @@ impl Error {
 
     /// Attach a stream ID and logical byte offset without replacing the physical offset.
     #[must_use]
-    pub const fn with_stream(mut self, stream: u32, offset: u64) -> Self {
+    pub const fn with_stream(mut self, stream: StreamId, offset: u64) -> Self {
         self.stream = Some((stream, offset));
         self
     }
 
     /// Return the stream ID and logical byte offset, if known.
     #[must_use]
-    pub const fn stream_location(&self) -> Option<(u32, u64)> {
+    pub const fn stream_location(&self) -> Option<(StreamId, u64)> {
         self.stream
     }
 
@@ -291,6 +294,7 @@ impl fmt::Display for Error {
             ErrorKind::MissingStream => "required stream is absent",
             ErrorKind::InvalidReference => "invalid serialized reference",
             ErrorKind::LimitExceeded => "resource limit exceeded",
+            ErrorKind::UnsupportedEdit => "unsupported edit",
         };
         formatter.write_str(message)?;
         if let Some(offset) = self.offset {
@@ -300,7 +304,7 @@ impl fmt::Display for Error {
             write!(formatter, " ({context})")?;
         }
         if let Some((stream, offset)) = self.stream {
-            write!(formatter, " in stream {stream} at {offset:#x}")?;
+            write!(formatter, " in stream {} at {offset:#x}", stream.0)?;
         }
         if let Some(location) = &self.portable {
             write!(formatter, " in Portable PDB metadata: {location}")?;

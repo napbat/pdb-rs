@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 
 use super::heaps::{BlobHeap, GuidHeap, StringHeapBuilder, UserStringHeap, walk_entries};
 use super::parts::{DebugTables, ExternalRowCounts, PdbParts};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::debug::{DocumentName, Import, Imports, encode_imports};

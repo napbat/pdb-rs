@@ -44,7 +44,7 @@ fn rejects_text_that_is_not_a_json_object() {
     ] {
         let error = SourceLink::parse(bytes, StreamId(9)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "{bytes:?}");
-        assert_eq!(error.stream_location(), Some((9, 0)));
+        assert_eq!(error.stream_location(), Some((StreamId(9), 0)));
     }
 }
 

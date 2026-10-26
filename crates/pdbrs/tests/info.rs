@@ -93,7 +93,7 @@ fn the_name_index_word_is_not_a_feature_code() {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
-        Some((1, u64::try_from(TABLE + 40).unwrap()))
+        Some((StreamId(1), u64::try_from(TABLE + 40).unwrap()))
     );
 }
 
@@ -112,7 +112,7 @@ fn validates_bitmaps_capacity_and_name_references() {
     for (offset, value, expected) in cases {
         let error = Info::parse(with(offset, value)).unwrap_err();
         assert_eq!(error.kind(), expected, "offset {offset} value {value}");
-        assert_eq!(error.stream_location().unwrap().0, 1);
+        assert_eq!(error.stream_location().unwrap().0, StreamId(1));
         assert_eq!(error.offset(), None);
     }
 }
@@ -128,7 +128,7 @@ fn names_outside_their_probe_sequence_are_rejected() {
     );
     assert_eq!(
         error.stream_location(),
-        Some((1, u64::try_from(TABLE + 32).unwrap()))
+        Some((StreamId(1), u64::try_from(TABLE + 32).unwrap()))
     );
 }
 

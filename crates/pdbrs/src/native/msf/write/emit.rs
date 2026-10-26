@@ -9,7 +9,7 @@ use super::super::directory::{DIRECTORY_SIZE_OFFSET, PAGE_MAP_OFFSET, WORD};
 use super::super::{ACTIVE_FPM_OFFSET, PAGE_COUNT_OFFSET, PAGE_SIZE_OFFSET};
 use super::StreamSource;
 use super::layout::{Layout, pages_of};
-use crate::format::ContainerKind;
+use crate::ContainerKind;
 use crate::io::Write;
 use crate::{Error, ErrorKind, Result};
 

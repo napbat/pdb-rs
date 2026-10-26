@@ -24,7 +24,7 @@
 //! and new layouts from raw rows and heaps. [`portable::PdbBuilder`] and
 //! [`portable::PdbEditor`] build and edit Portable PDBs from typed records.
 //!
-//! [`format::probe`] identifies containers, not valid PDBs. In particular,
+//! [`probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
 //! does not imply support for decoding legacy records.
 //!
@@ -35,7 +35,7 @@
 //! # Example
 //!
 //! ```
-//! use pdbrs::format::{ContainerKind, probe};
+//! use pdbrs::{ContainerKind, probe};
 //!
 //! let bytes = b"BSJB";
 //! assert_eq!(probe(bytes.as_slice())?, ContainerKind::CliMetadata);
@@ -48,13 +48,13 @@ extern crate alloc;
 
 mod compression;
 mod crypto;
-pub mod error;
-pub mod format;
+mod error;
+mod format;
 pub mod io;
 pub mod native;
 pub mod portable;
 #[cfg(test)]
 mod test_support;
 
-pub use error::{Error, ErrorKind, Result};
-pub use format::{Format, Pdb};
+pub use error::{Error, ErrorKind, PortableLocation, Result};
+pub use format::{ContainerKind, Format, PROBE_LEN, Pdb, probe};

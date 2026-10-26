@@ -35,7 +35,7 @@ pub use rebuild::verify_rebuild;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pdbrs::error::PortableLocation;
+use pdbrs::PortableLocation;
 use pdbrs::portable::embedded::decode_embedded;
 use pdbrs::portable::metadata::MetadataStream;
 use pdbrs::{ErrorKind, Format, Pdb};

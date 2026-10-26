@@ -1,7 +1,7 @@
 //! Inspect a container signature without claiming that its contents form a valid PDB.
 
-use pdbrs::format::probe;
 use pdbrs::io::{FileReader, ReadAt};
+use pdbrs::probe;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);

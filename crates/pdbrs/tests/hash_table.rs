@@ -114,7 +114,7 @@ fn placement_follows_tombstones_and_wraps_at_the_capacity() {
         .check_placement(|entry| Ok(if entry.key == 29 { 4 } else { home(entry) }))
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((STREAM.0, 24 + 2 * 8)));
+    assert_eq!(error.stream_location(), Some((STREAM, 24 + 2 * 8)));
     // Key 12 from bucket 9 stops at bucket 0, which is empty.
     assert!(
         table
@@ -167,7 +167,7 @@ fn values_of_other_fixed_sizes_decode_and_report_their_location() {
     let error = HashTable::<Small>::parse(&bytes, 0, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.context(), Some("small value"));
-    assert_eq!(error.stream_location(), Some((STREAM.0, 30)));
+    assert_eq!(error.stream_location(), Some((STREAM, 30)));
     assert_eq!(error.offset(), None);
 }
 
@@ -197,7 +197,10 @@ fn structural_rules_are_enforced() {
         let bytes = words(values);
         let error = HashTable::<u32>::parse(&bytes, 0, STREAM).unwrap_err();
         assert_eq!(error.kind(), expected, "{values:?}");
-        assert_eq!(error.stream_location().map(|(stream, _)| stream), Some(42));
+        assert_eq!(
+            error.stream_location().map(|(stream, _)| stream),
+            Some(StreamId(42))
+        );
         assert_eq!(error.offset(), None);
     }
     let error = HashTable::<u32>::parse(&[], 4, STREAM).unwrap_err();

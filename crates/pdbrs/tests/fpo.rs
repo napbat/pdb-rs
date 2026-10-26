@@ -33,7 +33,7 @@ fn frame(words: [u32; 6], prolog: u16, saved: u16, flags: u32) -> Vec<u8> {
 fn assert_truncated(error: &pdbrs::Error, offset: u64) {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof, "{error}");
     assert_eq!(error.offset(), None);
-    assert_eq!(error.stream_location(), Some((STREAM.0, offset)));
+    assert_eq!(error.stream_location(), Some((STREAM, offset)));
 }
 
 #[test]

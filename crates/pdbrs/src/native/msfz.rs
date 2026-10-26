@@ -19,7 +19,7 @@
 //!
 //! # Validation
 //!
-//! [`Msfz::open`] and [`Msfz::with_limits`] check these rules before they return:
+//! [`Msfz::read`] and [`Msfz::with_limits`] check these rules before they return:
 //!
 //! - The signature matches and the version is 0. Other versions give
 //!   [`ErrorKind::UnsupportedVersion`].
@@ -55,9 +55,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::compression::{deflate, zstd};
-use crate::format::{ContainerKind, probe};
 use crate::io::ReadAt;
 use crate::native::msf::StreamId;
+use crate::{ContainerKind, probe};
 use crate::{Error, ErrorKind, Result};
 
 mod cache;
@@ -207,12 +207,12 @@ pub struct Msfz<S> {
 }
 
 impl<S: ReadAt> Msfz<S> {
-    /// Open a container with the default [`MsfzLimits`].
+    /// Read a container with the default [`MsfzLimits`].
     ///
     /// # Errors
     ///
     /// Returns the errors of [`Msfz::with_limits`].
-    pub fn open(source: S) -> Result<Self> {
+    pub fn read(source: S) -> Result<Self> {
         Self::with_limits(source, MsfzLimits::default())
     }
 
@@ -275,7 +275,7 @@ impl<S: ReadAt> Msfz<S> {
             .ok_or_else(|| {
                 Error::new(ErrorKind::InvalidStreamIndex, None)
                     .with_context("stream index is outside the stream directory")
-                    .with_stream(id.0, 0)
+                    .with_stream(id, 0)
             })?;
         if entry.nil {
             return Ok(None);
@@ -428,7 +428,7 @@ impl<S: ReadAt> Stream<'_, S> {
         let limit = |context| {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context(context)
-                .with_stream(self.id.0, 0)
+                .with_stream(self.id, 0)
         };
         let size = usize::try_from(self.size)
             .ok()
@@ -457,11 +457,11 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
             .ok_or_else(|| {
                 Error::new(ErrorKind::OffsetOverflow, None)
                     .with_context("stream position is not addressable")
-                    .with_stream(stream, offset)
+                    .with_stream(StreamId(stream), offset)
             })?;
         if end > self.size {
             return Err(Error::new(ErrorKind::UnexpectedEof, None)
-                .with_stream(stream, offset.max(self.size)));
+                .with_stream(StreamId(stream), offset.max(self.size)));
         }
         let first = self
             .fragments
@@ -480,7 +480,7 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
                 Location::File(start) => self.msfz.source.read_exact_at(start + inner, head),
                 Location::Chunks(start) => self.msfz.read_chunks(start + inner, head),
             }
-            .map_err(|error| error.with_stream(stream, logical))?;
+            .map_err(|error| error.with_stream(StreamId(stream), logical))?;
             rest = tail;
             logical += u64::try_from(count).map_err(|_| no_memory())?;
         }

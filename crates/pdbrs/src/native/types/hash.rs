@@ -84,7 +84,7 @@ pub struct TypeHashes<'a> {
 fn error(kind: ErrorKind, context: &'static str, stream: StreamId, offset: u32) -> Error {
     Error::new(kind, None)
         .with_context(context)
-        .with_stream(stream.0, u64::from(offset))
+        .with_stream(stream, u64::from(offset))
 }
 
 /// Return the value of the `u32` at `position` in `bytes`, if present.

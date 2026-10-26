@@ -1,7 +1,7 @@
 //! Behavior tests for the conversion between MSF 7.00 and MSFZ containers.
 
+use pdbrs::ContainerKind;
 use pdbrs::ErrorKind;
-use pdbrs::format::ContainerKind;
 use pdbrs::native::container::Container;
 use pdbrs::native::msf::{self, Msf, MsfBuilder, OldDirectoryPolicy, StreamId};
 use pdbrs::native::msfz::{self, Codec, MIN_CHUNK_SIZE, MsfzBuilder};
@@ -72,7 +72,7 @@ fn small_chunks() -> msfz::WriteOptions {
 fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
     let original = sample_streams();
     let msf = msf_bytes(&original);
-    let source = Container::open(msf.as_slice()).unwrap();
+    let source = Container::read(msf.as_slice()).unwrap();
     for policy in [OldDirectoryPolicy::Empty, OldDirectoryPolicy::Preserve] {
         let expected = expected(&original, policy);
         let pdz = source
@@ -80,7 +80,7 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
             .unwrap()
             .to_vec()
             .unwrap();
-        let converted = Container::open(pdz.as_slice()).unwrap();
+        let converted = Container::read(pdz.as_slice()).unwrap();
         assert_eq!(converted.kind(), ContainerKind::NativeMsfz);
         assert_eq!(streams(&converted), expected);
 
@@ -89,7 +89,7 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
             .unwrap()
             .to_vec()
             .unwrap();
-        let back = Container::open(back.as_slice()).unwrap();
+        let back = Container::read(back.as_slice()).unwrap();
         assert_eq!(back.kind(), ContainerKind::NativeMsf7);
         assert_eq!(streams(&back), expected);
         let report = back.msf().unwrap().check_free_page_map().unwrap();
@@ -108,14 +108,14 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
 #[test]
 fn msf_to_msf_is_a_repack() {
     let msf = msf_bytes(&sample_streams());
-    let source = Container::open(msf.as_slice()).unwrap();
+    let source = Container::read(msf.as_slice()).unwrap();
     let options = msf::WriteOptions::default().with_page_size(1024);
     let converted = source
         .to_msf(options, OldDirectoryPolicy::Empty)
         .unwrap()
         .to_vec()
         .unwrap();
-    let repacked = Msf::open(msf.as_slice())
+    let repacked = Msf::read(msf.as_slice())
         .unwrap()
         .repack(options, OldDirectoryPolicy::Empty)
         .unwrap()
@@ -128,13 +128,13 @@ fn msf_to_msf_is_a_repack() {
 fn msfz_to_msfz_changes_only_the_layout() {
     let original = sample_streams();
     let msf = msf_bytes(&original);
-    let pdz = Container::open(msf.as_slice())
+    let pdz = Container::read(msf.as_slice())
         .unwrap()
         .to_msfz(msfz::WriteOptions::default(), OldDirectoryPolicy::Preserve)
         .unwrap()
         .to_vec()
         .unwrap();
-    let source = Container::open(pdz.as_slice()).unwrap();
+    let source = Container::read(pdz.as_slice()).unwrap();
     let options = small_chunks()
         .with_one_stream_per_chunk(true)
         .with_codec(Codec::Deflate)
@@ -145,7 +145,7 @@ fn msfz_to_msfz_changes_only_the_layout() {
         .unwrap()
         .to_vec()
         .unwrap();
-    let recoded = Container::open(recoded.as_slice()).unwrap();
+    let recoded = Container::read(recoded.as_slice()).unwrap();
     assert_eq!(streams(&recoded), original);
     let msfz = recoded.msfz().unwrap();
     assert!(msfz.is_directory_compressed());
@@ -187,12 +187,12 @@ fn an_msfz_stream_of_4_gib_does_not_convert_to_msf() {
     pdz[68..72].copy_from_slice(&size);
     pdz[table + 16..table + 20].copy_from_slice(&half.to_le_bytes());
 
-    let source = Container::open(pdz.as_slice()).unwrap();
+    let source = Container::read(pdz.as_slice()).unwrap();
     let stream = source.stream(StreamId(1)).unwrap().unwrap();
     assert_eq!(pdbrs::io::ReadAt::len(&stream).unwrap(), 1 << 32);
     let error = source
         .to_msf(msf::WriteOptions::default(), OldDirectoryPolicy::Empty)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
-    assert_eq!(error.stream_location(), Some((1, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
 }

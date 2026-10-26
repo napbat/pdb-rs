@@ -4,8 +4,8 @@
 
 use core::ops::Range;
 
+use pdbrs::ContainerKind;
 use pdbrs::ErrorKind;
-use pdbrs::format::ContainerKind;
 use pdbrs::native::msf::Msf;
 
 const PAGE: usize = 512;
@@ -96,7 +96,7 @@ impl Image {
     }
 
     fn msf(&self) -> Msf<&[u8]> {
-        Msf::open(self.bytes.as_slice()).expect("valid image opens")
+        Msf::read(self.bytes.as_slice()).expect("valid image opens")
     }
 }
 

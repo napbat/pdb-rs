@@ -38,7 +38,7 @@ impl<'a> SourceLink<'a> {
         let invalid = |context| {
             Error::new(ErrorKind::InvalidFormat, None)
                 .with_context(context)
-                .with_stream(stream.0, 0)
+                .with_stream(stream, 0)
         };
         let json =
             core::str::from_utf8(bytes).map_err(|_| invalid("Source Link stream is not UTF-8"))?;

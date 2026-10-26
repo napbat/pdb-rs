@@ -14,8 +14,8 @@ use crate::{MAX_STREAM, ok};
 ///
 /// Panics if a container opens with other limits and gives another stream count.
 pub fn read(data: &[u8]) {
-    let _ = pdbrs::format::probe(data);
-    let Some(msf) = ok(Msf::open(data)) else {
+    let _ = pdbrs::probe(data);
+    let Some(msf) = ok(Msf::read(data)) else {
         return;
     };
     walk(&msf);
@@ -74,7 +74,7 @@ pub fn repack(data: &[u8]) {
     let Some((&selector, data)) = data.split_first() else {
         return;
     };
-    let Some(msf) = ok(Msf::open(data)) else {
+    let Some(msf) = ok(Msf::read(data)) else {
         return;
     };
     let Some(original) = streams(&msf) else {
@@ -96,7 +96,7 @@ pub fn repack(data: &[u8]) {
     };
     let bytes = plan.to_vec().expect("a planned container writes");
     assert_eq!(u64::try_from(bytes.len()).ok(), Some(plan.file_size()));
-    let written = Msf::open(bytes.as_slice()).expect("a written container opens");
+    let written = Msf::read(bytes.as_slice()).expect("a written container opens");
     assert_eq!(written.block_size(), page_size);
     let report = written
         .check_free_page_map()
@@ -140,7 +140,7 @@ pub fn build(data: &[u8]) {
         return;
     };
     let bytes = plan.to_vec().expect("a planned container writes");
-    let msf = Msf::open(bytes.as_slice()).expect("a built container opens");
+    let msf = Msf::read(bytes.as_slice()).expect("a built container opens");
     let actual = streams(&msf).expect("built streams read");
     let expected: Vec<Option<Vec<u8>>> = expected.iter().map(|s| s.map(<[u8]>::to_vec)).collect();
     assert_eq!(actual, expected);

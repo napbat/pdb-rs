@@ -401,5 +401,5 @@ fn region(
 fn module_error(stream: u32, kind: ErrorKind, offset: usize, context: &'static str) -> Error {
     Error::new(kind, None)
         .with_context(context)
-        .with_stream(stream, logical(offset))
+        .with_stream(StreamId(stream), logical(offset))
 }

@@ -58,7 +58,7 @@
 //! The same builder and the same [`BuildOptions`] give the same bytes. The
 //! plan does not read a clock or random values: the caller gives the
 //! identity. This is deterministic reconstruction, not exact copying: see
-//! [`crate::native::msf::copy_exact`] for exact copies.
+//! [`crate::io::copy_exact`] for exact copies.
 //!
 //! # Identity
 //!

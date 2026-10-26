@@ -8,8 +8,8 @@ use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use super::{EmbeddedFormat, EmbeddedSource, FORMAT_FIELD};
+use crate::PortableLocation;
 use crate::crypto::sha256;
-use crate::error::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::CustomDebugKind;

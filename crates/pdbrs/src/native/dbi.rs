@@ -320,9 +320,9 @@ impl Dbi {
         if bytes.is_empty() {
             return Ok(None);
         }
-        parse(bytes)
-            .map(Some)
-            .map_err(|error| error.with_stream(DBI_STREAM, logical(self.substream_offset(kind))))
+        parse(bytes).map(Some).map_err(|error| {
+            error.with_stream(StreamId(DBI_STREAM), logical(self.substream_offset(kind)))
+        })
     }
 }
 
@@ -376,7 +376,7 @@ fn substream_ranges(
 fn dbi_error(kind: ErrorKind, offset: usize, context: &'static str) -> Error {
     Error::new(kind, None)
         .with_context(context)
-        .with_stream(DBI_STREAM, logical(offset))
+        .with_stream(StreamId(DBI_STREAM), logical(offset))
 }
 
 /// Convert a logical offset to the error representation.

@@ -32,8 +32,10 @@ pub mod types;
 mod words;
 pub mod write;
 
+mod producer;
 mod reader;
 pub use edit::{PdbEditPlan, PdbEditor};
+pub use producer::Producer;
 pub use reader::{Pdb, ReadOptions};
 
 /// The matching identity of a native PDB and its PE debug reference.

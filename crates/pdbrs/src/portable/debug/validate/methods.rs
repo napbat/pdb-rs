@@ -3,7 +3,7 @@
 use alloc::collections::BTreeSet;
 
 use super::{Rule, ValidateOptions, ValidationReport, count, external_exists};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::debug::document::check_hash;

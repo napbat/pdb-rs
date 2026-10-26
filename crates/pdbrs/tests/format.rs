@@ -3,8 +3,8 @@
 use core::cell::Cell;
 
 use pdbrs::ErrorKind;
-use pdbrs::format::{ContainerKind, PROBE_LEN, probe};
 use pdbrs::io::ReadAt;
+use pdbrs::{ContainerKind, PROBE_LEN, probe};
 
 const NATIVE_MSF7: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";
 const NATIVE_MSFZ: &[u8] = b"Microsoft MSFZ Container\r\n\x1aALD\0\0";

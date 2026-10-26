@@ -273,7 +273,7 @@ fn streams(fixture: &PdzFixture, pdz: &[u8], converted: &[u8]) -> Result<(), Str
 /// Convert the MSFZ container in `bytes` to MSF 7.0 with pages of `page_size` bytes.
 fn decode(bytes: &[u8], page_size: u32) -> Result<Vec<u8>, String> {
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
-    let container = Container::open(bytes).map_err(pdbrs)?;
+    let container = Container::read(bytes).map_err(pdbrs)?;
     if container.msfz().is_none() {
         return Err("the PDZ fixture is not an MSFZ container".to_owned());
     }
@@ -287,7 +287,7 @@ fn decode(bytes: &[u8], page_size: u32) -> Result<Vec<u8>, String> {
 fn page_size(path: &Path) -> Result<u32, String> {
     let bytes =
         fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    Msf::open(bytes.as_slice())
+    Msf::read(bytes.as_slice())
         .map(|msf| msf.block_size())
         .map_err(|error| format!("pdbrs: {error}"))
 }

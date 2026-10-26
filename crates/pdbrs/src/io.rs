@@ -9,6 +9,9 @@
 //!
 //! Sequential traits and cursors come from `nostdio`. [`SeekReader`] adapts
 //! a seekable stream to positional access without requiring `std`.
+//!
+//! [`copy_exact`] copies every byte of a [`ReadAt`] source. An exact copy does not depend on
+//! the format.
 
 use crate::{Error, ErrorKind, Result};
 
@@ -18,7 +21,9 @@ pub use nostdio::{
 
 mod copy;
 mod seek;
-pub(crate) use copy::copy_all;
+pub use copy::copy_exact;
+#[cfg(feature = "std")]
+pub use copy::copy_exact_file;
 pub use seek::SeekReader;
 
 #[cfg(feature = "std")]

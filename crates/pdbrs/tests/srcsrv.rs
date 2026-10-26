@@ -28,7 +28,7 @@ fn assert_invalid(bytes: &[u8], offset: usize) {
     assert_eq!(error.kind(), ErrorKind::InvalidFormat, "{error}");
     assert_eq!(
         error.stream_location(),
-        Some((STREAM.0, u64::try_from(offset).unwrap())),
+        Some((STREAM, u64::try_from(offset).unwrap())),
         "{error}"
     );
 }

@@ -130,7 +130,7 @@ fn write(streams: &[Option<Vec<u8>>], options: WriteOptions) -> Vec<u8> {
 
 /// Open `bytes` and check that the streams are `expected`.
 fn check_streams<'a>(bytes: &'a [u8], expected: &[Option<Vec<u8>>]) -> Msfz<&'a [u8]> {
-    let msfz = Msfz::open(bytes).unwrap();
+    let msfz = Msfz::read(bytes).unwrap();
     assert_eq!(msfz.stream_count(), u32::try_from(expected.len()).unwrap());
     for (id, expected) in (0..).zip(expected) {
         let actual = msfz
@@ -343,7 +343,7 @@ fn the_stream_directory_can_be_compressed() {
     }
     let bytes = write(&streams, WriteOptions::default());
     assert!(
-        !Msfz::open(bytes.as_slice())
+        !Msfz::read(bytes.as_slice())
             .unwrap()
             .is_directory_compressed()
     );
@@ -446,7 +446,7 @@ fn large_streams_need_no_large_buffers() {
     assert_eq!(plan.chunk_count(), 10_240);
     assert_eq!(plan.fragment_count(), 10_240);
     let bytes = plan.to_vec().unwrap();
-    let msfz = Msfz::open(bytes.as_slice()).unwrap();
+    let msfz = Msfz::read(bytes.as_slice()).unwrap();
     let stream = msfz.stream(StreamId(1)).unwrap().unwrap();
     assert_eq!(stream.len().unwrap(), 40 << 20);
     let mut window = vec![0; 10_000];
@@ -482,7 +482,10 @@ fn source_read_errors_stop_the_plan() {
     builder.push(Failing(10)).unwrap();
     let error = builder.plan(WriteOptions::default()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Io);
-    assert_eq!(error.stream_location().map(|(stream, _)| stream), Some(1));
+    assert_eq!(
+        error.stream_location().map(|(stream, _)| stream),
+        Some(StreamId(1))
+    );
 }
 
 #[test]

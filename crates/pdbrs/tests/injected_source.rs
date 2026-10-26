@@ -121,7 +121,7 @@ fn content_checks_reject_other_sizes_crcs_and_compression() {
     ] {
         let error = source.verify_content(content, StreamId(86)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-        assert_eq!(error.stream_location(), Some((86, 0)));
+        assert_eq!(error.stream_location(), Some((StreamId(86), 0)));
         assert_eq!(error.offset(), None);
     }
     let mut bytes = sample();
@@ -160,7 +160,7 @@ fn virtual_flag_is_decoded_and_reserved_flag_bits_are_rejected() {
     let error = SourceHeaderBlock::parse(&bytes, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let location = u64::try_from(entry_offset(0, 0)).unwrap();
-    assert_eq!(error.stream_location(), Some((STREAM.0, location)));
+    assert_eq!(error.stream_location(), Some((STREAM, location)));
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn header_rules_are_enforced() {
         put(&mut bytes, offset, value);
         let error = SourceHeaderBlock::parse(&bytes, STREAM).unwrap_err();
         assert_eq!(error.kind(), expected, "offset {offset}");
-        assert_eq!(error.stream_location().unwrap().0, STREAM.0);
+        assert_eq!(error.stream_location().unwrap().0, STREAM);
         assert_eq!(error.offset(), None);
     }
     let mut bytes = sample();
@@ -183,7 +183,7 @@ fn header_rules_are_enforced() {
     put(&mut bytes, 4, 261);
     let error = SourceHeaderBlock::parse(&bytes, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((STREAM.0, 260)));
+    assert_eq!(error.stream_location(), Some((STREAM, 260)));
 
     let error = SourceHeaderBlock::parse(&sample()[..63], STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);

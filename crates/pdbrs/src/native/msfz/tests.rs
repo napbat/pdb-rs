@@ -11,8 +11,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{Msfz, MsfzLimits, StreamId};
+use crate::ContainerKind;
 use crate::compression::{deflate, zstd};
-use crate::format::ContainerKind;
 use crate::{Error, ErrorKind, Result};
 
 /// Compression code 0: stored.
@@ -209,7 +209,7 @@ impl Image {
 
     /// Open the image with the default limits.
     fn open(&self) -> Result<Msfz<&[u8]>> {
-        Msfz::open(self.bytes.as_slice())
+        Msfz::read(self.bytes.as_slice())
     }
 
     /// Open the image with `limits`.

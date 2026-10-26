@@ -94,7 +94,10 @@ impl<R: ReadAt> MsfzBuilder<R> {
             sizes.push(
                 stream
                     .as_ref()
-                    .map(|data| data.len().map_err(|error| error.with_stream(id, 0)))
+                    .map(|data| {
+                        data.len()
+                            .map_err(|error| error.with_stream(StreamId(id), 0))
+                    })
                     .transpose()?,
             );
         }
@@ -117,9 +120,9 @@ impl<R: ReadAt> StreamSource for MsfzBuilder<R> {
             .ok_or_else(|| {
                 Error::new(ErrorKind::MissingStream, None)
                     .with_context("planned stream is nil in the builder")
-                    .with_stream(id, offset)
+                    .with_stream(StreamId(id), offset)
             })?;
         data.read_exact_at(offset, buffer)
-            .map_err(|error| error.with_stream(id, offset))
+            .map_err(|error| error.with_stream(StreamId(id), offset))
     }
 }

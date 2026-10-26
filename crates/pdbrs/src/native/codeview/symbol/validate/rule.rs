@@ -228,6 +228,6 @@ impl Violation {
     pub fn error(&self) -> Error {
         Error::new(self.error_kind, None)
             .with_context(self.context)
-            .with_stream(self.stream.0, self.offset)
+            .with_stream(self.stream, self.offset)
     }
 }

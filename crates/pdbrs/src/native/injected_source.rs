@@ -250,7 +250,7 @@ impl InjectedSource {
     /// [`Natvis::parse`] with the stream ID and logical offset 0.
     pub fn verify_natvis<'c>(&self, content: &'c [u8], stream: StreamId) -> Result<Natvis<'c>> {
         let content = self.verify_content(content, stream)?;
-        Natvis::parse(content).map_err(|error| error.with_stream(stream.0, 0))
+        Natvis::parse(content).map_err(|error| error.with_stream(stream, 0))
     }
 
     /// Check the contents of the file stream and return the file contents.
@@ -304,7 +304,7 @@ impl InjectedSource {
             ));
         }
         self.verify_stream(content, stream)?;
-        DotNetDocument::parse(content).map_err(|error| error.with_stream(stream.0, 0))
+        DotNetDocument::parse(content).map_err(|error| error.with_stream(stream, 0))
     }
 
     /// Check the size and the CRC of the stream bytes.
@@ -331,7 +331,7 @@ impl InjectedSource {
 fn stream_error(kind: ErrorKind, context: &'static str, stream: StreamId) -> Error {
     Error::new(kind, None)
         .with_context(context)
-        .with_stream(stream.0, 0)
+        .with_stream(stream, 0)
 }
 
 /// The header of the `/src/headerblock` stream (`SrcHeaderBlock`).

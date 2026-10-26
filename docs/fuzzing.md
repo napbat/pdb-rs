@@ -14,10 +14,10 @@ to the same value. It does not check that other readers accept the output.
 
 | Target | Input | Public API under test |
 | --- | --- | --- |
-| `msf` | MSF 7.0 file | `format::probe`, `Msf::open`, `Msf::with_limits`, each stream, `check_free_page_map`, `OldDirectory` |
+| `msf` | MSF 7.0 file | `pdbrs::probe`, `Msf::read`, `Msf::with_limits`, each stream, `check_free_page_map`, `OldDirectory` |
 | `msf_repack` | selector byte, MSF file | `Msf::repack` round trip: page size and stream 0 policy, written streams, free page map |
-| `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::open`, stream bytes |
-| `msfz` | MSFZ file | `format::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
+| `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::read`, stream bytes |
+| `msfz` | MSFZ file | `pdbrs::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
 | `msfz_chunks` | selector byte, two declared chunk sizes, fragment offset, stored chunk bytes | an MSFZ container around one or two chunks (stored, zstd or raw DEFLATE) and one fragment across them; reads with and without the chunk cache must agree; stored chunks must give their bytes |
 | `msfz_convert` | selector byte, MSF 7.0 or MSFZ file | `Container::to_msfz` and `Container::to_msf` round trip (#38): the selector gives the chunk size, one stream for each chunk, the chunk and directory codecs, padding and the stream 0 policy; a second write gives the same bytes; both outputs give the input streams; the MSF output has no unreferenced allocated page |
 | `native_pdb` | native PDB file | `native::Pdb` and every stream that it names: Info, named streams, TPI, IPI, hash streams, DBI, FPO, frame data, modules, symbol records, GSI, PSI |
@@ -35,7 +35,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_indexes` | bucket selector, GSI part, PSI part, records | `GlobalSymbolIndex`, `PublicSymbolIndex`, lookup, record and address checks |
 | `native_named` | kind selector, stream | `LinkInfo`, `TmCache`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceHeaderBlock`, `DotNetDocument`, `OldDirectory` |
 | `portable_pdb` | Portable PDB or `MPDB` payload | `portable::Pdb`: rows, heaps, documents, sequence points, scopes, imports, embedded sources, `validate_debug` |
-| `portable_metadata` | file | `MetadataRoot::read`, `format::probe`, `pdbrs::Pdb::parse` |
+| `portable_metadata` | file | `MetadataRoot::read`, `pdbrs::probe`, `pdbrs::Pdb::parse` |
 | `portable_blobs` | kind selector, blob | round trips of `DocumentName`, `SequencePoints`, `LocalConstantSignature`, `Imports`, compressed integers; `split_document_name` |
 | `custom_debug_info` | kind selector, value | round trip of each `CustomDebugValue` kind; native `MD2`, `asyncMethodInfo` and symbol attributes |
 | `mpdb` | payload | `decode_embedded` and `encode_embedded` round trips |

@@ -315,5 +315,5 @@ fn to_usize(value: u32) -> usize {
 fn invalid(kind: ErrorKind, offset: usize) -> Error {
     Error::new(kind, None)
         .with_context("PDB Info")
-        .with_stream(INFO_STREAM.0, u64::try_from(offset).unwrap_or(u64::MAX))
+        .with_stream(INFO_STREAM, u64::try_from(offset).unwrap_or(u64::MAX))
 }

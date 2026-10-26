@@ -73,6 +73,7 @@ mod architecture;
 mod attributed;
 mod code;
 mod compile;
+mod cpu;
 mod defrange;
 mod encode;
 mod frame;
@@ -108,6 +109,7 @@ pub use compile::{
     Compile2, Compile3, CompileFlags, EnvironmentBlock, ObjectName, SourceLanguage, StringList,
     Strings,
 };
+pub use cpu::CpuType;
 use defrange::read_global_on_entry;
 pub use defrange::{
     DefRangeProgram, EntryValues, S_DEFRANGE, S_DEFRANGE_CONSTVAL_ON_ENTRY,

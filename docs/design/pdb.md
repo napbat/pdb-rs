@@ -26,7 +26,7 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
   Subsequent reads move the cursor. The adapter is not `Sync`.
 - `io::FileReader` provides bounded file access on Unix and Windows under `std`.
   It captures the file length and owns the handle. Windows positional reads can change the underlying cursor.
-- `format::probe` identifies modern MSF, MSFZ, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
+- `pdbrs::probe` identifies modern MSF, MSFZ, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
   It examines a bounded prefix, not container or record validity.
   `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
 - `Error` retains an error kind, physical or stream-relative location, operation context and a typed `nostdio::IoError`.
@@ -239,18 +239,18 @@ The `native::msf` module writes Big MSF 7.0 containers through three operations 
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
-| Exact copy | `copy_exact`, `copy_exact_file` | Every source byte. The copy does not validate the source |
+| Exact copy | `io::copy_exact`, `io::copy_exact_file` | Every source byte. The copy does not validate the source |
 | Stream-preserving repack | `Msf::repack` | Stream IDs, nil and empty streams, sizes and all stream bytes. `OldDirectoryPolicy` selects stream 0 |
 | New layout | `MsfBuilder::plan` | A consistent container with the given streams, without a PDB semantic claim |
 
 `Msf::repack` and `MsfBuilder::plan` return a `WritePlan`. The plan computes and checks the full layout before output.
 A planning error writes nothing. `WritePlan::write_to` writes to a `nostdio` writer in page order, and `WritePlan::to_vec` writes to memory.
 Both work with `no_std + alloc`. The writer reads stream payloads one page at a time.
-`copy_exact` copies through one buffer of at most 64 KiB.
+`io::copy_exact` copies through one buffer of at most 64 KiB.
 
-Under `std`, `WritePlan::write_file` and `copy_exact_file` write a temporary file in the destination directory and rename it.
+Under `std`, `WritePlan::write_file` and `io::copy_exact_file` write a temporary file in the destination directory and rename it.
 On error, they delete the temporary file and do not change the destination. Writing over the source file is not supported.
-After an error, `write_to` and `copy_exact` can leave a partial output in the writer.
+After an error, `write_to` and `io::copy_exact` can leave a partial output in the writer.
 
 The layout is deterministic:
 
@@ -468,8 +468,11 @@ Names below are proposed contracts, not compilable examples.
 | `Format` and `Pdb<S>` | Identify the format and hold either `native::Pdb<S>` or `portable::Pdb<S>` |
 | `Pdb::parse(&[u8])` | Detect and validate a standalone file through a borrowed slice source |
 | `Pdb::open(path)` | Open a file source under the `std` feature and dispatch by its contents |
-| `native::Msf<S>` | Own a stable positional source and validated stream-directory metadata |
-| `native::Msf::stream(StreamId)` | Distinguish an invalid index, an absent stream and a present stream |
+| `Error`, `ErrorKind`, `Result`, `PortableLocation`, `probe`, `PROBE_LEN`, `ContainerKind` | Live at the crate root; the `error` and `format` modules are private |
+| `io::copy_exact`, `io::copy_exact_file` | Copy every byte of a source; an exact copy does not depend on the format |
+| `native::msf::Msf<S>` | Own a stable positional source and validated stream-directory metadata |
+| `native::msf::Msf::read`, `native::msfz::Msfz::read`, `native::container::Container::read` | Read a container from a positional source; `with_limits` takes `MsfLimits`, `MsfzLimits` or `ContainerLimits` |
+| `native::msf::Msf::stream(StreamId)` | Distinguish an invalid index, an absent stream and a present stream |
 | `native::Pdb<S>` | Expose lazy typed access to native streams |
 | `native::Pdb::info`, `types`, `ids`, `debug_info` | Decode only the requested native stream or view |
 | `portable::Pdb<S>` | Expose lazy access to metadata tables, heaps and debug blobs |
@@ -586,7 +589,7 @@ Where the MSFZ specification and Microsoft's reference implementation differ, fo
 
 Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/37)). The writer and the conversions are in [Implemented MSFZ writing](#implemented-msfz-writing) ([#38](https://github.com/napbat/pdbrs/issues/38)).
 
-- `format::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
+- `pdbrs::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
 - `native::msfz::Msfz` checks every invariant above when it opens a file. It decodes stored (code 0), zstd (code 1) and raw DEFLATE (code 2) chunks and stream directories through `compression.rs`. Other codes and versions give `UnsupportedVersion`.
 - `native::container::Container` holds an `Msf` or an `Msfz`. `native::Pdb::container` replaces `Pdb::msf`. All typed accessors, `Pdb::contents` and `Pdb::edit` read through it. The builder and the editor write MSF 7.0 output with the default page size (4096) for MSFZ input.
 - The free page map and the stream 0 snapshot are MSF 7.0 structures. `Container::msf` gives them; the `native` example reports them as not applicable for MSFZ.
@@ -771,7 +774,7 @@ A plan borrows immutable inputs or owns them. Edits cannot change a live plan.
 A planning error leaves the source and destination untouched.
 An output I/O error may leave a partial destination; document this contract.
 Do not support writing over the source file or incremental in-place commits in this design.
-The MSF file helpers (`WritePlan::write_file`, `copy_exact_file`) write a temporary sibling file and rename it.
+The MSF file helpers (`WritePlan::write_file`, `io::copy_exact_file`) write a temporary sibling file and rename it.
 On error, they delete the temporary file, so the destination does not change.
 
 Native dependencies include:

@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 

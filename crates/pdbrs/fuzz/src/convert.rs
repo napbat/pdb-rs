@@ -1,8 +1,8 @@
 //! The conversion round trip between MSF 7.0 and MSFZ containers.
 
-use pdbrs::format::ContainerKind;
-use pdbrs::native::container::Container;
-use pdbrs::native::msf::{self, MsfLimits, OldDirectoryPolicy, StreamId};
+use pdbrs::ContainerKind;
+use pdbrs::native::container::{Container, ContainerLimits};
+use pdbrs::native::msf::{self, OldDirectoryPolicy, StreamId};
 use pdbrs::native::msfz::{self, Codec, MIN_CHUNK_SIZE};
 
 use crate::msfz::limits;
@@ -71,7 +71,7 @@ pub fn round_trip(data: &[u8]) {
     let Some((&selector, data)) = data.split_first() else {
         return;
     };
-    let Some(source) = ok(Container::with_limits(data, MsfLimits::default(), limits())) else {
+    let Some(source) = ok(Container::with_limits(data, ContainerLimits::default().with_msfz(limits()))) else {
         return;
     };
     let Some(original) = streams(&source) else {
@@ -95,7 +95,10 @@ pub fn round_trip(data: &[u8]) {
         bytes,
         "a second write gives other bytes"
     );
-    let written = Container::with_limits(bytes.as_slice(), MsfLimits::default(), limits())
+    let written = Container::with_limits(
+        bytes.as_slice(),
+        ContainerLimits::default().with_msfz(limits()),
+    )
         .expect("a written MSFZ container opens");
     assert_eq!(written.kind(), ContainerKind::NativeMsfz);
     assert_eq!(
@@ -108,7 +111,7 @@ pub fn round_trip(data: &[u8]) {
         return;
     };
     let bytes = plan.to_vec().expect("a planned MSF container writes");
-    let back = Container::open(bytes.as_slice()).expect("a written MSF container opens");
+    let back = Container::read(bytes.as_slice()).expect("a written MSF container opens");
     assert_eq!(back.kind(), ContainerKind::NativeMsf7);
     assert_eq!(
         streams(&back).expect("written MSF streams read"),

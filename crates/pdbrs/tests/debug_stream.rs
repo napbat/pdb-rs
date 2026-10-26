@@ -23,7 +23,7 @@ fn words(values: &[u32]) -> Vec<u8> {
 fn assert_located(error: &pdbrs::Error, kind: ErrorKind, offset: u64) {
     assert_eq!(error.kind(), kind, "{error}");
     assert_eq!(error.offset(), None);
-    assert_eq!(error.stream_location(), Some((STREAM.0, offset)));
+    assert_eq!(error.stream_location(), Some((STREAM, offset)));
 }
 
 /// Build a blob stream with the given header words, extra bytes and data.

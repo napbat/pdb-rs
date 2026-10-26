@@ -178,8 +178,9 @@ impl<'a, V: HashTableValue<'a>> HashTable<'a, V> {
         for bucket in set_bits(present) {
             let key = cursor.u32()?;
             let at = cursor.position();
-            let value = V::decode(cursor.take(V::SIZE)?)
-                .map_err(|error| error.with_stream(stream_number(cursor.stream()), offset(at)))?;
+            let value = V::decode(cursor.take(V::SIZE)?).map_err(|error| {
+                error.with_stream(StreamId(stream_number(cursor.stream())), offset(at))
+            })?;
             entries.push(HashTableEntry { bucket, key, value });
         }
         Ok(Self {
@@ -281,7 +282,10 @@ impl<V> HashTable<'_, V> {
             if !reachable {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("hash table entry is not in its probe sequence")
-                    .with_stream(stream_number(self.stream), offset(self.key_offset(index))));
+                    .with_stream(
+                        StreamId(stream_number(self.stream)),
+                        offset(self.key_offset(index)),
+                    ));
             }
         }
         Ok(())
@@ -433,7 +437,7 @@ impl<'a> Cursor<'a> {
     pub(crate) fn fail(&self, kind: ErrorKind, at: usize, context: &'static str) -> Error {
         Error::new(kind, None)
             .with_context(context)
-            .with_stream(stream_number(self.stream), offset(at))
+            .with_stream(StreamId(stream_number(self.stream)), offset(at))
     }
 
     /// Read `count` bytes.

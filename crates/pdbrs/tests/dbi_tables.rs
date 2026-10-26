@@ -6,6 +6,7 @@ use pdbrs::native::dbi::{
     Dbi, SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContributionVersion,
     SectionContributions, SectionMap, SegmentFlags, SourceInfo,
 };
+use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::SIGNATURE;
 
 /// The header offsets of the substream sizes, in disk order.
@@ -65,7 +66,7 @@ fn assert_located<T: core::fmt::Debug>(result: pdbrs::Result<T>, kind: ErrorKind
     let error = result.unwrap_err();
     assert_eq!(error.kind(), kind);
     assert_eq!(error.offset(), None);
-    assert_eq!(error.stream_location(), Some((3, offset)));
+    assert_eq!(error.stream_location(), Some((StreamId(3), offset)));
 }
 
 #[test]

@@ -36,7 +36,7 @@ pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
         let bytes = builder
             .plan(WriteOptions::default().with_page_size(page_size))?
             .to_vec()?;
-        Msf::open(bytes.as_slice())?;
+        Msf::read(bytes.as_slice())?;
         corpus.add("msf", &bytes)?;
         corpus.add_parts("msf_repack", &[0x08], &[], &bytes)?;
         corpus.add_parts("msfz_convert", &[0x2c], &[], &bytes)?;

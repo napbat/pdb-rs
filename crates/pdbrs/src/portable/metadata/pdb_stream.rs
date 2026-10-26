@@ -12,7 +12,7 @@
 
 use super::ids::{MAX_ROW, MetadataToken, MethodDefId, TableId};
 use super::root::MetadataStream;
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Identity;
 use crate::{Error, ErrorKind, Result};

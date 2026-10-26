@@ -642,10 +642,7 @@ fn gives_violations_as_errors_with_locations() {
     let error = violation.error();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(error.context(), Some(Rule::TypeIndexRange.description()));
-    assert_eq!(
-        error.stream_location(),
-        Some((STREAM.0, u64::from(past_end)))
-    );
+    assert_eq!(error.stream_location(), Some((STREAM, u64::from(past_end))));
 }
 
 #[test]

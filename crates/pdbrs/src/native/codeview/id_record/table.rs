@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use super::{IdRecord, LF_STRING_ID, LF_SUBSTR_LIST};
 use crate::native::codeview::Record;
 use crate::native::codeview::index::{IdIndex, TypeIndex};
+use crate::native::msf::StreamId;
 use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable};
 use crate::{Error, ErrorKind, Result};
 
@@ -185,7 +186,7 @@ impl<'a> IdTable<'a> {
         for record in self.table.stream().records() {
             let record = record?.record;
             self.validate_record(record, type_index_end)
-                .map_err(|error| error.with_stream(IPI_STREAM, record_offset(record)))?;
+                .map_err(|error| error.with_stream(StreamId(IPI_STREAM), record_offset(record)))?;
         }
         Ok(())
     }
@@ -259,7 +260,8 @@ fn check_type(index: TypeIndex, type_index_end: TypeIndex) -> Result<()> {
 
 /// Decode a record and add its IPI stream location to an error.
 fn decode_at(record: Record<'_>) -> Result<IdRecord<'_>> {
-    IdRecord::decode(record).map_err(|error| error.with_stream(IPI_STREAM, record_offset(record)))
+    IdRecord::decode(record)
+        .map_err(|error| error.with_stream(StreamId(IPI_STREAM), record_offset(record)))
 }
 
 /// Return the IPI stream offset of a record.

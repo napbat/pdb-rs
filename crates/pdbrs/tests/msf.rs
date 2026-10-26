@@ -5,7 +5,7 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use pdbrs::format::ContainerKind;
+use pdbrs::ContainerKind;
 use pdbrs::io::ReadAt;
 use pdbrs::native::msf::{Msf, MsfLimits, StreamId};
 use pdbrs::{Error, ErrorKind, Result};
@@ -200,7 +200,7 @@ impl Fixture {
     }
 
     fn open(&self) -> Msf<&[u8]> {
-        Msf::open(self.bytes.as_slice()).expect("valid fixture opens")
+        Msf::read(self.bytes.as_slice()).expect("valid fixture opens")
     }
 }
 
@@ -259,7 +259,7 @@ fn expect_error<T: Debug>(
 }
 
 fn open_bytes(bytes: &[u8]) -> Result<Msf<&[u8]>> {
-    Msf::open(bytes)
+    Msf::read(bytes)
 }
 
 /// Check every stream of `msf` against the fixture contents.
@@ -451,7 +451,7 @@ fn stream_ids_outside_the_directory_are_rejected() {
     for id in [count, count + 1, u32::MAX] {
         let result = msf.stream(StreamId(id));
         let error = expect_error(result, ErrorKind::InvalidStreamIndex, None, "stream index");
-        assert_eq!(error.stream_location(), Some((id, 0)));
+        assert_eq!(error.stream_location(), Some((StreamId(id), 0)));
     }
 }
 
@@ -504,13 +504,17 @@ fn stream_reads_stop_at_the_stream_end() {
         let mut bytes = vec![0; count];
         let case = format!("{count} bytes at {offset}");
         let error = expect_error(stream.read_exact_at(offset, &mut bytes), kind, None, &case);
-        assert_eq!(error.stream_location(), Some((1, location)), "{case}");
+        assert_eq!(
+            error.stream_location(),
+            Some((StreamId(1), location)),
+            "{case}"
+        );
     }
 
     let size = fixture.contents[1].as_ref().unwrap().len();
     let result = stream.read_all(size - 1);
     let error = expect_error(result, ErrorKind::LimitExceeded, None, "read limit");
-    assert_eq!(error.stream_location(), Some((1, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
     assert_eq!(stream.read_all(size).unwrap().len(), size);
 }
 
@@ -779,7 +783,7 @@ fn directory_limit_is_checked_before_allocation() {
     let bytes = large.with(44, u32::MAX - 3);
     let source = Recorder::new(&bytes, None);
     expect_error(
-        Msf::open(&source),
+        Msf::read(&source),
         ErrorKind::LimitExceeded,
         Some(44),
         "default limit",
@@ -797,7 +801,7 @@ fn opening_reads_no_stream_payload_and_reads_copy_only_requested_bytes() {
     let fixture = small_fixture();
     let page_len = to_u64(to_usize(fixture.block_size));
     let source = Recorder::new(&fixture.bytes, None);
-    let msf = Msf::open(&source).unwrap();
+    let msf = Msf::read(&source).unwrap();
     let payload: Vec<u64> = fixture
         .stream_pages
         .iter()
@@ -831,12 +835,12 @@ fn source_errors_keep_the_physical_offset_and_add_the_stream_location() {
     let page = fixture.stream_pages[1][1];
     let failing = u64::from(page) * 512 + 20;
     let source = Recorder::new(&fixture.bytes, Some(failing));
-    let msf = Msf::open(&source).unwrap();
+    let msf = Msf::read(&source).unwrap();
     let stream = msf.stream(StreamId(1)).unwrap().unwrap();
     let mut bytes = [0; 100];
     let result = stream.read_exact_at(500, &mut bytes);
     let error = expect_error(result, ErrorKind::Io, Some(failing), "failed page");
-    assert_eq!(error.stream_location(), Some((1, 512)));
+    assert_eq!(error.stream_location(), Some((StreamId(1), 512)));
 }
 
 #[test]

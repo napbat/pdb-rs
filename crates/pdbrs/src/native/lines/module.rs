@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 use super::{FileChecksums, LineSubsection, invalid, too_large};
 use crate::native::dbi::ModuleStream;
+use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
 /// One decoded subsection of a module stream.
@@ -180,6 +181,6 @@ impl<'a> ModuleLines<'a> {
             .and_then(|offset| offset.checked_add(self.c13_start))
             .and_then(|offset| u64::try_from(offset).ok())
             .unwrap_or(u64::MAX);
-        error.with_stream(self.stream, offset)
+        error.with_stream(StreamId(self.stream), offset)
     }
 }

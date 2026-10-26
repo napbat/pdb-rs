@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{CustomDebugKind, CustomDebugValue, decode};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::metadata::{

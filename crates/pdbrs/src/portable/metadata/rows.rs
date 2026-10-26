@@ -16,7 +16,7 @@ use super::ids::{
 };
 use super::root::MetadataStream;
 use super::tables::TableStream;
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::{Error, ErrorKind, Result};
 
 /// A row type of one debug table.

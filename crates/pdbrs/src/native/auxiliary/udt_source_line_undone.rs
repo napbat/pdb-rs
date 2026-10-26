@@ -34,7 +34,7 @@ impl<'a> UdtSourceLineUndone<'a> {
             let offset = u64::try_from(bytes.len() - partial).unwrap_or(u64::MAX);
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("/UDTSRCLINEUNDONE size is not a multiple of 4")
-                .with_stream(stream.0, offset));
+                .with_stream(stream, offset));
         }
         Ok(Self { bytes })
     }

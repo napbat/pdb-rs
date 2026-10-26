@@ -121,7 +121,7 @@ fn assert_error(error: &pdbrs::Error, kind: ErrorKind, offset: usize) {
     assert_eq!(error.offset(), None);
     assert_eq!(
         error.stream_location(),
-        Some((INDEX.0, u64::try_from(offset).unwrap())),
+        Some((INDEX, u64::try_from(offset).unwrap())),
         "{error}"
     );
 }
@@ -403,7 +403,7 @@ fn record_framing_errors_identify_the_symbol_stream() {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
-        Some((SYMBOLS.0, u64::from(offsets[1])))
+        Some((SYMBOLS, u64::from(offsets[1])))
     );
 
     let error = SymbolOffset(offsets[1]).record(&stream).unwrap_err();

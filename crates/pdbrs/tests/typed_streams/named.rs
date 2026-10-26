@@ -193,7 +193,7 @@ fn truncated_link_info_across_pages_is_eof() {
         .unwrap();
     let error = LinkInfo::parse(&stream, LINK_INFO).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-    assert_eq!(error.stream_location().map(|(id, _)| id), Some(LINK_INFO.0));
+    assert_eq!(error.stream_location().map(|(id, _)| id), Some(LINK_INFO));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn truncated_injected_source_block_across_pages_is_eof() {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
-        Some((HEADER_BLOCK.0, to_u64(entries)))
+        Some((HEADER_BLOCK, to_u64(entries)))
     );
 }
 
@@ -279,7 +279,7 @@ fn named_stream_loads_check_the_stream_size_against_the_limit() {
         let small = Pdb::with_options(bytes.as_slice(), options(size - 1)).unwrap();
         let error = small.named_stream_bytes(name).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded, "{id:?}");
-        assert_eq!(error.stream_location(), Some((id.0, 0)));
+        assert_eq!(error.stream_location(), Some((id, 0)));
         assert_eq!(error.offset(), None);
     }
 }

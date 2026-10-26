@@ -140,7 +140,7 @@ fn truncated_module_record_across_pages_is_eof() {
     let bytes = streams.container(Order::Scattered);
     let error = open(&bytes).debug_info().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-    assert_eq!(error.stream_location(), Some((DBI.0, to_u64(PAGE + 12))));
+    assert_eq!(error.stream_location(), Some((DBI, to_u64(PAGE + 12))));
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn truncated_checksum_subsection_across_pages_is_eof() {
     let stream = pdb.module_stream(&target_module(&dbi)).unwrap().unwrap();
     let error = ModuleLines::parse(&stream).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-    assert_eq!(error.stream_location(), Some((MODULE.0, to_u64(c13_end))));
+    assert_eq!(error.stream_location(), Some((MODULE, to_u64(c13_end))));
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn truncated_symbol_record_across_pages_is_eof() {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
-        Some((SYMBOLS.0, to_u64(TARGET_SYMBOL_OFFSET)))
+        Some((SYMBOLS, to_u64(TARGET_SYMBOL_OFFSET)))
     );
     let error = SymbolOffset(to_u32(TARGET_SYMBOL_OFFSET))
         .record(&symbols)
@@ -269,7 +269,7 @@ fn truncated_section_header_across_pages_is_eof() {
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
-        Some((SECTIONS.0, to_u64(TARGET_SECTION * 40)))
+        Some((SECTIONS, to_u64(TARGET_SECTION * 40)))
     );
 }
 
@@ -302,5 +302,5 @@ fn truncated_omap_across_pages_is_eof() {
     let dbi = pdb.debug_info().unwrap().unwrap();
     let error = pdb.omap(&dbi, DebugStream::OmapToSource).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-    assert_eq!(error.stream_location(), Some((OMAP.0, to_u64(PAGE))));
+    assert_eq!(error.stream_location(), Some((OMAP, to_u64(PAGE))));
 }

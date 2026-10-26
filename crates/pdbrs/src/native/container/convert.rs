@@ -92,7 +92,7 @@ impl<S: ReadAt> StreamSource for Container<S> {
         let Some(stream) = self.stream(StreamId(id))? else {
             return Err(Error::new(ErrorKind::MissingStream, None)
                 .with_context("planned stream is nil in the source")
-                .with_stream(id, offset));
+                .with_stream(StreamId(id), offset));
         };
         stream.read_exact_at(offset, buffer)
     }

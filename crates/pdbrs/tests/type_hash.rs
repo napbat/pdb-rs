@@ -3,6 +3,7 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::type_record::{ClassOptions, LF_POINTER, LF_STRUCTURE};
 use pdbrs::native::hash::{hash_buffer_v8, hash_string_v1};
+use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{
     HEADER_SIZE, HashAdjuster, IndexOffset, TPI_V80, TypeHashes, TypeStream, type_record_hash,
 };
@@ -315,7 +316,10 @@ fn verify_reports_mismatched_values_and_pairs() {
         .verify(&stream)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((u32::from(HASH_STREAM), 4)));
+    assert_eq!(
+        error.stream_location(),
+        Some((StreamId(u32::from(HASH_STREAM)), 4))
+    );
 
     let mut fixture = Fixture::new();
     fixture.pairs[1].1 += 4;
@@ -328,7 +332,7 @@ fn verify_reports_mismatched_values_and_pairs() {
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(
         error.stream_location(),
-        Some((u32::from(HASH_STREAM), 12 + 8))
+        Some((StreamId(u32::from(HASH_STREAM)), 12 + 8))
     );
 
     let mut fixture = Fixture::new();

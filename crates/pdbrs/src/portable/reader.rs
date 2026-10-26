@@ -9,7 +9,7 @@ use super::metadata::{
     BlobOffset, GuidIndex, MetadataRoot, MetadataStream, PdbStream, RowReader, StringOffset,
     TableRow, TableStream, UserStringOffset, decode_row,
 };
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 

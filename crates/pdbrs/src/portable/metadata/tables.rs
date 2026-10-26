@@ -8,7 +8,7 @@ use super::coded::CodedIndex;
 use super::ids::{MAX_ROW, TableId};
 use super::pdb_stream::PdbStream;
 use super::root::MetadataStream;
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 

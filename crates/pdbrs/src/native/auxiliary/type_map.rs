@@ -88,7 +88,7 @@ impl<'a> TypeMapStream<'a> {
         let error = |kind, offset: usize, context| {
             Error::new(kind, None)
                 .with_context(context)
-                .with_stream(stream.0, u64::try_from(offset).unwrap_or(u64::MAX))
+                .with_stream(stream, u64::try_from(offset).unwrap_or(u64::MAX))
         };
         let words = bytes.as_chunks::<4>().0;
         let truncated = |offset| {

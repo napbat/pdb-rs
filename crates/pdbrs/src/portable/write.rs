@@ -67,7 +67,7 @@ use alloc::vec::Vec;
 
 use super::embedded::encode_embedded;
 use super::{Identity, Pdb};
-use crate::io::{ReadAt, Write, copy_all};
+use crate::io::{ReadAt, Write, copy_exact};
 use crate::{Error, ErrorKind, Result};
 
 mod check;
@@ -274,6 +274,6 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// After an error, `output` can hold a part of the source.
     pub fn copy_exact<W: Write + ?Sized>(&self, output: &mut W) -> Result<u64> {
-        copy_all(self.source(), output)
+        copy_exact(self.source(), output)
     }
 }

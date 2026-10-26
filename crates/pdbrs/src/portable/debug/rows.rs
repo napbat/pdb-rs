@@ -1,6 +1,6 @@
 //! Shared helpers of the typed row accessors: error locations and row iteration.
 
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::metadata::{BlobOffset, MetadataStream, TableId};

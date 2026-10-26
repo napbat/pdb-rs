@@ -47,7 +47,7 @@ fn typed_loads_check_the_stream_size_against_the_limit() {
         let small = Pdb::with_options(bytes.as_slice(), options(size - 1)).unwrap();
         let error = load(&small, &dbi, id).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded, "{id:?}");
-        assert_eq!(error.stream_location(), Some((id.0, 0)), "{id:?}");
+        assert_eq!(error.stream_location(), Some((id, 0)), "{id:?}");
         assert_eq!(error.offset(), None);
     }
 }

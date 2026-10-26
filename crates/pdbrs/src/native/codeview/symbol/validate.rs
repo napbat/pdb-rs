@@ -357,13 +357,13 @@ pub fn validate_shared_symbols(
         };
         let symbol = match record.and_then(|record| {
             Symbol::decode(record)
-                .map_err(|error| error.with_stream(stream.0, u64::from(record.offset)))
+                .map_err(|error| error.with_stream(stream, u64::from(record.offset)))
         }) {
             Ok(symbol) => symbol,
             Err(error) => {
                 let error = match error.stream_location() {
                     Some(_) => error,
-                    None => error.with_stream(stream.0, position),
+                    None => error.with_stream(stream, position),
                 };
                 report.push(Violation::walk(&error, stream))?;
                 break;

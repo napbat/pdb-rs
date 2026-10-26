@@ -10,7 +10,7 @@ mod root;
 mod tables;
 mod widths;
 
-use pdbrs::error::PortableLocation;
+use pdbrs::PortableLocation;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::metadata::MetadataStream;
 use pdbrs::{Error, ErrorKind};

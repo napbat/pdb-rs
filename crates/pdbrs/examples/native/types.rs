@@ -17,6 +17,7 @@ use pdbrs::native::types::{
 };
 
 use crate::{Outcome, Report};
+use pdbrs::native::msf::StreamId;
 
 /// The record size limit of the Microsoft compiler field-list split.
 ///
@@ -132,8 +133,9 @@ pub(crate) fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Re
     for record in tpi.records() {
         let record = record?;
         report.add("TPI records", 1);
-        let location =
-            |error: pdbrs::Error| error.with_stream(2, base + u64::from(record.record.offset));
+        let location = |error: pdbrs::Error| {
+            error.with_stream(StreamId(2), base + u64::from(record.record.offset))
+        };
         let decoded = TypeLeaf::decode(record.record).map_err(location);
         let what = format!("TPI leaf {:#06x}", record.record.kind);
         let Some(leaf) = report.supported(decoded, &what)? else {

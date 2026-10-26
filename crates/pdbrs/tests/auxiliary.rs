@@ -89,7 +89,7 @@ fn link_info_layout_rules_are_enforced() {
         put(&mut bytes, offset, value);
         let error = LinkInfo::parse(&bytes, STREAM).unwrap_err();
         assert_eq!(error.kind(), expected, "offset {offset} value {value}");
-        assert_eq!(error.stream_location().unwrap().0, STREAM.0);
+        assert_eq!(error.stream_location().unwrap().0, STREAM);
         assert_eq!(error.offset(), None);
     }
     // A command without a NUL inside the record.
@@ -119,7 +119,7 @@ fn udt_source_line_undone_lists_type_indices() {
 
     let error = UdtSourceLineUndone::parse(&bytes[..6], StreamId(82)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((82, 4)));
+    assert_eq!(error.stream_location(), Some((StreamId(82), 4)));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Write a byte stream, then inspect it through positional access.
 
-use pdbrs::format::{ContainerKind, probe};
 use pdbrs::io::{Cursor, ReadAt, SeekReader, Write, WriteLe};
+use pdbrs::{ContainerKind, probe};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut storage = [0; 8];

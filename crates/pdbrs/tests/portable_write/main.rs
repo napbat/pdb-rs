@@ -18,7 +18,7 @@ mod rebuild;
 mod widths;
 
 use pdbrs::Error;
-use pdbrs::error::PortableLocation;
+use pdbrs::PortableLocation;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::metadata::{
     BlobOffset, CustomDebugInformationRow, DocumentRow, GuidIndex, MetadataToken, TableId,

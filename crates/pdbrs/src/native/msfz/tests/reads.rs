@@ -111,7 +111,7 @@ fn expect_unexpected_eof<S: ReadAt>(
     let size = stream.len().unwrap();
     assert_eq!(
         error.stream_location(),
-        Some((stream.id().0, offset.max(size)))
+        Some((StreamId(stream.id().0), offset.max(size)))
     );
 }
 
@@ -249,7 +249,10 @@ fn streams_larger_than_4_gib_use_u64_sizes() {
         error.context(),
         Some("MSFZ chunk is larger than the chunk limit")
     );
-    assert_eq!(error.stream_location(), Some((0, u64::from(size) + 10)));
+    assert_eq!(
+        error.stream_location(),
+        Some((StreamId(0), u64::from(size) + 10))
+    );
 }
 
 #[test]
@@ -379,7 +382,7 @@ fn corrupt_chunks_fail_on_read_with_the_stream_location() {
             ),
             "{error:?}"
         );
-        assert_eq!(error.stream_location(), Some((1, 7)));
+        assert_eq!(error.stream_location(), Some((StreamId(1), 7)));
     }
 }
 
@@ -423,7 +426,7 @@ fn error_kinds_in_this_module_match_the_docs() {
         ErrorKind::InvalidStreamIndex,
         "stream index is outside the stream directory",
     );
-    assert_eq!(error.stream_location(), Some((100, 0)));
+    assert_eq!(error.stream_location(), Some((StreamId(100), 0)));
 }
 
 /// A source that counts the reads that start at one offset.
@@ -468,13 +471,13 @@ fn a_corrupt_chunk_is_decoded_once() {
         offset: image.chunks[0],
         reads: core::cell::Cell::new(0),
     };
-    let msfz = Msfz::open(&source).unwrap();
+    let msfz = Msfz::read(&source).unwrap();
     let mut kinds = Vec::new();
     for id in 0..8 {
         let stream = msfz.stream(StreamId(id)).unwrap().unwrap();
         for _ in 0..2 {
             let error = stream.read_all(usize::MAX).unwrap_err();
-            assert_eq!(error.stream_location(), Some((id, 0)));
+            assert_eq!(error.stream_location(), Some((StreamId(id), 0)));
             kinds.push(error.kind());
         }
     }

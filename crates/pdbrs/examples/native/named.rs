@@ -234,7 +234,7 @@ fn injected_source(
     };
     let decoded = embedded
         .decode(MAX_EMBEDDED_SOURCE)
-        .map_err(|error| error.with_stream(id.0, 0))?;
+        .map_err(|error| error.with_stream(id, 0))?;
     report.add(
         match embedded.format() {
             EmbeddedFormat::Raw => ".NET embedded sources (raw)",
@@ -244,7 +244,7 @@ fn injected_source(
     );
     let check = document
         .verify_checksum(&decoded)
-        .map_err(|error| error.with_stream(id.0, 0))?;
+        .map_err(|error| error.with_stream(id, 0))?;
     report.add(
         match check {
             ChecksumCheck::Verified => ".NET document checksums verified (SHA-256)",

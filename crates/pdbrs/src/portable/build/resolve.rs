@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use super::{CustomDebugParent, ImportInfo, PdbBuilder};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::portable::debug::{DocumentName, Import, encode_imports, encode_sequence_points};
 use crate::portable::metadata::{
     BlobOffset, CodedIndex, CustomDebugInformationRow, DocumentId, DocumentRow, GuidIndex,

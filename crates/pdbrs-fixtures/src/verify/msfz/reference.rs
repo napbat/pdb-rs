@@ -86,7 +86,7 @@ fn compare(fixture: &PdzFixture) -> Result<Option<String>, String> {
 
 /// Describe the size, the chunks and the fragments of an MSFZ file.
 fn facts(bytes: &[u8]) -> Result<String, String> {
-    let container = Container::open(bytes).map_err(|error| format!("pdbrs: {error}"))?;
+    let container = Container::read(bytes).map_err(|error| format!("pdbrs: {error}"))?;
     let msfz = container
         .msfz()
         .ok_or_else(|| "not an MSFZ container".to_owned())?;

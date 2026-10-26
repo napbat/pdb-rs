@@ -302,7 +302,7 @@ fn dia_check(
 /// Write the container in `bytes` as MSFZ. Return the bytes and the chunk count.
 pub(super) fn encode(bytes: &[u8], options: WriteOptions) -> Result<(Vec<u8>, u32), String> {
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
-    let container = Container::open(bytes).map_err(pdbrs)?;
+    let container = Container::read(bytes).map_err(pdbrs)?;
     let plan = container.to_msfz(options, POLICY).map_err(pdbrs)?;
     Ok((plan.to_vec().map_err(pdbrs)?, plan.chunk_count()))
 }

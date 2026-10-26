@@ -104,7 +104,7 @@ fn type_server_map_truncation() {
     let stream = dbi([&[], &[], &[], &[], &map[..20], &[], &[]]);
     let error = Dbi::parse(stream).unwrap().type_server_map().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-    assert_eq!(error.stream_location(), Some((3, 64)));
+    assert_eq!(error.stream_location(), Some((StreamId(3), 64)));
 }
 
 #[test]

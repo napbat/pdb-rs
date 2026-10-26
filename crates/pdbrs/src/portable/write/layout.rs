@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use super::check::Counts;
 use super::parts::{DebugTables, ExternalRowCounts, PdbParts};
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::portable::metadata::{
     CodedIndex, METADATA_SIGNATURE, MetadataStream, MetadataToken, MethodDefId, TableId,
 };

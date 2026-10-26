@@ -1,4 +1,4 @@
-//! Copy all bytes of a positional source to a sequential output.
+//! Exact copies of a positional source to a sequential output or a file.
 
 use alloc::vec::Vec;
 
@@ -8,10 +8,20 @@ use crate::{Error, ErrorKind, Result};
 /// The size of the copy buffer and of the file output buffer (64 KiB).
 pub(crate) const COPY_BUFFER_SIZE: usize = 64 << 10;
 
-/// Copy all bytes of `source` to `output` through one buffer of at most 64 KiB.
+/// Copy all bytes of `source` to `output` without a change.
 ///
-/// Return the number of bytes. An output error has the file offset of the buffer.
-pub(crate) fn copy_all<S: ReadAt + ?Sized, W: Write + ?Sized>(
+/// An exact copy does not depend on the format. The function does not check that `source`
+/// is a valid container or PDB. It copies through one buffer of at most 64 KiB and returns
+/// the number of bytes.
+///
+/// # Errors
+///
+/// - An error from `source` if a read fails.
+/// - [`ErrorKind::Io`] if `output` fails. The error offset is the file offset of the buffer.
+/// - [`ErrorKind::LimitExceeded`] if the buffer allocation fails.
+///
+/// After an error, `output` can hold a part of the source.
+pub fn copy_exact<S: ReadAt + ?Sized, W: Write + ?Sized>(
     source: &S,
     output: &mut W,
 ) -> Result<u64> {
@@ -35,5 +45,35 @@ pub(crate) fn copy_all<S: ReadAt + ?Sized, W: Write + ?Sized>(
         // `count` is at most 64 KiB.
         offset += u64::try_from(count).unwrap_or(0);
     }
+    Ok(length)
+}
+
+/// Copy all bytes of `source` to the file `path` without a change.
+///
+/// This function needs the `std` feature.
+///
+/// The function uses [`copy_exact`] to write a temporary file in the same directory. Then it
+/// renames the temporary file to `path`. The rename replaces an existing file. The function
+/// returns the number of bytes.
+///
+/// Caution: Do not give the path of the source file. This operation is not supported.
+///
+/// # Errors
+///
+/// - [`ErrorKind::Io`] if the temporary file does not open, a write fails, or the rename
+///   fails.
+/// - The errors of [`copy_exact`].
+///
+/// After an error, the function deletes the temporary file. The file at `path` does not change.
+#[cfg(feature = "std")]
+pub fn copy_exact_file<S: ReadAt + ?Sized>(
+    source: &S,
+    path: impl AsRef<std::path::Path>,
+) -> Result<u64> {
+    let mut length = 0;
+    super::write_new_file(path.as_ref(), |output| {
+        length = copy_exact(source, output)?;
+        Ok(())
+    })?;
     Ok(length)
 }

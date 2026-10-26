@@ -4,12 +4,12 @@
 //! the file header and the stream directory. It does not read stream payloads.
 //! [`Stream`] reads stream bytes on demand through [`ReadAt`].
 //!
-//! [`copy_exact`], [`Msf::repack`] and [`MsfBuilder`] write containers. The documentation of
-//! [`WritePlan`] gives the layout and the guarantee of each operation.
+//! [`copy_exact`](crate::io::copy_exact), [`Msf::repack`] and [`MsfBuilder`] write containers.
+//! The documentation of [`WritePlan`] gives the layout and the guarantee of each operation.
 //!
 //! # Validation
 //!
-//! [`Msf::open`] and [`Msf::with_limits`] check these structural rules:
+//! [`Msf::read`] and [`Msf::with_limits`] check these structural rules:
 //!
 //! - The page size is a power of two from 512 to 65536.
 //! - The active free page map is 1 or 2.
@@ -38,8 +38,8 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::format::{ContainerKind, probe};
 use crate::io::ReadAt;
+use crate::{ContainerKind, probe};
 use crate::{Error, ErrorKind, Result};
 
 mod directory;
@@ -49,9 +49,7 @@ mod write;
 
 pub use free_page_map::FreePageMapReport;
 pub use old_directory::{OldDirectory, OldStream, OldStreams};
-#[cfg(feature = "std")]
-pub use write::copy_exact_file;
-pub use write::{MsfBuilder, OldDirectoryPolicy, WriteOptions, WritePlan, copy_exact};
+pub use write::{MsfBuilder, OldDirectoryPolicy, WriteOptions, WritePlan};
 pub(crate) use write::{StreamSource, plan_sizes};
 
 /// The file offset of the page size field.
@@ -76,7 +74,7 @@ const MAX_PAGE_SIZE: u32 = 65_536;
 const DEFAULT_MAX_DIRECTORY_BYTES: u32 = 64 << 20;
 
 /// The index of a stream in the stream directory.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StreamId(pub u32);
 
 /// Resource limits for [`Msf::with_limits`].
@@ -186,12 +184,12 @@ pub struct Msf<S> {
 }
 
 impl<S: ReadAt> Msf<S> {
-    /// Open a container with the default [`MsfLimits`].
+    /// Read a container with the default [`MsfLimits`].
     ///
     /// # Errors
     ///
     /// Returns the errors of [`Msf::with_limits`].
-    pub fn open(source: S) -> Result<Self> {
+    pub fn read(source: S) -> Result<Self> {
         Self::with_limits(source, MsfLimits::default())
     }
 
@@ -276,7 +274,7 @@ impl<S: ReadAt> Msf<S> {
         else {
             return Err(Error::new(ErrorKind::InvalidStreamIndex, None)
                 .with_context("stream index is outside the stream directory")
-                .with_stream(id.0, 0));
+                .with_stream(id, 0));
         };
         if entry.size == NIL_STREAM_SIZE {
             return Ok(None);
@@ -290,7 +288,7 @@ impl<S: ReadAt> Msf<S> {
             .ok_or_else(|| {
                 Error::new(ErrorKind::OffsetOverflow, None)
                     .with_context("stream page list is not addressable")
-                    .with_stream(id.0, 0)
+                    .with_stream(id, 0)
             })?;
         Ok(Some(Stream {
             source: &self.source,
@@ -376,7 +374,7 @@ impl<S: ReadAt> Stream<'_, S> {
         let limit = |context| {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context(context)
-                .with_stream(self.id.0, 0)
+                .with_stream(self.id, 0)
         };
         let size = usize::try_from(self.size)
             .ok()
@@ -405,9 +403,8 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
             .ok_or_else(|| unaddressable(stream, offset))?;
         let size = u64::from(self.size);
         if end > size {
-            return Err(
-                Error::new(ErrorKind::UnexpectedEof, None).with_stream(stream, offset.max(size))
-            );
+            return Err(Error::new(ErrorKind::UnexpectedEof, None)
+                .with_stream(StreamId(stream), offset.max(size)));
         }
         let block_size = u64::from(self.block_size);
         let page_len =
@@ -439,7 +436,7 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
             let physical = u64::from(first) * block_size + (logical % block_size);
             self.source
                 .read_exact_at(physical, head)
-                .map_err(|error| error.with_stream(stream, logical))?;
+                .map_err(|error| error.with_stream(StreamId(stream), logical))?;
             rest = tail;
             logical += advance;
         }
@@ -451,7 +448,7 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
 fn unaddressable(stream: u32, offset: u64) -> Error {
     Error::new(ErrorKind::OffsetOverflow, None)
         .with_context("stream position is not addressable")
-        .with_stream(stream, offset)
+        .with_stream(StreamId(stream), offset)
 }
 
 impl<S> fmt::Debug for Stream<'_, S> {

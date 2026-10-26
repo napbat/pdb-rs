@@ -29,7 +29,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::error::PortableLocation;
+use crate::PortableLocation;
 use crate::portable::metadata::{
     DocumentId, ImportScopeId, MetadataStream, MethodDefId, StateMachineMethodRow, TableId,
 };

@@ -43,7 +43,7 @@ pub fn pdb(data: &[u8]) {
 
 /// Read the metadata root and detect the format of the input.
 pub fn metadata(data: &[u8]) {
-    let _ = pdbrs::format::probe(data);
+    let _ = pdbrs::probe(data);
     let _ = pdbrs::Pdb::parse(data).map(|pdb| pdb.format());
     if let Some(root) = ok(MetadataRoot::read(data, 64)) {
         let _ = (root.version(), root.version_string(), root.flags());

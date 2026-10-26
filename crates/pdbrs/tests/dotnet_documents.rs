@@ -170,7 +170,7 @@ fn rejects_wrong_entry_crc_and_size() {
     source.crc ^= 1;
     let error = source.verify_document(&content, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(error.stream_location(), Some((STREAM.0, 0)));
+    assert_eq!(error.stream_location(), Some((STREAM, 0)));
 
     for size in [103, 105, 0] {
         let mut source = entry(&content, SourceCompression::DotNet);
@@ -191,7 +191,7 @@ fn separates_document_records_from_file_contents() {
             .verify_document(&content, STREAM)
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
-        assert_eq!(error.stream_location(), Some((STREAM.0, 0)));
+        assert_eq!(error.stream_location(), Some((STREAM, 0)));
     }
 }
 
@@ -200,7 +200,7 @@ fn record_error(content: &[u8]) -> ErrorKind {
     let error = entry(content, SourceCompression::DotNet)
         .verify_document(content, STREAM)
         .unwrap_err();
-    assert_eq!(error.stream_location(), Some((STREAM.0, 0)));
+    assert_eq!(error.stream_location(), Some((STREAM, 0)));
     error.kind()
 }
 

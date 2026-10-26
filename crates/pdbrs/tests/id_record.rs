@@ -7,6 +7,7 @@ use pdbrs::native::codeview::id_record::{
     LF_SUBSTR_LIST, LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE, MAX_STRING_DEPTH,
 };
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{HEADER_SIZE, TypeStream};
 
 /// A leaf kind that is a type leaf, not an ID leaf (`LF_PROCEDURE`).
@@ -355,7 +356,7 @@ fn table_validates_references() {
             .validate(TypeIndex(0x1011))
             .unwrap_err();
         assert_eq!(error.kind(), kind);
-        assert_eq!(error.stream_location(), Some((4, 56)));
+        assert_eq!(error.stream_location(), Some((StreamId(4), 56)));
     }
 }
 
@@ -369,7 +370,7 @@ fn table_adds_the_record_location_to_decode_errors() {
     let error = table.decode(IdIndex(0x1001)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     // The first record has a 4-byte prefix and a 10-byte payload.
-    assert_eq!(error.stream_location(), Some((4, 56 + 14)));
+    assert_eq!(error.stream_location(), Some((StreamId(4), 56 + 14)));
     let error = table.decode(IdIndex(0x1002)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }

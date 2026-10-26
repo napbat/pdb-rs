@@ -273,7 +273,7 @@ pub(crate) fn shared_symbols(
         let record = record?;
         let symbol = record
             .symbol()
-            .map_err(|error| error.with_stream(id.0, u64::from(record.offset)))?;
+            .map_err(|error| error.with_stream(id, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
         reencode(&symbol, report)?;
         if writer.push_symbol(&symbol)?.0 != record.offset {

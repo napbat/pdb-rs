@@ -148,7 +148,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStrea
             return Err(opaque(
                 "the edit changes offsets or indices, and a stream that no other stream names can refer to them",
             )
-            .with_stream(id, 0));
+            .with_stream(StreamId(id), 0));
         }
         type_maps.try_reserve(1).map_err(|_| no_memory())?;
         type_maps.push(StreamId(id));
@@ -172,7 +172,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
         for record in Records::new(&bytes) {
             let record = record?;
             if matches!(record.symbol()?.data(), SymbolData::Unsupported(_)) {
-                return Err(unknown_symbol().with_stream(id.0, u64::from(record.offset)));
+                return Err(unknown_symbol().with_stream(id, u64::from(record.offset)));
             }
         }
     }
@@ -185,14 +185,14 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
         for record in stream.symbols() {
             let record = record?;
             if matches!(record.symbol()?.data(), SymbolData::Unsupported(_)) {
-                return Err(unknown_symbol().with_stream(id, u64::from(record.offset)));
+                return Err(unknown_symbol().with_stream(StreamId(id), u64::from(record.offset)));
             }
         }
         if !stream.c11_data().is_empty() {
             return Err(opaque(
                 "the edit moves symbol records, and C11 line data can refer to them",
             )
-            .with_stream(id, 0));
+            .with_stream(StreamId(id), 0));
         }
         let lines = ModuleLines::parse(&stream)?;
         for subsection in lines.subsections() {
@@ -200,7 +200,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
                 return Err(opaque(
                     "the edit moves symbol records, and a C13 subsection of an unknown kind can refer to them",
                 )
-                .with_stream(id, u64::from(subsection.offset)));
+                .with_stream(StreamId(id), u64::from(subsection.offset)));
             }
         }
     }
