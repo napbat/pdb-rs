@@ -8,10 +8,12 @@ use pdbrs::native::codeview::symbol::validate::{
     validate_shared_symbols,
 };
 use pdbrs::native::codeview::symbol::{
-    S_BLOCK32, S_BUILDINFO, S_COMPILE3, S_DEFRANGE_FRAMEPOINTER_REL,
-    S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_END, S_FILESTATIC, S_GMANPROC,
-    S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROC32,
-    S_LPROCREF, S_PROC_ID_END, S_PROCREF, S_SKIP, S_THUNK32, S_UDT,
+    S_ANNOTATION, S_ANNOTATIONREF, S_BLOCK32, S_BUILDINFO, S_CALLERS, S_COMPILE3, S_DATAREF,
+    S_DEFRANGE, S_DEFRANGE_CONSTVAL_ON_ENTRY, S_DEFRANGE_FRAMEPOINTER_REL,
+    S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_GLOBALSYM_ON_ENTRY, S_DEFRANGE_HLSL,
+    S_DEFRANGE_REGISTER, S_DEFRANGE_SUBFIELD, S_END, S_FILESTATIC, S_GMANPROC, S_GPROC32,
+    S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_LABEL32, S_LDATA32, S_LOCAL, S_LPROC32,
+    S_LPROCREF, S_PROC_ID_END, S_PROCREF, S_SEPCODE, S_SKIP, S_SOURCELINK, S_THUNK32, S_UDT,
 };
 use pdbrs::native::msf::StreamId;
 
@@ -692,4 +694,174 @@ fn does_not_panic_on_corrupt_bytes() {
             let _ = validate_module_symbols(&bytes[..index], STREAM, BASE, &context);
         }
     }
+}
+
+/// Add a record of `kind` with `head`, a range in section 1 and `gaps`.
+fn ranged(
+    builder: &mut Builder,
+    kind: u16,
+    head: &[u8],
+    start: u32,
+    length: u16,
+    gaps: &[(u16, u16)],
+) -> u32 {
+    let mut payload = head.to_vec();
+    payload.extend_from_slice(&start.to_le_bytes());
+    payload.extend_from_slice(&1_u16.to_le_bytes());
+    payload.extend_from_slice(&length.to_le_bytes());
+    for &(gap_start, gap_length) in gaps {
+        payload.extend_from_slice(&gap_start.to_le_bytes());
+        payload.extend_from_slice(&gap_length.to_le_bytes());
+    }
+    builder.push(kind, &payload)
+}
+
+/// Add an `S_SEPCODE` record in section 1 with an end link to patch later.
+fn separated(builder: &mut Builder, parent: u32, start: u32, length: u32, owner: u32) -> u32 {
+    let mut payload = Vec::new();
+    for value in [parent, 0, length, 0, start, owner] {
+        payload.extend_from_slice(&value.to_le_bytes());
+    }
+    payload.extend_from_slice(&[1, 0, 1, 0]);
+    builder.push(S_SEPCODE, &payload)
+}
+
+#[test]
+fn accepts_def_ranges_in_later_separated_code_of_the_procedure() {
+    let mut builder = Builder::default();
+    let outer = procedure(&mut builder);
+    builder.local(0x0074, 0);
+    builder.register_range(RCX, CODE + 0x500, 8, &[]);
+    builder.close(S_PROC_ID_END, outer);
+    let code = separated(&mut builder, 0, CODE + 0x500, 0x40, CODE);
+    builder.close(S_END, code);
+    assert_eq!(rules(&module(&builder)), []);
+}
+
+#[test]
+fn reports_def_ranges_outside_the_separated_code_of_the_procedure() {
+    let mut builder = Builder::default();
+    let outer = procedure(&mut builder);
+    builder.local(0x0074, 0);
+    let other_owner = builder.register_range(RCX, CODE + 0x500, 8, &[]);
+    let uncovered = builder.register_range(RCX, CODE + 0x600, 8, &[]);
+    builder.close(S_PROC_ID_END, outer);
+    let code = separated(&mut builder, 0, CODE + 0x500, 0x40, CODE + 0x10);
+    builder.close(S_END, code);
+    assert_eq!(
+        rules(&module(&builder)),
+        [
+            (Rule::DefRangeOutsideProcedure, u64::from(other_owner)),
+            (Rule::DefRangeOutsideProcedure, u64::from(uncovered)),
+        ]
+    );
+}
+
+#[test]
+fn checks_def_ranges_in_an_open_separated_code_scope() {
+    let mut builder = Builder::default();
+    let code = separated(&mut builder, 0, CODE + 0x500, 0x40, CODE);
+    builder.local(0x0074, 0);
+    builder.register_range(RCX, CODE + 0x510, 8, &[]);
+    let outside = builder.register_range(RCX, CODE + 0x600, 8, &[]);
+    builder.close(S_END, code);
+    assert_eq!(
+        rules(&module(&builder)),
+        [(Rule::DefRangeOutsideProcedure, u64::from(outside))]
+    );
+}
+
+#[test]
+fn checks_program_hlsl_and_entry_def_ranges() {
+    let mut builder = Builder::default();
+    let outer = procedure(&mut builder);
+    builder.local(0x0074, 0);
+    let program = 7_u32.to_le_bytes();
+    ranged(&mut builder, S_DEFRANGE, &program, CODE, 0x10, &[(2, 2)]);
+    let gap = ranged(&mut builder, S_DEFRANGE, &program, CODE, 0x10, &[(0xf, 2)]);
+    let subfield_head = [7, 0, 0, 0, 4, 0, 0, 0];
+    let outside = ranged(
+        &mut builder,
+        S_DEFRANGE_SUBFIELD,
+        &subfield_head,
+        CODE + 0x200,
+        4,
+        &[],
+    );
+    let hlsl_head = [1, 0, 0, 0, 0, 0, 4, 0];
+    let order = ranged(
+        &mut builder,
+        S_DEFRANGE_HLSL,
+        &hlsl_head,
+        CODE,
+        0x10,
+        &[(4, 4), (2, 1)],
+    );
+    builder.push(S_DEFRANGE_CONSTVAL_ON_ENTRY, &[1, 0, 0, 0]);
+    builder.push(S_DEFRANGE_GLOBALSYM_ON_ENTRY, &[0x20, 0, 0, 0, 2, 0]);
+    builder.close(S_PROC_ID_END, outer);
+    let constant = builder.push(S_DEFRANGE_CONSTVAL_ON_ENTRY, &[1, 0, 0, 0]);
+    let global = builder.push(S_DEFRANGE_GLOBALSYM_ON_ENTRY, &[0x20, 0, 0, 0, 2, 0]);
+    assert_eq!(
+        rules(&module(&builder)),
+        [
+            (Rule::GapOutsideRange, u64::from(gap)),
+            (Rule::DefRangeOutsideProcedure, u64::from(outside)),
+            (Rule::GapOrder, u64::from(order)),
+            (Rule::DefRangeWithoutLocal, u64::from(constant)),
+            (Rule::DefRangeWithoutLocal, u64::from(global)),
+        ]
+    );
+}
+
+#[test]
+fn checks_data_and_annotation_references() {
+    let mut builder = Builder::default();
+    builder.reference(S_DATAREF, 1, 4);
+    let data_kind = builder.reference(S_DATAREF, 1, 12);
+    let data_missing = builder.reference(S_DATAREF, 1, 16);
+    builder.reference(S_ANNOTATIONREF, 1, 8);
+    let annotation_kind = builder.reference(S_ANNOTATIONREF, 1, 4);
+    let annotation_module = builder.reference(S_ANNOTATIONREF, 0, 8);
+    let records = |module: u16, offset: u32| match (module, offset) {
+        (0, 4) => ModuleRecord::Kind(S_LDATA32),
+        (0, 8) => ModuleRecord::Kind(S_ANNOTATION),
+        (0, 12) => ModuleRecord::Kind(S_GPROC32),
+        _ => ModuleRecord::Missing,
+    };
+    let context = context().with_module_count(1).with_module_records(&records);
+    let report = validate_shared_symbols(&builder.bytes, StreamId(7), &context).unwrap();
+    let base = u64::from(BASE);
+    assert_eq!(
+        rules(&report),
+        [
+            (Rule::ModuleRecordKind, u64::from(data_kind) - base),
+            (Rule::ModuleRecordMissing, u64::from(data_missing) - base),
+            (Rule::ModuleRecordKind, u64::from(annotation_kind) - base),
+            (Rule::ModuleIndex, u64::from(annotation_module) - base),
+        ]
+    );
+}
+
+#[test]
+fn checks_caller_ids_and_source_link_ranges() {
+    let mut builder = Builder::default();
+    let mut callers = Vec::new();
+    for value in [3_u32, 0x1000, 0x1002, 0x1003] {
+        callers.extend_from_slice(&value.to_le_bytes());
+    }
+    let list = builder.push(S_CALLERS, &callers);
+    builder.push(S_SOURCELINK, &0x1002_u32.to_le_bytes());
+    builder.push(S_SOURCELINK, &0x1001_u32.to_le_bytes());
+    let past_end = builder.push(S_SOURCELINK, &0x1003_u32.to_le_bytes());
+    let primitive = builder.push(S_SOURCELINK, &0x0074_u32.to_le_bytes());
+    assert_eq!(
+        rules(&module(&builder)),
+        [
+            (Rule::IdKind, u64::from(list)),
+            (Rule::IdIndexRange, u64::from(list)),
+            (Rule::IdIndexRange, u64::from(past_end)),
+            (Rule::IdIndexRange, u64::from(primitive)),
+        ]
+    );
 }
