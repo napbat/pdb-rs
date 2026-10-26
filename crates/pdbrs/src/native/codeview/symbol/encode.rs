@@ -51,6 +51,11 @@ impl SymbolData<'_> {
     ///
     /// After an error, `out` can hold a part of the record.
     pub fn encode(&self, kind: u16, out: &mut Vec<u8>) -> Result<()> {
+        self.encode_with(kind, Padding::Zero, out)
+    }
+
+    /// Append the record of `kind` with these fields and `padding` to `out`.
+    fn encode_with(&self, kind: u16, padding: Padding, out: &mut Vec<u8>) -> Result<()> {
         let mut writer = FieldWriter::new(out);
         let start = writer.begin_record(kind)?;
         let written =
@@ -59,7 +64,7 @@ impl SymbolData<'_> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("symbol data does not belong to the record kind"));
         }
-        writer.finish_record(start, Padding::Zero)
+        writer.finish_record(start, padding)
     }
 
     /// Write the fields of a kind that is not a variable, data or def-range
@@ -256,25 +261,24 @@ impl Symbol<'_> {
     ///
     /// The errors of [`SymbolData::encode`].
     ///
-    /// The output has the length of the original record. A record with four or more zero
-    /// bytes after its fields (see [`Symbol::padding`]) keeps all of them, and a record with
-    /// a length that is not a multiple of 4 keeps that length.
+    /// The output has the length of the original record: the encoder writes the fields
+    /// and then the zero bytes of the original record after them (see [`Symbol::padding`]).
+    /// A record with four or more zero bytes, or with a length that is not a multiple of 4,
+    /// thus keeps its bytes.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let start = out.len();
-        self.data.encode(self.kind(), out)?;
+        self.data.encode_with(self.kind(), Padding::None, out)?;
         // The record had a valid u16 length, so the original length fits.
         let original = self.record().data.len() + 4;
-        let written = out.len() - start;
-        // Only zero padding is added or removed: the fields end at or before both lengths.
-        if written == original || out[start + original.min(written)..].iter().any(|&b| b != 0) {
+        let extra = original.saturating_sub(out.len() - start);
+        if extra == 0 {
             return Ok(());
         }
-        let extra = original.saturating_sub(written);
         out.try_reserve(extra).map_err(|_| {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("CodeView record output cannot be allocated")
         })?;
-        out.resize(start + original, 0);
+        out.resize(out.len() + extra, 0);
         let length = u16::try_from(original - 2).map_err(|_| {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("CodeView record is longer than its u16 length field allows")

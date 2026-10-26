@@ -178,6 +178,25 @@ fn keeps_the_length_of_an_unaligned_record() {
 }
 
 #[test]
+fn encodes_a_record_of_the_largest_length_without_padding() {
+    // Regression (#35, fuzz target `native_symbol_encode`): a decoded record with the length
+    // field 0xffff did not encode, because the alignment padding made it too long.
+    let mut name = vec![b'a'; 0xfff2];
+    name.push(0);
+    let bytes = record(S_PUB32, &public_payload(&name));
+    assert_eq!(bytes[..2], [0xff, 0xff]);
+    let symbol = Records::new(&bytes)
+        .next()
+        .unwrap()
+        .unwrap()
+        .symbol()
+        .unwrap();
+    let mut out = Vec::new();
+    symbol.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
+}
+
+#[test]
 fn decodes_data_symbols() {
     for kind in [S_GDATA32, S_LDATA32] {
         let mut payload = Vec::new();
