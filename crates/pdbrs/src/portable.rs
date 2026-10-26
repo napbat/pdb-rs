@@ -5,8 +5,9 @@
 //!
 //! [`compressed`] decodes and encodes the compressed integers of metadata
 //! blobs. [`custom`] decodes and encodes custom debug information blobs.
-//! [`embedded`] decodes and encodes embedded-source blobs. Windows PDB
-//! document records use the same blob format.
+//! [`embedded`] decodes and encodes embedded Portable PDB payloads and
+//! embedded-source blobs. Windows PDB document records use the same
+//! embedded-source blob format.
 
 pub mod compressed;
 pub mod custom;

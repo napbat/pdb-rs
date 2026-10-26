@@ -14,13 +14,43 @@ exception handling and .NET async state machines.
 | --- | --- |
 | `native/` | C++20 and C17 sources for MSVC and `clang-cl`: `main.cpp`, `types.cpp`, `control.cpp`, `big_enum.cpp`, `c_api.c` and two headers. |
 | `rust/` | A standalone Cargo project. Its empty `[workspace]` table keeps it out of the root workspace. |
-| `dotnet/csharp/` | A C# console project with three source files. |
-| `dotnet/vb/` | A Visual Basic console project. |
-| `dotnet/fsharp/` | An F# console project. It needs the `FSharp.Core` package from NuGet. |
+| `dotnet/csharp/` | A C# console project with four source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs` and `Locals.cs`. |
+| `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
+| `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
 
 Each program runs without arguments, prints a checksum and exits with code 0. MSVC-only
 constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m128` and
 `__vectorcall` code is only in x86 and x64 builds.
+
+### .NET demos
+
+The .NET demos give the Portable PDB reader and writer data for each debug table (#23, #24,
+#26). Each demo has these items:
+
+- async methods and iterators
+- more than one source document
+- methods without sequence points: abstract methods, extern methods and compiler-generated
+  members, for example the kickoff methods of state machines and record members
+
+Each demo also has these language-specific items:
+
+| Demo | Items |
+| --- | --- |
+| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. |
+| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. |
+| F# | `task { }` state machines, `seq { }` classes, an `async { }` workflow, records and discriminated unions. The generator builds the F# demo with `Optimize=true`, because the F# compiler makes a `task { }` state machine only with optimization. The F# compiler writes no `StateMachineMethod` rows. |
+
+With the argument `stack`, each .NET demo prints `System.Diagnostics.StackTrace(true)` and
+exits with code 0. The stack goes through more than one source file, an async method and an
+iterator. Use this mode to compare the file names and line numbers of a changed PDB with the
+original PDB (#26):
+
+```sh
+dotnet target/fixtures/dotnet-csharp-portable/artifacts/bin/CSharpDemo/debug/CSharpDemo.dll stack
+```
+
+The output of the F# demo also has frames from `FSharp.Core`. Their file names and line numbers
+come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 
 ## Matrix
 
@@ -47,7 +77,7 @@ constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m12
 | `dotnet-csharp-full` | `dotnet build` | AnyCPU | `DebugType=full` |
 | `dotnet-csharp-embed-sources` | `dotnet build` | AnyCPU | `DebugType=portable`, `EmbedAllSources=true` |
 | `dotnet-vb-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
-| `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
+| `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable`, `Optimize=true` |
 
 The `clang-cl` and `lld-link` tools come from the LLVM component of Visual Studio, not from a
 separate LLVM installation. MSVC 14.50 and later ignore `/DEBUG:FASTLINK` (warning LNK4315)
@@ -72,7 +102,8 @@ The generator does these steps:
 2. It runs `vcvarsall.bat` once for each architecture and keeps the environment.
 3. It gives that environment to each compiler and linker process.
 4. It deletes the directory of each selected fixture and builds the fixture again.
-5. It classifies each output by its contents and writes `manifest.json`.
+5. It classifies each output by its contents and writes `manifest.json`. With `--only`, it
+   keeps the entries of the other fixtures from the earlier manifest.
 
 The generator exits with a failure code if a fixture with an available toolchain fails. A
 missing toolchain does not cause a failure. The manifest records the fixture as `unavailable`
@@ -85,19 +116,31 @@ own directory with a `build.log` file. Native builds put object files in `obj/`.
 use `target/` in the fixture directory as `CARGO_TARGET_DIR`. .NET builds use `artifacts/` in
 the fixture directory as the artifacts path, so no `bin/` or `obj/` directory appears here.
 
-`manifest.json` lists the selected fixtures of the last run. For each fixture it records:
+`manifest.json` lists the fixtures in matrix order. A run without `--only` writes the entries
+of all fixtures. A run with `--only` reads the earlier `manifest.json` of the output root, if it
+exists. It replaces or adds the entries of the selected fixtures and keeps the other entries.
+The header fields, for example the commit and the time, always come from the last run. If the
+generator cannot read or parse the earlier manifest, it writes a warning and lists only the
+selected fixtures.
+
+For each fixture the manifest records:
 
 - the name, producer, language, architecture and configuration
 - the status (`built`, `failed` or `unavailable`) and the reason
 - the tool versions, for example the `cl` banner, `clang-cl --version`, `rustc -V` and
   `dotnet --version`
 - each command with its working directory, environment source and extra variables
-- each output with its kind (`native-pdb`, `portable-pdb`, `embedded-in-image` or `image`),
-  its path relative to the output root and its size in bytes
+- each output with its kind (`native-pdb`, `portable-pdb`, `embedded-in-image`,
+  `embedded-pdb-payload` or `image`), its path relative to the output root and its size in bytes
 
-The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature or
-an `MPDB` payload in the PE debug directory. The manifest also records the workspace commit
-and the host.
+The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature, the
+`MPDB` signature or an `MPDB` payload in the PE debug directory. The manifest also records the
+workspace commit and the host.
+
+For an `embedded-in-image` output, the generator writes the data of the debug directory entry
+of type 17 to a file next to the image, with the extension `.mpdb` (for example
+`CSharpDemo.mpdb`). The manifest records this file as an `embedded-pdb-payload` output. Tests
+and examples read the payload from this file, so pdbrs does not need a PE parser.
 
 The `consumer_tools` section of `manifest.json` copies the tool records of
 `target/tools/manifest.json` (see [Consumer tools](#consumer-tools)). If that file is missing,

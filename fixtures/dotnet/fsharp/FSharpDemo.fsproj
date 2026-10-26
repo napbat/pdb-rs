@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The generator sets DebugType and the artifacts path on the command line. -->
+  <!-- The generator sets DebugType, Optimize and the artifacts path on the command line. -->
   <!-- The SDK adds the FSharp.Core package reference implicitly. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Tracing.fs" />
+    <Compile Include="Workflows.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
