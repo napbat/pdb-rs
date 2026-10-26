@@ -3,9 +3,11 @@
 //! Portable PDBs use CLI metadata, not MSF. Their 20-byte identity combines
 //! a GUID with a stamp. The stamp is not a native PDB age.
 //!
-//! [`embedded`] decodes and encodes embedded-source blobs. Windows PDB
+//! [`compressed`] decodes and encodes the compressed integers of metadata
+//! blobs. [`embedded`] decodes and encodes embedded-source blobs. Windows PDB
 //! document records use the same blob format.
 
+pub mod compressed;
 pub mod embedded;
 
 /// The 20-byte identity stored at the start of a Portable PDB's `#Pdb` stream.
