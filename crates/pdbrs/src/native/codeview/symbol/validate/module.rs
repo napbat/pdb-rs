@@ -7,14 +7,12 @@
 
 mod inline_site;
 
-use inline_site::SiteRange;
-
 use alloc::vec::Vec;
 
 use super::super::{
-    AddressGaps, AddressRange, Annotation, BinaryAnnotations, LocalFlags, ModuleSymbols, S_BLOCK32,
-    S_END, S_INLINESITE, S_INLINESITE2, S_PROC_ID_END, S_SEPCODE, S_THUNK32, ScopedSymbol, Symbol,
-    SymbolData,
+    AddressGaps, AddressRange, Annotation, BinaryAnnotations, ChunkRange, LocalFlags,
+    ModuleSymbols, S_BLOCK32, S_END, S_INLINESITE, S_INLINESITE2, S_PROC_ID_END, S_SEPCODE,
+    S_THUNK32, ScopedSymbol, Symbol, SymbolData, separated_chunks,
 };
 use super::{
     GLOBAL_PROCEDURES, ID_PROCEDURES, LOCAL_PROCEDURES, MANAGED_PROCEDURES, Rule,
@@ -86,7 +84,7 @@ struct DeferredSite {
     /// The code range of the procedure (chunk 0).
     procedure: CodeRange,
     /// The code ranges of the inline site.
-    ranges: Vec<SiteRange>,
+    ranges: Vec<ChunkRange>,
     /// The parts of the def-range outside its gaps.
     parts: Vec<CodeRange>,
     /// The offset of the def-range record.
@@ -148,7 +146,7 @@ struct Checker<'r, 'c> {
     /// The type of that local.
     local_type: Option<TypeIndex>,
     /// The code ranges of the open inline sites, in stack order.
-    site_ranges: Vec<SiteRange>,
+    site_ranges: Vec<ChunkRange>,
     /// The def-range checks that need separated code chunks.
     deferred: Vec<DeferredSite>,
 }
@@ -314,11 +312,7 @@ fn chunk(
         section: procedure.section,
         offset: procedure.start,
     };
-    separated
-        .iter()
-        .filter(|&&(parent, _)| parent == start)
-        .nth(index)
-        .map(|&(_, code)| code)
+    separated_chunks(separated, start).nth(index).copied()
 }
 
 /// Return `true` if an inline site has code length annotations and all of

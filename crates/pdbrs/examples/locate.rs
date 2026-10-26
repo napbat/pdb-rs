@@ -10,9 +10,9 @@
 //! An RVA is a hexadecimal number with or without `0x`. `--sample <count>`
 //! selects up to `count` addresses from the PDB: procedure starts, bytes
 //! inside procedures, the last byte of procedures, the byte after procedures,
-//! inline range starts,
-//! bytes inside inline ranges, line entry starts and the byte before a line
-//! entry. `--sample-names <count>` selects up to `count` names of
+//! inline range starts, bytes inside inline ranges, line entry starts, the
+//! byte before a line entry, and the start and a middle byte of separated
+//! code chunks. `--sample-names <count>` selects up to `count` names of
 //! procedures and of the public symbols at their starts.
 //!
 //! The output has one block for each address:
@@ -141,6 +141,8 @@ fn sample_addresses(locator: &SymbolLocator, count: usize) -> Outcome<Vec<(u32, 
         "inline-middle",
         "line-start",
         "line-before",
+        "separated-start",
+        "separated-middle",
     ]
     .into_iter()
     .map(|kind| (kind, Vec::new()))
@@ -156,13 +158,22 @@ fn sample_addresses(locator: &SymbolLocator, count: usize) -> Outcome<Vec<(u32, 
         kinds[1].1.push(start + procedure.length / 2);
         kinds[2].1.push(end - 1);
         kinds[3].1.push(end);
+        let chunks = locator.code_chunks(&procedure)?;
+        for chunk in &chunks[1..] {
+            if let (Some(chunk_start), true) = (chunk.start, chunk.length > 0) {
+                kinds[8].1.push(chunk_start.0);
+                kinds[9].1.push(chunk_start.0 + chunk.length / 2);
+            }
+        }
         for site in locator.inline_sites(&procedure)? {
             for range in site.ranges {
-                let Some(length) = range.code_length.filter(|&length| length > 0) else {
+                let Some((range_start, length)) =
+                    range.rva_range(&chunks).filter(|&(_, length)| length > 0)
+                else {
                     continue;
                 };
-                kinds[4].1.push(start + range.code_offset);
-                kinds[5].1.push(start + range.code_offset + length / 2);
+                kinds[4].1.push(range_start.0);
+                kinds[5].1.push(range_start.0 + length / 2);
             }
         }
         let mut rva = start;

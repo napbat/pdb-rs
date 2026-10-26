@@ -4,10 +4,12 @@
 //! annotations are a small program. [`InlineRanges`] runs the program and
 //! returns one [`InlineRange`] for each range that the program emits.
 //!
-//! The program has this state: a code offset, a code offset base, a file, a
-//! line, a line count, columns and a range kind. The start values come from
-//! the `DEBUG_S_INLINEELINES` entry of the inlinee. These opcodes start a
-//! range at the current state:
+//! The program has a code state and a line state. The code state is a code
+//! offset, a code chunk and the open range. The symbol validator uses the
+//! same code rules. The line state is a file, a line, a line count, columns
+//! and a range kind. The start values of the line state come from the
+//! `DEBUG_S_INLINEELINES` entry of the inlinee. These opcodes start a range
+//! at the current state:
 //!
 //! - `ChangeCodeOffset`.
 //! - `ChangeCodeOffsetAndLineOffset`.
@@ -17,10 +19,19 @@
 //! `ChangeCodeLength` gives the length of the open range and moves the code
 //! offset to the end of that range. Thus a later range can start after a gap.
 //!
-//! The code offset of a range is relative to the start of the procedure that
-//! contains the inline site, also for nested inline sites. The range offset
-//! is the code offset plus the code offset base. `ChangeCodeOffsetBase` sets
-//! the base for separated code chunks. No fixture contains it.
+//! The code offset of a range is relative to the start of a code chunk of
+//! the procedure that contains the inline site, also for nested inline
+//! sites. Chunk 0 is the code of the procedure. `ChangeCodeOffsetBase`
+//! selects chunk `n`: the code of the `n`-th `S_SEPCODE` record of the
+//! module whose parent address is the start of the procedure, in stream
+//! order (`cvinfo.h`: "nth separated code chunk (main code chunk == 0)").
+//! The opcode ends the open range and sets the code offset to 0. A range
+//! without a length that no later range ends, ends with its chunk.
+//! [`SymbolLocator::code_chunks`](super::SymbolLocator::code_chunks) gives
+//! the chunks of a procedure. MSVC writes separated code for profile-guided
+//! optimization: the fixture `msvc-x64-pgo` of #27 has 62 inline sites with
+//! `ChangeCodeOffsetBase`, and DIA gives the same inline frames in its
+//! separated code.
 //!
 //! The rules follow `InlineeLineIterator` in the `pdb` crate (version
 //! 0.8.0) and `MCCodeView::encodeInlineLineTable` in LLVM (revision
@@ -28,19 +39,27 @@
 
 use core::iter::FusedIterator;
 
-use crate::native::codeview::symbol::{Annotation, Annotations, BinaryAnnotations};
+use super::CodeChunk;
+use crate::native::address::Rva;
+use crate::native::codeview::symbol::{
+    Annotation, Annotations, BinaryAnnotations, ChunkRange, CodeError, CodeState,
+};
 use crate::{Error, ErrorKind, Result};
 
 /// One source line range of an inline site.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineRange {
-    /// The offset of the first byte from the start of the procedure.
+    /// The code chunk of the procedure: 0 for the code of the procedure,
+    /// `n` for the code of its `n`-th `S_SEPCODE` record.
     ///
-    /// The value includes the code offset base.
+    /// The value is the index in the list of
+    /// [`SymbolLocator::code_chunks`](super::SymbolLocator::code_chunks).
+    pub chunk: u32,
+    /// The offset of the first byte from the start of the chunk.
     pub code_offset: u32,
     /// The number of bytes in the range, or `None` if the annotations do not
-    /// give the end of the last range.
+    /// give the end of the range. Such a range ends with its chunk.
     pub code_length: Option<u32>,
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the module.
@@ -58,21 +77,42 @@ pub struct InlineRange {
 }
 
 impl InlineRange {
-    /// Return the offset after the last byte, if the range has a length.
-    #[must_use]
-    pub fn code_end(&self) -> Option<u64> {
-        self.code_length
-            .map(|length| u64::from(self.code_offset) + u64::from(length))
-    }
-
-    /// Return `true` if the range holds `offset`, an offset from the start of
-    /// the procedure.
+    /// Return the RVA of the first byte and the length of the range.
     ///
-    /// A range without a length holds no offset.
+    /// `chunks` are the code chunks of the procedure, from
+    /// [`SymbolLocator::code_chunks`](super::SymbolLocator::code_chunks). A
+    /// range without a length ends at the end of its chunk. Return `None`
+    /// if `chunks` does not have the chunk of the range, if the chunk has no
+    /// RVA, or if the range does not fit in 32 bits.
     #[must_use]
-    pub fn contains(&self, offset: u32) -> bool {
-        offset >= self.code_offset && self.code_end().is_some_and(|end| u64::from(offset) < end)
+    pub fn rva_range(&self, chunks: &[CodeChunk]) -> Option<(Rva, u32)> {
+        let chunk = chunks.get(usize::try_from(self.chunk).ok()?)?;
+        let start = chunk.start?.0;
+        let code = ChunkRange {
+            chunk: self.chunk,
+            start: self.code_offset,
+            length: self.code_length,
+        };
+        let (first, end) = code.bounds(start, start.checked_add(chunk.length)?)?;
+        Some((Rva(first), end - first))
     }
+}
+
+/// The line state of a range.
+#[derive(Clone, Copy, Debug)]
+struct LineState {
+    /// The file checksum offset.
+    file: u32,
+    /// The line.
+    line: u32,
+    /// The line count.
+    line_count: u32,
+    /// The first column.
+    column_start: Option<u32>,
+    /// The column after the end.
+    column_end: Option<u32>,
+    /// The range kind.
+    is_statement: bool,
 }
 
 /// An iterator that runs the binary annotations of an inline site.
@@ -83,10 +123,8 @@ impl InlineRange {
 pub struct InlineRanges<'a> {
     /// The annotations that are not run yet.
     annotations: Annotations<'a>,
-    /// The code offset relative to the procedure start, without the base.
-    code_offset: u32,
-    /// The code offset base.
-    base: u32,
+    /// The code offset, the code chunk and the open code range.
+    code: CodeState,
     /// The file checksum offset.
     file: u32,
     /// The line. It is signed so that a negative intermediate value is not
@@ -100,8 +138,8 @@ pub struct InlineRanges<'a> {
     column_end: Option<u32>,
     /// The range kind.
     is_statement: bool,
-    /// The last range that was started and is not returned yet.
-    open: Option<InlineRange>,
+    /// The line state of the open code range.
+    open: Option<LineState>,
     /// `true` after an error or after the last range.
     done: bool,
 }
@@ -116,8 +154,7 @@ impl<'a> InlineRanges<'a> {
     pub fn new(annotations: &BinaryAnnotations<'a>, file: u32, line: u32) -> Self {
         Self {
             annotations: annotations.iter(),
-            code_offset: 0,
-            base: 0,
+            code: CodeState::default(),
             file,
             line: i64::from(line),
             line_count: 1,
@@ -129,26 +166,15 @@ impl<'a> InlineRanges<'a> {
         }
     }
 
-    /// Run one annotation. Return a finished range, if the annotation
-    /// starts a new range.
+    /// Run one annotation. Return a finished range, if the annotation ends
+    /// one.
     fn step(&mut self, annotation: Annotation) -> Result<Option<InlineRange>> {
         match annotation {
-            Annotation::CodeOffset(offset) => self.code_offset = offset,
-            Annotation::ChangeCodeOffsetBase(base) => self.base = base,
-            Annotation::ChangeCodeOffset(delta) => {
-                self.advance(delta)?;
-                return self.start(None);
-            }
-            Annotation::ChangeCodeLength(length) => {
-                if let Some(open) = &mut self.open
-                    && open.code_length.is_none()
-                {
-                    open.code_length = Some(length);
-                }
-                self.advance(length)?;
-            }
             Annotation::ChangeFile(file) => self.file = file,
-            Annotation::ChangeLineOffset(delta) => self.line += i64::from(delta),
+            Annotation::ChangeLineOffset(delta)
+            | Annotation::ChangeCodeOffsetAndLineOffset {
+                line_delta: delta, ..
+            } => self.line += i64::from(delta),
             Annotation::ChangeLineEndDelta(count) => self.line_count = count,
             Annotation::ChangeRangeKind(kind) => {
                 self.is_statement = match kind {
@@ -168,62 +194,46 @@ impl<'a> InlineRanges<'a> {
                 }
             }
             Annotation::ChangeColumnEnd(column) => self.column_end = Some(column),
-            Annotation::ChangeCodeOffsetAndLineOffset {
-                code_delta,
-                line_delta,
-            } => {
-                self.advance(code_delta)?;
-                self.line += i64::from(line_delta);
-                return self.start(None);
-            }
-            Annotation::ChangeCodeLengthAndCodeOffset {
-                code_length,
-                code_delta,
-            } => {
-                self.advance(code_delta)?;
-                return self.start(Some(code_length));
-            }
+            _ => {}
         }
-        Ok(None)
+        let step = self.code.step(annotation).map_err(|error| match error {
+            CodeError::Overflow => Error::new(ErrorKind::OffsetOverflow, None)
+                .with_context("inline site code offset overflows 32 bits"),
+            CodeError::Decreasing => invalid("inline site code offsets decrease"),
+        })?;
+        let finished = step.finished.map(|code| self.finish(code)).transpose()?;
+        if step.started {
+            let line = u32::try_from(self.line)
+                .map_err(|_| invalid("inline site line is outside the 32-bit range"))?;
+            self.open = Some(LineState {
+                file: self.file,
+                line,
+                line_count: self.line_count,
+                column_start: self.column_start,
+                column_end: self.column_end,
+                is_statement: self.is_statement,
+            });
+        }
+        Ok(finished)
     }
 
-    /// Add `delta` to the code offset.
-    fn advance(&mut self, delta: u32) -> Result<()> {
-        self.code_offset = self.code_offset.checked_add(delta).ok_or_else(|| {
-            Error::new(ErrorKind::OffsetOverflow, None)
-                .with_context("inline site code offset overflows 32 bits")
-        })?;
-        Ok(())
-    }
-
-    /// Start a range at the current state. Return the range that it ends.
-    fn start(&mut self, code_length: Option<u32>) -> Result<Option<InlineRange>> {
-        let code_offset = self.code_offset.checked_add(self.base).ok_or_else(|| {
-            Error::new(ErrorKind::OffsetOverflow, None)
-                .with_context("inline site code offset overflows 32 bits")
-        })?;
-        let line = u32::try_from(self.line)
-            .map_err(|_| invalid("inline site line is outside the 32-bit range"))?;
-        let next = InlineRange {
-            code_offset,
-            code_length,
-            file: self.file,
-            line,
-            line_count: self.line_count,
-            column_start: self.column_start,
-            column_end: self.column_end,
-            is_statement: self.is_statement,
-        };
-        let Some(mut previous) = self.open.replace(next) else {
-            return Ok(None);
-        };
-        if previous.code_length.is_none() {
-            let length = code_offset
-                .checked_sub(previous.code_offset)
-                .ok_or_else(|| invalid("inline site code offsets decrease"))?;
-            previous.code_length = Some(length);
-        }
-        Ok(Some(previous))
+    /// Join a finished code range with the line state of the open range.
+    fn finish(&mut self, code: ChunkRange) -> Result<InlineRange> {
+        let line = self
+            .open
+            .take()
+            .ok_or_else(|| invalid("inline site code range has no line state"))?;
+        Ok(InlineRange {
+            chunk: code.chunk,
+            code_offset: code.start,
+            code_length: code.length,
+            file: line.file,
+            line: line.line,
+            line_count: line.line_count,
+            column_start: line.column_start,
+            column_end: line.column_end,
+            is_statement: line.is_statement,
+        })
     }
 }
 
@@ -234,7 +244,7 @@ impl Iterator for InlineRanges<'_> {
         while !self.done {
             let Some(annotation) = self.annotations.next() else {
                 self.done = true;
-                return self.open.take().map(Ok);
+                return self.code.finish().map(|code| self.finish(code));
             };
             match self.step(annotation) {
                 Ok(Some(range)) => return Some(Ok(range)),

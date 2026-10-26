@@ -28,6 +28,16 @@
 //! frame is the procedure. Its line comes from the `DEBUG_S_LINES`
 //! subsections ([`Location::line`]).
 //!
+//! # Separated code
+//!
+//! A compiler can move a part of a procedure to a separated code chunk, for
+//! example cold code after profile-guided optimization. An `S_SEPCODE`
+//! record gives the chunk. Its parent address is the start of the
+//! procedure. MSVC writes it at the top level, after the end of the
+//! procedure. [`SymbolLocator::code_chunks`] gives the chunks of a
+//! procedure. An address in a chunk gives the procedure of the chunk, as DIA
+//! does, and the inline frames from the ranges of the chunk.
+//!
 //! # Limits
 //!
 //! The locator translates addresses through the OMAP tables of an image
@@ -59,7 +69,7 @@ mod scope;
 pub use inline::{InlineRange, InlineRanges};
 pub use lines::{LineMatch, find_line};
 pub use name::NameMatch;
-pub use scope::InlineSiteRanges;
+pub use scope::{CodeChunk, InlineSiteRanges};
 
 use range::RangeIndex;
 
@@ -81,6 +91,8 @@ pub struct SymbolLocator {
     modules: Vec<ModuleData>,
     /// The procedures and thunks by RVA.
     procedures: RangeIndex<ProcedureKey>,
+    /// The separated code chunks by RVA, with the procedure of each chunk.
+    separated: RangeIndex<ProcedureKey>,
     /// The `DEBUG_S_LINES` subsections by RVA.
     lines: RangeIndex<LineKey>,
     /// The section contributions by RVA, with the module index.
@@ -115,6 +127,20 @@ struct ModuleData {
     /// a scope kind that this crate does not decode. The locator does not
     /// read records at or after it.
     walk_end: Option<u32>,
+    /// The parent address and the chunk of each `S_SEPCODE` record, in
+    /// stream order.
+    separated: Vec<(SectionOffset, SeparatedChunk)>,
+}
+
+/// An `S_SEPCODE` record of a module.
+#[derive(Clone, Copy, Debug)]
+struct SeparatedChunk {
+    /// The module stream offset of the record.
+    offset: u32,
+    /// The address of the separated code.
+    address: SectionOffset,
+    /// The length of the separated code in bytes.
+    length: u32,
 }
 
 /// The place of a procedure record.
@@ -253,7 +279,8 @@ pub struct Location<'a> {
     /// The module of the section contribution that holds the address, or
     /// else the module of the procedure.
     pub module: Option<ModuleRef<'a>>,
-    /// The procedure or thunk that holds the address.
+    /// The procedure or thunk that holds the address. For an address in a
+    /// separated code chunk, the procedure of the chunk.
     pub procedure: Option<ProcedureInfo<'a>>,
     /// The innermost `S_BLOCK32` scope of the procedure that holds the address.
     pub block: Option<BlockInfo<'a>>,
@@ -384,11 +411,16 @@ impl SymbolLocator {
     /// and of these the last one in module and record order. DIA
     /// (`findSymbolByRVA`) and `llvm-symbolizer` give the same procedure for
     /// the folded procedures of the fixtures of #27.
+    ///
+    /// An address in a separated code chunk and in no procedure gives the
+    /// procedure of the chunk, with the same preference.
     fn locate_at(&self, rva: Rva, address: SectionOffset) -> Result<Location<'_>> {
         let contribution = self.contributions.find(rva.0).map(|span| span.value);
+        let prefer = |key: &ProcedureKey| Some(key.module) == contribution;
         let procedure = self
             .procedures
-            .find_last_preferred(rva.0, |key| Some(key.module) == contribution)
+            .find_last_preferred(rva.0, prefer)
+            .or_else(|| self.separated.find_last_preferred(rva.0, prefer))
             .map(|span| self.procedure_info(span.value))
             .transpose()?;
         let module_index = contribution.or(procedure.map(|procedure| procedure.module));

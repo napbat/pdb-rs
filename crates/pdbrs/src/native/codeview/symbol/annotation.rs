@@ -19,6 +19,8 @@
 //! a linked PDB uses it as padding. The decoder accepts it only as the record
 //! padding at the end: fewer than four bytes, all zero.
 
+pub(super) mod code;
+
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 

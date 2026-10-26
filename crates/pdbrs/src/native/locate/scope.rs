@@ -1,4 +1,4 @@
-//! The scopes of one procedure: blocks and inline sites.
+//! The scopes of one procedure: blocks, inline sites and code chunks.
 
 use alloc::vec::Vec;
 
@@ -9,8 +9,28 @@ use super::{
 use crate::native::address::{AddressMap, Rva, SectionOffset};
 use crate::native::codeview::Records;
 use crate::native::codeview::index::IdIndex;
-use crate::native::codeview::symbol::{Symbol, SymbolData};
+use crate::native::codeview::symbol::{Symbol, SymbolData, separated_chunks};
 use crate::{Error, ErrorKind, Result};
+
+/// A code chunk of a procedure.
+///
+/// Chunk 0 is the code of the procedure. Chunk `n` is the code of the
+/// `n`-th `S_SEPCODE` record of the module whose parent address is the
+/// start of the procedure, in stream order.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct CodeChunk {
+    /// The module stream offset of the `S_SEPCODE` record, or `None` for
+    /// the code of the procedure.
+    pub offset: Option<u32>,
+    /// The section-relative address of the first byte.
+    pub address: SectionOffset,
+    /// The RVA of the first byte, or `None` if the address is not in an
+    /// image section.
+    pub start: Option<Rva>,
+    /// The length of the code in bytes.
+    pub length: u32,
+}
 
 /// The line ranges of one `S_INLINESITE` record.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -23,7 +43,8 @@ pub struct InlineSiteRanges {
     /// The inlined function.
     pub inlinee: IdIndex,
     /// The ranges in annotation order. Each code offset is relative to the
-    /// start of the procedure.
+    /// start of the code chunk of the range
+    /// ([`SymbolLocator::code_chunks`]).
     pub ranges: Vec<InlineRange>,
 }
 
@@ -105,6 +126,42 @@ impl SymbolLocator {
         Ok(sites)
     }
 
+    /// Return the code chunks of a procedure.
+    ///
+    /// The index of a chunk in the list is its chunk number, the value of
+    /// [`InlineRange::chunk`]. Chunk 0 is the code of the procedure. The
+    /// next chunks come from the `S_SEPCODE` records of the module whose
+    /// parent address is the start of the procedure, in stream order.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidReference`] if the module of the procedure is
+    ///   not known.
+    /// - The errors of the address translation.
+    pub fn code_chunks(&self, procedure: &ProcedureInfo<'_>) -> Result<Vec<CodeChunk>> {
+        const LIMIT: &str = "code chunk list cannot be allocated";
+        let module = self.module_data(procedure.module)?;
+        let map = self.address_map()?;
+        let mut chunks = Vec::new();
+        let main = CodeChunk {
+            offset: None,
+            address: procedure.address,
+            start: procedure.start,
+            length: procedure.length,
+        };
+        push(&mut chunks, main, LIMIT)?;
+        for chunk in separated_chunks(&module.separated, procedure.address) {
+            let separated = CodeChunk {
+                offset: Some(chunk.offset),
+                address: chunk.address,
+                start: optional_rva(&map, chunk.address)?,
+                length: chunk.length,
+            };
+            push(&mut chunks, separated, LIMIT)?;
+        }
+        Ok(chunks)
+    }
+
     /// Decode the blocks and the inline sites of a procedure.
     fn scopes(&self, procedure: &ProcedureInfo<'_>) -> Result<Vec<ScopeRecord<'_>>> {
         let module = self.module_data(procedure.module)?;
@@ -166,25 +223,25 @@ impl SymbolLocator {
         location: &mut Location<'s>,
         procedure: &ProcedureInfo<'s>,
     ) -> Result<()> {
-        let Some(start) = procedure.start else {
-            return Ok(());
-        };
-        let Some(target) = location.rva.0.checked_sub(start.0) else {
-            return Ok(());
-        };
+        let rva = location.rva;
         let scopes = self.scopes(procedure)?;
         location.block = scopes.iter().rev().find_map(|scope| match scope.kind {
             ScopeKind::Block(block)
-                if block.start <= location.rva
-                    && u64::from(location.rva.0) - u64::from(block.start.0)
-                        < u64::from(block.length) =>
+                if block.start <= rva
+                    && u64::from(rva.0) - u64::from(block.start.0) < u64::from(block.length) =>
             {
                 Some(block)
             }
             _ => None,
         });
+        let chunks = self.code_chunks(procedure)?;
+        // The range that holds the address, with its RVA and length.
+        let holding = |range: &InlineRange| {
+            let (start, length) = range.rva_range(&chunks)?;
+            (rva.0.checked_sub(start.0)? < length).then_some((*range, start, length))
+        };
         let innermost = scopes.iter().rposition(|scope| match &scope.kind {
-            ScopeKind::Site { ranges, .. } => ranges.iter().any(|range| range.contains(target)),
+            ScopeKind::Site { ranges, .. } => ranges.iter().any(|range| holding(range).is_some()),
             _ => false,
         });
         let module = self.module_data(procedure.module)?;
@@ -192,17 +249,17 @@ impl SymbolLocator {
         while let Some(position) = next {
             let scope = &scopes[position];
             if let ScopeKind::Site { inlinee, ranges } = &scope.kind {
-                let range = ranges.iter().copied().find(|range| range.contains(target));
+                let found = ranges.iter().find_map(holding);
                 let (name, qualified_name) = self.inlinee_name(*inlinee)?;
-                let line = range
-                    .map(|range| self.range_line(module, start, &range))
+                let line = found
+                    .map(|(range, start, length)| self.range_line(module, start, length, &range))
                     .transpose()?;
                 let frame = InlineFrame {
                     offset: scope.offset,
                     inlinee: *inlinee,
                     name,
                     qualified_name,
-                    range,
+                    range: found.map(|(range, _, _)| range),
                     line,
                     call_site: None,
                 };
@@ -230,20 +287,15 @@ impl SymbolLocator {
         Ok(())
     }
 
-    /// Return the source line of an inline range.
+    /// Return the source line of an inline range at `start` with `length`
+    /// bytes.
     fn range_line(
         &self,
         module: &ModuleData,
-        procedure_start: Rva,
+        start: Rva,
+        length: u32,
         range: &InlineRange,
     ) -> Result<SourceLine<'_>> {
-        let start = procedure_start
-            .0
-            .checked_add(range.code_offset)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::OffsetOverflow, None)
-                    .with_context("inline range RVA overflows 32 bits")
-            })?;
         Ok(SourceLine {
             file: self.file_name(module, range.file)?,
             checksum_offset: range.file,
@@ -253,8 +305,8 @@ impl SymbolLocator {
                 .saturating_add(range.line_count.saturating_sub(1)),
             column: range.column_start,
             end_column: range.column_end,
-            start: Rva(start),
-            length: range.code_length,
+            start,
+            length: Some(length),
             is_statement: range.is_statement,
         })
     }
