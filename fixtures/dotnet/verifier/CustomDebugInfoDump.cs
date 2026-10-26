@@ -11,6 +11,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace PortableVerifier;
@@ -32,6 +33,7 @@ internal static class CustomDebugInfoDump
     private static readonly Guid CompilationOptions = new("B5FEEC05-8CD0-4A83-96DA-466284BB4BD8");
     private static readonly Guid TypeDocuments = new("932E74BC-DBA9-4478-8D46-0F32A7BAB3D3");
     private static readonly Guid PrimaryConstructor = new("9D40ACE1-C703-4D0E-BF41-7243060A8FB5");
+    private static readonly Guid Sha256 = new("8829D00F-11B8-4213-878B-770E8597AC16");
 
     public static void Write(MetadataReader reader, StringBuilder output)
     {
@@ -245,33 +247,66 @@ internal static class CustomDebugInfoDump
     /// <summary>Decode an embedded source and write its size and FNV-1a hash.</summary>
     private static void DecodeEmbeddedSource(BlobReader blob, int id, Action<string> line)
     {
-        int format = blob.ReadInt32();
-        byte[] data = blob.ReadBytes(blob.RemainingBytes);
-        byte[] source;
-        if (format == 0)
-        {
-            source = data;
-        }
-        else
-        {
-            using var output = new MemoryStream();
-            using (var deflate = new DeflateStream(new MemoryStream(data), CompressionMode.Decompress))
-            {
-                deflate.CopyTo(output);
-            }
-            source = output.ToArray();
-            if (source.Length != format)
-            {
-                throw new InvalidDataException("embedded source size differs from its format field");
-            }
-        }
+        byte[] source = DecodeSource(blob, out bool raw);
         ulong hash = 0xcbf29ce484222325;
         foreach (byte value in source)
         {
             hash = unchecked((hash ^ value) * 0x100000001b3);
         }
-        string name = format == 0 ? "raw" : "deflate";
+        string name = raw ? "raw" : "deflate";
         line($"cdi-embedded-source id={id} format={name} size={Hex((uint)source.Length)} fnv1a=0x{hash:x16}");
+    }
+
+    /// <summary>Decode an embedded-source blob: raw bytes or a DEFLATE stream.</summary>
+    private static byte[] DecodeSource(BlobReader blob, out bool raw)
+    {
+        int format = blob.ReadInt32();
+        byte[] data = blob.ReadBytes(blob.RemainingBytes);
+        raw = format == 0;
+        if (raw)
+        {
+            return data;
+        }
+        using var output = new MemoryStream();
+        using (var deflate = new DeflateStream(new MemoryStream(data), CompressionMode.Decompress))
+        {
+            deflate.CopyTo(output);
+        }
+        byte[] source = output.ToArray();
+        if (source.Length != format)
+        {
+            throw new InvalidDataException("embedded source size differs from its format field");
+        }
+        return source;
+    }
+
+    /// <summary>
+    /// Write a <c>source</c> line for each embedded source of each document: the check of the
+    /// decoded source against the document hash. Only SHA-256 is computed.
+    /// </summary>
+    public static void WriteSources(MetadataReader reader, StringBuilder output)
+    {
+        foreach (DocumentHandle handle in reader.Documents)
+        {
+            Document document = reader.GetDocument(handle);
+            Guid algorithm = document.HashAlgorithm.IsNil ? Guid.Empty : reader.GetGuid(document.HashAlgorithm);
+            foreach (CustomDebugInformationHandle row in reader.GetCustomDebugInformation(handle))
+            {
+                CustomDebugInformation information = reader.GetCustomDebugInformation(row);
+                if (information.Kind.IsNil || reader.GetGuid(information.Kind) != EmbeddedSource)
+                {
+                    continue;
+                }
+                byte[] source = DecodeSource(reader.GetBlobReader(information.Value), out _);
+                string check = algorithm != Sha256
+                    ? "not-verified"
+                    : SHA256.HashData(source).AsSpan().SequenceEqual(reader.GetBlobBytes(document.Hash))
+                        ? "verified"
+                        : "mismatch";
+                output.Append($"source document={MetadataTokens.GetRowNumber(handle)} "
+                    + $"cdi={MetadataTokens.GetRowNumber(row)} size={Hex((uint)source.Length)} check={check}\n");
+            }
+        }
     }
 
     /// <summary>Read a NUL-terminated string without its terminator.</summary>

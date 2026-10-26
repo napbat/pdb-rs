@@ -116,8 +116,9 @@ It does not read rows or heap values. `Pdb::row` and `Pdb::rows` read one row at
 | Heaps | `#Strings` termination, `#Blob` and `#US` length prefixes, `#GUID` indexes, the empty first entry and 16-byte GUID boundaries | — |
 | Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked. `portable::debug` (#23): typed rows of seven tables (`CustomDebugInformation` in `portable::custom`, #24); document names, languages and hash algorithms; sequence points (hidden points, document records, signed deltas, IL offset and line and column bounds); local constant signatures (all type codes, enums, general values, custom modifiers); imports of the nine kinds; an encoder for each blob in the Roslyn form; `Pdb::validate_debug` | Instruction boundaries and the IL size of the first scope of a method: they need the method bodies of the assembly |
 | Dispatch | `pdbrs::Pdb` and `pdbrs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
+| Embedded data (#25) | `portable::embedded::decode_embedded` and `encode_embedded` for `MPDB` payloads (signature, reserved sizes, limit before allocation, exact output length); `Pdb::document_source` decodes the embedded source of a document and checks it against the document hash; `Document::verify_source` | Hash algorithms other than SHA-256 give `SourceCheck::NotVerified` |
 
-Read a complete Portable PDB with:
+Read a complete Portable PDB or an `MPDB` payload with:
 
 ```sh
 cargo run -p pdbrs --example portable -- path/to/input.pdb
@@ -125,10 +126,13 @@ cargo run -p pdbrs --example portable -- path/to/input.pdb
 
 The example reads every row and every heap value that a row refers to. It fails at the first value that it cannot read.
 It decodes every blob of the debug tables and every custom debug information value, encodes each again and compares the bytes.
+It decodes the embedded source of each document and fails if a source does not match its SHA-256 hash.
 Then it runs `Pdb::validate_debug` and prints the report: each rule with the number of checked items, or the reason why the rule was not checked.
 The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `System.Reflection.Metadata`.
 `cargo run -p pdbrs-fixtures -- verify-portable` compares it with the pdbrs dump; `fixtures/README.md` describes the format.
-The dump has the raw rows, the decoded debug tables (#23) and the decoded custom debug information (#24).
+The dump has the raw rows, the decoded debug tables (#23), the decoded custom debug information (#24) and the embedded source checks (#25).
+For the embedded fixture, pdbrs reads the `.mpdb` payload and the verifier reads the assembly with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`.
+Evidence ([#25](https://github.com/napbat/pdbrs/issues/25)): the 15 embedded sources of the five Portable PDB fixtures match their SHA-256 hashes in both dumps.
 Evidence ([#22](https://github.com/napbat/pdbrs/issues/22), [#23](https://github.com/napbat/pdbrs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
 The encoders give the same bytes for every debug table blob of the four standalone fixtures (62, 62, 25 and 45 blobs).
 In 26 F# sequence point blobs, the `LocalSignature` header is a full `StandAloneSig` token, not a row. `SequencePoints::local_signature_form` reports the form, and `encode_sequence_points` takes a `LocalSignatureForm` to keep it.

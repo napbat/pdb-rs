@@ -179,6 +179,7 @@ internal sealed class Dump
         WriteCustomDebugInformation();
         DebugDump.Write(reader, output);
         CustomDebugInfoDump.Write(reader, output);
+        CustomDebugInfoDump.WriteSources(reader, output);
     }
 
     private void ReadStreamHeaders()

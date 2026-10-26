@@ -1,6 +1,10 @@
-//! Read every table row and heap value of a standalone Portable PDB and print counts.
+//! Read every table row and heap value of a Portable PDB and print counts.
 //!
-//! The example opens the file with `pdbrs::portable::Pdb`. It prints the metadata version, the
+//! The input is a standalone Portable PDB or an embedded PDB payload (`MPDB`, for example the
+//! `.mpdb` file that the fixture generator writes). The example decodes a payload with
+//! `pdbrs::portable::embedded::decode_embedded` and then reads the decoded PDB.
+//!
+//! The example opens the PDB with `pdbrs::portable::Pdb`. It prints the metadata version, the
 //! stream headers, the heap sizes, the `#Pdb` fields and the row count of each debug table.
 //! Then it reads each row of the eight debug tables and each string, blob and GUID that a row
 //! refers to. It stops with an error at the first value that it cannot read.
@@ -13,6 +17,9 @@
 //! blob that encodes to other bytes, with the reason. Last, it validates the debug tables with
 //! `Pdb::validate_debug` and prints the report. It stops with an error at the first value that
 //! does not decode and at the first rule violation.
+//!
+//! The example also decodes the embedded source of each document and checks it against the
+//! document hash (SHA-256 only).
 
 mod debug;
 
@@ -22,6 +29,7 @@ use std::fmt::Write as _;
 
 use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::CustomDebugValue;
+use pdbrs::portable::embedded::{EMBEDDED_PDB_SIGNATURE, decode_embedded};
 use pdbrs::portable::metadata::{
     BlobOffset, CustomDebugInformationRow, DocumentRow, GuidIndex, ImportScopeRow,
     LocalConstantRow, LocalScopeRow, LocalVariableRow, MetadataStream, MethodDebugInformationRow,
@@ -29,6 +37,9 @@ use pdbrs::portable::metadata::{
 };
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
+
+/// The largest decoded embedded PDB that the example reads.
+const MAX_EMBEDDED_PDB: usize = 256 << 20;
 
 /// The counts of read values, in name order.
 #[derive(Default)]
@@ -42,7 +53,7 @@ impl Counts {
 
 /// Read heap values and count them.
 struct Reader<'a> {
-    pdb: &'a Pdb<pdbrs::io::FileReader>,
+    pdb: &'a Pdb<&'a [u8]>,
     counts: Counts,
 }
 
@@ -126,9 +137,20 @@ impl Reader<'_> {
 fn main() -> Outcome {
     let mut arguments = std::env::args().skip(1);
     let (Some(path), None) = (arguments.next(), arguments.next()) else {
-        return Err("usage: cargo run -p pdbrs --example portable -- <file.pdb>".into());
+        return Err(
+            "usage: cargo run -p pdbrs --example portable -- <file.pdb | file.mpdb>".into(),
+        );
     };
-    let pdb = Pdb::open(&path)?;
+    let mut bytes = std::fs::read(&path)?;
+    if bytes.starts_with(&EMBEDDED_PDB_SIGNATURE) {
+        let payload = bytes.len();
+        bytes = decode_embedded(&bytes, MAX_EMBEDDED_PDB)?;
+        println!(
+            "embedded PDB payload: {payload} bytes, decoded to {} bytes",
+            bytes.len()
+        );
+    }
+    let pdb = Pdb::parse(&bytes)?;
 
     let metadata = pdb.metadata();
     println!(

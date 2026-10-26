@@ -6,6 +6,7 @@ mod compilation;
 mod enc;
 mod locals;
 mod rows;
+mod sources;
 mod state_machine;
 
 use pdbrs::ErrorKind;

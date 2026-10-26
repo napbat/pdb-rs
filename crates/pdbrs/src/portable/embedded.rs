@@ -31,9 +31,22 @@
 //! specification (`PortablePdb-Metadata.md` in `dotnet/runtime`).
 //!
 //! The two formats are different. Each one has its own size checks.
+//!
+//! # Embedded source of a document
+//!
+//! [`Pdb::document_source`](crate::portable::Pdb::document_source) finds the
+//! embedded-source custom debug information of a `Document` row, decodes it
+//! and checks it against the document hash.
+//! [`Document::verify_source`](crate::portable::debug::Document::verify_source)
+//! does the check for a source from another place. Only SHA-256 is computed;
+//! other hash algorithms give [`SourceCheck::NotVerified`].
+
+mod source;
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
+
+pub use source::{DocumentSource, SourceCheck};
 
 use crate::compression::deflate;
 use crate::{Error, ErrorKind, Result};

@@ -46,6 +46,7 @@ pub fn dump<S: ReadAt>(pdb: &Pdb<S>) -> pdbrs::Result<String> {
     rows(pdb, &mut out)?;
     debug::debug(pdb, &mut out)?;
     custom::custom(pdb, &mut out)?;
+    custom::sources(pdb, &mut out)?;
     Ok(out.text)
 }
 

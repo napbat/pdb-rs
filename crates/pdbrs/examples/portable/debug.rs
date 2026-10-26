@@ -1,22 +1,28 @@
 //! Decode the debug table blobs, encode them again and validate the tables.
 //!
 //! Each decoded blob goes through its encoder. The example counts the blobs that encode to the
-//! same bytes and prints each blob that encodes to other bytes, with the reason.
+//! same bytes and prints each blob that encodes to other bytes, with the reason. It decodes the
+//! embedded source of each document and checks it against the document hash. A source that
+//! does not match its SHA-256 hash stops the example with an error.
 
 use std::collections::BTreeMap;
 
-use pdbrs::io::FileReader;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
-    DocumentName, Import, LocalConstantSignature, LocalSignatureForm, Outcome as RuleOutcome,
-    ValidateOptions, encode_imports, encode_sequence_points, split_document_name,
+    Document, DocumentName, Import, LocalConstantSignature, LocalSignatureForm,
+    Outcome as RuleOutcome, ValidateOptions, encode_imports, encode_sequence_points,
+    split_document_name,
 };
+use pdbrs::portable::embedded::{EmbeddedFormat, SourceCheck};
 use pdbrs::portable::metadata::BlobOffset;
 
 use crate::{Counts, Outcome};
 
+/// The largest embedded source that the example decodes.
+const MAX_EMBEDDED_SOURCE: usize = 64 << 20;
+
 /// Decode, encode and validate all debug table data of `pdb`.
-pub fn debug_tables(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
+pub fn debug_tables(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
     documents(pdb, counts)?;
     sequence_points(pdb, counts)?;
     scopes(pdb, counts)?;
@@ -50,7 +56,7 @@ fn compare(counts: &mut Counts, what: &str, encoded: &[u8], original: &[u8], rea
 }
 
 /// Decode the document names and check the Roslyn split of each name.
-fn documents(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
+fn documents(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
     for document in pdb.documents() {
         let document = document?;
         counts.add("documents", 1);
@@ -60,6 +66,7 @@ fn documents(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
         if document.hash_algorithm().is_some() {
             counts.add("documents with a defined hash algorithm", 1);
         }
+        embedded_source(pdb, &document, counts)?;
         let blob = pdb.blob(document.row().name)?;
         let name = DocumentName::decode(&blob)?;
         let parts: Vec<BlobOffset> = name.parts().collect();
@@ -93,8 +100,37 @@ fn documents(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
     Ok(())
 }
 
+/// Decode the embedded source of `document` and check it against the document hash.
+fn embedded_source(pdb: &Pdb<&[u8]>, document: &Document, counts: &mut Counts) -> Outcome {
+    let Some(source) = pdb.document_source(document, MAX_EMBEDDED_SOURCE)? else {
+        return Ok(());
+    };
+    counts.add(
+        match source.format() {
+            EmbeddedFormat::Raw => "embedded sources (raw)",
+            EmbeddedFormat::Deflate => "embedded sources (DEFLATE)",
+        },
+        1,
+    );
+    match source.check() {
+        SourceCheck::Verified => counts.add("embedded sources that match their SHA-256 hash", 1),
+        SourceCheck::NotVerified => counts.add(
+            "embedded sources not verified (hash algorithm is not SHA-256)",
+            1,
+        ),
+        SourceCheck::Mismatch => {
+            return Err(format!(
+                "the embedded source of Document row {} does not match its SHA-256 hash",
+                document.id().get()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Decode the sequence points of each method and encode them again.
-fn sequence_points(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
+fn sequence_points(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
     for method in pdb.method_debug_informations() {
         let method = method?;
         counts.add("methods", 1);
@@ -147,7 +183,7 @@ fn sequence_points(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
 }
 
 /// Read the scopes, variables and constants, and encode each constant signature again.
-fn scopes(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
+fn scopes(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
     for scope in pdb.local_scopes() {
         let scope = scope?;
         counts.add("local scopes", 1);
@@ -176,7 +212,7 @@ fn scopes(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
 }
 
 /// Decode the imports of each import scope and encode them again.
-fn imports(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
+fn imports(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
     for scope in pdb.import_scopes() {
         let scope = scope?;
         counts.add("import scopes", 1);

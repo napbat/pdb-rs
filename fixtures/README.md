@@ -362,6 +362,16 @@ syntax offsets, state numbers, slot kinds, ordinals and row IDs are signed decim
 | `primary-constructor` | No detail line |
 | `unknown` | `cdi-raw`: `size`, `bytes` (in hexadecimal) |
 
+#### Embedded source check lines
+
+The embedded source check section comes after the custom debug information section. Each
+embedded source of a document gives a `source` line, in `Document` row order: `document` (the
+row ID), `cdi` (the `CustomDebugInformation` row ID), `size` (the decoded size) and `check`.
+The `check` field is `verified` if the hash algorithm is SHA-256 and the SHA-256 digest of the
+decoded source is equal to the document hash. It is `mismatch` if the digest differs. It is
+`not-verified` for other hash algorithms. pdbrs uses `Pdb::document_source`. The verifier
+decodes the blob with `DeflateStream` and computes the digest with `SHA256.HashData`.
+
 To extend the format, add new keywords after the `row` lines. Add each new line type to the
 verifier and to `crates/pdbrs-fixtures/src/verify/dump.rs` (or a module below it) together,
 and increase the version only if an existing line changes.
@@ -402,4 +412,13 @@ cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-portable/
 The example prints the stream headers, the heap sizes, the `#Pdb` fields and the row counts. It
 exits with a failure code at the first row or heap value that it cannot read. It decodes each
 custom debug information value, encodes it again and counts the values that give the same
-bytes (#24). It does not decode the other blob contents yet (#23, #25).
+bytes (#24). It decodes the debug table blobs (#23). It decodes the embedded source of each
+document and checks it against the SHA-256 document hash (#25). It exits with a failure code
+if a source does not match its hash. It counts the sources with other hash algorithms as not
+verified.
+
+The example also reads an embedded PDB payload. It decodes the `MPDB` envelope first:
+
+```sh
+cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-embedded/artifacts/bin/CSharpDemo/debug/CSharpDemo.mpdb
+```

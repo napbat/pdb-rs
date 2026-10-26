@@ -10,7 +10,7 @@ use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::{
     CustomDebugInformation, CustomDebugValue, LambdaClosure, LocalSlot, Utf8Bytes,
 };
-use pdbrs::portable::embedded::EmbeddedSource;
+use pdbrs::portable::embedded::{EmbeddedSource, SourceCheck};
 
 use super::{Dump, quote};
 
@@ -30,6 +30,29 @@ pub fn custom<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
             codec(&value)
         ));
         details(&row, &value, out)?;
+    }
+    Ok(())
+}
+
+/// Print a `source` line for the embedded source of each document: the check of the decoded
+/// source against the document hash.
+pub fn sources<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
+    for document in pdb.documents() {
+        let document = document?;
+        let Some(source) = pdb.document_source(&document, MAX_SOURCE)? else {
+            continue;
+        };
+        let check = match source.check() {
+            SourceCheck::Verified => "verified",
+            SourceCheck::Mismatch => "mismatch",
+            SourceCheck::NotVerified => "not-verified",
+        };
+        out.line(format_args!(
+            "source document={} cdi={} size={:#x} check={check}",
+            document.id().get(),
+            source.custom_debug_information().get(),
+            source.content().len()
+        ));
     }
     Ok(())
 }
