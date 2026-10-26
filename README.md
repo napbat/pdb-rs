@@ -86,6 +86,12 @@ cargo run -p pdbrs --example native -- path/to/file.pdb
 cargo run -p pdbrs --example native_rebuild -- input.pdb output.pdb
 cargo run -p pdbrs --example native_synthetic -- output.pdb
 
+# Print the UDT layouts and enum values of a native PDB in a C-like form, one type,
+# or the signatures of the procedures and function IDs.
+cargo run -p pdbrs --example types -- path/to/file.pdb
+cargo run -p pdbrs --example types -- --type demo::Point path/to/file.pdb
+cargo run -p pdbrs --example types -- --functions path/to/file.pdb
+
 # Print the procedure, source lines and inline chain of an RVA.
 cargo run -p pdbrs --example locate -- path/to/file.pdb 0x1000
 
