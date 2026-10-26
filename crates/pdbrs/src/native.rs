@@ -8,6 +8,7 @@ pub mod dbi;
 pub mod hash;
 pub mod info;
 pub mod msf;
+pub mod symbols;
 pub mod types;
 
 mod reader;
