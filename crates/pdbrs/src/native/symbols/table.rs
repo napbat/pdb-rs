@@ -28,6 +28,8 @@ use super::{BucketCount, RecordOffsets, SymbolOffset, index_error, region, u32_a
 use crate::native::msf::StreamId;
 use crate::{ErrorKind, Result};
 
+pub(super) mod write;
+
 /// The size of the hash table header.
 const HEADER_SIZE: usize = 16;
 /// The size of one hash record in the file (`HRFile`).

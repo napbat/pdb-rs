@@ -12,6 +12,8 @@ use super::table::{HashTable, Layout};
 use crate::Result;
 use crate::native::msf::StreamId;
 
+mod write;
+
 /// A decoded global symbol index stream with owned serialized bytes.
 #[derive(Clone, Debug)]
 pub struct GlobalSymbolIndex {

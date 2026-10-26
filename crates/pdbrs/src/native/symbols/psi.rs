@@ -25,6 +25,10 @@ use super::{BucketCount, RecordOffsets, SymbolOffset, index_error, region, u32_a
 use crate::native::msf::StreamId;
 use crate::{ErrorKind, Result};
 
+mod write;
+
+pub use write::ThunkTable;
+
 /// The size of the public symbol index header.
 const HEADER_SIZE: usize = 28;
 /// The size of one section offset entry.
