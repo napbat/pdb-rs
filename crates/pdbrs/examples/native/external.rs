@@ -40,5 +40,9 @@ pub(crate) fn external_dependencies(
         "modules with S_MOD_TYPEREF type records",
         dependencies.module_types.len(),
     );
+    report.add(
+        "modules with precompiled types in an object file (external)",
+        dependencies.object_precompiled_types.len(),
+    );
     Ok(())
 }

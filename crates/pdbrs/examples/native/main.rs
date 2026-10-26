@@ -129,6 +129,9 @@ impl Report {
 struct Context<'a> {
     names: StringTable<'a>,
     tpi_end: TypeIndex,
+    /// `false` if the type and ID indices refer to records outside the PDB, so that the checks
+    /// skip them.
+    indices_checked: bool,
     ids: IdTable<'a>,
     addresses: Option<AddressMap<'a>>,
     module_count: usize,
@@ -203,6 +206,7 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     let context = Context {
         names,
         tpi_end: TypeIndex(tpi.header().index_end),
+        indices_checked: true,
         ids,
         addresses,
         module_count,

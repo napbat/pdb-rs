@@ -11,6 +11,11 @@
 //! - [`ModuleTypeSource::OtherModule`]: the records of the named module.
 //! - [`ModuleTypeSource::NoTypes`]: no records, so only primitive type
 //!   indices are valid.
+//! - [`ModuleTypeSource::PrecompiledTypeOwner`] and
+//!   [`ModuleTypeSource::PrecompiledTypeUser`]: the precompiled types are in
+//!   an object file outside the PDB and the first index of the own records
+//!   is not known, so the plan does not check the type and ID index ranges.
+//!   The builder still writes the stream of the own records.
 //! - [`ModuleTypeSource::Other`]: the meaning of the words is not known, so
 //!   the plan does not check the type and ID index ranges.
 //!

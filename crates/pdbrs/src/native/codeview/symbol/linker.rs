@@ -233,22 +233,62 @@ pub enum ModuleTypeSource {
         /// The index of the module that holds the records (`word0`, 0-based).
         module: u16,
     },
-    /// Another combination of flags, for example the precompiled-type flags
-    /// `fRefTMPCT` and `fOwnTMPCT`. No fixture shows their words.
+    /// The module is the `/Yc` object of a `/Z7` precompiled header
+    /// (`fOwnTMR | fOwnTMPCT`).
+    ///
+    /// The stream holds the records of `.debug$P` after `LF_ENDPRECOMP`.
+    /// The precompiled types before `LF_ENDPRECOMP` are not in the PDB:
+    /// Microsoft's writer (`Mod1::fCopyTM`) does not copy them, and `word1`
+    /// is 0. They stay in the object file of the module. The own records
+    /// start at index `0x1000` plus the number of precompiled types, and
+    /// the PDB does not hold that number (`msvc-x64-pch-lazy`, #30, #39).
+    PrecompiledTypeOwner {
+        /// The stream with the own records (`word0`).
+        stream: StreamId,
+    },
+    /// The module is a `/Yu` object of a `/Z7` precompiled header
+    /// (`fOwnTMR | fRefTMPCT`).
+    ///
+    /// The stream holds the `.debug$T` records without the `LF_PRECOMP`
+    /// record. The precompiled types are in the object file of the owner
+    /// module, not in the PDB (see
+    /// [`ModuleTypeSource::PrecompiledTypeOwner`]).
+    PrecompiledTypeUser {
+        /// The stream with the own records (`word0`).
+        stream: StreamId,
+        /// The index of the module that owns the precompiled types
+        /// (`word1`, 0-based).
+        owner: u16,
+    },
+    /// Another combination of flags. No producer is known for it.
     Other(ModuleTypeReference),
 }
 
 impl ModuleTypeSource {
     /// Return the streams that hold the records: the stream of
-    /// [`ModuleTypeSource::TypeRecords`], the type and the ID stream of
+    /// [`ModuleTypeSource::TypeRecords`] and of the precompiled-type
+    /// sources, the type and the ID stream of
     /// [`ModuleTypeSource::TypeServer`], and no stream for the other sources.
     pub fn streams(&self) -> impl Iterator<Item = StreamId> {
         let pair = match *self {
-            Self::TypeRecords { stream } => [Some(stream), None],
+            Self::TypeRecords { stream }
+            | Self::PrecompiledTypeOwner { stream }
+            | Self::PrecompiledTypeUser { stream, .. } => [Some(stream), None],
             Self::TypeServer { types, ids } => [Some(types), Some(ids)],
             Self::NoTypes | Self::OtherModule { .. } | Self::Other(_) => [None, None],
         };
         pair.into_iter().flatten()
+    }
+
+    /// Return `true` if the type and ID indices of the module refer to
+    /// precompiled types outside the PDB, so that a reader cannot resolve
+    /// them.
+    #[must_use]
+    pub const fn has_external_precompiled_types(&self) -> bool {
+        matches!(
+            self,
+            Self::PrecompiledTypeOwner { .. } | Self::PrecompiledTypeUser { .. }
+        )
     }
 }
 
@@ -256,8 +296,9 @@ impl ModuleTypeReference {
     /// Return where the type records of the module are.
     ///
     /// The function uses only the flags of bits 0 to 5. Exactly one of
-    /// `fNone`, `fOwnTMR`, `fOwnTM` and `fRefTM` must be set, and no
-    /// precompiled-type flag; else the result is [`ModuleTypeSource::Other`].
+    /// `fNone`, `fOwnTMR`, `fOwnTM` and `fRefTM` must be set. With
+    /// `fOwnTMR`, either `fOwnTMPCT` or `fRefTMPCT` can be set too. Other
+    /// combinations give [`ModuleTypeSource::Other`].
     #[must_use]
     pub fn source(&self) -> ModuleTypeSource {
         let stream = |word: u16| StreamId(u32::from(word));
@@ -271,14 +312,22 @@ impl ModuleTypeReference {
                 ids: stream(self.word1),
             },
             0x20 => ModuleTypeSource::OtherModule { module: self.word0 },
+            0x0c => ModuleTypeSource::PrecompiledTypeOwner {
+                stream: stream(self.word0),
+            },
+            0x0a => ModuleTypeSource::PrecompiledTypeUser {
+                stream: stream(self.word0),
+                owner: self.word1,
+            },
             _ => ModuleTypeSource::Other(*self),
         }
     }
 
     /// Replace each stream number of the record with `map(stream)`.
     ///
-    /// The record names streams only for [`ModuleTypeSource::TypeRecords`]
-    /// and [`ModuleTypeSource::TypeServer`]. The words of the other sources
+    /// The record names streams only for [`ModuleTypeSource::TypeRecords`],
+    /// the precompiled-type sources (`word0`) and
+    /// [`ModuleTypeSource::TypeServer`]. The words of the other sources
     /// do not change. Use this function when a writer gives the streams new
     /// numbers.
     ///
@@ -296,7 +345,9 @@ impl ModuleTypeReference {
             })
         };
         match self.source() {
-            ModuleTypeSource::TypeRecords { .. } => self.word0 = word(self.word0)?,
+            ModuleTypeSource::TypeRecords { .. }
+            | ModuleTypeSource::PrecompiledTypeOwner { .. }
+            | ModuleTypeSource::PrecompiledTypeUser { .. } => self.word0 = word(self.word0)?,
             ModuleTypeSource::TypeServer { .. } => {
                 self.word0 = word(self.word0)?;
                 self.word1 = word(self.word1)?;

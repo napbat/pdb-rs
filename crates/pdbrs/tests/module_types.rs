@@ -142,9 +142,52 @@ fn gives_the_source_of_module_type_records() {
         reference(0x8000_0020, 3, 0).source(),
         ModuleTypeSource::OtherModule { module: 3 }
     );
-    for flags in [0, 0x02, 0x04, 0x0c, 0x18, 0x21] {
+    for flags in [0, 0x02, 0x04, 0x06, 0x0e, 0x18, 0x21] {
         let value = reference(flags, 1, 2);
         assert_eq!(value.source(), ModuleTypeSource::Other(value));
+        assert!(!value.source().has_external_precompiled_types());
+    }
+}
+
+/// `cl /Z7 /Yc` and `/Yu` with `link /DEBUG:LAZY` (MSVC 14.51) write `0x0c`
+/// for the owner of the precompiled types and `0x0a` with the owner module in
+/// word1 (`msvc-x64-pch-lazy`, #30, #39).
+#[test]
+fn gives_the_source_of_precompiled_type_modules() {
+    let owner = reference(0x0c, 35, 0).source();
+    assert_eq!(
+        owner,
+        ModuleTypeSource::PrecompiledTypeOwner {
+            stream: StreamId(35)
+        }
+    );
+    let user = reference(0x0a, 39, 0).source();
+    assert_eq!(
+        user,
+        ModuleTypeSource::PrecompiledTypeUser {
+            stream: StreamId(39),
+            owner: 0
+        }
+    );
+    for source in [owner, user] {
+        assert!(source.has_external_precompiled_types());
+        assert_eq!(
+            source.streams().collect::<Vec<_>>(),
+            [StreamId(source_stream(source))]
+        );
+    }
+    // A new stream number replaces word0; the owner module in word1 stays.
+    let mut value = reference(0x0a, 39, 4);
+    value.map_streams(|_| Ok(StreamId(9))).expect("mapped");
+    assert_eq!(value, reference(0x0a, 9, 4));
+}
+
+/// Return the stream of a precompiled-type source.
+fn source_stream(source: ModuleTypeSource) -> u32 {
+    match source {
+        ModuleTypeSource::PrecompiledTypeOwner { stream }
+        | ModuleTypeSource::PrecompiledTypeUser { stream, .. } => stream.0,
+        _ => panic!("not a precompiled-type source"),
     }
 }
 
@@ -156,7 +199,7 @@ fn maps_only_the_stream_words_of_module_type_records() {
         streams(reference(0x10, 0x20, 0x21)),
         [StreamId(0x20), StreamId(0x21)]
     );
-    for flags in [0x01, 0x20, 0x0c] {
+    for flags in [0x01, 0x20, 0x06] {
         assert_eq!(streams(reference(flags, 1, 2)), []);
         let mut value = reference(flags, 1, 2);
         value

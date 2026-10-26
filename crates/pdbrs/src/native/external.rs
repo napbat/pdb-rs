@@ -16,6 +16,11 @@
 //!   types, and the type and ID indices of the module symbols refer to the records of the input
 //!   object. The `S_MOD_TYPEREF` record of each module tells which stream of the PDB holds
 //!   them ([`ModuleTypeSource`]). The records are in the PDB, but not in TPI and IPI.
+//! - Precompiled types of `/DEBUG:LAZY` (feature code `NOTM`, `/Z7` with `/Yc` and `/Yu`): the
+//!   linker does not copy the precompiled types of the `/Yc` object to the PDB
+//!   ([`ModuleTypeSource::PrecompiledTypeOwner`] and
+//!   [`ModuleTypeSource::PrecompiledTypeUser`]). They stay in the object file of the owner
+//!   module ([`ObjectPrecompiledTypes`]).
 
 use alloc::vec::Vec;
 
@@ -61,6 +66,20 @@ pub struct ModuleTypeServer {
     pub type_server: u8,
 }
 
+/// A module of a `NOTM` PDB whose type and ID indices refer to precompiled types that stay in
+/// the object file of the owner module.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct ObjectPrecompiledTypes {
+    /// The index of the module.
+    pub module: u32,
+    /// The index of the module that owns the precompiled types (the `/Yc` object). It is
+    /// `module` for the owner itself.
+    pub owner: u32,
+    /// The object file of the owner module, which holds the precompiled types in `.debug$P`.
+    pub object_file: Vec<u8>,
+}
+
 /// The source of the type records of one module, from its `S_MOD_TYPEREF` record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -89,6 +108,9 @@ pub struct ExternalDependencies {
     pub fastlink_objects: Vec<FastLinkObject>,
     /// The modules with an `S_MOD_TYPEREF` record, in module order.
     pub module_types: Vec<ModuleTypeDependency>,
+    /// The modules whose type and ID indices refer to precompiled types in an object file, in
+    /// module order (MSVC `/DEBUG:LAZY` with `/Z7` precompiled headers).
+    pub object_precompiled_types: Vec<ObjectPrecompiledTypes>,
 }
 
 impl ExternalDependencies {
@@ -100,6 +122,7 @@ impl ExternalDependencies {
             && self.precompiled.is_empty()
             && self.fastlink_objects.is_empty()
             && self.module_types.is_empty()
+            && self.object_precompiled_types.is_empty()
     }
 }
 
@@ -112,7 +135,9 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// Returns the errors of [`Dbi::type_server_map`], [`Dbi::modules`], [`Pdb::module_stream`]
     /// and of the decoding of
-    /// `S_OBJNAME` records, and [`crate::ErrorKind::LimitExceeded`] if an allocation fails.
+    /// `S_OBJNAME` records, [`crate::ErrorKind::InvalidReference`] if an `S_MOD_TYPEREF` record
+    /// names a missing owner module, and [`crate::ErrorKind::LimitExceeded`] if an allocation
+    /// fails.
     pub fn external_dependencies(&self, dbi: &Dbi) -> Result<ExternalDependencies> {
         let mut dependencies = ExternalDependencies {
             mini_pdb: self.info().has_feature(Feature::MinimalDebugInfo),
@@ -171,8 +196,35 @@ impl<S: ReadAt> Pdb<S> {
                 });
             }
         }
+        object_precompiled_types(dbi, &mut dependencies)?;
         Ok(dependencies)
     }
+}
+
+/// Fill [`ExternalDependencies::object_precompiled_types`] from the module type sources.
+fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) -> Result<()> {
+    for dependency in &dependencies.module_types {
+        let owner = match dependency.source {
+            ModuleTypeSource::PrecompiledTypeOwner { .. } => dependency.module,
+            ModuleTypeSource::PrecompiledTypeUser { owner, .. } => u32::from(owner),
+            _ => continue,
+        };
+        let object = dbi
+            .modules()
+            .nth(usize::try_from(owner).unwrap_or(usize::MAX))
+            .ok_or_else(|| {
+                crate::Error::new(crate::ErrorKind::InvalidReference, None)
+                    .with_context("S_MOD_TYPEREF names a missing owner of precompiled types")
+            })??;
+        let list = &mut dependencies.object_precompiled_types;
+        list.try_reserve(1).map_err(|_| no_memory())?;
+        list.push(ObjectPrecompiledTypes {
+            module: dependency.module,
+            owner,
+            object_file: copy(object.object_file)?,
+        });
+    }
+    Ok(())
 }
 
 /// Add `module` to the group of `signature`.

@@ -25,6 +25,9 @@ pub(crate) struct ModuleTypeStreams {
     types: TypeStream,
     /// The ID records of a `/Zi` type server; `None` if they share `types`.
     ids: Option<TypeStream>,
+    /// `false` if the indices refer to precompiled types outside the PDB, so that the example
+    /// cannot check them.
+    checked: bool,
 }
 
 /// Return the source of the type records of a module stream.
@@ -78,15 +81,31 @@ pub(crate) fn streams(
         Some(ModuleTypeSource::NoTypes) => ModuleTypeStreams {
             types: TypeStream::from_records(&[])?,
             ids: None,
+            checked: true,
         },
         Some(ModuleTypeSource::TypeRecords { stream }) => ModuleTypeStreams {
             types: read(pdb, stream, report)?,
             ids: None,
+            checked: true,
         },
         Some(ModuleTypeSource::TypeServer { types, ids }) => ModuleTypeStreams {
             types: read(pdb, types, report)?,
             ids: Some(read(pdb, ids, report)?),
+            checked: true,
         },
+        // `/DEBUG:LAZY` with `/Z7` precompiled headers: the own records are in the PDB, the
+        // precompiled types stay in the object file of the owner module (#30, #39).
+        Some(
+            ModuleTypeSource::PrecompiledTypeOwner { stream }
+            | ModuleTypeSource::PrecompiledTypeUser { stream, .. },
+        ) => {
+            report.add("modules with precompiled types in an object file", 1);
+            return Ok(Some(ModuleTypeStreams {
+                types: read(pdb, stream, report)?,
+                ids: None,
+                checked: false,
+            }));
+        }
         Some(_) => {
             report.undecoded("S_MOD_TYPEREF record without a known source".to_owned());
             return Ok(None);
@@ -97,6 +116,8 @@ pub(crate) fn streams(
 }
 
 /// Run `check` with a context whose type and ID indices resolve against `types`.
+///
+/// If the indices refer to precompiled types outside the PDB, the context does not check them.
 pub(crate) fn with_context<R>(
     types: &ModuleTypeStreams,
     context: &Context<'_>,
@@ -105,10 +126,21 @@ pub(crate) fn with_context<R>(
     let ids = IdTable::new(types.ids.as_ref().unwrap_or(&types.types))?;
     let table = TypeTable::new(&types.types)?;
     let forward = ForwardRefs::new(&table, None)?;
-    let size_of_type = |index| type_size(&table, Some(&forward), index).ok().flatten();
+    // The sizes of an unchecked module would come from records with an unknown first index.
+    let size_of_type = |index| {
+        types
+            .checked
+            .then(|| type_size(&table, Some(&forward), index).ok().flatten())
+            .flatten()
+    };
     let module_context = Context {
         names: context.names,
-        tpi_end: TypeIndex(types.types.header().index_end),
+        tpi_end: if types.checked {
+            TypeIndex(types.types.header().index_end)
+        } else {
+            TypeIndex(u32::MAX)
+        },
+        indices_checked: types.checked,
         ids,
         addresses: context.addresses,
         module_count: context.module_count,

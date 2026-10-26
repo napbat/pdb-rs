@@ -223,6 +223,79 @@ fn rebuild_carries_the_module_type_streams() {
     );
 }
 
+/// Build a PDB like `link /DEBUG:LAZY` writes for `/Z7` objects with a
+/// precompiled header: module 0 is the `/Yc` object (`fOwnTMR | fOwnTMPCT`)
+/// and module 1 a `/Yu` object (`fOwnTMR | fRefTMPCT`, owner 0). Each has two
+/// own records in a stream. The local data uses index `0x1506`, an index
+/// after 1286 precompiled types that the PDB does not hold.
+fn precompiled() -> Vec<u8> {
+    let mut builder = PdbBuilder::new(7, [7; 16], 1).expect("builder");
+    builder
+        .set_features(&[Feature::Vc140, Feature::NoTypeMerge])
+        .expect("features");
+    for (name, flags) in [(&b"pch.obj"[..], 0x0c), (b"use.obj", 0x0a)] {
+        let types = builder.add_stream(type_records(2)).expect("type stream");
+        let module = builder.add_module(module_record(name)).expect("module");
+        module
+            .push_symbol_with(move |resolver, out| {
+                let mut reference = ModuleTypeReference {
+                    flags: ModuleTypeReferenceFlags(flags),
+                    word0: 0,
+                    word1: 0,
+                };
+                reference.map_streams(|_| resolver.stream(types))?;
+                SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
+            })
+            .expect("type reference");
+        module
+            .push_symbol_fields(S_LDATA32, local(TypeIndex(0x1506)))
+            .expect("local");
+    }
+    builder
+        .plan(&BuildOptions::default())
+        .and_then(|plan| plan.to_vec())
+        .expect("indices of precompiled-type modules are not checked")
+}
+
+/// The precompiled types of `/DEBUG:LAZY` stay in the object file of the
+/// `/Yc` module (#30, #39: `msvc-x64-pch-lazy`). The dependency list names it,
+/// and the rebuild carries the own records of both modules.
+#[test]
+fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
+    let bytes = precompiled();
+    let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
+    let dbi = pdb.debug_info().expect("DBI").expect("DBI stream");
+    let dependencies = pdb.external_dependencies(&dbi).expect("dependencies");
+    let objects: Vec<_> = dependencies
+        .object_precompiled_types
+        .iter()
+        .map(|entry| (entry.module, entry.owner, entry.object_file.clone()))
+        .collect();
+    assert_eq!(
+        objects,
+        [(0, 0, b"pch.obj".to_vec()), (1, 0, b"pch.obj".to_vec())]
+    );
+    assert!(matches!(
+        module_type_streams(&pdb)[1],
+        (1, ModuleTypeSource::PrecompiledTypeUser { owner: 0, .. })
+    ));
+    let contents = pdb.contents().expect("contents");
+    assert_eq!(contents.unclaimed_streams(), []);
+    let rebuilt = contents
+        .to_builder(IdentityPolicy::Preserve)
+        .expect("builder")
+        .plan(&contents.build_options())
+        .and_then(|plan| plan.to_vec())
+        .expect("the rebuild plans");
+    let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
+    let sources = module_type_streams(&rebuilt);
+    assert_eq!(sources.len(), 2);
+    for (_, source) in sources {
+        let stream_id = source.streams().next().expect("own records");
+        assert_eq!(stream(&rebuilt, stream_id), Some(type_records(2)));
+    }
+}
+
 #[test]
 fn edit_that_moves_records_keeps_the_module_type_streams() {
     let bytes = notm();

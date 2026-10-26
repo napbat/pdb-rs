@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::IdIndex;
+use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::validate::{
     ModuleRecord, ValidationContext, ValidationReport, validate_module_symbols,
     validate_shared_symbols,
@@ -45,15 +45,21 @@ fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<u16> {
 }
 
 /// Make the library context from the example context.
+///
+/// For a module whose indices refer to records outside the PDB, the library does not check
+/// the type and ID indices, as the builder does.
 fn validation_context<'c>(
     context: &'c Context<'_>,
     id_kinds: &'c dyn Fn(IdIndex) -> Option<u16>,
     lengths: &'c [u32],
 ) -> ValidationContext<'c> {
-    let base = ValidationContext::new(context.tpi_end, context.ids.index_end())
-        .with_id_kinds(id_kinds)
-        .with_module_count(context.module_count)
-        .with_type_sizes(context.type_size);
+    let base = if context.indices_checked {
+        ValidationContext::new(context.tpi_end, context.ids.index_end()).with_id_kinds(id_kinds)
+    } else {
+        ValidationContext::new(TypeIndex(u32::MAX), IdIndex(u32::MAX))
+    }
+    .with_module_count(context.module_count)
+    .with_type_sizes(context.type_size);
     if context.addresses.is_some() {
         base.with_section_lengths(lengths)
     } else {

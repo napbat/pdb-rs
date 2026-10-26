@@ -276,6 +276,9 @@ mod tests {
         assert_eq!(vcvars_argument("x86_64", Arch::X86), Some("x64_x86"));
         assert_eq!(vcvars_argument("x86_64", Arch::Arm64), Some("x64_arm64"));
         assert_eq!(vcvars_argument("aarch64", Arch::Arm64), Some("arm64"));
+        // The ARM64 tools build ARM64EC.
+        assert_eq!(vcvars_argument("x86_64", Arch::Arm64Ec), Some("x64_arm64"));
+        assert_eq!(vcvars_argument("aarch64", Arch::Arm64Ec), Some("arm64"));
         assert_eq!(vcvars_argument("riscv64", Arch::X64), None);
     }
 }

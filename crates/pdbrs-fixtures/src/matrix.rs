@@ -613,6 +613,17 @@ pub static FIXTURES: &[Fixture] = &[
             ),
         ),
     ),
+    native(
+        "msvc-x64-pch-lazy",
+        "msvc",
+        "debug, z7, precompiled header, lazy (no type merge)",
+        // S_MOD_TYPEREF gets the precompiled-type flags: 0x0c for the /Yc module and 0x0a
+        // for the /Yu modules. The linker does not copy the precompiled types to the PDB.
+        with_variant(
+            Variant::PrecompiledHeader,
+            msvc(Arch::X64, &["/Z7", "/Od", "/MDd"], LINK_LAZY),
+        ),
+    ),
     rust("rust-link-x64-debug", Linker::Msvc, Arch::X64, false),
     rust("rust-link-x64-release", Linker::Msvc, Arch::X64, true),
     rust("rust-lld-x64-debug", Linker::Lld, Arch::X64, false),

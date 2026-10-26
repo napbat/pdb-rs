@@ -28,16 +28,23 @@ const MAX_SCOPE_DEPTH: usize = 256;
 /// Check the type, ID and address of a symbol.
 fn check_symbol(symbol: &Symbol<'_>, context: &Context<'_>, report: &mut Report) -> Outcome {
     if let Some(index) = symbol.type_index()
+        && context.indices_checked
         && !(index.primitive()?.is_some() || index < context.tpi_end)
     {
         return Err("symbol refers to a missing type".into());
     }
     // `/DEBUG:LAZY` funclets have ID 0 ("no ID"); the library check accepts it too.
     if let Some(id) = symbol.id_index()
+        && context.indices_checked
         && id.0 != 0
         && context.ids.get(id).is_none()
     {
-        return Err("symbol refers to a missing ID".into());
+        return Err(format!(
+            "symbol {:#06x} refers to a missing ID {:#x}",
+            symbol.kind(),
+            id.0
+        )
+        .into());
     }
     if let Some(address) = symbol.address() {
         translate(
@@ -221,9 +228,15 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
             }
             LineSubsection::InlineeLines(data) => {
                 for entry in data {
-                    match context.ids.decode(entry.inlinee)? {
-                        IdRecord::Function(_) | IdRecord::MemberFunction(_) => {}
-                        _ => return Err("inlinee line names an ID that is not a function".into()),
+                    if context.indices_checked {
+                        match context.ids.decode(entry.inlinee)? {
+                            IdRecord::Function(_) | IdRecord::MemberFunction(_) => {}
+                            _ => {
+                                return Err(
+                                    "inlinee line names an ID that is not a function".into()
+                                );
+                            }
+                        }
                     }
                     file_name(entry.checksum_offset)?;
                     for extra in entry.extra_files {
