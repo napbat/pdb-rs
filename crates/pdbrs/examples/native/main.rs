@@ -10,6 +10,12 @@
 //! producer data that no stream names, with the reason, without failing.
 //! Names stay bytes.
 //!
+//! The input can be an MSF 7.00 or an MSFZ PDB. The example prints the container facts first,
+//! on lines that start with `container:`. The free page map and the stream 0 snapshot (the
+//! previous stream directory) are MSF 7.00 structures; for MSFZ the example reports them as
+//! not applicable. The other lines depend only on the stream bytes, so they are the same for
+//! an MSF 7.00 PDB and its MSFZ copy.
+//!
 //! The option `--input file|slice|seek` selects the source: `Pdb::open` (the default),
 //! `Pdb::parse` on the file bytes, or `Pdb::read` with `SeekReader` around the file. All three
 //! sources give the same output.
@@ -36,6 +42,7 @@ use pdbrs::native::address::{AddressMap, AddressTables};
 use pdbrs::native::auxiliary::TypeMapStream;
 use pdbrs::native::codeview::id_record::IdTable;
 use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::container::Container;
 use pdbrs::native::msf::{OldDirectory, StreamId};
 use pdbrs::native::names::StringTable;
 use pdbrs::{ErrorKind, Result as PdbResult};
@@ -215,23 +222,44 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     }
 }
 
-/// Check the container: free-page map, stream 0 and the Info stream.
+/// Check the container (free-page map and stream 0 for MSF 7.00) and print its lines.
+///
+/// Each line starts with `container:`.
 fn container(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
-    let msf = pdb.msf();
-    let map = msf.check_free_page_map()?;
-    report.add("pages", usize::try_from(msf.page_count())?);
-    report.add(
-        "unreferenced allocated pages",
-        usize::try_from(map.unreferenced_allocated_count())?,
-    );
-    if msf.stream(StreamId(0))?.is_some() {
-        let bytes = pdb.stream_bytes(StreamId(0))?;
-        if let Some(old) = OldDirectory::parse(&bytes, msf.block_size())? {
-            report.add(
-                "previous directory streams",
-                usize::try_from(old.stream_count())?,
+    match pdb.container() {
+        Container::Msf(msf) => {
+            let map = msf.check_free_page_map()?;
+            println!("container: MSF 7.00, page size {}", msf.block_size());
+            println!("container: pages: {}", msf.page_count());
+            println!(
+                "container: unreferenced allocated pages: {}",
+                map.unreferenced_allocated_count()
             );
+            if msf.stream(StreamId(0))?.is_some() {
+                let bytes = pdb.stream_bytes(StreamId(0))?;
+                if let Some(old) = OldDirectory::parse(&bytes, msf.block_size())? {
+                    println!(
+                        "container: previous directory streams: {}",
+                        old.stream_count()
+                    );
+                }
+            }
         }
+        Container::Msfz(msfz) => {
+            println!(
+                "container: MSFZ, compressed stream directory: {}",
+                if msfz.is_directory_compressed() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+            println!("container: chunks: {}", msfz.chunk_count());
+            println!("container: fragments: {}", msfz.fragment_count());
+            println!("container: free page map: not applicable (MSFZ)");
+            println!("container: stream 0 snapshot: not applicable (MSFZ)");
+        }
+        other => return Err(format!("unknown container {:?}", other.kind()).into()),
     }
     report.claim(StreamId(0));
     report.claim(StreamId(1));
@@ -245,9 +273,10 @@ fn container(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
 /// unowned type map: two inputs with the same type section checksum share one `/TMCache` entry,
 /// and the entry keeps only the last stream (#13).
 fn unclaimed_streams(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
-    for index in 0..pdb.msf().stream_count() {
+    let streams = pdb.container();
+    for index in 0..streams.stream_count() {
         let id = StreamId(index);
-        if pdb.msf().stream(id)?.is_none() || report.claimed.contains(&index) {
+        if streams.stream(id)?.is_none() || report.claimed.contains(&index) {
             continue;
         }
         let bytes = pdb.stream_bytes(id)?;

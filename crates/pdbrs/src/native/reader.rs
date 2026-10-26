@@ -1,15 +1,20 @@
 //! Native PDB stream discovery and bounded typed loading.
+//!
+//! [`Pdb`] reads streams through a [`Container`], so all accessors work on MSF 7.00 and MSFZ
+//! input.
 
 use alloc::vec::Vec;
 
 use super::address::AddressTables;
+use super::container::{Container, Stream};
 use super::dbi::{Dbi, DebugStream, Module, ModuleStream};
 use super::debug_stream::{
     DebugRecord, FixupStream, FunctionEntryStream, OmapStream, RecordStream, RvaVaBlob, TokenRidMap,
 };
 use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
-use super::msf::{Msf, MsfLimits, Stream, StreamId};
+use super::msf::{Msf, MsfLimits, StreamId, WriteOptions};
+use super::msfz::MsfzLimits;
 use super::section::SectionHeaderStream;
 use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
 use super::types::TypeStream;
@@ -19,8 +24,10 @@ use crate::{Error, ErrorKind, Result};
 /// Resource limits for native container metadata and explicitly loaded streams.
 #[derive(Clone, Copy, Debug)]
 pub struct ReadOptions {
-    /// Limits for the MSF directory and block metadata.
+    /// Limits for the MSF 7.00 directory and block metadata.
     pub msf: MsfLimits,
+    /// Limits for the MSFZ directory, the Chunk Table and the chunk cache.
+    pub msfz: MsfzLimits,
     /// Maximum bytes in any stream materialized by a typed accessor.
     pub max_stream_bytes: usize,
 }
@@ -29,18 +36,20 @@ impl Default for ReadOptions {
     fn default() -> Self {
         Self {
             msf: MsfLimits::default(),
+            msfz: MsfzLimits::default(),
             max_stream_bytes: 64 * 1024 * 1024,
         }
     }
 }
 
-/// A native PDB with a validated MSF directory and decoded Info stream.
+/// A native PDB with a validated stream directory and decoded Info stream.
 ///
-/// Opening does not decode all streams. Accessors load and validate the requested
-/// stream. Raw access remains available for data without a semantic decoder.
+/// The container is MSF 7.00 or MSFZ. Opening does not decode all streams. Accessors load and
+/// validate the requested stream. Raw access remains available for data without a semantic
+/// decoder.
 #[derive(Debug)]
 pub struct Pdb<S> {
-    msf: Msf<S>,
+    container: Container<S>,
     info: Info,
     options: ReadOptions,
 }
@@ -62,24 +71,36 @@ impl<S: ReadAt> Pdb<S> {
     /// Returns an error for malformed or unsupported input, missing Info,
     /// invalid named-stream references, exceeded limits or failed I/O.
     pub fn with_options(source: S, options: ReadOptions) -> Result<Self> {
-        let msf = Msf::with_limits(source, options.msf)?;
-        if msf.stream_count() <= 1 {
+        let container = Container::with_limits(source, options.msf, options.msfz)?;
+        if container.stream_count() <= 1 {
             return Err(Error::new(ErrorKind::MissingStream, None).with_context("PDB Info"));
         }
-        let stream = msf
+        let stream = container
             .stream(StreamId(1))?
             .ok_or_else(|| Error::new(ErrorKind::MissingStream, None).with_context("PDB Info"))?;
         let info = Info::parse(stream.read_all(options.max_stream_bytes)?)?;
         for named in info.named_streams() {
-            require_stream(&msf, named.stream)?;
+            require_stream(&container, named.stream)?;
         }
-        Ok(Self { msf, info, options })
+        Ok(Self {
+            container,
+            info,
+            options,
+        })
     }
 
-    /// Return the native container for raw stream access.
+    /// Return the stream container (MSF 7.00 or MSFZ) for raw stream access.
     #[must_use]
-    pub const fn msf(&self) -> &Msf<S> {
-        &self.msf
+    pub const fn container(&self) -> &Container<S> {
+        &self.container
+    }
+
+    /// Return the page size for MSF 7.00 output from this PDB: the page size of an MSF 7.00
+    /// source, or the default page size of [`WriteOptions`] for an MSFZ source.
+    pub(crate) fn output_page_size(&self) -> u32 {
+        self.container
+            .msf()
+            .map_or(WriteOptions::default().page_size(), Msf::block_size)
     }
 
     /// Return decoded identity, named streams and feature codes.
@@ -96,7 +117,7 @@ impl<S: ReadAt> Pdb<S> {
     pub fn named_stream(&self, name: &[u8]) -> Result<Option<Stream<'_, S>>> {
         self.info
             .named_stream(name)
-            .map_or(Ok(None), |id| self.msf.stream(id))
+            .map_or(Ok(None), |id| self.container.stream(id))
     }
 
     /// Load all bytes of a present stream within the configured stream limit.
@@ -110,7 +131,7 @@ impl<S: ReadAt> Pdb<S> {
     /// directory, [`ErrorKind::InvalidReference`] for a nil stream, and
     /// limit, allocation or I/O errors.
     pub fn stream_bytes(&self, id: StreamId) -> Result<Vec<u8>> {
-        require_stream(&self.msf, id)?.read_all(self.options.max_stream_bytes)
+        require_stream(&self.container, id)?.read_all(self.options.max_stream_bytes)
     }
 
     /// Load all bytes of a named stream, if the Info stream names it.
@@ -211,7 +232,7 @@ impl<S: ReadAt> Pdb<S> {
             .into_iter()
             .flatten()
         {
-            require_stream(&self.msf, reference)?;
+            require_stream(&self.container, reference)?;
         }
         Ok(Some(types))
     }
@@ -246,14 +267,14 @@ impl<S: ReadAt> Pdb<S> {
         .into_iter()
         .flatten()
         {
-            require_stream(&self.msf, reference)?;
+            require_stream(&self.container, reference)?;
         }
         for reference in dbi.debug_streams().flatten() {
-            require_stream(&self.msf, reference)?;
+            require_stream(&self.container, reference)?;
         }
         for module in dbi.modules() {
             if let Some(reference) = module?.stream {
-                require_stream(&self.msf, reference)?;
+                require_stream(&self.container, reference)?;
             }
         }
         Ok(Some(dbi))
@@ -269,15 +290,15 @@ impl<S: ReadAt> Pdb<S> {
         let Some(id) = module.stream else {
             return Ok(None);
         };
-        let stream = require_stream(&self.msf, id)?;
+        let stream = require_stream(&self.container, id)?;
         ModuleStream::parse(stream.read_all(self.options.max_stream_bytes)?, module).map(Some)
     }
 
     fn optional_stream(&self, id: StreamId) -> Result<Option<Stream<'_, S>>> {
-        if id.0 >= self.msf.stream_count() {
+        if id.0 >= self.container.stream_count() {
             return Ok(None);
         }
-        self.msf.stream(id)
+        self.container.stream(id)
     }
 
     /// Load the exception data stream of the [`DebugStream::Exception`] slot, if any.
@@ -420,8 +441,9 @@ impl Pdb<crate::io::FileReader> {
     }
 }
 
-fn require_stream<S: ReadAt>(msf: &Msf<S>, id: StreamId) -> Result<Stream<'_, S>> {
-    msf.stream(id)
+fn require_stream<S: ReadAt>(container: &Container<S>, id: StreamId) -> Result<Stream<'_, S>> {
+    container
+        .stream(id)
         .map_err(|error| error.with_context("PDB stream reference"))?
         .ok_or_else(|| Error::new(ErrorKind::InvalidReference, None).with_stream(id.0, 0))
 }

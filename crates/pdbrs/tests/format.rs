@@ -7,12 +7,14 @@ use pdbrs::format::{ContainerKind, PROBE_LEN, probe};
 use pdbrs::io::ReadAt;
 
 const NATIVE_MSF7: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";
+const NATIVE_MSFZ: &[u8] = b"Microsoft MSFZ Container\r\n\x1aALD\0\0";
 const LEGACY_MSF2: &[u8] = b"Microsoft C/C++ program database 2.00\r\n\x1aJG\0\0";
 const CLI_METADATA: &[u8] = b"BSJB";
 const EMBEDDED_PORTABLE_PDB: &[u8] = b"MPDB";
 
-const SIGNATURES: [(&[u8], ContainerKind); 4] = [
+const SIGNATURES: [(&[u8], ContainerKind); 5] = [
     (NATIVE_MSF7, ContainerKind::NativeMsf7),
+    (NATIVE_MSFZ, ContainerKind::NativeMsfz),
     (LEGACY_MSF2, ContainerKind::LegacyMsf2),
     (CLI_METADATA, ContainerKind::CliMetadata),
     (EMBEDDED_PORTABLE_PDB, ContainerKind::EmbeddedPortablePdb),

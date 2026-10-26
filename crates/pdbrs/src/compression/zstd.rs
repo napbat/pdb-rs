@@ -40,10 +40,6 @@ const MIN_WINDOW_LIMIT: u64 = 8 << 20;
 ///   is corrupt or truncated, if a content size or a checksum does not match,
 ///   if the frames produce fewer or more bytes than `declared`, or if bytes
 ///   after a frame do not form a frame.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "first user: #20 MSFZ chunk decoding")
-)]
 pub(crate) fn decode(input: &[u8], declared: u64, limit: usize) -> Result<Vec<u8>> {
     let mut output = output_buffer(declared, limit)?;
     if input.is_empty() {

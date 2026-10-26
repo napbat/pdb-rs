@@ -227,9 +227,9 @@ impl<S: ReadAt> Pdb<S> {
             }
         }
         let mut unclaimed = Vec::new();
-        for id in 0..self.msf().stream_count() {
+        for id in 0..self.container().stream_count() {
             let id = StreamId(id);
-            if !claimed.contains(&id) && self.msf().stream(id)?.is_some() {
+            if !claimed.contains(&id) && self.container().stream(id)?.is_some() {
                 push(&mut unclaimed, id)?;
             }
         }
@@ -249,7 +249,7 @@ impl<S: ReadAt> Pdb<S> {
             named,
             type_maps,
             unclaimed,
-            page_size: self.msf().block_size(),
+            page_size: self.output_page_size(),
         })
     }
 

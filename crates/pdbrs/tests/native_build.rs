@@ -108,7 +108,7 @@ fn rebuild_keeps_the_source_page_size() {
         .and_then(|builder| builder.plan(&options)?.to_vec())
         .expect("the synthetic program builds with 512-byte pages");
     let pdb = Pdb::parse(&bytes).expect("parse");
-    assert_eq!(pdb.msf().block_size(), 512);
+    assert_eq!(pdb.container().msf().expect("MSF 7.00").block_size(), 512);
     let contents = pdb.contents().expect("contents");
     let mut rebuild_options = contents.build_options();
     assert_eq!(rebuild_options.msf.page_size(), 512);
@@ -127,7 +127,10 @@ fn rebuild_keeps_the_source_page_size() {
         .and_then(|plan| plan.to_vec())
         .expect("rebuild with 4096-byte pages");
     let larger = Pdb::parse(&larger).expect("parse");
-    assert_eq!(larger.msf().block_size(), 4096);
+    assert_eq!(
+        larger.container().msf().expect("MSF 7.00").block_size(),
+        4096
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@
 
 pub mod input;
 pub mod msf;
+pub mod msfz;
 pub mod native;
 pub mod portable;
 

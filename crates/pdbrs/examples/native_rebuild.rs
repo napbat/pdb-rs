@@ -4,6 +4,7 @@
 //! builds a new PDB from the decoded values with `PdbBuilder`. It keeps the
 //! identity of the input, so the image of the input matches the output. It
 //! plans the output twice and fails if the two plans give different bytes.
+//! The input can be an MSF 7.00 or an MSFZ PDB. The output is MSF 7.00.
 //!
 //! Usage: `cargo run --example native_rebuild -- <input.pdb> <output.pdb>`
 
@@ -35,7 +36,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     std::fs::write(&output, &bytes)?;
     println!("{builder:?}");
-    println!("input streams: {}", pdb.msf().stream_count());
+    println!(
+        "input container: {:?}, streams: {}",
+        pdb.container().kind(),
+        pdb.container().stream_count()
+    );
     println!("output streams: {}", plan.stream_count());
     println!("output bytes: {}", bytes.len());
     println!(

@@ -48,6 +48,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "msfz"
+path = "fuzz_targets/msfz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "msfz_chunks"
+path = "fuzz_targets/msfz_chunks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "native_pdb"
 path = "fuzz_targets/native_pdb.rs"
 test = false

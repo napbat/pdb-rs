@@ -4,9 +4,11 @@
 //! PDB has one module with a procedure, line data, types, IDs, a GSI, a PSI and section
 //! headers. The Portable PDB has each debug table and each custom debug information kind.
 
+mod msfz;
 mod native;
 mod portable;
 
+pub use msfz::msfz_chunk_seeds;
 pub use native::native_pdb;
 pub use portable::portable_pdb;
 
@@ -17,6 +19,7 @@ use crate::{Corpus, Outcome};
 
 /// Add small synthetic inputs that the PDB splits do not give.
 pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
+    msfz::extra_seeds(corpus)?;
     let text = b"class C { static void Main() { } }\n".repeat(4);
     for format in [EmbeddedFormat::Raw, EmbeddedFormat::Deflate] {
         corpus.add("embedded_source", &encode(&text, format)?)?;

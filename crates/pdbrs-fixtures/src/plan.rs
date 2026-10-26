@@ -3,6 +3,7 @@
 mod dotnet;
 mod hlsl;
 mod native;
+mod pdz;
 mod rust;
 
 use std::path::PathBuf;
@@ -61,5 +62,6 @@ pub fn plan(fixture: &Fixture, paths: &Paths, toolchains: &mut Toolchains) -> Re
         Recipe::Rust(recipe) => rust::plan(recipe, paths, toolchains),
         Recipe::Dotnet(recipe) => dotnet::plan(recipe, paths, toolchains),
         Recipe::Hlsl(recipe) => hlsl::plan(recipe, paths, toolchains),
+        Recipe::Pdz(recipe) => pdz::plan(recipe, paths, toolchains),
     }
 }

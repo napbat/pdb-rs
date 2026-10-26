@@ -1,4 +1,4 @@
-//! Copy, repack and compare Big MSF 7.00 containers.
+//! Copy, repack and compare native PDB containers.
 //!
 //! Usage:
 //!
@@ -12,10 +12,12 @@
 //! - `repack` writes a new layout with the same streams. The default page size is 4096 and
 //!   the default stream 0 policy is `empty`. `--page-size source` keeps the page size of the
 //!   input. A preserved stream 0 with bytes needs the page size of the input.
-//! - `compare` opens both files as MSF containers. It compares the presence, the size and the
-//!   bytes of each stream, and it checks the free page map of the written file. It fails if a
-//!   stream other than stream 0 differs or if the written file has allocated pages without a
-//!   reference.
+//! - `compare` opens both files as MSF 7.00 or MSFZ containers. It compares the presence, the
+//!   size and the bytes of each stream. For an MSF 7.00 written file, it also checks the free
+//!   page map; MSFZ has no free page map. It fails if a stream other than stream 0 differs or
+//!   if an MSF 7.00 written file has allocated pages without a reference. Stream 0 holds the
+//!   previous MSF stream directory, so it can differ, for example in an MSFZ copy.
+//! - `repack` reads MSF 7.00 input only. Conversion from MSFZ is #38.
 //!
 //! The output must not be the input file.
 
@@ -23,6 +25,7 @@ use std::error::Error;
 use std::path::Path;
 
 use pdbrs::io::FileReader;
+use pdbrs::native::container::Container;
 use pdbrs::native::msf::{Msf, OldDirectoryPolicy, StreamId, WriteOptions, copy_exact_file};
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
@@ -105,22 +108,36 @@ fn repack(arguments: &[String]) -> Outcome {
     Ok(())
 }
 
+/// Print the facts of a container.
+fn describe(name: &str, container: &Container<FileReader>) {
+    match container {
+        Container::Msf(msf) => println!(
+            "{name}: MSF 7.00, page size {}, {} pages, {} streams, active FPM {}",
+            msf.block_size(),
+            msf.page_count(),
+            msf.stream_count(),
+            msf.active_free_page_map(),
+        ),
+        Container::Msfz(msfz) => println!(
+            "{name}: MSFZ, {} chunks, {} fragments, {} streams, compressed directory {}",
+            msfz.chunk_count(),
+            msfz.fragment_count(),
+            msfz.stream_count(),
+            msfz.is_directory_compressed(),
+        ),
+        other => println!("{name}: {:?}", other.kind()),
+    }
+}
+
 /// Compare the streams of two containers and check the free page map of the second.
 fn compare(arguments: &[String]) -> Outcome {
     let [original, written] = arguments else {
         return Err(usage());
     };
-    let first = Msf::open(FileReader::open(original)?)?;
-    let second = Msf::open(FileReader::open(written)?)?;
-    for (name, msf) in [("original", &first), ("written", &second)] {
-        println!(
-            "{name}: page size {}, {} pages, {} streams, active FPM {}",
-            msf.block_size(),
-            msf.page_count(),
-            msf.stream_count(),
-            msf.active_free_page_map(),
-        );
-    }
+    let first = Container::open(FileReader::open(original)?)?;
+    let second = Container::open(FileReader::open(written)?)?;
+    describe("original", &first);
+    describe("written", &second);
     if first.stream_count() != second.stream_count() {
         return Err("stream counts differ".into());
     }
@@ -147,7 +164,15 @@ fn compare(arguments: &[String]) -> Outcome {
         }
     }
     println!("streams: {equal} present and equal, {nil} nil in both, different: {different:?}");
-    let report = second.check_free_page_map()?;
+    let Some(written) = second.msf() else {
+        println!("written free page map: not applicable (MSFZ)");
+        return if different.iter().any(|&id| id != 0) {
+            Err("streams differ".into())
+        } else {
+            Ok(())
+        };
+    };
+    let report = written.check_free_page_map()?;
     println!(
         "written FPM {}: stream 0 pages free {}, allocated {}; unreferenced allocated pages {}",
         report.active(),

@@ -184,6 +184,33 @@ pub struct Hlsl {
     pub options: &'static [&'static str],
 }
 
+/// A conversion of the MSF 7.0 PDBs of other fixtures to MSFZ with `pdbtool pdz-encode`.
+#[derive(Debug)]
+pub struct Pdz {
+    /// The `pdz-encode` options.
+    pub options: &'static [&'static str],
+    /// The source fixtures. An empty list selects each fixture with an MSF 7.0 PDB output,
+    /// except [`PDZ_EXCLUDED`].
+    pub sources: &'static [&'static str],
+}
+
+/// The fixtures that a PDZ fixture does not convert, even with an empty source list.
+///
+/// `pdbtool` does not open the DXC PDBs: their stream pages are after the declared page
+/// count ("Page is invalid; it is out of range").
+pub const PDZ_EXCLUDED: &[&str] = &["hlsl-dxc-debug"];
+
+/// The sources of the PDZ fixtures with one option: one fixture of each producer.
+const PDZ_SAMPLE: &[&str] = &[
+    "msvc-x64-debug",
+    "clang-lld-x64-debug",
+    "rust-link-x64-debug",
+    "dotnet-csharp-full",
+];
+
+/// The sources of the `--pad16k` fixture: PDBs that give a PDZ file smaller than 16 KiB.
+const PDZ_SMALL: &[&str] = &["hlsl-fxc-sm50-debug", "dotnet-csharp-full"];
+
 /// How to build a fixture.
 #[derive(Debug)]
 pub enum Recipe {
@@ -195,6 +222,8 @@ pub enum Recipe {
     Dotnet(Dotnet),
     /// An HLSL shader build.
     Hlsl(Hlsl),
+    /// A conversion to MSFZ.
+    Pdz(Pdz),
 }
 
 /// One fixture of the matrix.
@@ -359,6 +388,22 @@ const fn dotnet(
             properties,
             pdb,
         }),
+    }
+}
+
+const fn pdz(
+    name: &'static str,
+    configuration: &'static str,
+    options: &'static [&'static str],
+    sources: &'static [&'static str],
+) -> Fixture {
+    Fixture {
+        name,
+        producer: "pdbtool pdz-encode",
+        language: "native PDB in MSFZ",
+        arch: "any",
+        configuration,
+        recipe: Recipe::Pdz(Pdz { options, sources }),
     }
 }
 
@@ -613,6 +658,28 @@ pub static FIXTURES: &[Fixture] = &[
         "6_0",
         &["-Zi", "-Od"],
     ),
+    // The PDZ fixtures read the outputs of the fixtures above, so they come last.
+    pdz("pdz-default", "pdz-encode defaults", &[], &[]),
+    pdz(
+        "pdz-compress-stream-dir",
+        "--compress-stream-dir",
+        &["--compress-stream-dir"],
+        PDZ_SAMPLE,
+    ),
+    pdz(
+        "pdz-one-stream-per-chunk",
+        "--one-stream-per-chunk",
+        &["--one-stream-per-chunk"],
+        PDZ_SAMPLE,
+    ),
+    // 4 KiB is the smallest chunk size of the writer. Large streams then cross chunks.
+    pdz(
+        "pdz-small-chunks",
+        "--max-chunk-size 4K",
+        &["--max-chunk-size", "4K"],
+        PDZ_SAMPLE,
+    ),
+    pdz("pdz-pad16k", "--pad16k", &["--pad16k"], PDZ_SMALL),
 ];
 
 /// Select fixtures by name. An empty list selects every fixture.
@@ -637,7 +704,7 @@ fn find(name: &str) -> Option<&'static Fixture> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FIXTURES, select};
+    use super::{FIXTURES, PDZ_EXCLUDED, Recipe, select};
     use std::collections::BTreeSet;
 
     #[test]
@@ -661,5 +728,27 @@ mod tests {
         assert_eq!(selected, ["msvc-x64-debug", "rust-lld-x64-debug"]);
         assert!(select(&["nope".to_owned()]).unwrap_err().contains("`nope`"));
         assert_eq!(select(&[]).unwrap().len(), FIXTURES.len());
+    }
+
+    #[test]
+    fn pdz_sources_are_earlier_fixtures_that_are_not_conversions() {
+        let position = |name: &str| FIXTURES.iter().position(|fixture| fixture.name == name);
+        for name in PDZ_EXCLUDED {
+            assert!(position(name).is_some(), "{name}");
+        }
+        for (index, fixture) in FIXTURES.iter().enumerate() {
+            let Recipe::Pdz(pdz) = &fixture.recipe else {
+                continue;
+            };
+            for source in pdz.sources {
+                let source_index = position(source).expect(source);
+                assert!(
+                    source_index < index,
+                    "{source} comes after {}",
+                    fixture.name
+                );
+                assert!(!matches!(FIXTURES[source_index].recipe, Recipe::Pdz(_)));
+            }
+        }
     }
 }

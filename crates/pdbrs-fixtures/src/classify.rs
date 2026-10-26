@@ -5,6 +5,9 @@ use std::ops::Range;
 /// The signature at the start of an MSF 7.0 file.
 pub const MSF7_SIGNATURE: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";
 
+/// The signature at the start of an MSFZ file (a PDZ file).
+pub const MSFZ_SIGNATURE: &[u8] = b"Microsoft MSFZ Container\r\n\x1aALD\0\0";
+
 /// The signature at the start of CLI metadata and of a Portable PDB.
 pub const METADATA_SIGNATURE: &[u8] = b"BSJB";
 
@@ -26,6 +29,8 @@ const RSDS_PATH_OFFSET: usize = 24;
 pub enum Kind {
     /// An MSF 7.0 (native) PDB.
     NativePdb,
+    /// A native PDB in an MSFZ container (a PDZ file).
+    NativePdz,
     /// A Portable PDB.
     PortablePdb,
     /// A PE image with an embedded Portable PDB debug payload.
@@ -43,6 +48,7 @@ impl Kind {
     pub fn name(self) -> &'static str {
         match self {
             Self::NativePdb => "native-pdb",
+            Self::NativePdz => "native-pdz",
             Self::PortablePdb => "portable-pdb",
             Self::EmbeddedInImage => "embedded-in-image",
             Self::EmbeddedPdbPayload => "embedded-pdb-payload",
@@ -56,6 +62,8 @@ impl Kind {
 pub fn classify(bytes: &[u8]) -> Kind {
     if bytes.starts_with(MSF7_SIGNATURE) {
         Kind::NativePdb
+    } else if bytes.starts_with(MSFZ_SIGNATURE) {
+        Kind::NativePdz
     } else if bytes.starts_with(METADATA_SIGNATURE) {
         Kind::PortablePdb
     } else if bytes.starts_with(EMBEDDED_SIGNATURE) {
@@ -196,7 +204,8 @@ fn to_usize(value: u32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::{
-        EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, classify, codeview_pdb_path, embedded_pdb_payload,
+        EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, MSFZ_SIGNATURE, classify, codeview_pdb_path,
+        embedded_pdb_payload,
     };
 
     fn put_u16(image: &mut [u8], offset: usize, value: u16) {
@@ -239,6 +248,9 @@ mod tests {
         let mut native = MSF7_SIGNATURE.to_vec();
         native.extend_from_slice(&[0; 8]);
         assert_eq!(classify(&native), Kind::NativePdb);
+        let mut pdz = MSFZ_SIGNATURE.to_vec();
+        pdz.extend_from_slice(&[0; 48]);
+        assert_eq!(classify(&pdz), Kind::NativePdz);
         assert_eq!(classify(b"BSJB\x01\x00"), Kind::PortablePdb);
         assert_eq!(
             classify(b"Microsoft C/C++ program database 2.00\r\n"),

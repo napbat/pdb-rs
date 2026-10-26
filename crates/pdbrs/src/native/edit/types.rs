@@ -73,7 +73,7 @@ pub(super) fn plan<S: ReadAt>(
         store(appended, TPI_STREAM, changes)?;
     }
     let id_end = if ids.count == 0 {
-        match pdb.msf().stream(IPI_STREAM)? {
+        match pdb.container().stream(IPI_STREAM)? {
             Some(stream) if stream.len()? != 0 => IdIndex(stream.read_u32_at(INDEX_END_OFFSET)?),
             _ => IdIndex(FIRST_RECORD_INDEX),
         }

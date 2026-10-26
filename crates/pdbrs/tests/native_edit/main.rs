@@ -45,10 +45,10 @@ fn synthetic() -> Vec<u8> {
 
 /// Return the bytes of stream `id`, or `None` for a nil or absent stream.
 fn stream(pdb: &Pdb<&[u8]>, id: u32) -> Option<Vec<u8>> {
-    if id >= pdb.msf().stream_count() {
+    if id >= pdb.container().stream_count() {
         return None;
     }
-    pdb.msf()
+    pdb.container()
         .stream(StreamId(id))
         .expect("stream directory")
         .map(|reader| reader.read_all(usize::MAX).expect("stream bytes"))
@@ -59,7 +59,10 @@ fn stream(pdb: &Pdb<&[u8]>, id: u32) -> Option<Vec<u8>> {
 fn differing_streams(left: &[u8], right: &[u8]) -> Vec<u32> {
     let left = Pdb::parse(left).expect("left PDB");
     let right = Pdb::parse(right).expect("right PDB");
-    let count = left.msf().stream_count().max(right.msf().stream_count());
+    let count = left
+        .container()
+        .stream_count()
+        .max(right.container().stream_count());
     (1..count)
         .filter(|&id| stream(&left, id) != stream(&right, id))
         .collect()
@@ -136,7 +139,7 @@ fn edit_without_changes_keeps_every_stream() {
 fn named_streams_are_added_replaced_and_removed() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let count = pdb.msf().stream_count();
+    let count = pdb.container().stream_count();
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     let first = b"SRCSRV: ini ----\r\nVERSION=2\r\nSRCSRV: end ----\r\n";
     let second = b"SRCSRV: ini ----\r\nVERSION=3\r\nSRCSRV: end ----\r\n";
@@ -589,7 +592,7 @@ fn unowned_type_map_does_not_block_moved_records() {
     let symbols = symbols(&edited);
     assert!(has(&symbols.publics, b"sum_with_a_longer_name"));
     // The type map keeps its bytes.
-    let count = pdb.msf().stream_count();
+    let count = pdb.container().stream_count();
     let edited = Pdb::parse(edited.as_slice()).expect("edited");
     assert_eq!(stream(&edited, count - 1), Some(UNOWNED_TYPE_MAP.to_vec()));
 }

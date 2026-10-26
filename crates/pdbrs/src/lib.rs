@@ -1,8 +1,9 @@
 //! Building blocks for native Windows and Portable .NET PDB files.
 //!
-//! The API reads MSF 7.0 containers, native PDB metadata and framed debug
+//! The API reads MSF 7.0 and MSFZ containers, native PDB metadata and framed debug
 //! records. It decodes common data, public and procedure symbols. Other record
 //! kinds remain available as raw bytes. Full semantic decoding is not complete.
+//! [`native::container::Container`] gives one stream reader for both containers.
 //!
 //! [`portable::Pdb`] reads standalone Portable PDBs: the metadata root, the
 //! heaps, the `#Pdb` stream, the `#~` table layout and the raw rows of the

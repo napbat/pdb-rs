@@ -504,7 +504,7 @@ fn append_record<S: ReadAt>(
     let first = if let Some(first) = added.first {
         first
     } else {
-        let reader = source.msf().stream(stream)?.ok_or_else(|| {
+        let reader = source.container().stream(stream)?.ok_or_else(|| {
             Error::new(ErrorKind::MissingStream, None)
                 .with_context("PDB has no type stream for the added record")
         })?;

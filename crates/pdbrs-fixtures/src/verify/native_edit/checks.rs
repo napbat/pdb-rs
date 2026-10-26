@@ -29,7 +29,7 @@ pub(crate) fn baseline(tools: &Tools, pdb: &Path) -> Result<Baseline, String> {
         std::fs::read(pdb).map_err(|error| format!("cannot read {}: {error}", pdb.display()))?;
     let streams = pdbrs::native::Pdb::parse(bytes.as_slice())
         .map_err(|error| format!("cannot read {}: {error}", pdb.display()))?
-        .msf()
+        .container()
         .stream_count();
     Ok(Baseline {
         pdbutil: pdbutil(tools, ["dump", "--all"], pdb)?.code,

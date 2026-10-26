@@ -290,6 +290,17 @@ pub fn consumer_tools(workspace: &Path) -> Value {
 ///
 /// Return an error with the reason if the tool is not built or one of its files is missing.
 pub fn built_tool(workspace: &Path, name: &str) -> Result<PathBuf, String> {
+    built_record(workspace, name)?
+        .get("path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("the record of {name} has no path"))
+}
+
+/// Return the record of a built tool from the tools manifest of the workspace.
+///
+/// Return an error with the reason if the tool is not built or one of its files is missing.
+pub fn built_record(workspace: &Path, name: &str) -> Result<Value, String> {
     let records = consumer_tools(workspace);
     let Some(Value::Array(records)) = records.get("tools") else {
         return Err("the tools manifest has no tools".to_owned());
@@ -305,11 +316,7 @@ pub fn built_tool(workspace: &Path, name: &str) -> Result<PathBuf, String> {
             .unwrap_or("no reason");
         return Err(format!("{name} is not available: {reason}"));
     }
-    record
-        .get("path")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("the record of {name} has no path"))
+    Ok(record.clone())
 }
 
 /// Select one record for each tool from the text of a tools manifest.

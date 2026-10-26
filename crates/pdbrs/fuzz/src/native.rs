@@ -21,6 +21,7 @@ pub fn pdb(data: &[u8]) {
     let _ = pdbrs::Pdb::parse(data);
     let options = ReadOptions {
         max_stream_bytes: MAX_STREAM,
+        msfz: crate::msfz::limits(),
         ..ReadOptions::default()
     };
     let Some(pdb) = ok(Pdb::with_options(data, options)) else {

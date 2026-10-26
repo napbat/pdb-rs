@@ -164,7 +164,9 @@ fn main() -> Outcome {
     for file in &files {
         let bytes = std::fs::read(file)?;
         corpus.start_source();
-        let result = if bytes.starts_with(b"Microsoft C/C++ MSF 7.00") {
+        let result = if bytes.starts_with(b"Microsoft C/C++ MSF 7.00")
+            || bytes.starts_with(b"Microsoft MSFZ Container")
+        {
             native::seeds(&bytes, &mut corpus)
         } else {
             portable::seeds(&bytes, &mut corpus)

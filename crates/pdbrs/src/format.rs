@@ -28,7 +28,7 @@ use crate::{Error, ErrorKind, Result, native, portable};
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Format {
-    /// A native PDB in an MSF 7.00 container.
+    /// A native PDB in an MSF 7.00 or an MSFZ container.
     Native,
     /// A standalone Portable PDB.
     Portable,
@@ -61,7 +61,7 @@ impl<S: ReadAt> Pdb<S> {
     /// - The errors of [`native::Pdb::read`] or [`portable::Pdb::read`].
     pub fn read(source: S) -> Result<Self> {
         match probe(&source)? {
-            ContainerKind::NativeMsf7 => native::Pdb::read(source)
+            ContainerKind::NativeMsf7 | ContainerKind::NativeMsfz => native::Pdb::read(source)
                 .map(|pdb| Self::Native(Box::new(pdb))),
             ContainerKind::CliMetadata => portable::Pdb::read(source)
                 .map(|pdb| Self::Portable(Box::new(pdb))),
@@ -110,6 +110,9 @@ impl Pdb<crate::io::FileReader> {
 /// The signature of a native MSF 7.00 container (32 bytes).
 const NATIVE_MSF7_SIGNATURE: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";
 
+/// The signature of a native MSFZ container (32 bytes).
+const NATIVE_MSFZ_SIGNATURE: &[u8] = b"Microsoft MSFZ Container\r\n\x1aALD\0\0";
+
 /// The signature of a legacy small MSF 2.00 container (44 bytes).
 const LEGACY_MSF2_SIGNATURE: &[u8] = b"Microsoft C/C++ program database 2.00\r\n\x1aJG\0\0";
 
@@ -125,8 +128,9 @@ const EMBEDDED_PORTABLE_PDB_SIGNATURE: &[u8] = b"MPDB";
 pub const PROBE_LEN: usize = LEGACY_MSF2_SIGNATURE.len();
 
 /// All container kinds that [`probe`] can identify.
-const KINDS: [ContainerKind; 4] = [
+const KINDS: [ContainerKind; 5] = [
     ContainerKind::NativeMsf7,
+    ContainerKind::NativeMsfz,
     ContainerKind::LegacyMsf2,
     ContainerKind::CliMetadata,
     ContainerKind::EmbeddedPortablePdb,
@@ -142,6 +146,10 @@ pub enum ContainerKind {
     ///
     /// The signature is `b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0"` (32 bytes).
     NativeMsf7,
+    /// A native PDB in the MSFZ container (a PDZ file).
+    ///
+    /// The signature is `b"Microsoft MSFZ Container\r\n\x1aALD\0\0"` (32 bytes).
+    NativeMsfz,
     /// A legacy native PDB in the MSF 2.00 ("small MSF") container.
     ///
     /// The signature is `b"Microsoft C/C++ program database 2.00\r\n\x1aJG\0\0"` (44 bytes).
@@ -165,6 +173,7 @@ impl ContainerKind {
     pub const fn signature(self) -> &'static [u8] {
         match self {
             Self::NativeMsf7 => NATIVE_MSF7_SIGNATURE,
+            Self::NativeMsfz => NATIVE_MSFZ_SIGNATURE,
             Self::LegacyMsf2 => LEGACY_MSF2_SIGNATURE,
             Self::CliMetadata => CLI_METADATA_SIGNATURE,
             Self::EmbeddedPortablePdb => EMBEDDED_PORTABLE_PDB_SIGNATURE,

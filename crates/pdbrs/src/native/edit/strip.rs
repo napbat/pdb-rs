@@ -446,7 +446,7 @@ fn strip_named<S: ReadAt>(
                 false
             }
             NamedStreamKind::UdtSourceLineUndone => {
-                if pdb.msf().stream(stream)?.is_some_and(|reader| {
+                if pdb.container().stream(stream)?.is_some_and(|reader| {
                     crate::io::ReadAt::len(&reader).is_ok_and(|length| length != 0)
                 }) {
                     changes.replace(stream, Vec::new())?;

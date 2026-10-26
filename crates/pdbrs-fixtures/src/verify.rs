@@ -271,7 +271,7 @@ const NO_METADATA: &str = "no CLI metadata in the image";
 /// assembly metadata. A native image has no CLI metadata.
 fn checks(output: &Output, file: &str, bytes: &[u8]) -> Vec<(String, &'static str, String)> {
     match output.kind.as_str() {
-        "native-pdb" => vec![(file.to_owned(), "native", outcome(bytes))],
+        "native-pdb" | "native-pdz" => vec![(file.to_owned(), "native", outcome(bytes))],
         "portable-pdb" => vec![(file.to_owned(), "portable", outcome(bytes))],
         "image" | "embedded-in-image" => {
             let metadata = cli_metadata(bytes).map_or_else(|| NO_METADATA.to_owned(), outcome);

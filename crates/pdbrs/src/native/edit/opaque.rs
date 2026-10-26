@@ -60,7 +60,7 @@ pub(super) fn check<S: ReadAt>(
 /// Return an error for a stream without a known role or a named stream
 /// without a decoder.
 fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<StreamId>> {
-    let count = pdb.msf().stream_count();
+    let count = pdb.container().stream_count();
     let mut claimed = Vec::new();
     claimed
         .try_reserve_exact(count as usize)
@@ -111,7 +111,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<Strea
     }
     let mut type_maps = Vec::new();
     for (id, claimed) in (0..count).zip(claimed) {
-        if claimed || pdb.msf().stream(StreamId(id))?.is_none() {
+        if claimed || pdb.container().stream(StreamId(id))?.is_none() {
             continue;
         }
         // A type map holds type and ID indices of input files and of the

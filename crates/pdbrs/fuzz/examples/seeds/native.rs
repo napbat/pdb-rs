@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use pdbrs::format::ContainerKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::auxiliary::NamedStreamKind;
 use pdbrs::native::codeview::Records;
@@ -30,13 +31,18 @@ impl Kinds {
     }
 }
 
-/// Add the seeds of the native PDB in `bytes`.
+/// Add the seeds of the native PDB in `bytes`, in an MSF 7.0 or an MSFZ container.
 pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
-    corpus.add("msf", bytes)?;
-    corpus.add("native_pdb", bytes)?;
-    for selector in [0x03_u8, 0x08, 0x10] {
-        corpus.add_parts("msf_repack", &[selector], &[], bytes)?;
+    if bytes.starts_with(ContainerKind::NativeMsfz.signature()) {
+        corpus.add("msfz", bytes)?;
+        crate::synthetic::msfz_chunk_seeds(bytes, corpus)?;
+    } else {
+        corpus.add("msf", bytes)?;
+        for selector in [0x03_u8, 0x08, 0x10] {
+            corpus.add_parts("msf_repack", &[selector], &[], bytes)?;
+        }
     }
+    corpus.add("native_pdb", bytes)?;
     let pdb = Pdb::parse(bytes)?;
     let mut kinds = Kinds::default();
     let info = pdb.stream_bytes(StreamId(1))?;
@@ -46,9 +52,11 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
     }
     let names_bytes = pdb.named_stream_bytes(b"/names")?.unwrap_or_default();
     corpus.add("native_names", &names_bytes)?;
-    if pdb.msf().stream(StreamId(0))?.is_some() {
+    if let Some(msf) = pdb.container().msf()
+        && msf.stream(StreamId(0))?.is_some()
+    {
         let old = pdb.stream_bytes(StreamId(0))?;
-        let selector = u8::try_from(pdb.msf().block_size().trailing_zeros().saturating_sub(9))?;
+        let selector = u8::try_from(msf.block_size().trailing_zeros().saturating_sub(9))?;
         corpus.add_parts("native_named", &[7, selector], &[], &old)?;
     }
     let tpi = pdb.types()?;

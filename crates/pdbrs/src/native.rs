@@ -1,11 +1,16 @@
 //! Native PDB containers, streams and record views.
 //!
+//! Native PDBs use the MSF 7.00 container ([`msf`]) or the MSFZ container ([`msfz`]).
+//! [`container::Container`] reads streams from both. The stream and record decoders use only
+//! the stream bytes.
+//!
 //! Container versions, stream versions and record kinds are independent.
 //! Typed decoders report unsupported versions rather than guessing a layout.
 
 pub mod address;
 pub mod auxiliary;
 pub mod codeview;
+pub mod container;
 pub mod dbi;
 pub mod debug_stream;
 pub mod edit;
@@ -18,6 +23,7 @@ pub mod injected_source;
 pub mod lines;
 pub mod locate;
 pub mod msf;
+pub mod msfz;
 pub mod names;
 mod output;
 pub mod section;

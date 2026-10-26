@@ -1,9 +1,9 @@
 # pdbrs
 
 pdbrs is a Rust library for Program Database (PDB) files. It reads native Windows PDB files
-(MSF 7.0), writes MSF 7.0 containers and reads the metadata of standalone Portable .NET PDB
-files. `pdbrs::Pdb` detects the format from the file contents. The library supports `std` and
-`no_std + alloc`.
+(MSF 7.0 and MSFZ), writes MSF 7.0 containers and reads the metadata of standalone Portable .NET
+PDB files. `pdbrs::Pdb` detects the format from the file contents. The library supports `std`
+and `no_std + alloc`.
 
 ## Status
 
@@ -13,7 +13,7 @@ files. `pdbrs::Pdb` detects the format from the file contents. The library suppo
 | Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. The writer makes no PDB semantic claim about the streams. |
 | Native PDB semantic building and editing | Not implemented. |
 | Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writing is in progress ([#26](https://github.com/napbat/pdbrs/issues/26)). |
-| Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |
+| Native PDB in MSFZ (PDZ files) | Reading: `format::probe` gives `ContainerKind::NativeMsfz`, and `native::Pdb` reads the streams through `native::container::Container`, so every typed accessor, the builder input (`Pdb::contents`) and the editor (`Pdb::edit`, MSF 7.0 output) work on PDZ files. Stored, zstd and raw DEFLATE chunks, compressed stream directories and fragments across chunks ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing and conversion are not implemented ([#38](https://github.com/napbat/pdbrs/issues/38)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) has one epic for each format family:
@@ -97,7 +97,8 @@ cargo run -p pdbrs --example streams --no-default-features
 cargo run -p pdbrs --example msf -- copy input.pdb copy.pdb
 cargo run -p pdbrs --example msf -- repack --page-size 8192 input.pdb repacked.pdb
 
-# Compare the streams of two containers and check the free page map of the second.
+# Compare the streams of two containers (MSF 7.0 or MSFZ) and check the free page map of an
+# MSF 7.0 second file.
 cargo run -p pdbrs --example msf -- compare input.pdb repacked.pdb
 ```
 

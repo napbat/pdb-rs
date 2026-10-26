@@ -218,7 +218,7 @@ fn strip_removes_an_unowned_type_map() {
             .map(|_| ())
     });
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let last = pdb.msf().stream_count() - 1;
+    let last = pdb.container().stream_count() - 1;
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
     let plan = editor.plan().expect("type map");

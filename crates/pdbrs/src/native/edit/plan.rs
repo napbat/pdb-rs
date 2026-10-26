@@ -5,10 +5,11 @@ use alloc::vec::Vec;
 
 use super::{PdbEditor, named, strip, symbols, types, unsupported};
 use crate::io::{ReadAt, Write};
+use crate::native::container::Stream;
 use crate::native::dbi::{Dbi, DbiBuilder};
 use crate::native::hash_table::HashTableProducer;
 use crate::native::info::{InfoBuilder, PeMatch};
-use crate::native::msf::{MsfBuilder, Stream, StreamId, WriteOptions, WritePlan};
+use crate::native::msf::{MsfBuilder, StreamId, WriteOptions, WritePlan};
 use crate::native::output::no_memory;
 use crate::native::symbols::IndexProducer;
 use crate::native::types::{HashLayout, TypeStream};
@@ -251,7 +252,8 @@ fn same_bytes<S: ReadAt>(reader: &Stream<'_, S>, bytes: &[u8]) -> Result<bool> {
 
 impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// Check all changes, encode the changed streams and plan the container
-    /// with the page size of the source.
+    /// with the page size of an MSF 7.00 source. For an MSFZ source, the plan
+    /// uses the default page size of [`WriteOptions`].
     ///
     /// See the [module documentation](super) for the rules.
     ///
@@ -267,7 +269,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// - The errors of the stream readers, the record encoders and
     ///   [`MsfBuilder::plan`].
     pub fn plan(&self) -> Result<PdbEditPlan<'p, S>> {
-        let options = WriteOptions::default().with_page_size(self.source.msf().block_size());
+        let options = WriteOptions::default().with_page_size(self.source.output_page_size());
         self.plan_with(options)
     }
 
@@ -307,7 +309,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
         let mut info = source_info.clone();
         let mut dbi_age = context.dbi.header().age;
         let pe_match = info.apply_identity(self.identity, &mut dbi_age)?;
-        let mut changes = Changes::new(pdb.msf().stream_count());
+        let mut changes = Changes::new(pdb.container().stream_count());
         let mut dbi_builder = None;
         if self.strip {
             dbi_builder = Some(strip::plan(pdb, &context, &mut info, &mut changes)?);
@@ -346,7 +348,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
         options: WriteOptions,
         pe_match: PeMatch,
     ) -> Result<PdbEditPlan<'p, S>> {
-        let msf = self.source.msf();
+        let container = self.source.container();
         let mut streams = MsfBuilder::new();
         let mut edited = Vec::new();
         // Stream 0 is the previous stream directory. Its pages describe the
@@ -359,7 +361,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
         } = changes;
         for id in 1..source_count {
             let stream = StreamId(id);
-            let reader = msf.stream(stream)?;
+            let reader = container.stream(stream)?;
             let (planned, differs) = match (source.remove(&id), reader) {
                 (Some(Change::Replace(bytes)), Some(reader)) if same_bytes(&reader, &bytes)? => {
                     (Some(EditedStream::Source(reader)), false)

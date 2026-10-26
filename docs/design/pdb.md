@@ -387,6 +387,7 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `native.rs` and `native/` | Native reader, editor, builder, identity and capability reporting |
 | `native/msf.rs` and `native/msf/` | Superblock, directory, block maps, stream access and container writing |
 | `native/msfz.rs` and `native/msfz/` | MSFZ header, stream directory, Chunk Table, fragment reads, chunk cache and container writing |
+| `native/container.rs` | One stream container type (`Container`) over MSF 7.0 and MSFZ for the native `Pdb` facade |
 | `native/codeview.rs` and `native/codeview/` | Record framing, type records, symbol records and numeric leaves |
 | `native/types.rs` and `native/types/` | TPI/IPI access, type lookup and hash generation |
 | `native/dbi.rs` and `native/dbi/` | Modules, contributions, section maps, source file info and debug stream references |
@@ -542,6 +543,20 @@ The reader must check these conditions before using the affected data:
 Treat other versions and compression codes as unsupported, not malformed.
 Writers zero-fill gaps and give the same chunk layout for the same input and options.
 Where the MSFZ specification and Microsoft's reference implementation differ, follow the implementation and record the decision in #20.
+
+### Implemented MSFZ reading
+
+Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing and conversion are not implemented ([#38](https://github.com/napbat/pdbrs/issues/38)).
+
+- `format::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
+- `native::msfz::Msfz` checks every invariant above when it opens a file. It decodes stored (code 0), zstd (code 1) and raw DEFLATE (code 2) chunks and stream directories through `compression.rs`. Other codes and versions give `UnsupportedVersion`.
+- `native::container::Container` holds an `Msf` or an `Msfz`. `native::Pdb::container` replaces `Pdb::msf`. All typed accessors, `Pdb::contents` and `Pdb::edit` read through it. The builder and the editor write MSF 7.0 output with the default page size (4096) for MSFZ input.
+- The free page map and the stream 0 snapshot are MSF 7.0 structures. `Container::msf` gives them; the `native` example reports them as not applicable for MSFZ.
+- `MsfzLimits` bounds the stream directory (64 MiB), the Chunk Table (64 MiB), one chunk (256 MiB) and the chunk cache (256 MiB). The cache removes the least recently used chunk first; the same reads give the same evictions. `ReadOptions::msfz` holds the limits.
+- Stream sizes are `u64` values: a stream can be larger than 4 GiB. Nil and empty streams stay distinct.
+- The decisions for the differences between the specification and `ms-pdb-msfz` 0.1.10 are in [#37](https://github.com/napbat/pdbrs/issues/37#issuecomment-6415233037). Two decisions follow the specification, because it is a superset: a compressed fragment can continue into the next chunks, and non-zero reserved location bits are an error.
+- `pdbtool pdz-encode` writes stream 0 (the previous MSF stream directory) as an empty stream. Stream comparisons start at stream 1, as `pdbtool compare` does.
+- Evidence: every stream of the 52 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdbrs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
 
 ## Portable metadata invariants
 

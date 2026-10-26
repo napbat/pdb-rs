@@ -185,6 +185,28 @@ Some producer properties of these PDBs:
   DIA2Dump reject these PDBs. `llvm-pdbutil` reads the summary and the stream list, but not the
   empty TPI stream.
 
+### PDZ (MSFZ) conversions
+
+The `pdz-*` fixtures convert the MSF 7.0 PDBs of the fixtures above to MSFZ with
+`pdbtool pdz-encode` (pinned `microsoft/pdb-rs` at `2081a0dd`, #37). They come last in the
+matrix, because they read the outputs of the other fixtures in the same output root. They need
+`pdbtool` in the tools manifest. Each output is `<pdz fixture>/<source fixture>/<file name>`
+with the `.pdb` extension of the source, because DIA opens only files with that extension.
+The manifest gives the kind `native-pdz`, the option set as the configuration and each
+`pdz-encode` command.
+
+| Fixture | `pdz-encode` options | Sources |
+| --- | --- | --- |
+| `pdz-default` | none (defaults) | Each MSF 7.0 PDB of each fixture, except `hlsl-dxc-debug` (36 files) |
+| `pdz-compress-stream-dir` | `--compress-stream-dir` | `msvc-x64-debug`, `clang-lld-x64-debug`, `rust-link-x64-debug`, `dotnet-csharp-full` |
+| `pdz-one-stream-per-chunk` | `--one-stream-per-chunk` | the same four |
+| `pdz-small-chunks` | `--max-chunk-size 4K` (the smallest size): large streams cross chunks | the same four |
+| `pdz-pad16k` | `--pad16k` | `hlsl-fxc-sm50-debug` (3 files), `dotnet-csharp-full`: PDZ files smaller than 16 KiB |
+
+`pdbtool` does not open the `hlsl-dxc-debug` PDBs ("Page is invalid; it is out of range"),
+so no PDZ fixture converts them. `pdz-encode` writes stream 0 (the previous MSF stream
+directory) as an empty stream; compare streams from stream 1, as `pdbtool compare` does.
+
 ## Run the generator
 
 Run these commands from the workspace root. You do not need a developer command prompt.

@@ -414,7 +414,7 @@ fn types(
     expect.types.push(ADDED_TYPE.into());
     expect.globals.push(ADDED_TYPE.into());
     let has_ipi = pdb
-        .msf()
+        .container()
         .stream(pdbrs::native::msf::StreamId(4))?
         .is_some_and(|stream| pdbrs::io::ReadAt::len(&stream).is_ok_and(|length| length != 0));
     if has_ipi {

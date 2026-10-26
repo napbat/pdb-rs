@@ -401,7 +401,7 @@ fn rebuild(original: &Path, directory: &Path, file_name: &str) -> Result<Rebuilt
     Ok(Rebuilt {
         path,
         deterministic: first == second,
-        streams_before: pdb.msf().stream_count(),
+        streams_before: pdb.container().stream_count(),
         streams_after,
         unclaimed: contents
             .unclaimed_streams()
