@@ -7,6 +7,7 @@
 //! of `BUILDINFOSYM`: one ID index.
 
 use super::super::Fields;
+use crate::native::msf::StreamId;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
@@ -197,7 +198,67 @@ pub struct ModuleTypeReference {
     pub word1: u16,
 }
 
+/// Where the type records of a module are, as an [`S_MOD_TYPEREF`] record
+/// tells.
+///
+/// MSVC `link /DEBUG:LAZY` writes these records in a PDB without type
+/// merging (feature `NOTM`). The type and ID indices of the module symbols
+/// are then indices of the input object file, not TPI or IPI indices. The
+/// meaning of the words comes from `msvc-x64-lazy` (#30): see
+/// [`ModuleTypeReference::source`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum ModuleTypeSource {
+    /// The module refers to no types (`fNone`).
+    NoTypes,
+    /// The module holds the `.debug$T` records of a `/Z7` object (`fOwnTMR`).
+    /// The stream holds the records without the signature. Types and IDs
+    /// share one index space from `0x1000`.
+    TypeRecords {
+        /// The stream with the records (`word0`).
+        stream: StreamId,
+    },
+    /// The module holds the records of a `/Zi` type server (`fOwnTM`). Each
+    /// stream starts at index `0x1000`.
+    TypeServer {
+        /// The stream with the type records (`word0`).
+        types: StreamId,
+        /// The stream with the ID records (`word1`).
+        ids: StreamId,
+    },
+    /// The module uses the records of another module (`fRefTM`).
+    OtherModule {
+        /// The index of the module that holds the records (`word0`, 0-based).
+        module: u16,
+    },
+    /// Another combination of flags, for example the precompiled-type flags
+    /// `fRefTMPCT` and `fOwnTMPCT`. No fixture shows their words.
+    Other(ModuleTypeReference),
+}
+
 impl ModuleTypeReference {
+    /// Return where the type records of the module are.
+    ///
+    /// The function uses only the flags of bits 0 to 5. Exactly one of
+    /// `fNone`, `fOwnTMR`, `fOwnTM` and `fRefTM` must be set, and no
+    /// precompiled-type flag; else the result is [`ModuleTypeSource::Other`].
+    #[must_use]
+    pub fn source(&self) -> ModuleTypeSource {
+        let stream = |word: u16| StreamId(u32::from(word));
+        match self.flags.0 & 0x3f {
+            0x01 => ModuleTypeSource::NoTypes,
+            0x08 => ModuleTypeSource::TypeRecords {
+                stream: stream(self.word0),
+            },
+            0x10 => ModuleTypeSource::TypeServer {
+                types: stream(self.word0),
+                ids: stream(self.word1),
+            },
+            0x20 => ModuleTypeSource::OtherModule { module: self.word0 },
+            _ => ModuleTypeSource::Other(*self),
+        }
+    }
+
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'_>) -> Result<Self> {
         let flags = ModuleTypeReferenceFlags(fields.u32()?);

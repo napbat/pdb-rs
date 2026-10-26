@@ -23,12 +23,14 @@ use crate::{Error, ErrorKind, Result};
 mod forward;
 mod hash;
 mod lookup;
+mod size;
 mod validate;
 mod write;
 
 pub use forward::ForwardRefs;
 pub use hash::{HashAdjuster, IndexOffset, TypeHashes, type_record_hash};
 pub use lookup::{FieldMembers, TypeTable};
+pub use size::type_size;
 pub use validate::{ReferenceLimits, ReferenceSummary, validate_type_references};
 pub use write::{
     DEFAULT_HASH_BUCKETS, HashLayout, TypeStreamBytes, TypeStreamOptions, serialize_hash_adjusters,
@@ -154,6 +156,34 @@ impl TypeStream {
     pub fn parse(bytes: Vec<u8>) -> Result<Self> {
         let header = parse_header(&bytes)?;
         Ok(Self { bytes, header })
+    }
+
+    /// Make a type stream from record bytes that have no stream header.
+    ///
+    /// The first record gets the index [`FIRST_RECORD_INDEX`]. The stream
+    /// gets a version 8.0 header without a hash stream, as
+    /// [`write_type_stream`] writes it with [`HashLayout::Llvm`].
+    /// [`TypeStream::record_bytes`] gives `records` again.
+    ///
+    /// Use this function for the streams that an `S_MOD_TYPEREF` record
+    /// names in a PDB without type merging
+    /// ([`ModuleTypeSource`](crate::native::codeview::symbol::ModuleTypeSource)).
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`write_type_stream`]: for example
+    /// [`ErrorKind::InvalidFormat`] if `records` is not a sequence of
+    /// complete records.
+    pub fn from_records(records: &[u8]) -> Result<Self> {
+        let options = TypeStreamOptions {
+            index_begin: FIRST_RECORD_INDEX,
+            hash_bucket_count: DEFAULT_HASH_BUCKETS,
+            hash_stream: None,
+            hash_aux_stream: None,
+            layout: HashLayout::Llvm,
+            adjusters: &[],
+        };
+        Self::parse(write_type_stream(records, &options)?.stream)
     }
 
     /// Return the validated header.

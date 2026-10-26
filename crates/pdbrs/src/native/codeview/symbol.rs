@@ -124,7 +124,8 @@ pub use hlsl::{
 pub use link::{FastLink, FastLinkFlags, S_REF_MINIPDB, Trampoline, TrampolineKind};
 pub use linker::{
     DiscardReason, Discarded, Export, ExportFlags, ModuleTypeReference, ModuleTypeReferenceFlags,
-    PdbMap, ProfileData, S_DISCARDED, S_EXPORT, S_MOD_TYPEREF, S_PDBMAP, S_POGODATA, S_SOURCELINK,
+    ModuleTypeSource, PdbMap, ProfileData, S_DISCARDED, S_EXPORT, S_MOD_TYPEREF, S_PDBMAP,
+    S_POGODATA, S_SOURCELINK,
 };
 pub use managed::{
     ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,

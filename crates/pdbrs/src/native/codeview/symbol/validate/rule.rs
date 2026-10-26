@@ -82,6 +82,35 @@ pub enum Rule {
     OptimizedOutWithRange,
     /// A register number is not known for the CPU of the module.
     RegisterUnknown,
+    /// A def-range in an inline site does not overlap or touch the code of
+    /// that inline site or of an enclosing inline site.
+    ///
+    /// The binary annotations of the inline sites give their code ranges,
+    /// also in the separated code chunks of the procedure. The gaps of the
+    /// def-range are not part of its range. A part touches a code range if
+    /// it starts at the end of the range or ends at its start.
+    ///
+    /// The check does not require that the def-range is inside the code of
+    /// its inline site. MSVC, Clang, rustc and fxc write def-ranges that
+    /// continue after the inlined code, for example for a value that the
+    /// inlined function returns (fixtures of #12 and #27). MSVC PGO writes
+    /// def-ranges of a local of an inner inline site in the separated code
+    /// of an outer inline site. The check skips a def-range of length 0 and
+    /// a def-range with the "may have no user name" bit (`CV_RANGEATTR`):
+    /// the name of such a variable can be out of scope in the range.
+    DefRangeOutsideInlineSite,
+    /// The binary annotations of an inline site do not give valid code
+    /// ranges: a code offset overflows 32 bits, or a range starts before the
+    /// range in front of it. The def-ranges of the site are not checked.
+    InlineSiteAnnotations,
+    /// The parent offset of a subfield def-range is not less than the size of
+    /// the type of its local.
+    ///
+    /// The rule applies to `S_DEFRANGE_SUBFIELD`,
+    /// `S_DEFRANGE_SUBFIELD_REGISTER` and to `S_DEFRANGE_REGISTER_REL` with
+    /// the spilled-member bit. It needs
+    /// [`ValidationContext::with_type_sizes`](super::ValidationContext::with_type_sizes).
+    SubfieldOutsideType,
 }
 
 impl Rule {
@@ -115,6 +144,11 @@ impl Rule {
             Self::LocalFlagsReserved => "local sets a reserved flag bit",
             Self::OptimizedOutWithRange => "optimized-out local has a def-range",
             Self::RegisterUnknown => "register is not known for the module CPU",
+            Self::DefRangeOutsideInlineSite => {
+                "def-range does not touch the code of its inline sites"
+            }
+            Self::InlineSiteAnnotations => "inline site annotations give no valid code ranges",
+            Self::SubfieldOutsideType => "subfield def-range offset is outside its local type",
         }
     }
 
@@ -134,7 +168,9 @@ impl Rule {
             | Self::ModuleIndex
             | Self::ModuleRecordMissing
             | Self::ModuleRecordKind
-            | Self::DefRangeOutsideProcedure => ErrorKind::InvalidReference,
+            | Self::DefRangeOutsideProcedure
+            | Self::DefRangeOutsideInlineSite
+            | Self::SubfieldOutsideType => ErrorKind::InvalidReference,
             _ => ErrorKind::InvalidFormat,
         }
     }

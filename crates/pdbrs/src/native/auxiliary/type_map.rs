@@ -23,7 +23,10 @@
 //! function ID of the input and the PDB type index of its function type.
 //!
 //! [`TypeMapStream::encode`] gives the bytes of a decoded stream again. It keeps the 2 padding
-//! bytes of version 2.
+//! bytes of version 2. [`TypeMapStream::validate`] checks the references to the TPI and IPI
+//! streams.
+
+mod validate;
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
@@ -31,6 +34,8 @@ use core::iter::FusedIterator;
 use crate::native::msf::StreamId;
 use crate::native::output::{Output, to_u32};
 use crate::{Error, ErrorKind, Result};
+
+pub use validate::{TypeMapContext, TypeMapRule, TypeMapViolation};
 
 /// The first type index and the first ID index of a type server.
 const TYPE_SERVER_FIRST_INDEX: u32 = 0x1000;

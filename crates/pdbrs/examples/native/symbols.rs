@@ -12,7 +12,7 @@ use pdbrs::native::codeview::symbol::{
     Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
     Symbol, SymbolData, Trampoline, TrampolineKind,
 };
-use pdbrs::native::dbi::Dbi;
+use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::symbols::{
     HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets, SymbolRecordWriter,
@@ -32,7 +32,9 @@ fn check_symbol(symbol: &Symbol<'_>, context: &Context<'_>, report: &mut Report)
     {
         return Err("symbol refers to a missing type".into());
     }
+    // `/DEBUG:LAZY` funclets have ID 0 ("no ID"); the library check accepts it too.
     if let Some(id) = symbol.id_index()
+        && id.0 != 0
         && context.ids.get(id).is_none()
     {
         return Err("symbol refers to a missing ID".into());
@@ -62,6 +64,9 @@ pub(crate) struct Procedures {
 }
 
 /// Decode every module stream and return the procedure offsets per module.
+///
+/// In a PDB without type merging (`NOTM`), the type and ID indices of a module resolve against
+/// the records that its `S_MOD_TYPEREF` record names, not against TPI and IPI.
 pub(crate) fn modules(
     pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
@@ -76,62 +81,78 @@ pub(crate) fn modules(
             continue;
         };
         report.claim(stream.stream());
-        let lines = report.supported(ModuleLines::parse(&stream), "C13 line data")?;
-        if let Some(lines) = &lines {
-            lines.validate()?;
-        }
-        let checksums = lines.as_ref().and_then(ModuleLines::checksums);
-        let base = u32::try_from(stream.symbol_offset())?;
-        crate::symbol_validation::module(&stream, index, context, &mut procedures.records, report)?;
-        let symbols =
-            ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
-        let mut writer = Some(ModuleSymbolWriter::new(base));
-        for scoped in symbols {
-            let Some(scoped) = report.supported(scoped, "module symbol scope")? else {
-                procedures.incomplete.insert(index);
-                break;
-            };
-            let symbol = scoped.symbol;
-            check_symbol(&symbol, context, report)?;
-            reencode(&symbol, report)?;
-            if let Some(writer) = &mut writer {
-                writer.push_symbol(&symbol)?;
-            }
-            match symbol.data() {
-                SymbolData::Unsupported(_) => {
-                    report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
-                }
-                SymbolData::Procedure(_) | SymbolData::ManagedProcedure(_) => {
-                    procedures.offsets.insert((index, scoped.offset));
-                }
-                SymbolData::InlineSite(site) => {
-                    for annotation in &site.annotations {
-                        if let Annotation::ChangeFile(offset) = annotation
-                            && !checksums.is_some_and(|table| table.contains(offset))
-                        {
-                            return Err("inline site names a missing file checksum".into());
-                        }
-                    }
-                }
-                SymbolData::FileStatic(value) => {
-                    context.names.get(value.module_name_offset)?;
-                    report.add("file statics joined to /names", 1);
-                }
-                SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
-                SymbolData::FastLink(_) => report.add("FASTLINK references", 1),
-                SymbolData::Oem(oem) => oem_attribute(oem, report)?,
-                _ => {}
-            }
-            report.add("module symbols", 1);
-        }
-        if !procedures.incomplete.contains(&index) {
-            rewrite_module(writer.take(), stream.symbol_data(), report)?;
-        }
-        if let Some(lines) = &lines {
-            module_lines(lines, context, report)?;
+        match crate::module_types::streams(pdb, dbi, &stream, report)? {
+            Some(types) => crate::module_types::with_context(&types, context, |context| {
+                module_symbols(&stream, index, context, &mut procedures, report)
+            })?,
+            None => module_symbols(&stream, index, context, &mut procedures, report)?,
         }
     }
     Ok(procedures)
+}
+
+/// Decode and check the symbols and the line data of one module stream.
+fn module_symbols(
+    stream: &ModuleStream,
+    index: u16,
+    context: &Context<'_>,
+    procedures: &mut Procedures,
+    report: &mut Report,
+) -> Outcome {
+    let lines = report.supported(ModuleLines::parse(stream), "C13 line data")?;
+    if let Some(lines) = &lines {
+        lines.validate()?;
+    }
+    let checksums = lines.as_ref().and_then(ModuleLines::checksums);
+    let base = u32::try_from(stream.symbol_offset())?;
+    crate::symbol_validation::module(stream, index, context, &mut procedures.records, report)?;
+    let symbols = ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+    let mut writer = Some(ModuleSymbolWriter::new(base));
+    for scoped in symbols {
+        let Some(scoped) = report.supported(scoped, "module symbol scope")? else {
+            procedures.incomplete.insert(index);
+            break;
+        };
+        let symbol = scoped.symbol;
+        check_symbol(&symbol, context, report)?;
+        reencode(&symbol, report)?;
+        if let Some(writer) = &mut writer {
+            writer.push_symbol(&symbol)?;
+        }
+        match symbol.data() {
+            SymbolData::Unsupported(_) => {
+                report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
+            }
+            SymbolData::Procedure(_) | SymbolData::ManagedProcedure(_) => {
+                procedures.offsets.insert((index, scoped.offset));
+            }
+            SymbolData::InlineSite(site) => {
+                for annotation in &site.annotations {
+                    if let Annotation::ChangeFile(offset) = annotation
+                        && !checksums.is_some_and(|table| table.contains(offset))
+                    {
+                        return Err("inline site names a missing file checksum".into());
+                    }
+                }
+            }
+            SymbolData::FileStatic(value) => {
+                context.names.get(value.module_name_offset)?;
+                report.add("file statics joined to /names", 1);
+            }
+            SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
+            SymbolData::FastLink(_) => report.add("FASTLINK references", 1),
+            SymbolData::Oem(oem) => oem_attribute(oem, report)?,
+            _ => {}
+        }
+        report.add("module symbols", 1);
+    }
+    if !procedures.incomplete.contains(&index) {
+        rewrite_module(writer.take(), stream.symbol_data(), report)?;
+    }
+    if let Some(lines) = &lines {
+        module_lines(lines, context, report)?;
+    }
+    Ok(())
 }
 
 /// Decode the symbol attribute of an `S_OEM` record and its Roslyn value.
