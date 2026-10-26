@@ -4,9 +4,10 @@ use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::IdIndex;
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::lines::{
-    ALWAYS_STEP_INTO_LINE, ChecksumKind, DEBUG_S_FILECHKSMS, DEBUG_S_FRAMEDATA, DEBUG_S_IGNORE,
-    DEBUG_S_INLINEELINES, DEBUG_S_LINES, FileChecksums, InlineeLines, InlineeSignature, LineEntry,
-    LineSubsection, LinesSubsection, ModuleLines, SubsectionKind,
+    ALWAYS_STEP_INTO_LINE, ChecksumKind, CoffSymbolRvas, DEBUG_S_COFF_SYMBOL_RVA,
+    DEBUG_S_FILECHKSMS, DEBUG_S_FRAMEDATA, DEBUG_S_IGNORE, DEBUG_S_INLINEELINES, DEBUG_S_LINES,
+    FileChecksums, InlineeLines, InlineeSignature, LineEntry, LineSubsection, LinesSubsection,
+    ModuleLines, SubsectionKind,
 };
 
 /// The module stream index in the synthetic module record.
@@ -344,6 +345,40 @@ fn classifier_names_kinds_without_decoding_them() {
         LineSubsection::decode(DEBUG_S_INLINEELINES, &u32s(&[0])).unwrap(),
         LineSubsection::InlineeLines(_)
     ));
+}
+
+#[test]
+fn decodes_coff_symbol_rvas() {
+    // The values come from module 0 of the FASTLINK fixture: absolute
+    // symbols, a section and its auxiliary record, then two data symbols.
+    let data = u32s(&[0, 0, 0x1_0078, 0, 0x1_0078, 0x1_0080, u32::MAX]);
+    let LineSubsection::CoffSymbolRvas(rvas) =
+        LineSubsection::decode(DEBUG_S_COFF_SYMBOL_RVA, &data).unwrap()
+    else {
+        panic!("expected DEBUG_S_COFF_SYMBOL_RVA");
+    };
+    assert!(SubsectionKind::CoffSymbolRva.is_decoded());
+    assert_eq!(rvas.len(), 7);
+    assert_eq!(rvas.get(2), Some(0x1_0078));
+    assert_eq!(rvas.get(7), None);
+    assert_eq!(rvas.iter().next_back(), Some(u32::MAX));
+    assert_eq!(
+        rvas.iter().collect::<Vec<_>>(),
+        [0, 0, 0x1_0078, 0, 0x1_0078, 0x1_0080, u32::MAX]
+    );
+}
+
+#[test]
+fn coff_symbol_rvas_accept_empty_data_and_reject_partial_entries() {
+    assert!(CoffSymbolRvas::decode(&[]).unwrap().is_empty());
+    for length in [1, 2, 3, 5] {
+        let data = vec![0; length];
+        assert_eq!(
+            error_kind(CoffSymbolRvas::decode(&data)),
+            ErrorKind::InvalidFormat,
+            "{length} bytes"
+        );
+    }
 }
 
 /// Serialize one C13 subsection with its header and zero padding.
