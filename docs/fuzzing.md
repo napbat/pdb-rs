@@ -17,6 +17,8 @@ to the same value. It does not check that other readers accept the output.
 | `msf` | MSF 7.0 file | `format::probe`, `Msf::open`, `Msf::with_limits`, each stream, `check_free_page_map`, `OldDirectory` |
 | `msf_repack` | selector byte, MSF file | `Msf::repack` round trip: page size and stream 0 policy, written streams, free page map |
 | `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::open`, stream bytes |
+| `msfz` | MSFZ file | `format::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
+| `msfz_chunks` | selector byte, two declared chunk sizes, fragment offset, stored chunk bytes | an MSFZ container around one or two chunks (stored, zstd or raw DEFLATE) and one fragment across them; reads with and without the chunk cache must agree; stored chunks must give their bytes |
 | `native_pdb` | native PDB file | `native::Pdb` and every stream that it names: Info, named streams, TPI, IPI, hash streams, DBI, FPO, frame data, modules, symbol records, GSI, PSI |
 | `native_info` | Info stream | `Info::parse`, named stream lookup, feature codes |
 | `native_hash_table` | hash table | `HashTable::<u32>::parse`, `check_placement` |
@@ -52,7 +54,9 @@ to the same value. It does not check that other readers accept the output.
 | `native_debug_stream_encode` | kind selector, stream | FPO, frame data, fixup, function entry, token map, section header, OMAP and `RvaVaBlob` encoders |
 | `native_named_encode` | kind selector, stream | `LinkInfo`, `TmCache` and `TmCacheBuilder`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceServer`, `SourceHeaderBlock` and its builder, `DotNetDocument` |
 
-The MSFZ targets come with #20.
+The MSFZ targets (#37) use 16 MiB chunks and a 32 MiB chunk cache (`pdbrs_fuzz::msfz::limits`);
+`native_pdb` uses the same MSFZ limits. `msfz` does not compare reads without the cache: for
+a whole PDZ file, each uncached read decompresses a chunk again and takes too long.
 
 ### Round-trip properties of the native encoders
 
@@ -85,6 +89,9 @@ It builds these inputs with the public API of `pdbrs`:
   one value of each custom debug information kind.
 - Small inputs: MSF containers, builder commands, FPO and frame data records, compressed
   integers and embedded-source blobs.
+- MSFZ inputs: chunks with a zstd frame of one raw block, a raw DEFLATE stored block and stored
+  bytes, and the containers around them. A PDZ fixture (MSFZ signature) gives its file to
+  `msfz` and `native_pdb` and each chunk of its Chunk Table to `msfz_chunks`.
 
 The generator splits each PDB into the inputs of the targets: streams, records, subsections,
 blobs and values. It caps the seeds of one PDB to 48 for each target.
@@ -181,6 +188,13 @@ runs without a finding. `cov` and `corpus` are from the last run of the target.
 | `native_dbi_encode` | 901 | 1,030,786 | 1171 | 263 | 615 |
 | `native_debug_stream_encode` | 901 | 50,452,815 | 369 | 88 | 499 |
 | `native_named_encode` | 901 | 55,190,434 | 1058 | 565 | 959 |
+| `msfz` | 902 | 47,554 | 1697 | 496 | 659 |
+| `msfz_chunks` | 901 | 43,043 | 1835 | 561 | 837 |
+
+The MSFZ targets ran on branch `msfz-reader` (#37) on 2026-10-26, with seeds from the
+synthetic inputs and the 52 PDZ fixtures of the native fixtures of `main` 8dc001c (`msfz`: 56
+seeds, `msfz_chunks`: 631 seeds). The `msfz` row is the run after the fix of finding 4. The
+`msfz_chunks` run used the library before that fix, which does not change its inputs.
 
 The 12 encoder targets ran on the branch with `main` aa552a7 (2026-10-26). Their seeds are
 the seeds of the reader targets with the same input layout.
@@ -208,6 +222,13 @@ build, each crash input in `artifacts/` runs without a finding.
    `encodes_a_record_of_the_largest_length_without_padding` in `crates/pdbrs/tests/codeview.rs`.
    The fix of findings 2 and 3: `Symbol::encode` writes the fields without alignment padding
    and then the zero bytes of the original record.
+4. `msfz`: a timeout. A real PDZ file with one changed byte in a zstd chunk took 45 s: each
+   read of a fragment in the corrupt chunk decoded the chunk again, because the chunk cache
+   keeps only decoded chunks. The fix: the cache keeps the error kind of a chunk that does not
+   decode, so the reader decodes each chunk at most once. Regression test:
+   `a_corrupt_chunk_is_decoded_once` in `crates/pdbrs/src/native/msfz/tests/reads.rs`. The
+   first `msfz` runs also compared reads without the cache for whole PDZ files; that part of
+   the target took more than 10 s for the seeds, and the target now leaves it to `msfz_chunks`.
 
 The other first failures of the encoder targets came from the target code, not from the
 library: a comparison of record offsets, of the raw bytes of field lists and method lists,

@@ -557,7 +557,7 @@ Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/
 - Stream sizes are `u64` values: a stream can be larger than 4 GiB. Nil and empty streams stay distinct.
 - The decisions for the differences between the specification and `ms-pdb-msfz` 0.1.10 are in [#37](https://github.com/napbat/pdbrs/issues/37#issuecomment-6415233037). Two decisions follow the specification, because it is a superset: a compressed fragment can continue into the next chunks, and non-zero reserved location bits are an error.
 - `pdbtool pdz-encode` writes stream 0 (the previous MSF stream directory) as an empty stream. Stream comparisons start at stream 1, as `pdbtool compare` does.
-- Evidence: every stream of the 52 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdbrs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
+- Evidence: every stream of the 63 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdbrs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. For `msvc-x64-lazy`, both files stop at the same error of the symbol reader. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
 
 ## Portable metadata invariants
 

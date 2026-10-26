@@ -226,7 +226,7 @@ The manifest gives the kind `native-pdz`, the option set as the configuration an
 
 | Fixture | `pdz-encode` options | Sources |
 | --- | --- | --- |
-| `pdz-default` | none (defaults) | Each MSF 7.0 PDB of each fixture, except `hlsl-dxc-debug` (36 files) |
+| `pdz-default` | none (defaults) | Each MSF 7.0 PDB of each fixture, except `hlsl-dxc-debug` (47 files) |
 | `pdz-compress-stream-dir` | `--compress-stream-dir` | `msvc-x64-debug`, `clang-lld-x64-debug`, `rust-link-x64-debug`, `dotnet-csharp-full` |
 | `pdz-one-stream-per-chunk` | `--one-stream-per-chunk` | the same four |
 | `pdz-small-chunks` | `--max-chunk-size 4K` (the smallest size): large streams cross chunks | the same four |
