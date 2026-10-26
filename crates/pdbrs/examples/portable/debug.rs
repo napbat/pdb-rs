@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
     Document, DocumentName, Import, LocalConstantSignature, LocalSignatureForm,
@@ -22,7 +23,7 @@ use crate::{Counts, Outcome};
 const MAX_EMBEDDED_SOURCE: usize = 64 << 20;
 
 /// Decode, encode and validate all debug table data of `pdb`.
-pub fn debug_tables(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
+pub fn debug_tables(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
     documents(pdb, counts)?;
     sequence_points(pdb, counts)?;
     scopes(pdb, counts)?;
@@ -56,7 +57,7 @@ fn compare(counts: &mut Counts, what: &str, encoded: &[u8], original: &[u8], rea
 }
 
 /// Decode the document names and check the Roslyn split of each name.
-fn documents(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
+fn documents(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
     for document in pdb.documents() {
         let document = document?;
         counts.add("documents", 1);
@@ -101,7 +102,7 @@ fn documents(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
 }
 
 /// Decode the embedded source of `document` and check it against the document hash.
-fn embedded_source(pdb: &Pdb<&[u8]>, document: &Document, counts: &mut Counts) -> Outcome {
+fn embedded_source(pdb: &Pdb<impl ReadAt>, document: &Document, counts: &mut Counts) -> Outcome {
     let Some(source) = pdb.document_source(document, MAX_EMBEDDED_SOURCE)? else {
         return Ok(());
     };
@@ -130,7 +131,7 @@ fn embedded_source(pdb: &Pdb<&[u8]>, document: &Document, counts: &mut Counts) -
 }
 
 /// Decode the sequence points of each method and encode them again.
-fn sequence_points(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
+fn sequence_points(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
     for method in pdb.method_debug_informations() {
         let method = method?;
         counts.add("methods", 1);
@@ -183,7 +184,7 @@ fn sequence_points(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
 }
 
 /// Read the scopes, variables and constants, and encode each constant signature again.
-fn scopes(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
+fn scopes(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
     for scope in pdb.local_scopes() {
         let scope = scope?;
         counts.add("local scopes", 1);
@@ -212,7 +213,7 @@ fn scopes(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
 }
 
 /// Decode the imports of each import scope and encode them again.
-fn imports(pdb: &Pdb<&[u8]>, counts: &mut Counts) -> Outcome {
+fn imports(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
     for scope in pdb.import_scopes() {
         let scope = scope?;
         counts.add("import scopes", 1);

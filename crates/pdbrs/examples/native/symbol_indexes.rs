@@ -1,6 +1,6 @@
 //! Rebuild the global and public symbol indexes and compare their bytes.
 
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::symbols::{
@@ -19,7 +19,7 @@ use crate::{Outcome, Report};
 /// the PDB DLL version in the DBI header, so the example selects the LLVM
 /// conventions for such a PDB. The run fails if a rebuilt stream is different.
 pub(crate) fn symbol_indexes(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
     symbol_records: &[u8],
     report: &mut Report,

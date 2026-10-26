@@ -9,9 +9,15 @@
 //! outside the bucket of its name, without failing. It also reports decoded
 //! producer data that no stream names, with the reason, without failing.
 //! Names stay bytes.
+//!
+//! The option `--input file|slice|seek` selects the source: `Pdb::open` (the default),
+//! `Pdb::parse` on the file bytes, or `Pdb::read` with `SeekReader` around the file. All three
+//! sources give the same output.
 
 mod dbi;
 mod external;
+#[path = "../support/input.rs"]
+mod input;
 mod lines;
 mod named;
 mod symbol_encoding;
@@ -22,8 +28,9 @@ mod types;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
+use std::fs::{self, File};
 
-use pdbrs::io::FileReader;
+use pdbrs::io::{ReadAt, SeekReader};
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, AddressTables};
 use pdbrs::native::auxiliary::TypeMapStream;
@@ -35,6 +42,7 @@ use pdbrs::{ErrorKind, Result as PdbResult};
 
 use dbi::{debug_info_tables, frame_data, reencode_dbi, section_header_bytes};
 use external::external_dependencies;
+use input::Input;
 use named::{info_and_names, named_streams};
 use symbols::{modules, shared_symbols};
 use types::{hash_stream_bytes, identifiers, types};
@@ -118,16 +126,24 @@ struct Context<'a> {
 }
 
 fn main() -> Outcome {
-    let mut arguments = std::env::args_os().skip(1);
-    let path = arguments
-        .next()
-        .ok_or("usage: cargo run --example native -- <path>")?;
-    if arguments.next().is_some() {
-        return Err("expected exactly one input path".into());
+    let (input, path) = input::arguments(
+        std::env::args_os().skip(1),
+        "usage: cargo run --example native -- [--input file|slice|seek] <path>",
+    )?;
+    match input {
+        Input::File => run(&Pdb::open(path)?),
+        Input::Slice => {
+            let bytes = fs::read(path)?;
+            run(&Pdb::parse(&bytes)?)
+        }
+        Input::Seek => run(&Pdb::read(SeekReader::new(File::open(path)?)?)?),
     }
-    let pdb = Pdb::open(path)?;
+}
+
+/// Read and check every stream of `pdb`, and print the report.
+fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     let mut report = Report::default();
-    container(&pdb, &mut report)?;
+    container(pdb, &mut report)?;
 
     let names_bytes = if let Some(bytes) = pdb.named_stream_bytes(b"/names")? {
         bytes
@@ -138,7 +154,7 @@ fn main() -> Outcome {
         EMPTY_NAMES.to_vec()
     };
     let names = StringTable::parse(&names_bytes)?;
-    info_and_names(&pdb, &names, &mut report)?;
+    info_and_names(pdb, &names, &mut report)?;
     if let Some(placement) = report.supported(names.verify_buckets(), "/names hashing")? {
         report.add(
             "/names strings",
@@ -149,22 +165,22 @@ fn main() -> Outcome {
     let ipi = pdb.ids()?.ok_or("missing IPI stream")?;
     report.claim(StreamId(2));
     report.claim(StreamId(4));
-    let tpi_hash_bytes = hash_stream_bytes(&pdb, &tpi, &mut report)?;
-    let ipi_hash_bytes = hash_stream_bytes(&pdb, &ipi, &mut report)?;
-    named_streams(&pdb, &names, &tpi, &ipi, &mut report)?;
+    let tpi_hash_bytes = hash_stream_bytes(pdb, &tpi, &mut report)?;
+    let ipi_hash_bytes = hash_stream_bytes(pdb, &ipi, &mut report)?;
+    named_streams(pdb, &names, &tpi, &ipi, &mut report)?;
     types(&tpi, tpi_hash_bytes.as_deref(), &mut report)?;
     let ids = identifiers(&ipi, ipi_hash_bytes.as_deref(), &tpi, &names, &mut report)?;
 
     let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
     report.claim(StreamId(3));
-    reencode_dbi(&pdb, &dbi, &mut report)?;
+    reencode_dbi(pdb, &dbi, &mut report)?;
     let info_age = pdb.info().identity().age();
     if dbi.header().age != info_age {
         // `pdbstr -w` increments only the Info age; the image matches the DBI age.
         report.add("PDB Info age above the DBI age", 1);
         println!("PDB Info age: {info_age}, DBI age: {}", dbi.header().age);
     }
-    section_header_bytes(&pdb, &dbi, &mut report)?;
+    section_header_bytes(pdb, &dbi, &mut report)?;
     // The tables hold the section headers and, if the DBI stream names them, the OMAP tables
     // and the original section headers.
     let tables = pdb.address_tables(&dbi)?;
@@ -177,12 +193,12 @@ fn main() -> Outcome {
         addresses,
         module_count,
     };
-    frame_data(&pdb, &dbi, &context, &mut report)?;
-    let procedures = modules(&pdb, &dbi, &context, &mut report)?;
-    lines::module_streams(&pdb, &dbi, &mut report)?;
-    shared_symbols(&pdb, &dbi, &context, &procedures, &mut report)?;
-    external_dependencies(&pdb, &dbi, &mut report)?;
-    unclaimed_streams(&pdb, &mut report)?;
+    frame_data(pdb, &dbi, &context, &mut report)?;
+    let procedures = modules(pdb, &dbi, &context, &mut report)?;
+    lines::module_streams(pdb, &dbi, &mut report)?;
+    shared_symbols(pdb, &dbi, &context, &procedures, &mut report)?;
+    external_dependencies(pdb, &dbi, &mut report)?;
+    unclaimed_streams(pdb, &mut report)?;
     print(&report);
     let undecoded: usize = report.undecoded.values().sum();
     let different: usize = report
@@ -200,7 +216,7 @@ fn main() -> Outcome {
 }
 
 /// Check the container: free-page map, stream 0 and the Info stream.
-fn container(pdb: &Pdb<FileReader>, report: &mut Report) -> Outcome {
+fn container(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
     let msf = pdb.msf();
     let map = msf.check_free_page_map()?;
     report.add("pages", usize::try_from(msf.page_count())?);
@@ -228,7 +244,7 @@ fn container(pdb: &Pdb<FileReader>, report: &mut Report) -> Outcome {
 /// An unclaimed stream with the same bytes as a type map stream that `/TMCache` names is an
 /// unowned type map: two inputs with the same type section checksum share one `/TMCache` entry,
 /// and the entry keeps only the last stream (#13).
-fn unclaimed_streams(pdb: &Pdb<FileReader>, report: &mut Report) -> Outcome {
+fn unclaimed_streams(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
     for index in 0..pdb.msf().stream_count() {
         let id = StreamId(index);
         if pdb.msf().stream(id)?.is_none() || report.claimed.contains(&index) {

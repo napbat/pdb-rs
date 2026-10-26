@@ -1,7 +1,7 @@
 //! The C13 subsections that the symbol walk does not resolve, the global
 //! references and the re-encoding of every module stream.
 
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::dbi::{Dbi, ModuleRegionSizes};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
@@ -78,7 +78,7 @@ pub(crate) fn other_subsection(
 /// The run fails if an encoded subsection, C13 region or module stream is
 /// not equal to the source bytes, or if the region sizes are not equal to
 /// the sizes of the module record.
-pub(crate) fn module_streams(pdb: &Pdb<FileReader>, dbi: &Dbi, report: &mut Report) -> Outcome {
+pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Report) -> Outcome {
     let records = match dbi.header().symbol_stream {
         Some(id) => Some(RecordOffsets::frame(&pdb.stream_bytes(id)?, id)?),
         None => None,

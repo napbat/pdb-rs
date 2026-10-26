@@ -207,6 +207,23 @@ fn the_fsharp_token_form_of_the_local_signature_round_trips() {
 }
 
 #[test]
+fn a_nil_local_signature_token_has_the_row_form() {
+    // Regression (#35, fuzz target `portable_blobs`): the header `0x11000000` is a
+    // `StandAloneSig` token with the nil row. The decoder gave the token form, but the encoder
+    // writes a nil row as 0 in both forms, so the encoded blob decoded with the row form.
+    let blob = [0xd1, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00];
+    let decoded = SequencePoints::decode(&blob, DocumentId::new(1)).unwrap();
+    assert_eq!(decoded.local_signature(), StandAloneSigId::new(0));
+    let form = decoded.local_signature_form();
+    assert_eq!(form, LocalSignatureForm::Row);
+    let points: Vec<_> = decoded.collect::<Result<_, _>>().unwrap();
+    let encoded = encode_sequence_points(StandAloneSigId::new(0), form, &points).unwrap();
+    let again = SequencePoints::decode(&encoded.blob, encoded.document).unwrap();
+    assert_eq!(again.local_signature_form(), form);
+    assert_eq!(again.collect::<Result<Vec<_>, _>>().unwrap(), points);
+}
+
+#[test]
 fn the_encoder_checks_its_input() {
     let nil = [point(0, 0, None)];
     expect(
