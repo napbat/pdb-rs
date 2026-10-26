@@ -1,6 +1,7 @@
 //! Native PDB readers: the whole PDB and each stream role.
 
 pub mod dbi;
+pub mod encode;
 pub mod info;
 pub mod named;
 pub mod symbols;

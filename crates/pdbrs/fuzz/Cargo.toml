@@ -200,3 +200,87 @@ path = "fuzz_targets/portable_rebuild.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "native_type_encode"
+path = "fuzz_targets/native_type_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_id_encode"
+path = "fuzz_targets/native_id_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_leaf_encode"
+path = "fuzz_targets/native_leaf_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_symbol_encode"
+path = "fuzz_targets/native_symbol_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_index_encode"
+path = "fuzz_targets/native_index_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_lines_encode"
+path = "fuzz_targets/native_lines_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_module_encode"
+path = "fuzz_targets/native_module_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_info_encode"
+path = "fuzz_targets/native_info_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_names_encode"
+path = "fuzz_targets/native_names_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_dbi_encode"
+path = "fuzz_targets/native_dbi_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_debug_stream_encode"
+path = "fuzz_targets/native_debug_stream_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_named_encode"
+path = "fuzz_targets/native_named_encode.rs"
+test = false
+doc = false
+bench = false

@@ -106,7 +106,7 @@ fn translate(addresses: Option<&AddressMap<'_>>, section: u16, offset: u32) {
 }
 
 /// Build a DBI stream with one module record for the region sizes of a module stream.
-fn module_dbi(sizes: [u32; 3]) -> Option<Dbi> {
+pub(crate) fn module_dbi(sizes: [u32; 3]) -> Option<Dbi> {
     let mut record = vec![0; 64];
     record[34..36].copy_from_slice(&5_u16.to_le_bytes());
     for (offset, size) in [36, 40, 44].into_iter().zip(sizes) {

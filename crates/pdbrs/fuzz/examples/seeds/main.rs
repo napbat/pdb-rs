@@ -55,7 +55,22 @@ impl Corpus {
     }
 
     /// Add one seed for `target`, unless the current source has given enough seeds.
+    ///
+    /// A reader target with an encoder target gives the seed to both targets.
     pub(crate) fn add(&mut self, target: &'static str, bytes: &[u8]) -> Outcome {
+        self.write(target, bytes)?;
+        if let Some((twin, prefixes)) = twin(target, bytes) {
+            for prefix in prefixes {
+                let mut seed = prefix.to_vec();
+                seed.extend_from_slice(bytes);
+                self.write(twin, &seed)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write one seed file for `target`, unless the current source has given enough seeds.
+    fn write(&mut self, target: &'static str, bytes: &[u8]) -> Outcome {
         let count = self.per_source.entry(target).or_default();
         if *count >= MAX_SEEDS_PER_PDB {
             return Ok(());
@@ -87,6 +102,31 @@ impl Corpus {
         bytes.extend_from_slice(rest);
         self.add(target, &bytes)
     }
+}
+
+/// Return the encoder target of a reader target and the selector prefixes of the seed.
+///
+/// The `native_named` seeds start with a reader selector; only the kinds with the same
+/// selector in both targets go to the encoder target.
+fn twin(target: &str, bytes: &[u8]) -> Option<(&'static str, &'static [&'static [u8]])> {
+    const NONE: &[&[u8]] = &[&[]];
+    Some(match target {
+        "native_types" => ("native_type_encode", NONE),
+        "native_ids" => ("native_id_encode", NONE),
+        "native_leaf" => ("native_leaf_encode", NONE),
+        "native_symbols" => ("native_symbol_encode", NONE),
+        "native_indexes" => ("native_index_encode", NONE),
+        "native_lines" => ("native_lines_encode", NONE),
+        "native_module" => ("native_module_encode", NONE),
+        "native_info" => ("native_info_encode", NONE),
+        "native_names" => ("native_names_encode", NONE),
+        "native_dbi" => ("native_dbi_encode", NONE),
+        "native_frames" => ("native_debug_stream_encode", &[&[0], &[1], &[5]]),
+        "native_named" if bytes.first().is_some_and(|&selector| selector <= 4) => {
+            ("native_named_encode", &[&[]])
+        }
+        _ => return None,
+    })
 }
 
 /// Return the 64-bit FNV-1a hash of `bytes`.
