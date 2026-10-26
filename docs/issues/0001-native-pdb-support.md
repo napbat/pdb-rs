@@ -125,7 +125,7 @@ This does not yet add `S_CONSTANT` to `Record::symbol`.
 - [ ] Decode primitive types, pointer modes, calling conventions and numeric leaves, including signed, unsigned and extended values.
 - [ ] Decode all modern type and ID families. Include modifiers, pointers, arrays, classes, structures, interfaces, unions, enums, procedures and member functions.
 - [ ] Decode argument lists, field lists, member records, method lists, bitfields, vtables and continuation records.
-- [ ] Decode function IDs, member-function IDs, string IDs, substring lists, build info and UDT source-line records.
+- [x] Decode function IDs, member-function IDs, string IDs, substring lists, build info and UDT source-line records.
 - [ ] Resolve forward declarations and type/ID references. Detect invalid references and bound cycles, depth and traversal work.
 - [ ] Complete symbol families beyond the initial seven kinds. Include constants, UDTs, TLS, locals, registers, relative addresses and location ranges.
 - [ ] Decode scope/end records, blocks, labels, thunks, trampolines, references, compile/object metadata and namespace records.
