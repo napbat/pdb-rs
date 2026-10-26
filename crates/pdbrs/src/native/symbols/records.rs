@@ -3,8 +3,8 @@
 //! [`SymbolRecordWriter`] encodes the shared symbol records one after the
 //! other, each with its zero padding. It returns the [`SymbolOffset`] of each
 //! record. Give the offsets to [`HashEntry::new`](super::HashEntry::new) for
-//! [`GlobalSymbolIndex::build`](super::GlobalSymbolIndex::build) and
-//! [`PublicSymbolIndex::build`](super::PublicSymbolIndex::build), and to the
+//! [`GlobalSymbolIndex::encode_parts`](super::GlobalSymbolIndex::encode_parts) and
+//! [`PublicSymbolIndex::encode_parts`](super::PublicSymbolIndex::encode_parts), and to the
 //! global references of the module streams.
 
 use alloc::vec::Vec;
@@ -24,7 +24,7 @@ pub struct SymbolRecordWriter {
 }
 
 /// The output of [`SymbolRecordWriter::finish`].
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SymbolRecordStream {
     /// The stream bytes.

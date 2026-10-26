@@ -1,14 +1,15 @@
 //! The line entry of a `DEBUG_S_LINES` subsection that holds an offset.
 
+use crate::native::codeview::index::ChecksumOffset;
 use crate::native::lines::{ColumnEntry, LineEntry, LinesSubsection};
 
 /// The line entry that holds a code offset.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LineMatch {
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the module.
-    pub checksum_offset: u32,
+    pub checksum_offset: ChecksumOffset,
     /// The line entry.
     pub entry: LineEntry,
     /// The column entry of the line entry, if the subsection has columns.
@@ -45,7 +46,7 @@ pub fn find_line(lines: &LinesSubsection<'_>, offset: u32) -> Option<LineMatch> 
     'blocks: for block in lines.blocks() {
         for (position, entry) in block.lines.iter().enumerate() {
             if entry.offset > offset {
-                // `LinesSubsection::decode` checked that offsets do not
+                // `LinesSubsection::parse` checked that offsets do not
                 // decrease, so this entry ends the found range.
                 end = entry.offset;
                 break 'blocks;

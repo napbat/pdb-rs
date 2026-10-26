@@ -14,7 +14,7 @@ use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::Numeric;
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::codeview::{Record, Records};
-use pdbrs::native::types::{TypeHashes, TypeStream, TypeStreamOptions, write_type_stream};
+use pdbrs::native::types::{TypeHashes, TypeStream, TypeStreamOptions, encode_type_stream};
 
 use crate::input::Input;
 use crate::ok;
@@ -181,7 +181,7 @@ fn rebuild(
     let hashes = ok(TypeHashes::parse(stream.header(), hash));
     let adjusters = hashes.as_ref().map_or_default(TypeHashes::adjusters);
     let options = TypeStreamOptions::from_header(stream.header(), adjusters);
-    let Some(written) = ok(write_type_stream(&records, &options)) else {
+    let Some(written) = ok(encode_type_stream(&records, &options)) else {
         return;
     };
     let again = TypeStream::parse(written.stream).expect("a written type stream parses");
@@ -194,7 +194,7 @@ fn rebuild(
         let hashes =
             TypeHashes::parse(again.header(), hash_stream).expect("a written hash stream parses");
         hashes
-            .verify(&again)
+            .check(&again)
             .expect("a written hash stream matches its records");
     }
 }

@@ -6,6 +6,7 @@ use core::ops::Range;
 
 use super::{Module, align4, logical, read_u32};
 use crate::native::codeview::Records;
+use crate::native::lines::SubsectionKind;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
@@ -13,7 +14,7 @@ mod global_refs;
 mod write;
 
 pub use global_refs::{GlobalRefs, GlobalRefsIter};
-pub use write::{EncodedModuleStream, ModuleStreamParts};
+pub use write::ModuleStreamParts;
 
 /// The `CV_SIGNATURE_C13` value at the start of a symbol region.
 const SIGNATURE_C13: u32 = 4;
@@ -27,6 +28,7 @@ const SUBSECTION_HEADER_SIZE: usize = 8;
 /// [`ModuleStreamParts::encode`] returns the sizes of the stream that it
 /// writes. Copy them into the module record.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ModuleRegionSizes {
     /// The size of the symbol region, with the 4-byte signature. The value
     /// is 0 if the stream has no symbol region.
@@ -222,7 +224,7 @@ impl ModuleStream {
 
     /// Decode the global references: offsets into the symbol record stream.
     ///
-    /// Call [`GlobalRefs::validate`] to check the offsets against the
+    /// Call [`GlobalRefs::check`] to check the offsets against the
     /// symbol record stream.
     ///
     /// # Errors
@@ -259,14 +261,14 @@ impl ModuleStream {
 
 /// One framed C13 subsection.
 ///
-/// The kind stays raw, so unknown kinds and the ignore bit are preserved.
+/// The kind keeps unknown values and the ignore bit.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Subsection<'a> {
     /// The offset of the subsection header in the C13 line region.
     pub offset: u32,
-    /// The raw `DEBUG_S_SUBSECTION_TYPE` value.
-    pub kind: u32,
+    /// The `DEBUG_S_SUBSECTION_TYPE` value.
+    pub kind: SubsectionKind,
     /// The subsection contents, without the header and the alignment padding.
     pub data: &'a [u8],
 }
@@ -333,7 +335,7 @@ impl<'a> Subsections<'a> {
         })?;
         let subsection = Subsection {
             offset,
-            kind: u32::from_le_bytes([k0, k1, k2, k3]),
+            kind: SubsectionKind(u32::from_le_bytes([k0, k1, k2, k3])),
             data,
         };
         Ok((subsection, start + padded))

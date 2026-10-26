@@ -18,9 +18,9 @@ use pdbrs::native::codeview::symbol::{
 use pdbrs::native::codeview::type_record::{
     Class, ClassKind, ClassOptions, MemberAttributes, TypeLeaf,
 };
-use pdbrs::native::info::{IdentityPolicy, PeMatch};
+use pdbrs::native::info::PeMatch;
 use pdbrs::native::symbols::{HashTable, indexed_name};
-use pdbrs::native::{Pdb, PdbEditor};
+use pdbrs::native::{IdentityPolicy, Pdb, PdbEditor};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);

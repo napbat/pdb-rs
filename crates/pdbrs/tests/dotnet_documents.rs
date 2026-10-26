@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::hash::hash_buffer_v8;
 use pdbrs::native::injected_source::{
     CHECKSUM_SHA1, CHECKSUM_SHA256, ChecksumCheck, DOCUMENT_TYPE_TEXT, DotNetDocument,
@@ -53,36 +54,30 @@ fn blob(format: u32, data: &[u8]) -> Vec<u8> {
 
 /// Return a header entry that describes `content`.
 fn entry(content: &[u8], compression: SourceCompression) -> InjectedSource {
-    InjectedSource {
-        crc: hash_buffer_v8(content),
-        file_size: u32::try_from(content.len()).unwrap(),
-        file_name_offset: 1,
-        object_name_offset: 0,
-        virtual_file_name_offset: 1,
-        compression,
-        is_virtual: false,
-        reserved: [0; 8],
-    }
+    let mut source = InjectedSource::default();
+    source.crc = hash_buffer_v8(content);
+    source.file_size = u32::try_from(content.len()).unwrap();
+    source.file_name_offset = NameOffset(1);
+    source.object_name_offset = NameOffset(0);
+    source.virtual_file_name_offset = NameOffset(1);
+    source.compression = compression;
+    source.is_virtual = false;
+    source.reserved = [0; 8];
+    source
 }
 
 /// Verify `content` with a correct entry and return the record.
 fn document(content: &[u8]) -> DotNetDocument<'_> {
-    entry(content, SourceCompression::DotNet)
+    entry(content, SourceCompression::DOT_NET)
         .verify_document(content, STREAM)
         .unwrap()
 }
 
 #[test]
 fn compression_byte_101_is_a_dotnet_document() {
-    assert_eq!(SourceCompression::from_raw(101), SourceCompression::DotNet);
-    assert_eq!(
-        SourceCompression::from_raw(100),
-        SourceCompression::Unknown(100)
-    );
-    assert_eq!(
-        SourceCompression::from_raw(102),
-        SourceCompression::Unknown(102)
-    );
+    assert_eq!(SourceCompression(101), SourceCompression::DOT_NET);
+    assert_ne!(SourceCompression(100), SourceCompression::DOT_NET);
+    assert_ne!(SourceCompression(102), SourceCompression::DOT_NET);
 }
 
 #[test]
@@ -166,14 +161,14 @@ fn rejects_wrong_sha256_checksums() {
 #[test]
 fn rejects_wrong_entry_crc_and_size() {
     let content = record(CHECKSUM_SHA256, &SOURCE_SHA256, &[]);
-    let mut source = entry(&content, SourceCompression::DotNet);
+    let mut source = entry(&content, SourceCompression::DOT_NET);
     source.crc ^= 1;
     let error = source.verify_document(&content, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.stream_location(), Some((STREAM, 0)));
 
     for size in [103, 105, 0] {
-        let mut source = entry(&content, SourceCompression::DotNet);
+        let mut source = entry(&content, SourceCompression::DOT_NET);
         source.file_size = size;
         let error = source.verify_document(&content, STREAM).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "size {size}");
@@ -183,10 +178,10 @@ fn rejects_wrong_entry_crc_and_size() {
 #[test]
 fn separates_document_records_from_file_contents() {
     let content = record(CHECKSUM_SHA256, &SOURCE_SHA256, &[]);
-    let dotnet = entry(&content, SourceCompression::DotNet);
+    let dotnet = entry(&content, SourceCompression::DOT_NET);
     let error = dotnet.verify_content(&content, STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
-    for compression in [SourceCompression::None, SourceCompression::Lz] {
+    for compression in [SourceCompression::NONE, SourceCompression::LZ] {
         let error = entry(&content, compression)
             .verify_document(&content, STREAM)
             .unwrap_err();
@@ -197,7 +192,7 @@ fn separates_document_records_from_file_contents() {
 
 /// Decode `content` with a correct entry and return the error kind.
 fn record_error(content: &[u8]) -> ErrorKind {
-    let error = entry(content, SourceCompression::DotNet)
+    let error = entry(content, SourceCompression::DOT_NET)
         .verify_document(content, STREAM)
         .unwrap_err();
     assert_eq!(error.stream_location(), Some((STREAM, 0)));

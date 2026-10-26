@@ -1,14 +1,14 @@
 //! Tests for the record streams and blobs of the optional debug streams.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::debug_stream::blob::{
-    BLOB_HEADER_SIZE, BLOB_VERSION, MACHINE_AMD64, MACHINE_ARM64,
-};
+use pdbrs::native::address::Rva;
 use pdbrs::native::debug_stream::{
-    Arm64RuntimeFunction, BlobHeader, DebugRecord, Fixup, FixupStream, FunctionEntry,
-    FunctionEntryStream, Rid, RuntimeFunctions, RvaVaBlob, TokenRidMap, X64RuntimeFunction,
+    Arm64RuntimeFunction, BLOB_HEADER_SIZE, BLOB_VERSION, BlobHeader, DebugRecord, Fixup,
+    FixupStream, FunctionEntry, FunctionEntryStream, Rid, RuntimeFunctions, RvaVaBlob, TokenRidMap,
+    X64RuntimeFunction,
 };
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::section::Machine;
 
 /// The stream ID of the synthetic streams.
 const STREAM: StreamId = StreamId(9);
@@ -35,13 +35,54 @@ fn blob(header: [u32; 3], extra: &[u8], data: &[u8]) -> Vec<u8> {
     bytes
 }
 
+fn function_entry(start: u32, end: u32, end_of_prologue: u32) -> FunctionEntry {
+    let mut entry = FunctionEntry::default();
+    entry.start = start;
+    entry.end = end;
+    entry.end_of_prologue = end_of_prologue;
+    entry
+}
+
+fn fixup(kind: u16, extra: u16, rva: u32, target: u32) -> Fixup {
+    let mut fixup = Fixup::default();
+    fixup.kind = kind;
+    fixup.extra = extra;
+    fixup.rva = rva;
+    fixup.target = target;
+    fixup
+}
+
+fn blob_header(data_rva: u32, image_base: u64) -> BlobHeader {
+    let mut header = BlobHeader::default();
+    header.version = BLOB_VERSION;
+    header.data_rva = data_rva;
+    header.image_base = image_base;
+    header.reserved = [0; 2];
+    header
+}
+
+fn x64_entry(begin: u32, end: u32, unwind_info: u32) -> X64RuntimeFunction {
+    let mut entry = X64RuntimeFunction::default();
+    entry.begin = begin;
+    entry.end = end;
+    entry.unwind_info = unwind_info;
+    entry
+}
+
+fn arm64_entry(begin: u32, unwind_data: u32) -> Arm64RuntimeFunction {
+    let mut entry = Arm64RuntimeFunction::default();
+    entry.begin = begin;
+    entry.unwind_data = unwind_data;
+    entry
+}
+
 #[test]
 fn function_entries_decode_and_encode() {
     let bytes = words(&[0x1000, 0x1040, 0x1008, u32::MAX, 0, 1]);
     let stream = FunctionEntryStream::parse(bytes.clone(), STREAM).unwrap();
     assert_eq!(stream.len(), 2);
     let entries: Vec<_> = stream.iter().collect();
-    assert_eq!(entries[0], FunctionEntry::new(0x1000, 0x1040, 0x1008));
+    assert_eq!(entries[0], function_entry(0x1000, 0x1040, 0x1008));
     assert_eq!(
         (entries[1].start, entries[1].end, entries[1].end_of_prologue),
         (u32::MAX, 0, 1)
@@ -71,7 +112,7 @@ fn fixups_decode_and_encode() {
     }
     let stream = FixupStream::parse(bytes.clone(), STREAM).unwrap();
     let fixups: Vec<_> = stream.iter().collect();
-    assert_eq!(fixups[0], Fixup::new(1, 0, 0xf080, 0xf088));
+    assert_eq!(fixups[0], fixup(1, 0, 0xf080, 0xf088));
     assert_eq!(
         (
             fixups[1].kind,
@@ -119,17 +160,17 @@ fn blobs_decode_the_header_and_encode_the_same_bytes() {
     let bytes = blob([1, 32, 24], &[], &data);
     let pdata = RvaVaBlob::parse(bytes.clone(), STREAM).unwrap();
     let header = pdata.header();
-    assert_eq!(header, BlobHeader::new(0x1_0000, 0x1_0000_0000));
+    assert_eq!(header, blob_header(0x1_0000, 0x1_0000_0000));
     assert_eq!((header.version, header.reserved), (BLOB_VERSION, [0, 0]));
     assert_eq!((pdata.header_size(), pdata.data_size()), (32, 24));
     assert_eq!(pdata.extra_header(), [0_u8; 0]);
     assert_eq!(pdata.data(), data.as_slice());
     assert_eq!(pdata.to_bytes().unwrap(), bytes);
-    assert_eq!(pdata.data_at(0x1_0000), Some(data.as_slice()));
-    assert_eq!(pdata.data_at(0x1_0004).unwrap().len(), 20);
-    assert_eq!(pdata.data_at(0x1_0018), Some(&[][..]));
-    assert_eq!(pdata.data_at(0x1_0019), None);
-    assert_eq!(pdata.data_at(0xffff), None);
+    assert_eq!(pdata.data_at(Rva(0x1_0000)), Some(data.as_slice()));
+    assert_eq!(pdata.data_at(Rva(0x1_0004)).unwrap().len(), 20);
+    assert_eq!(pdata.data_at(Rva(0x1_0018)), Some(&[][..]));
+    assert_eq!(pdata.data_at(Rva(0x1_0019)), None);
+    assert_eq!(pdata.data_at(Rva(0xffff)), None);
 
     let rebuilt = RvaVaBlob::new(header, &[], &data).unwrap();
     assert_eq!(rebuilt.to_bytes().unwrap(), bytes);
@@ -172,7 +213,7 @@ fn blob_header_errors_have_locations() {
         let error = RvaVaBlob::parse(blob([1, 32, data_size], &[], &[0; 4]), STREAM).unwrap_err();
         assert_located(&error, ErrorKind::InvalidFormat, 8);
     }
-    let mut header = BlobHeader::new(0, 0);
+    let mut header = blob_header(0, 0);
     header.version = 2;
     let error = RvaVaBlob::new(header, &[], &[]).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
@@ -182,7 +223,7 @@ fn blob_header_errors_have_locations() {
 fn pdata_entries_depend_on_the_machine() {
     let data = words(&[0x1010, 0x116c, 0xc910, 0x1180, 0x11c4, 0xc900]);
     let pdata = RvaVaBlob::parse(blob([1, 32, 24], &[], &data), STREAM).unwrap();
-    let Some(RuntimeFunctions::X64(entries)) = pdata.runtime_functions(MACHINE_AMD64).unwrap()
+    let Some(RuntimeFunctions::X64(entries)) = pdata.runtime_functions(Machine::AMD64).unwrap()
     else {
         panic!("x64 entries expected");
     };
@@ -190,22 +231,22 @@ fn pdata_entries_depend_on_the_machine() {
     assert_eq!(
         entries,
         [
-            X64RuntimeFunction::new(0x1010, 0x116c, 0xc910),
-            X64RuntimeFunction::new(0x1180, 0x11c4, 0xc900)
+            x64_entry(0x1010, 0x116c, 0xc910),
+            x64_entry(0x1180, 0x11c4, 0xc900)
         ]
     );
-    let Some(RuntimeFunctions::Arm64(entries)) = pdata.runtime_functions(MACHINE_ARM64).unwrap()
+    let Some(RuntimeFunctions::Arm64(entries)) = pdata.runtime_functions(Machine::ARM64).unwrap()
     else {
         panic!("ARM64 entries expected");
     };
     let entries: Vec<_> = entries.collect();
     assert_eq!(entries.len(), 3);
-    assert_eq!(entries[0], Arm64RuntimeFunction::new(0x1010, 0x116c));
+    assert_eq!(entries[0], arm64_entry(0x1010, 0x116c));
     assert_eq!(entries[0].flag(), 0);
-    assert_eq!(Arm64RuntimeFunction::new(0, 0x0040_0011).flag(), 1);
-    assert_eq!(Arm64RuntimeFunction::new(0, 0x0040_0012).flag(), 2);
+    assert_eq!(arm64_entry(0, 0x0040_0011).flag(), 1);
+    assert_eq!(arm64_entry(0, 0x0040_0012).flag(), 2);
     // x86 has no `.pdata` layout.
-    assert!(pdata.runtime_functions(0x14c).unwrap().is_none());
+    assert!(pdata.runtime_functions(Machine::I386).unwrap().is_none());
 
     let mut encoded = Vec::new();
     for entry in &entries {
@@ -215,12 +256,12 @@ fn pdata_entries_depend_on_the_machine() {
 
     // A partial entry fails with the stream offset of the entry.
     let odd = RvaVaBlob::parse(blob([1, 32, 20], &[], &data[..20]), STREAM).unwrap();
-    let error = odd.runtime_functions(MACHINE_AMD64).unwrap_err();
+    let error = odd.runtime_functions(Machine::AMD64).unwrap_err();
     assert_located(&error, ErrorKind::UnexpectedEof, 32 + 12);
-    let error = odd.runtime_functions(MACHINE_ARM64).unwrap_err();
+    let error = odd.runtime_functions(Machine::ARM64).unwrap_err();
     assert_located(&error, ErrorKind::UnexpectedEof, 32 + 16);
     let unlocated = RvaVaBlob::new(odd.header(), &[], odd.data()).unwrap();
-    let error = unlocated.runtime_functions(MACHINE_AMD64).unwrap_err();
+    let error = unlocated.runtime_functions(Machine::AMD64).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(error.stream_location(), None);
 }

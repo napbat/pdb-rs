@@ -1,6 +1,7 @@
 //! Round trips of the stream encoders: C13 subsections, module streams, the Info stream,
 //! `/names`, the DBI stream, the optional debug streams and the named streams.
 
+use pdbrs::native::Producer;
 use pdbrs::native::auxiliary::{
     LinkInfo, SourceLink, SourceServer, TmCache, TmCacheBuilder, TypeMapStream, UdtSourceLineUndone,
 };
@@ -11,10 +12,9 @@ use pdbrs::native::debug_stream::{
     FixupStream, FunctionEntryStream, OmapStream, RvaVaBlob, TokenRidMap,
 };
 use pdbrs::native::fpo::{FpoStream, FrameDataStream};
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::info::{Info, InfoBuilder};
 use pdbrs::native::injected_source::{DotNetDocument, SourceHeaderBlock, SourceHeaderBlockBuilder};
-use pdbrs::native::lines::{LineSubsection, ModuleLines};
+use pdbrs::native::lines::{LineSubsection, ModuleLines, SubsectionKind};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{StringTable, StringTableBuilder};
 use pdbrs::native::section::SectionHeaderStream;
@@ -46,7 +46,7 @@ pub fn lines(data: &[u8]) {
     let mut input = Input::new(data);
     let kind = input.u32();
     let data = input.rest();
-    let Some(decoded) = ok(LineSubsection::decode(kind, data)) else {
+    let Some(decoded) = ok(LineSubsection::decode(SubsectionKind(kind), data)) else {
         return;
     };
     let mut out = Vec::new();
@@ -85,13 +85,14 @@ pub fn module(data: &[u8]) {
     let Some(stream) = ok(ModuleStream::parse(input.rest().to_vec(), &module)) else {
         return;
     };
-    let Some(encoded) = ok(stream.encode()) else {
+    let mut encoded = Vec::new();
+    let Some(region_sizes) = ok(stream.encode(&mut encoded)) else {
         return;
     };
     let sizes = [
-        encoded.sizes.symbol_bytes,
-        encoded.sizes.c11_bytes,
-        encoded.sizes.c13_bytes,
+        region_sizes.symbol_bytes,
+        region_sizes.c11_bytes,
+        region_sizes.c13_bytes,
     ];
     let again_dbi = module_dbi(sizes).expect("module region sizes fit a module record");
     let again_module = again_dbi
@@ -100,7 +101,7 @@ pub fn module(data: &[u8]) {
         .expect("a module record decodes")
         .expect("a module record decodes");
     let again =
-        ModuleStream::parse(encoded.bytes, &again_module).expect("an encoded module stream parses");
+        ModuleStream::parse(encoded, &again_module).expect("an encoded module stream parses");
     assert_eq!(again.symbol_data(), stream.symbol_data());
     assert_eq!(again.c11_data(), stream.c11_data());
     assert_eq!(again.c13_data(), stream.c13_data());
@@ -115,17 +116,19 @@ pub fn module(data: &[u8]) {
         return;
     };
     let refs: Vec<_> = refs.iter().collect();
-    let parts = ModuleStreamParts {
-        symbols: Some(stream.symbol_data()),
-        c11: stream.c11_data(),
-        c13: &c13,
-        global_refs: &refs,
-    };
-    let rebuilt = parts.encode().expect("module stream parts encode");
+    let mut parts = ModuleStreamParts::default();
+    parts.symbols = Some(stream.symbol_data());
+    parts.c11 = stream.c11_data();
+    parts.c13 = &c13;
+    parts.global_refs = &refs;
+    let mut rebuilt = Vec::new();
+    let region_sizes = parts
+        .encode(&mut rebuilt)
+        .expect("module stream parts encode");
     let sizes = [
-        rebuilt.sizes.symbol_bytes,
-        rebuilt.sizes.c11_bytes,
-        rebuilt.sizes.c13_bytes,
+        region_sizes.symbol_bytes,
+        region_sizes.c11_bytes,
+        region_sizes.c13_bytes,
     ];
     let rebuilt_dbi = module_dbi(sizes).expect("module region sizes fit a module record");
     let rebuilt_module = rebuilt_dbi
@@ -133,8 +136,8 @@ pub fn module(data: &[u8]) {
         .next()
         .expect("a module record decodes")
         .expect("a module record decodes");
-    let rebuilt = ModuleStream::parse(rebuilt.bytes, &rebuilt_module)
-        .expect("a rebuilt module stream parses");
+    let rebuilt =
+        ModuleStream::parse(rebuilt, &rebuilt_module).expect("a rebuilt module stream parses");
     let again = ModuleLines::parse(&rebuilt).expect("encoded line data decodes");
     assert_eq!(again.subsections().len(), lines.subsections().len());
     for (left, right) in again.subsections().iter().zip(lines.subsections()) {
@@ -365,7 +368,7 @@ fn header_block(bytes: &[u8]) {
         return;
     };
     same(|out| block.encode(out), bytes, "/src/headerblock stream");
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let Some(builder) = ok(SourceHeaderBlockBuilder::from_block(&block, producer)) else {
             continue;
         };

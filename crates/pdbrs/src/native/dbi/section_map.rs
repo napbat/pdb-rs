@@ -45,6 +45,7 @@ impl SegmentFlags {
 
 /// One section map descriptor.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SectionMapEntry {
     /// The descriptor flags.
     pub flags: SegmentFlags,
@@ -182,6 +183,7 @@ impl<'a> SectionMap<'a> {
 
 /// An owned section map that a writer can fill.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OwnedSectionMap {
     /// The number of logical segment descriptors for the header.
     pub logical_count: u16,

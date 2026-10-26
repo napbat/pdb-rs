@@ -16,34 +16,11 @@
 use alloc::vec::Vec;
 
 use super::{Feature, Info, VERSION_VC70, name_hash};
-use crate::native::Identity;
-use crate::native::hash_table::{HashTableKeys, HashTableProducer, OwnedHashTable};
+use crate::native::hash_table::{HashTableKeys, OwnedHashTable};
 use crate::native::msf::StreamId;
 use crate::native::output::{Output, no_memory, to_u32};
+use crate::native::{Identity, IdentityPolicy, Producer};
 use crate::{Error, ErrorKind, Result};
-
-/// The identity change that a writer applies to a PDB.
-///
-/// The PDB Info stream and the DBI header both store an age. An image matches a PDB if the
-/// GUID and the age of its `RSDS` debug entry equal the GUID and the DBI age.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum IdentityPolicy {
-    /// Keep the signature, the GUID and both ages. The image keeps matching.
-    Preserve,
-    /// Add 1 to the Info age and write the new age to the DBI header too, as an incremental
-    /// link does. The image must get the new age.
-    IncrementAge,
-    /// Write a new identity. The DBI header gets the same age.
-    Replace {
-        /// The 32-bit signature (often a time stamp).
-        signature: u32,
-        /// The GUID bytes in their serialized order.
-        guid: [u8; 16],
-        /// The new age.
-        age: u32,
-    },
-}
 
 /// The values that the `RSDS` debug entry of the matching image must hold.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -87,7 +64,7 @@ impl HashTableKeys for NameKeys<'_> {
 }
 
 /// An owned PDB Info stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct InfoBuilder {
     /// The stream version.
     version: u32,
@@ -104,7 +81,7 @@ pub struct InfoBuilder {
     /// `niMac` of `NMTNI`.
     next_name_index: u32,
     /// The feature codes.
-    features: Vec<u32>,
+    features: Vec<Feature>,
 }
 
 impl InfoBuilder {
@@ -113,12 +90,7 @@ impl InfoBuilder {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn new(
-        producer: HashTableProducer,
-        signature: u32,
-        guid: [u8; 16],
-        age: u32,
-    ) -> Result<Self> {
+    pub fn new(producer: Producer, signature: u32, guid: [u8; 16], age: u32) -> Result<Self> {
         Ok(Self {
             version: VERSION_VC70,
             signature,
@@ -137,7 +109,7 @@ impl InfoBuilder {
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
     pub fn from_info(info: &Info) -> Result<Self> {
-        Self::from_info_with(info, HashTableProducer::Microsoft)
+        Self::from_info_with(info, Producer::Microsoft)
     }
 
     /// Copy a decoded stream with the change rules of `producer`.
@@ -145,7 +117,7 @@ impl InfoBuilder {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn from_info_with(info: &Info, producer: HashTableProducer) -> Result<Self> {
+    pub fn from_info_with(info: &Info, producer: Producer) -> Result<Self> {
         let Identity::Modern { guid, age } = info.identity() else {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("PDB Info stream has no GUID identity"));
@@ -284,9 +256,9 @@ impl InfoBuilder {
         self.next_name_index = value;
     }
 
-    /// Return the typed feature codes in stream order.
+    /// Return the feature codes in stream order.
     pub fn features(&self) -> impl ExactSizeIterator<Item = Feature> + '_ {
-        self.features.iter().map(|&code| Feature::from_code(code))
+        self.features.iter().copied()
     }
 
     /// Replace the feature codes.
@@ -299,7 +271,7 @@ impl InfoBuilder {
         codes
             .try_reserve_exact(features.len())
             .map_err(|_| no_memory())?;
-        codes.extend(features.iter().map(|feature| feature.code()));
+        codes.extend_from_slice(features);
         self.features = codes;
         Ok(())
     }
@@ -363,8 +335,8 @@ impl InfoBuilder {
         self.table.encode(out)?;
         let mut output = Output::new(out);
         output.u32(self.next_name_index)?;
-        for code in &self.features {
-            output.u32(*code)?;
+        for feature in &self.features {
+            output.u32(feature.0)?;
         }
         Ok(())
     }

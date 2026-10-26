@@ -15,6 +15,7 @@ use core::iter::FusedIterator;
 
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
 use crate::Result;
+use crate::native::codeview::index::NameOffset;
 use crate::native::output::Output;
 
 pub use validate::{
@@ -42,21 +43,22 @@ entry_list!(
 
 /// The item IDs that a module uses from one other module
 /// (`CrossScopeReferences`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CrossScopeImport<'a> {
     /// The byte offset of the name of the other module: the object file
     /// path or the PDB path of its compilation (`PdbIdScope`).
     ///
     /// In a PDB the offset is into the `/names` stream. In an object file it
     /// is into the `DEBUG_S_STRINGTABLE` subsection.
-    pub module_name_offset: u32,
+    pub module_name_offset: NameOffset,
     /// The item IDs in the scope of the other module.
     pub ids: CrossScopeIds<'a>,
 }
 
 /// A decoded `DEBUG_S_CROSSSCOPEIMPORTS` subsection.
 ///
-/// [`CrossScopeImports::decode`] validates all entries. The entry iterator
+/// [`CrossScopeImports::parse`] validates all entries. The entry iterator
 /// then cannot fail.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct CrossScopeImports<'a> {
@@ -67,7 +69,7 @@ pub struct CrossScopeImports<'a> {
 }
 
 impl<'a> CrossScopeImports<'a> {
-    /// Decode the data of a `DEBUG_S_CROSSSCOPEIMPORTS` subsection.
+    /// Parse the data of a `DEBUG_S_CROSSSCOPEIMPORTS` subsection.
     ///
     /// The entries must fill the data exactly.
     ///
@@ -79,7 +81,7 @@ impl<'a> CrossScopeImports<'a> {
     ///   an item ID count does not fit in memory.
     ///
     /// The errors do not have a file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let mut rest = data;
         let mut count = 0usize;
         while !rest.is_empty() {
@@ -158,18 +160,22 @@ impl CrossScopeImport<'_> {
     ///
     /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
     /// if the count does not fit in 32 bits or if the output cannot grow.
-    pub fn encode_parts(module_name_offset: u32, ids: &[u32], out: &mut Vec<u8>) -> Result<()> {
+    pub fn encode_parts(
+        module_name_offset: NameOffset,
+        ids: &[u32],
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         write_import(module_name_offset, ids.iter().copied(), out)
     }
 }
 
 /// Append an import entry with the item IDs of `ids` to `out`.
 fn write_import(
-    module_name_offset: u32,
+    module_name_offset: NameOffset,
     ids: impl ExactSizeIterator<Item = u32>,
     out: &mut Vec<u8>,
 ) -> Result<()> {
-    Output::new(out).u32(module_name_offset)?;
+    Output::new(out).u32(module_name_offset.0)?;
     Output::new(out).u32(to_u32(
         ids.len(),
         "cross-scope import count does not fit in 32 bits",
@@ -193,7 +199,7 @@ impl<'a> Iterator for CrossScopeImportsIter<'a> {
     type Item = CrossScopeImport<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // `CrossScopeImports::decode` validated the entries, so this cannot fail.
+        // `CrossScopeImports::parse` validated the entries, so this cannot fail.
         let (entry, rest) = split_import(self.bytes).ok()?;
         self.bytes = rest;
         self.left = self.left.saturating_sub(1);
@@ -224,14 +230,15 @@ fn split_import(bytes: &[u8]) -> Result<(CrossScopeImport<'_>, &[u8])> {
     }
     let (ids, rest) = ids.split_at(size);
     let entry = CrossScopeImport {
-        module_name_offset,
+        module_name_offset: NameOffset(module_name_offset),
         ids: CrossScopeIds::new(ids),
     };
     Ok((entry, rest))
 }
 
 /// One exported item ID (`LocalIdAndGlobalIdPair`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CrossScopeExport {
     /// The item ID in the scope of the module.
     pub local_id: u32,
@@ -240,15 +247,6 @@ pub struct CrossScopeExport {
 }
 
 impl CrossScopeExport {
-    /// Create an entry from its fields.
-    #[must_use]
-    pub const fn new(local_id: u32, global_id: u32) -> Self {
-        Self {
-            local_id,
-            global_id,
-        }
-    }
-
     /// Decode a serialized entry.
     const fn parse(bytes: [u8; EXPORT_SIZE]) -> Self {
         let [l0, l1, l2, l3, g0, g1, g2, g3] = bytes;
@@ -281,14 +279,14 @@ entry_list!(
 );
 
 impl<'a> CrossScopeExports<'a> {
-    /// Decode the data of a `DEBUG_S_CROSSSCOPEEXPORTS` subsection.
+    /// Parse the data of a `DEBUG_S_CROSSSCOPEEXPORTS` subsection.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// if the size is not a multiple of 8. The error does not have a file
     /// offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         if !data.len().is_multiple_of(EXPORT_SIZE) {
             return Err(invalid(
                 "cross-scope export subsection size is not a multiple of 8",

@@ -28,7 +28,9 @@ use pdbrs::native::codeview::symbol::{
     S_END, S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_MOD_TYPEREF, S_PROC_ID_END,
     S_SEPCODE,
 };
-use pdbrs::native::lines::{DEBUG_S_FILECHKSMS, DEBUG_S_INLINEELINES, DEBUG_S_LINES};
+use pdbrs::native::lines::{
+    DEBUG_S_FILECHKSMS, DEBUG_S_INLINEELINES, DEBUG_S_LINES, SubsectionKind,
+};
 use pdbrs::native::locate::{Location, SourceLine, SymbolLocator};
 use pdbrs::native::msf::{MsfBuilder, WriteOptions};
 
@@ -161,8 +163,8 @@ fn symbols(separated: bool) -> Vec<u8> {
 }
 
 /// Frame a C13 subsection and pad it to 4 bytes.
-fn subsection(kind: u32, data: &[u8]) -> Vec<u8> {
-    let mut bytes = u32s(&[kind, u32::try_from(data.len()).unwrap()]);
+fn subsection(kind: SubsectionKind, data: &[u8]) -> Vec<u8> {
+    let mut bytes = u32s(&[kind.0, u32::try_from(data.len()).unwrap()]);
     bytes.extend_from_slice(data);
     while !bytes.len().is_multiple_of(4) {
         bytes.push(0);

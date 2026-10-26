@@ -40,13 +40,13 @@ pub use builder::DbiBuilder;
 pub use debug_header::{DebugStream, DebugStreams, encode_debug_streams};
 pub use header::DbiHeader;
 pub use module::{
-    EncodedModuleStream, GlobalRefs, GlobalRefsIter, ModuleRegionSizes, ModuleStream,
-    ModuleStreamParts, Subsection, Subsections,
+    GlobalRefs, GlobalRefsIter, ModuleRegionSizes, ModuleStream, ModuleStreamParts, Subsection,
+    Subsections,
 };
 pub use module_info::{Module, Modules, OwnedModule};
 pub use section_contribution::{
     SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
-    SectionContributionIter, SectionContributionVersion, SectionContributions,
+    SectionContributionVersion, SectionContributions, SectionContributionsIter,
 };
 pub use section_map::{OwnedSectionMap, SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
 pub use sources::{
@@ -83,6 +83,7 @@ const SUBSTREAM_COUNT: usize = 7;
 
 /// A substream of the DBI stream, in disk order.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum Substream {
     /// The module info records. [`Dbi::modules`] decodes them.
     ModuleInfo,

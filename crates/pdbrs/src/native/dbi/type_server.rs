@@ -25,7 +25,8 @@ use crate::{Error, ErrorKind, Result};
 const FIXED_SIZE: usize = 16;
 
 /// One record of the type server map.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeServer {
     /// The `reserved` field. Microsoft writers store a stale pointer here.
     pub reserved: u32,

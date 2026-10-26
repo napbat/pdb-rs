@@ -249,7 +249,7 @@ fn compare(arguments: &[String]) -> Outcome {
             Ok(())
         };
     };
-    let report = written.check_free_page_map()?;
+    let report = written.validate_free_page_map()?;
     println!(
         "written FPM {}: stream 0 pages free {}, allocated {}; unreferenced allocated pages {}",
         report.active(),

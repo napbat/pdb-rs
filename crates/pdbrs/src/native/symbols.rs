@@ -12,10 +12,10 @@
 //! the candidate records with [`HashTable::lookup`]. Then decode each
 //! candidate record and compare its name with the name that you look for.
 //!
-//! [`GlobalSymbolIndex::build`] and [`PublicSymbolIndex::build`] write the
-//! index streams from a symbol record stream and a list of [`HashEntry`]
-//! values. [`IndexProducer`] selects the conventions of MSVC or LLVM where
-//! the two producers differ.
+//! [`GlobalSymbolIndex::encode_parts`] and [`PublicSymbolIndex::encode_parts`]
+//! write the index streams from a symbol record stream and a list of
+//! [`HashEntry`] values. A [`Producer`](super::Producer) selects the
+//! conventions of MSVC or LLVM where the two producers differ.
 //!
 //! The layouts follow `GSIHashHdr`, `HRFile` and `PSGSIHDR` in `PDB/dbi/gsi.h`
 //! and `PDB/dbi/gsi.cpp`, and `SO` in `langapi/include/pdb.h`, of
@@ -28,6 +28,7 @@ use core::ops::Range;
 
 use super::codeview::{Record, Records};
 use super::hash::hash_string_v1;
+use super::info::Feature;
 use super::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
@@ -38,22 +39,18 @@ mod table;
 
 pub use gsi::GlobalSymbolIndex;
 pub use psi::{
-    AddressMap, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap, ThunkTable,
+    AddressMapIter, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap,
+    ThunkTable,
 };
 pub use records::{SymbolRecordStream, SymbolRecordWriter};
-pub use table::write::{HashEntry, IndexProducer, indexed_name};
+pub use table::write::{HashEntry, indexed_name};
 pub use table::{Bucket, Buckets, HashHeader, HashRecord, HashRecords, HashTable};
-
-/// The PDB Info stream feature code for minimal debug information (`MINI`).
-///
-/// A PDB with this feature uses [`BucketCount::Minimal`] for its symbol indexes.
-pub const MINIMAL_DEBUG_INFO_FEATURE: u32 = 0x494e_494d;
 
 /// The byte offset of a record in the symbol record stream.
 ///
 /// The offset identifies the length field of the record. It is not an offset
 /// in the index stream that stores it.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SymbolOffset(pub u32);
 
 impl SymbolOffset {
@@ -90,10 +87,11 @@ impl SymbolOffset {
 /// The number of hash buckets in a symbol index.
 ///
 /// The streams do not store this value. The PDB Info stream selects it: a PDB
-/// with [`MINIMAL_DEBUG_INFO_FEATURE`] uses [`BucketCount::Minimal`]. All
+/// with [`Feature::MINIMAL_DEBUG_INFO`] uses [`BucketCount::Minimal`]. All
 /// other PDBs use [`BucketCount::Standard`]. See `GSI1::GSI1` in
 /// `PDB/dbi/gsi.cpp`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum BucketCount {
     /// 4096 buckets (`0x1000`).
     Standard,
@@ -102,12 +100,12 @@ pub enum BucketCount {
 }
 
 impl BucketCount {
-    /// Select the bucket count from the feature codes of the PDB Info stream.
+    /// Select the bucket count from the features of the PDB Info stream.
     #[must_use]
-    pub fn from_features<I: IntoIterator<Item = u32>>(features: I) -> Self {
+    pub fn from_features<I: IntoIterator<Item = Feature>>(features: I) -> Self {
         if features
             .into_iter()
-            .any(|feature| feature == MINIMAL_DEBUG_INFO_FEATURE)
+            .any(|feature| feature == Feature::MINIMAL_DEBUG_INFO)
         {
             Self::Minimal
         } else {
@@ -117,7 +115,7 @@ impl BucketCount {
 
     /// Return the number of buckets.
     #[must_use]
-    pub const fn get(self) -> u32 {
+    pub const fn count(self) -> u32 {
         match self {
             Self::Standard => 0x1000,
             Self::Minimal => 0x3ffff,
@@ -133,7 +131,7 @@ impl BucketCount {
     /// use buckets `0x10000` and higher.
     #[must_use]
     pub fn bucket_of(self, name: &[u8]) -> u32 {
-        (hash_string_v1(name) % self.get()) & 0xffff
+        (hash_string_v1(name) % self.count()) & 0xffff
     }
 }
 
@@ -141,7 +139,7 @@ impl BucketCount {
 ///
 /// [`HashTable::check_records`] and [`PublicSymbolIndex::check_records`] use
 /// this value to make sure that each stored offset starts a record.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RecordOffsets {
     /// The record start offsets in increasing order.
     offsets: Vec<u32>,

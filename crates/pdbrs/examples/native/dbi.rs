@@ -3,6 +3,7 @@
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::dbi::{Dbi, DbiBuilder, DebugStream, OwnedModule, Substream};
 use pdbrs::native::msf::StreamId;
 
@@ -101,6 +102,7 @@ fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, slot: usize) -> Outcom
         DebugStream::Xdata | DebugStream::Pdata => {
             pdb.debug_blob(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
         }
+        _ => return Ok(None),
     };
     Ok(Some(bytes))
 }
@@ -119,7 +121,7 @@ pub(crate) fn frame_data(
     }
     if let Some(frames) = pdb.frame_data(dbi)? {
         for frame in &frames {
-            context.names.get(frame.program)?;
+            context.names.get(NameOffset(frame.program))?;
             starts.push(frame.start);
         }
         report.add("frame data records", frames.len());
@@ -146,7 +148,7 @@ pub(crate) fn debug_info_tables(
     report.add("modules", module_count);
     if let Some(contributions) = dbi.section_contributions()? {
         for contribution in &contributions {
-            if usize::from(contribution.module) >= module_count {
+            if usize::try_from(contribution.module.0)? >= module_count {
                 return Err("section contribution names a missing module".into());
             }
             let offset = u32::try_from(contribution.offset)?;
@@ -167,7 +169,7 @@ pub(crate) fn debug_info_tables(
     }
     if let Some(ec) = dbi.ec_names()?
         && report
-            .supported(ec.verify_buckets(), "EC name hashing")?
+            .supported(ec.validate_buckets(), "EC name hashing")?
             .is_some()
     {
         report.add("EC names", ec.entries().count());

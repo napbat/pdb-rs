@@ -6,15 +6,14 @@ mod program;
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{Data, S_GDATA32, Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
-use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::msf::WriteOptions;
 use pdbrs::native::write::{BuildOptions, PdbBuilder};
-use pdbrs::native::{Identity, Pdb};
+use pdbrs::native::{Identity, IdentityPolicy, Pdb};
 
 /// Build the synthetic program and return the PDB bytes.
 fn synthetic() -> Vec<u8> {
@@ -37,34 +36,34 @@ fn data_g(type_index: TypeIndex) -> Data<'static> {
 
 /// Return a module record with a name and no section contribution.
 fn module_record(name: &[u8]) -> OwnedModule {
-    OwnedModule {
-        unused1: 0,
-        section_contribution: SectionContribution {
-            section: 0xffff,
-            padding1: 0,
-            offset: -1,
-            size: -1,
-            characteristics: 0,
-            module: 0xffff,
-            padding2: 0,
-            data_crc: Some(0),
-            reloc_crc: Some(0),
-            coff_section: None,
-        },
-        flags: 0,
-        stream: None,
-        symbol_bytes: 0,
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 0,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: name.to_vec(),
-        object_file: name.to_vec(),
-        name_padding: [0; 3],
-    }
+    let mut contribution = SectionContribution::default();
+    contribution.section = 0xffff;
+    contribution.padding1 = 0;
+    contribution.offset = -1;
+    contribution.size = -1;
+    contribution.characteristics = 0;
+    contribution.module = ModuleIndex(0xffff);
+    contribution.padding2 = 0;
+    contribution.data_crc = Some(0);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    let mut module = OwnedModule::default();
+    module.unused1 = 0;
+    module.section_contribution = contribution;
+    module.flags = 0;
+    module.stream = None;
+    module.symbol_bytes = 0;
+    module.c11_bytes = 0;
+    module.c13_bytes = 0;
+    module.source_file_count = 0;
+    module.padding = 0;
+    module.file_name_offset = 0;
+    module.source_file_name_index = 0;
+    module.pdb_file_path_index = 0;
+    module.name = name.to_vec();
+    module.object_file = name.to_vec();
+    module.name_padding = [0; 3];
+    module
 }
 
 #[test]
@@ -103,7 +102,7 @@ fn synthetic_program_reads_back() {
         .collect();
     assert_eq!(names, [b"sum".to_vec(), b"main".to_vec()]);
     let lines = ModuleLines::parse(&stream).expect("C13 subsections");
-    lines.validate().expect("file references resolve");
+    lines.check().expect("file references resolve");
     let blocks = lines
         .subsections()
         .iter()

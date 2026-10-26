@@ -298,7 +298,8 @@ pub(super) fn plan<S: ReadAt>(
         list.try_reserve(global_added.len())
             .map_err(|_| no_memory())?;
         list.extend(global_added);
-        let bytes = GlobalSymbolIndex::build(&out, &list, buckets, context.index_producer)?;
+        let mut bytes = Vec::new();
+        GlobalSymbolIndex::encode_parts(&out, &list, buckets, context.index_producer, &mut bytes)?;
         let parsed = GlobalSymbolIndex::parse(bytes, *id, buckets)?;
         parsed.hash_table().check_records(&offsets)?;
         changes.replace(*id, parsed.into_bytes())?;
@@ -326,13 +327,15 @@ pub(super) fn plan<S: ReadAt>(
             offset: header.thunk_table_offset,
             targets: &targets,
         };
-        let bytes = PublicSymbolIndex::build(
+        let mut bytes = Vec::new();
+        PublicSymbolIndex::encode_parts(
             &out,
             &list,
             buckets,
             context.index_producer,
             thunks,
             &starts,
+            &mut bytes,
         )?;
         let parsed = PublicSymbolIndex::parse(bytes, *id, buckets)?;
         parsed.check_records(&offsets)?;

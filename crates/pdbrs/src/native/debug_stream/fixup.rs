@@ -14,7 +14,7 @@ use crate::native::output::Output;
 use crate::native::words::{halves, word};
 
 /// One `XFIXUP_DATA` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Fixup {
     /// The fixup type (`wType`): a COFF relocation type.
@@ -26,19 +26,6 @@ pub struct Fixup {
     pub rva: u32,
     /// The RVA of the fixup target (`rvaTarget`).
     pub target: u32,
-}
-
-impl Fixup {
-    /// Make a record from its fields.
-    #[must_use]
-    pub const fn new(kind: u16, extra: u16, rva: u32, target: u32) -> Self {
-        Self {
-            kind,
-            extra,
-            rva,
-            target,
-        }
-    }
 }
 
 impl Codec for Fixup {

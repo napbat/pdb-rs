@@ -1,9 +1,9 @@
 //! External dependencies: type servers, precompiled types and FASTLINK objects.
 
 use pdbrs::native::Pdb;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::Producer;
+use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::dbi::{DbiBuilder, DbiHeader, OwnedModule, SectionContribution, TypeServer};
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::info::{Feature, InfoBuilder};
 use pdbrs::native::msf::{MsfBuilder, StreamId, WriteOptions};
 
@@ -27,34 +27,34 @@ fn module_stream(signature: u32, fastlink: usize) -> Vec<u8> {
 }
 
 fn module(name: &[u8], stream: u32, symbol_bytes: usize, type_server: u8) -> OwnedModule {
-    OwnedModule {
-        unused1: 0,
-        section_contribution: SectionContribution {
-            section: 0,
-            padding1: 0,
-            offset: 0,
-            size: 0,
-            characteristics: 0,
-            module: 0,
-            padding2: 0,
-            data_crc: Some(0),
-            reloc_crc: Some(0),
-            coff_section: None,
-        },
-        flags: u16::from(type_server) << 8,
-        stream: Some(StreamId(stream)),
-        symbol_bytes: u32::try_from(symbol_bytes).unwrap(),
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 0,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: name.to_vec(),
-        object_file: b"lib.lib".to_vec(),
-        name_padding: [0; 3],
-    }
+    let mut contribution = SectionContribution::default();
+    contribution.section = 0;
+    contribution.padding1 = 0;
+    contribution.offset = 0;
+    contribution.size = 0;
+    contribution.characteristics = 0;
+    contribution.module = ModuleIndex(0);
+    contribution.padding2 = 0;
+    contribution.data_crc = Some(0);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    let mut module = OwnedModule::default();
+    module.unused1 = 0;
+    module.section_contribution = contribution;
+    module.flags = u16::from(type_server) << 8;
+    module.stream = Some(StreamId(stream));
+    module.symbol_bytes = u32::try_from(symbol_bytes).unwrap();
+    module.c11_bytes = 0;
+    module.c13_bytes = 0;
+    module.source_file_count = 0;
+    module.padding = 0;
+    module.file_name_offset = 0;
+    module.source_file_name_index = 0;
+    module.pdb_file_path_index = 0;
+    module.name = name.to_vec();
+    module.object_file = b"lib.lib".to_vec();
+    module.name_padding = [0; 3];
+    module
 }
 
 /// Build a PDB with three modules: two share a precompiled header, one has FASTLINK records.
@@ -71,15 +71,13 @@ fn pdb() -> Vec<u8> {
         symbols
     })
     .collect();
-    let mut info = InfoBuilder::new(HashTableProducer::Microsoft, 1, [3; 16], 1).unwrap();
-    info.set_features(&[Feature::Vc140, Feature::MinimalDebugInfo])
+    let mut info = InfoBuilder::new(Producer::Microsoft, 1, [3; 16], 1).unwrap();
+    info.set_features(&[Feature::VC140, Feature::MINIMAL_DEBUG_INFO])
         .unwrap();
     let mut info_bytes = Vec::new();
     info.encode(&mut info_bytes).unwrap();
-    let header = DbiHeader {
-        age: 1,
-        ..DbiHeader::default()
-    };
+    let mut header = DbiHeader::default();
+    header.age = 1;
     let mut dbi = DbiBuilder::new(header);
     for (index, (name, server)) in [(&b"pch.obj"[..], 0), (b"use.obj", 1), (b"fast.obj", 0)]
         .into_iter()
@@ -89,15 +87,15 @@ fn pdb() -> Vec<u8> {
         dbi.modules
             .push(module(name, stream, streams[index].len() - 4, server));
     }
-    dbi.type_servers.push(TypeServer {
-        reserved: 0,
-        type_index_base: TypeIndex(0x0100_1000),
-        signature: 9,
-        age: 2,
-        name: b"vc140.pdb".to_vec(),
-        path: b"C:\\obj".to_vec(),
-        padding: [0; 3],
-    });
+    let mut server = TypeServer::default();
+    server.reserved = 0;
+    server.type_index_base = TypeIndex(0x0100_1000);
+    server.signature = 9;
+    server.age = 2;
+    server.name = b"vc140.pdb".to_vec();
+    server.path = b"C:\\obj".to_vec();
+    server.padding = [0; 3];
+    dbi.type_servers.push(server);
     let dbi_bytes = dbi.to_bytes().unwrap();
     let mut builder = MsfBuilder::new();
     builder.push(&[][..]).unwrap();
@@ -125,15 +123,18 @@ fn lists_type_servers_precompiled_types_and_fastlink_objects() {
     assert!(!dependencies.is_empty());
     assert_eq!(dependencies.type_servers.len(), 1);
     assert_eq!(dependencies.type_servers[0].name, b"vc140.pdb");
-    let modules: Vec<(u32, u8)> = dependencies
+    let modules: Vec<(ModuleIndex, u8)> = dependencies
         .type_server_modules
         .iter()
         .map(|entry| (entry.module, entry.type_server))
         .collect();
-    assert_eq!(modules, [(1, 1)]);
+    assert_eq!(modules, [(ModuleIndex(1), 1)]);
     assert_eq!(dependencies.precompiled.len(), 1);
     assert_eq!(dependencies.precompiled[0].signature, 77);
-    assert_eq!(dependencies.precompiled[0].modules, [0, 1]);
+    assert_eq!(
+        dependencies.precompiled[0].modules,
+        [ModuleIndex(0), ModuleIndex(1)]
+    );
     assert_eq!(dependencies.fastlink_objects.len(), 1);
     let object = &dependencies.fastlink_objects[0];
     assert_eq!(
@@ -142,7 +143,7 @@ fn lists_type_servers_precompiled_types_and_fastlink_objects() {
             object.references,
             object.module_name.as_slice()
         ),
-        (2, 3, &b"fast.obj"[..])
+        (ModuleIndex(2), 3, &b"fast.obj"[..])
     );
     assert_eq!(object.object_file, b"lib.lib");
 }

@@ -1,8 +1,10 @@
 //! Tests for the DBI stream, module records and module streams.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::ModuleIndex;
 use pdbrs::native::dbi::{Dbi, DebugStream, Module, ModuleStream, Substream};
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::section::Machine;
 use pdbrs::native::symbols::SymbolOffset;
 
 /// The header offsets of the substream sizes, in disk order.
@@ -111,7 +113,7 @@ fn header_and_modules_keep_raw_values() {
     assert_eq!(header.public_stream, None);
     assert_eq!(header.symbol_stream, Some(StreamId(0x12)));
     assert_eq!(header.flags, 1);
-    assert_eq!(header.machine, 0x8664);
+    assert_eq!(header.machine, Machine::AMD64);
 
     let modules: Vec<_> = dbi.modules().collect::<pdbrs::Result<_>>().unwrap();
     assert_eq!(modules.len(), 2);
@@ -127,12 +129,15 @@ fn header_and_modules_keep_raw_values() {
         (12, 0, 24)
     );
     assert_eq!(modules[0].source_file_count, 3);
-    assert_eq!((modules[0].index, modules[0].offset), (0, 64));
+    assert_eq!((modules[0].index, modules[0].offset), (ModuleIndex(0), 64));
     assert_eq!(modules[1].name, b"* Linker *");
     assert_eq!(modules[1].object_file, b"");
     assert_eq!(modules[1].stream, None);
     let second_offset = 64 + u32::try_from(first.len()).unwrap();
-    assert_eq!((modules[1].index, modules[1].offset), (1, second_offset));
+    assert_eq!(
+        (modules[1].index, modules[1].offset),
+        (ModuleIndex(1), second_offset)
+    );
 }
 
 #[test]
@@ -363,12 +368,12 @@ fn c13_subsections_preserve_unknown_kinds() {
         .unwrap();
     assert_eq!(subsections.len(), 2);
     assert_eq!(
-        (subsections[0].offset, subsections[0].kind),
+        (subsections[0].offset, subsections[0].kind.0),
         (0, 0x8000_00f4)
     );
     assert_eq!(subsections[0].data, [1, 2, 3]);
     assert_eq!(
-        (subsections[1].offset, subsections[1].kind),
+        (subsections[1].offset, subsections[1].kind.0),
         (12, 0x1234_5678)
     );
     assert_eq!(subsections[1].data, []);

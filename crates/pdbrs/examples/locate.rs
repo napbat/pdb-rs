@@ -75,7 +75,10 @@ fn main() -> Outcome {
     let pdb = Pdb::open(path)?;
     let locator = SymbolLocator::new(&pdb)?;
     for &module in locator.incomplete_modules() {
-        eprintln!("module {module} has an undecoded scope kind; later records are not indexed");
+        eprintln!(
+            "module {} has an undecoded scope kind; later records are not indexed",
+            module.0
+        );
     }
     let mut out = String::new();
     let mut rvas: Vec<(u32, &str)> = arguments
@@ -244,7 +247,7 @@ fn print_location(out: &mut String, locator: &SymbolLocator, rva: u32, kind: &st
         return Ok(());
     };
     if let Some(module) = location.module {
-        writeln!(out, "MODULE {} {}", module.index, text(module.name))?;
+        writeln!(out, "MODULE {} {}", module.index.0, text(module.name))?;
     }
     if let Some(procedure) = location.procedure {
         let start = procedure.start.map_or(0, |start| start.0);
@@ -299,7 +302,7 @@ fn print_name(out: &mut String, locator: &SymbolLocator, name: &str) -> Outcome 
                 out,
                 "MATCH procedure {:#010x} {} {}",
                 procedure.start.map_or(0, |start| start.0),
-                procedure.module,
+                procedure.module.0,
                 text(procedure.name)
             )?,
             NameMatch::Public { public, rva, .. } => writeln!(

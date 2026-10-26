@@ -16,6 +16,7 @@ use crate::{Error, ErrorKind, Result};
 
 /// The regions of a module stream for [`ModuleStreamParts::encode`].
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ModuleStreamParts<'a> {
     /// The symbol records without the signature, or `None` for a module
     /// stream without a symbol region.
@@ -31,22 +32,12 @@ pub struct ModuleStreamParts<'a> {
     pub global_refs: &'a [SymbolOffset],
 }
 
-/// A module stream from [`ModuleStreamParts::encode`] or
-/// [`ModuleStream::encode`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct EncodedModuleStream {
-    /// The module stream bytes.
-    pub bytes: Vec<u8>,
-    /// The region sizes for the DBI module record.
-    pub sizes: ModuleRegionSizes,
-}
-
 impl ModuleStreamParts<'_> {
-    /// Check the regions and join them into module stream bytes.
+    /// Check the regions and append the module stream bytes to `out`.
     ///
-    /// The function checks all sizes before it allocates the output. The
-    /// output has the exact size of the stream.
+    /// The function checks all sizes before it reserves space in `out`.
+    /// It appends the exact size of the stream and returns the region sizes
+    /// for the DBI module record.
     ///
     /// # Errors
     ///
@@ -55,43 +46,48 @@ impl ModuleStreamParts<'_> {
     /// - The framing errors of [`Records`] for the symbol records and of
     ///   [`ModuleStream::c13_subsections`] for the C13 line region.
     /// - [`ErrorKind::LimitExceeded`] if a region size or the stream size
-    ///   does not fit in 32 bits, or if the output cannot be allocated.
+    ///   does not fit in 32 bits, or if the output cannot grow.
     ///
-    /// The errors do not have a stream location.
-    pub fn encode(&self) -> Result<EncodedModuleStream> {
+    /// The errors do not have a stream location. The function does not
+    /// change `out` if it returns an error.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<ModuleRegionSizes> {
         write(
             self.symbols,
             self.c11,
             self.c13,
             self.global_refs.iter().copied(),
+            out,
         )
     }
 }
 
 impl ModuleStream {
-    /// Join the regions of this module stream again.
+    /// Join the regions of this module stream again and append them to `out`.
     ///
-    /// The output is equal to the parsed bytes, and the sizes are equal to
-    /// the sizes of the module record, if the regions are canonical: the
-    /// symbol records and the C13 line region end at a 4-byte boundary.
+    /// The appended bytes are equal to the parsed bytes, and the sizes are
+    /// equal to the sizes of the module record, if the regions are
+    /// canonical: the symbol records and the C13 line region end at a
+    /// 4-byte boundary.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`ModuleStreamParts::encode`].
-    pub fn encode(&self) -> Result<EncodedModuleStream> {
+    /// Returns the errors of [`ModuleStreamParts::encode`]. The function
+    /// does not change `out` if it returns an error.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<ModuleRegionSizes> {
         let symbols = (self.symbol_offset() == SIGNATURE_SIZE).then(|| self.symbol_data());
         let refs = self.global_refs()?;
-        write(symbols, self.c11_data(), self.c13_data(), refs.iter())
+        write(symbols, self.c11_data(), self.c13_data(), refs.iter(), out)
     }
 }
 
-/// Check the regions and join them into module stream bytes.
+/// Check the regions and append the module stream bytes to `out`.
 fn write(
     symbols: Option<&[u8]>,
     c11: &[u8],
     c13: &[u8],
     global_refs: impl ExactSizeIterator<Item = SymbolOffset>,
-) -> Result<EncodedModuleStream> {
+    out: &mut Vec<u8>,
+) -> Result<ModuleRegionSizes> {
     let symbol_size = match symbols {
         None => 0,
         Some(records) => {
@@ -151,21 +147,19 @@ fn write(
         .try_fold(symbol_size, usize::checked_add)
         .filter(|&total| u32::try_from(total).is_ok())
         .ok_or_else(|| too_large("module stream size does not fit in 32 bits"))?;
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(total)
+    out.try_reserve_exact(total)
         .map_err(|_| too_large("module stream cannot be allocated"))?;
     if let Some(records) = symbols {
-        bytes.extend_from_slice(&SIGNATURE_C13.to_le_bytes());
-        bytes.extend_from_slice(records);
+        out.extend_from_slice(&SIGNATURE_C13.to_le_bytes());
+        out.extend_from_slice(records);
     }
-    bytes.extend_from_slice(c11);
-    bytes.extend_from_slice(c13);
-    bytes.extend_from_slice(&refs_field.to_le_bytes());
+    out.extend_from_slice(c11);
+    out.extend_from_slice(c13);
+    out.extend_from_slice(&refs_field.to_le_bytes());
     for offset in global_refs {
-        bytes.extend_from_slice(&offset.0.to_le_bytes());
+        out.extend_from_slice(&offset.0.to_le_bytes());
     }
-    Ok(EncodedModuleStream { bytes, sizes })
+    Ok(sizes)
 }
 
 /// Convert a size to the `u32` of its field.

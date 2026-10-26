@@ -13,12 +13,14 @@ use super::{
 };
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
+use crate::native::section::Machine;
 use crate::{Error, ErrorKind, Result};
 
 /// The decoded fields of a modern DBI header, without the substream sizes.
 ///
 /// The signature is always `-1` and the version is always `V70` (19990903).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DbiHeader {
     /// The PDB revision counter.
     pub age: u32,
@@ -41,7 +43,7 @@ pub struct DbiHeader {
     /// The other bits are unused. The decoder keeps them as stored.
     pub flags: u16,
     /// The `IMAGE_FILE_MACHINE` value.
-    pub machine: u16,
+    pub machine: Machine,
     /// The reserved `u32` at offset 60.
     pub reserved: u32,
 }
@@ -97,7 +99,7 @@ impl DbiHeader {
             pdb_dll_rebuild: u16_at(fixed, 22),
             mfc_type_server_index: u32_at(fixed, 44),
             flags: u16_at(fixed, 56),
-            machine: u16_at(fixed, 58),
+            machine: Machine(u16_at(fixed, 58)),
             reserved: u32_at(fixed, 60),
         }
     }
@@ -136,7 +138,7 @@ impl DbiHeader {
         }
         put(44, &self.mfc_type_server_index.to_le_bytes());
         put(56, &self.flags.to_le_bytes());
-        put(58, &self.machine.to_le_bytes());
+        put(58, &self.machine.0.to_le_bytes());
         put(60, &self.reserved.to_le_bytes());
         Output::new(out).bytes(&fixed)
     }

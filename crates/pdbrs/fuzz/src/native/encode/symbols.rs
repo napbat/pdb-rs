@@ -1,13 +1,14 @@
 //! Round trips of the symbol record encoders, the symbol stream writers and the GSI and PSI
 //! builders.
 
+use pdbrs::native::Producer;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{ModuleSymbolWriter, ModuleSymbols, Symbol};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{
-    BucketCount, GlobalSymbolIndex, HashEntry, HashTable, IndexProducer, PublicSymbolIndex,
-    SectionStart, SymbolRecordWriter, ThunkTable, indexed_name,
+    BucketCount, GlobalSymbolIndex, HashEntry, HashTable, PublicSymbolIndex, SectionStart,
+    SymbolRecordWriter, ThunkTable, indexed_name,
 };
 
 use crate::input::Input;
@@ -146,21 +147,20 @@ pub fn indexes(data: &[u8]) {
         BucketCount::Minimal
     };
     let producer = if selector & 2 == 0 {
-        IndexProducer::Microsoft
+        Producer::Microsoft
     } else {
-        IndexProducer::Llvm
+        Producer::Llvm
     };
     let gsi = input.part().to_vec();
     let psi = input.part().to_vec();
     let records = input.rest();
     if let Some(globals) = ok(GlobalSymbolIndex::parse(gsi, StreamId(8), buckets_kind))
         && let Some(entries) = entries(&globals.hash_table(), records)
-        && let Some(bytes) = ok(GlobalSymbolIndex::build(
-            records,
-            &entries,
-            buckets_kind,
-            producer,
-        ))
+        && let Some(bytes) = ok({
+            let mut bytes = Vec::new();
+            GlobalSymbolIndex::encode_parts(records, &entries, buckets_kind, producer, &mut bytes)
+                .map(|()| bytes)
+        })
     {
         let again =
             GlobalSymbolIndex::parse(bytes, StreamId(8), buckets_kind).expect("a built GSI parses");
@@ -174,23 +174,26 @@ pub fn indexes(data: &[u8]) {
     };
     let fields = publics.header();
     let targets: Vec<u32> = publics.thunk_map().collect();
-    let thunks = ThunkTable {
-        thunk_size: fields.thunk_size,
-        section: fields.thunk_table_section,
-        offset: fields.thunk_table_offset,
-        targets: &targets,
-    };
+    let mut thunks = ThunkTable::default();
+    thunks.thunk_size = fields.thunk_size;
+    thunks.section = fields.thunk_table_section;
+    thunks.offset = fields.thunk_table_offset;
+    thunks.targets = &targets;
     let starts: Vec<SectionStart> = publics.section_starts().collect();
-    let Some(bytes) = ok(PublicSymbolIndex::build(
+    let mut bytes = Vec::new();
+    if ok(PublicSymbolIndex::encode_parts(
         records,
         &entries,
         buckets_kind,
         producer,
         thunks,
         &starts,
-    )) else {
+        &mut bytes,
+    ))
+    .is_none()
+    {
         return;
-    };
+    }
     let again =
         PublicSymbolIndex::parse(bytes, StreamId(9), buckets_kind).expect("a built PSI parses");
     assert_eq!(buckets(&again.hash_table()), buckets(&publics.hash_table()));

@@ -4,7 +4,7 @@ use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
 use pdbrs::native::codeview::symbol::{ModuleSymbols, SymbolData};
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::fpo::{FpoStream, FrameDataStream};
-use pdbrs::native::lines::{LineSubsection, ModuleLines};
+use pdbrs::native::lines::{LineSubsection, ModuleLines, SubsectionKind};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::section::SectionHeaders;
 
@@ -148,7 +148,7 @@ pub(crate) fn walk_module(stream: &ModuleStream) {
         line_subsection(subsection.kind, subsection.data);
     }
     if let Some(lines) = ok(ModuleLines::parse(stream)) {
-        let _ = lines.validate();
+        let _ = lines.check();
         let checksums = lines.checksums();
         for subsection in lines.subsections() {
             if let LineSubsection::Lines(data) = &subsection.data {
@@ -182,7 +182,7 @@ pub(crate) fn walk_module(stream: &ModuleStream) {
 }
 
 /// Decode one C13 subsection and visit its entries.
-pub(crate) fn line_subsection(kind: u32, data: &[u8]) {
+pub(crate) fn line_subsection(kind: SubsectionKind, data: &[u8]) {
     let Some(decoded) = ok(LineSubsection::decode(kind, data)) else {
         return;
     };
@@ -223,5 +223,5 @@ pub(crate) fn line_subsection(kind: u32, data: &[u8]) {
 pub fn lines(data: &[u8]) {
     let mut input = Input::new(data);
     let kind = input.u32();
-    line_subsection(kind, input.rest());
+    line_subsection(SubsectionKind(kind), input.rest());
 }

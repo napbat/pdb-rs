@@ -2,8 +2,8 @@
 //!
 //! The table maps the `/names` offset of a virtual file name to an [`InjectedSource`] entry.
 //! The hash of a key is the key truncated to 16 bits. [`OwnedHashTable`] applies the insertion
-//! rules of [`HashTableProducer::Microsoft`] (`link.exe`) or [`HashTableProducer::Llvm`]
-//! (`lld-link`). The first capacity of the table differs from the default of the producer:
+//! rules of [`Producer::Microsoft`] (`link.exe`) or [`Producer::Llvm`] (`lld-link`). The first
+//! capacity of the table differs from the default of the producer:
 //!
 //! - Microsoft `MapNiSrcHdr` (`ms_srcimpl.h`) uses the default `Map()`: 1 bucket.
 //! - LLVM `PDBFileBuilder` makes `InjectedSourceTable(2)`: 2 buckets.
@@ -21,8 +21,10 @@ use super::{
     HEADER_SIZE, InjectedSource, SourceBlockHeader, SourceCompression, SourceHeaderBlock,
     encode_header,
 };
+use crate::native::Producer;
+use crate::native::codeview::index::NameOffset;
 use crate::native::hash::hash_buffer_v8;
-use crate::native::hash_table::{HashTableKeys, HashTableProducer, OwnedHashTable};
+use crate::native::hash_table::{HashTableKeys, OwnedHashTable};
 use crate::native::names::StringTableBuilder;
 use crate::native::output::to_u32;
 use crate::{Error, ErrorKind, Result};
@@ -38,7 +40,8 @@ impl HashTableKeys for SourceKeys {
 }
 
 /// The names and the stream bytes of a file to inject.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct InjectedFile<'a> {
     /// The original file name.
     pub file_name: &'a [u8],
@@ -46,7 +49,7 @@ pub struct InjectedFile<'a> {
     pub object_name: &'a [u8],
     /// The virtual file name. `link.exe` and `lld-link` use the lowercase file name.
     pub virtual_file_name: &'a [u8],
-    /// [`SourceCompression::None`] for file contents, or [`SourceCompression::DotNet`] for a
+    /// [`SourceCompression::NONE`] for file contents, or [`SourceCompression::DOT_NET`] for a
     /// [`DotNetDocument`](super::DotNetDocument) record.
     pub compression: SourceCompression,
     /// The `fVirtual` flag.
@@ -56,7 +59,7 @@ pub struct InjectedFile<'a> {
 }
 
 /// An owned `/src/headerblock` stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SourceHeaderBlockBuilder {
     /// The file time of the header.
     file_time: u64,
@@ -74,10 +77,10 @@ impl SourceHeaderBlockBuilder {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
-    pub fn new(producer: HashTableProducer, file_time: u64, age: u32) -> Result<Self> {
+    pub fn new(producer: Producer, file_time: u64, age: u32) -> Result<Self> {
         let capacity = match producer {
-            HashTableProducer::Microsoft => 1,
-            HashTableProducer::Llvm => 2,
+            Producer::Microsoft => 1,
+            Producer::Llvm => 2,
         };
         Ok(Self {
             file_time,
@@ -91,7 +94,7 @@ impl SourceHeaderBlockBuilder {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
-    pub fn from_block(block: &SourceHeaderBlock<'_>, producer: HashTableProducer) -> Result<Self> {
+    pub fn from_block(block: &SourceHeaderBlock<'_>, producer: Producer) -> Result<Self> {
         let header = block.header();
         Ok(Self {
             file_time: header.file_time,
@@ -122,7 +125,7 @@ impl SourceHeaderBlockBuilder {
     /// Returns [`ErrorKind::LimitExceeded`] if the table cannot grow.
     pub fn insert(&mut self, source: InjectedSource) -> Result<Option<InjectedSource>> {
         self.table
-            .insert(source.virtual_file_name_offset, source, &SourceKeys)
+            .insert(source.virtual_file_name_offset.0, source, &SourceKeys)
     }
 
     /// Remove the entry of the virtual file name offset `key` and return it.
@@ -130,8 +133,8 @@ impl SourceHeaderBlockBuilder {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
-    pub fn remove(&mut self, key: u32) -> Result<Option<InjectedSource>> {
-        self.table.remove(key, &SourceKeys)
+    pub fn remove(&mut self, key: NameOffset) -> Result<Option<InjectedSource>> {
+        self.table.remove(key.0, &SourceKeys)
     }
 
     /// Add the names of `file` to `names`, then insert its entry and return the entry.
@@ -145,7 +148,7 @@ impl SourceHeaderBlockBuilder {
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`] if the compression is not
-    ///   [`SourceCompression::None`] or [`SourceCompression::DotNet`], or the virtual file name
+    ///   [`SourceCompression::NONE`] or [`SourceCompression::DOT_NET`], or the virtual file name
     ///   is empty.
     /// - [`ErrorKind::LimitExceeded`] if the stream size does not fit in `u32`, or a table
     ///   cannot grow.
@@ -155,10 +158,9 @@ impl SourceHeaderBlockBuilder {
         names: &mut StringTableBuilder,
         file: &InjectedFile<'_>,
     ) -> Result<InjectedSource> {
-        if !matches!(
-            file.compression,
-            SourceCompression::None | SourceCompression::DotNet
-        ) {
+        if file.compression != SourceCompression::NONE
+            && file.compression != SourceCompression::DOT_NET
+        {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("injected source compression is not None or DotNet"));
         }

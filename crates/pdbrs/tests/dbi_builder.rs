@@ -2,13 +2,14 @@
 //! a whole DBI stream and the owned DBI builder.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, NameOffset, TypeIndex};
 use pdbrs::native::dbi::{
     Dbi, DbiBuilder, DbiHeader, DebugStream, OwnedModule, OwnedSourceInfo,
     SECTION_CONTRIBUTION_V60, SectionContribution, Substream, TypeServer, encode_debug_streams,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{HashVersion, SIGNATURE, StringTableBuilder};
+use pdbrs::native::section::Machine;
 
 /// The header offsets of the substream sizes, in disk order.
 const SIZE_FIELDS: [usize; 7] = [24, 28, 32, 36, 40, 52, 48];
@@ -232,48 +233,46 @@ fn encode_errors_remove_appended_bytes() {
 }
 
 fn owned_module(name: &[u8]) -> OwnedModule {
-    OwnedModule {
-        unused1: 0,
-        section_contribution: SectionContribution {
-            section: 1,
-            padding1: 0,
-            offset: 0,
-            size: 4,
-            characteristics: 0x6000_0020,
-            module: 0,
-            padding2: 0,
-            data_crc: Some(0),
-            reloc_crc: Some(0),
-            coff_section: None,
-        },
-        flags: 0,
-        stream: Some(StreamId(12)),
-        symbol_bytes: 4,
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 1,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: name.to_vec(),
-        object_file: name.to_vec(),
-        name_padding: [0; 3],
-    }
+    let mut contribution = SectionContribution::default();
+    contribution.section = 1;
+    contribution.padding1 = 0;
+    contribution.offset = 0;
+    contribution.size = 4;
+    contribution.characteristics = 0x6000_0020;
+    contribution.module = ModuleIndex(0);
+    contribution.padding2 = 0;
+    contribution.data_crc = Some(0);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    let mut module = OwnedModule::default();
+    module.unused1 = 0;
+    module.section_contribution = contribution;
+    module.flags = 0;
+    module.stream = Some(StreamId(12));
+    module.symbol_bytes = 4;
+    module.c11_bytes = 0;
+    module.c13_bytes = 0;
+    module.source_file_count = 1;
+    module.padding = 0;
+    module.file_name_offset = 0;
+    module.source_file_name_index = 0;
+    module.pdb_file_path_index = 0;
+    module.name = name.to_vec();
+    module.object_file = name.to_vec();
+    module.name_padding = [0; 3];
+    module
 }
 
 #[test]
 fn builder_fills_a_new_stream() {
-    let header = DbiHeader {
-        age: 1,
-        global_stream: Some(StreamId(7)),
-        machine: 0x8664,
-        ..DbiHeader::default()
-    };
+    let mut header = DbiHeader::default();
+    header.age = 1;
+    header.global_stream = Some(StreamId(7));
+    header.machine = Machine::AMD64;
     let mut builder = DbiBuilder::new(header);
     let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
     let mut module = owned_module(b"a.obj");
-    module.source_file_name_index = names.insert(b"a.c").unwrap();
+    module.source_file_name_index = names.insert(b"a.c").unwrap().0;
     builder.modules.push(module);
     builder.ec_names = Some(names);
     builder.source_info = Some(OwnedSourceInfo::from_file_names([[&b"a.c"[..]]]).unwrap());
@@ -286,7 +285,10 @@ fn builder_fills_a_new_stream() {
     assert_eq!(decoded.substream(Substream::SectionContributions).len(), 4);
     let module = decoded.modules().next().unwrap().unwrap();
     let ec = decoded.ec_names().unwrap().unwrap();
-    assert_eq!(ec.get(module.source_file_name_index).unwrap(), b"a.c");
+    assert_eq!(
+        ec.get(NameOffset(module.source_file_name_index)).unwrap(),
+        b"a.c"
+    );
     assert_eq!(decoded.debug_streams().len(), 11);
     assert_eq!(DbiBuilder::from_dbi(&decoded).unwrap(), builder);
 }

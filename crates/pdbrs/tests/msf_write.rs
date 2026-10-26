@@ -1,7 +1,7 @@
 //! Behavior tests for Big MSF 7.00 container writing.
 //!
 //! Each test writes a container and opens the output with the reader. The reader checks the
-//! structure, and `check_free_page_map` checks the active free page map.
+//! structure, and `validate_free_page_map` checks the active free page map.
 
 use pdbrs::io::ReadAt;
 use pdbrs::io::copy_exact;
@@ -119,7 +119,7 @@ fn check_layout(bytes: &[u8], msf: &Msf<&[u8]>, old_pages: u32) {
         !matches!(page_count % page_size, 1 | 2),
         "the last interval has its FPM pages"
     );
-    let report = msf.check_free_page_map().unwrap();
+    let report = msf.validate_free_page_map().unwrap();
     assert_eq!(report.unreferenced_allocated_count(), 0);
     assert_eq!(report.old_directory_free_pages(), old_pages);
     assert_eq!(report.old_directory_allocated_pages(), 0);

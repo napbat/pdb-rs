@@ -26,8 +26,10 @@
 use alloc::vec::Vec;
 
 use super::{Codec, DebugRecord, RecordIter};
+use crate::native::address::Rva;
 use crate::native::msf::StreamId;
 use crate::native::output::{Output, to_u32};
+use crate::native::section::Machine;
 use crate::native::words::word;
 use crate::{Error, ErrorKind, Result};
 
@@ -35,15 +37,13 @@ use crate::{Error, ErrorKind, Result};
 pub const BLOB_HEADER_SIZE: usize = 32;
 /// The blob version that this crate decodes (`vdbOne`).
 pub const BLOB_VERSION: u32 = 1;
-/// The `IMAGE_FILE_MACHINE_AMD64` value of the DBI header.
-pub const MACHINE_AMD64: u16 = 0x8664;
-/// The `IMAGE_FILE_MACHINE_ARM64` value of the DBI header.
-pub const MACHINE_ARM64: u16 = 0xaa64;
 
 /// The fixed fields of a `DbgRvaVaBlob` header.
 ///
 /// The `cbHdr` and `cbData` fields come from the lengths of the extra header
 /// bytes and of the data: see [`RvaVaBlob::header_size`] and [`RvaVaBlob::data_size`].
+///
+/// [`Default`] gives a version 1 ([`BLOB_VERSION`]) header with all other fields 0.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct BlobHeader {
@@ -57,21 +57,19 @@ pub struct BlobHeader {
     pub reserved: [u32; 2],
 }
 
-impl BlobHeader {
-    /// Make a version 1 header with reserved fields of 0.
-    #[must_use]
-    pub const fn new(data_rva: u32, image_base: u64) -> Self {
+impl Default for BlobHeader {
+    fn default() -> Self {
         Self {
             version: BLOB_VERSION,
-            data_rva,
-            image_base,
+            data_rva: 0,
+            image_base: 0,
             reserved: [0; 2],
         }
     }
 }
 
 /// A decoded `.xdata` or `.pdata` blob with owned serialized bytes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RvaVaBlob {
     /// The fixed header fields.
     header: BlobHeader,
@@ -208,16 +206,16 @@ impl RvaVaBlob {
     ///
     /// Return `None` if `rva` is before [`BlobHeader::data_rva`] or after the data.
     #[must_use]
-    pub fn data_at(&self, rva: u32) -> Option<&[u8]> {
-        let offset = usize::try_from(rva.checked_sub(self.header.data_rva)?).ok()?;
+    pub fn data_at(&self, rva: Rva) -> Option<&[u8]> {
+        let offset = usize::try_from(rva.0.checked_sub(self.header.data_rva)?).ok()?;
         self.data().get(offset..)
     }
 
     /// Return the `RUNTIME_FUNCTION` entries of a `.pdata` blob.
     ///
     /// `machine` is [`DbiHeader::machine`]. The function decodes 12-byte x64
-    /// entries for [`MACHINE_AMD64`] and 8-byte ARM64 entries for
-    /// [`MACHINE_ARM64`]. Return `None` for other machines: their layouts
+    /// entries for [`Machine::AMD64`] and 8-byte ARM64 entries for
+    /// [`Machine::ARM64`]. Return `None` for other machines: their layouts
     /// are not decoded.
     ///
     /// # Errors
@@ -226,10 +224,10 @@ impl RvaVaBlob {
     /// of the entry size. The error has the stream location of the truncated entry.
     ///
     /// [`DbiHeader::machine`]: crate::native::dbi::DbiHeader::machine
-    pub fn runtime_functions(&self, machine: u16) -> Result<Option<RuntimeFunctions<'_>>> {
+    pub fn runtime_functions(&self, machine: Machine) -> Result<Option<RuntimeFunctions<'_>>> {
         let entries = match machine {
-            MACHINE_AMD64 => RuntimeFunctions::X64(self.entries()?),
-            MACHINE_ARM64 => RuntimeFunctions::Arm64(self.entries()?),
+            Machine::AMD64 => RuntimeFunctions::X64(self.entries()?),
+            Machine::ARM64 => RuntimeFunctions::Arm64(self.entries()?),
             _ => return Ok(None),
         };
         Ok(Some(entries))
@@ -292,6 +290,7 @@ impl RvaVaBlob {
 
 /// The `RUNTIME_FUNCTION` entries of a `.pdata` blob.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum RuntimeFunctions<'a> {
     /// The 12-byte entries of an x64 image.
     X64(RecordIter<'a, X64RuntimeFunction>),
@@ -300,7 +299,7 @@ pub enum RuntimeFunctions<'a> {
 }
 
 /// One x64 `RUNTIME_FUNCTION` entry of `winnt.h` (`_IMAGE_RUNTIME_FUNCTION_ENTRY`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct X64RuntimeFunction {
     /// The RVA of the first byte of the function (`BeginAddress`).
@@ -309,18 +308,6 @@ pub struct X64RuntimeFunction {
     pub end: u32,
     /// The RVA of the unwind information (`UnwindInfoAddress`).
     pub unwind_info: u32,
-}
-
-impl X64RuntimeFunction {
-    /// Make an entry from its fields.
-    #[must_use]
-    pub const fn new(begin: u32, end: u32, unwind_info: u32) -> Self {
-        Self {
-            begin,
-            end,
-            unwind_info,
-        }
-    }
 }
 
 impl Codec for X64RuntimeFunction {
@@ -348,7 +335,7 @@ impl DebugRecord for X64RuntimeFunction {
 }
 
 /// One ARM64 `RUNTIME_FUNCTION` entry of `winnt.h` (`_IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Arm64RuntimeFunction {
     /// The RVA of the first byte of the function (`BeginAddress`).
@@ -358,12 +345,6 @@ pub struct Arm64RuntimeFunction {
 }
 
 impl Arm64RuntimeFunction {
-    /// Make an entry from its fields.
-    #[must_use]
-    pub const fn new(begin: u32, unwind_data: u32) -> Self {
-        Self { begin, unwind_data }
-    }
-
     /// Return the `Flag` field: bits 0 and 1 of the unwind word.
     ///
     /// The value 0 means that the unwind word is the RVA of the unwind

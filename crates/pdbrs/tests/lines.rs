@@ -1,13 +1,14 @@
 //! Tests for C13 line subsections and module line validation.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::IdIndex;
+use pdbrs::native::address::Rva;
+use pdbrs::native::codeview::index::{ChecksumOffset, IdIndex, NameOffset};
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::lines::{
     ALWAYS_STEP_INTO_LINE, ChecksumKind, CoffSymbolRvas, DEBUG_S_COFF_SYMBOL_RVA,
-    DEBUG_S_FILECHKSMS, DEBUG_S_IGNORE, DEBUG_S_INLINEE_MDTOKEN_MAP, DEBUG_S_INLINEELINES,
-    DEBUG_S_LINES, FileChecksums, InlineeLines, InlineeSignature, LineEntry, LineSubsection,
-    LinesSubsection, ModuleLines, SubsectionKind,
+    DEBUG_S_FILECHKSMS, DEBUG_S_FRAMEDATA, DEBUG_S_IGNORE, DEBUG_S_INLINEE_MDTOKEN_MAP,
+    DEBUG_S_INLINEELINES, DEBUG_S_LINES, DEBUG_S_XFGHASH_VIRTUAL, FileChecksums, InlineeLines,
+    InlineeSignature, LineEntry, LineSubsection, LinesSubsection, ModuleLines, SubsectionKind,
 };
 use pdbrs::native::msf::StreamId;
 
@@ -71,7 +72,7 @@ fn lines_decode_blocks_and_packed_flags() {
         block(0x28, &[(0x324, ALWAYS_STEP_INTO_LINE)], None),
     ]
     .concat();
-    let lines = LinesSubsection::decode(&data).unwrap();
+    let lines = LinesSubsection::parse(&data).unwrap();
     let header = lines.header();
     assert_eq!(
         (
@@ -86,7 +87,7 @@ fn lines_decode_blocks_and_packed_flags() {
     assert_eq!(lines.block_count(), 2);
     let blocks: Vec<_> = lines.blocks().collect();
     assert_eq!(blocks.len(), 2);
-    assert_eq!(blocks[0].checksum_offset, 0);
+    assert_eq!(blocks[0].checksum_offset, ChecksumOffset(0));
     assert_eq!(blocks[0].columns, None);
     let entries: Vec<LineEntry> = blocks[0].lines.iter().collect();
     assert_eq!(entries[0].offset, 0);
@@ -96,7 +97,7 @@ fn lines_decode_blocks_and_packed_flags() {
     assert_eq!(entries[1].line_start, 0x68);
     assert_eq!(entries[1].end_delta, 3);
     assert!(!entries[1].is_statement);
-    assert_eq!(blocks[1].checksum_offset, 0x28);
+    assert_eq!(blocks[1].checksum_offset, ChecksumOffset(0x28));
     assert_eq!(
         blocks[1].lines.get(0).map(|line| line.line_start),
         Some(ALWAYS_STEP_INTO_LINE)
@@ -111,7 +112,7 @@ fn lines_decode_columns_when_the_flag_is_set() {
         block(0, &[(0, 1), (4, 2)], Some(&[(5, 9), (1, 0)])),
     ]
     .concat();
-    let lines = LinesSubsection::decode(&data).unwrap();
+    let lines = LinesSubsection::parse(&data).unwrap();
     assert!(lines.header().has_columns());
     let block = lines.blocks().next().unwrap();
     let columns: Vec<_> = block
@@ -127,7 +128,7 @@ fn lines_decode_columns_when_the_flag_is_set() {
     let mut without = data.clone();
     without[6] = 0;
     assert_eq!(
-        error_kind(LinesSubsection::decode(&without)),
+        error_kind(LinesSubsection::parse(&without)),
         ErrorKind::InvalidFormat
     );
 }
@@ -171,14 +172,10 @@ fn lines_reject_invalid_blocks() {
         ),
     ];
     for (data, kind) in cases {
-        assert_eq!(
-            error_kind(LinesSubsection::decode(&data)),
-            kind,
-            "{data:x?}"
-        );
+        assert_eq!(error_kind(LinesSubsection::parse(&data)), kind, "{data:x?}");
     }
     // An empty subsection after the header has no blocks.
-    assert_eq!(LinesSubsection::decode(&header).unwrap().block_count(), 0);
+    assert_eq!(LinesSubsection::parse(&header).unwrap().block_count(), 0);
 }
 
 #[test]
@@ -190,10 +187,10 @@ fn checksums_decode_all_kinds_and_find_entries() {
         checksum(60, 3, &[0x33; 32]),
     ]
     .concat();
-    let table = FileChecksums::decode(&data).unwrap();
+    let table = FileChecksums::parse(&data).unwrap();
     assert_eq!(table.len(), 4);
     let entries: Vec<_> = table.iter().collect();
-    let offsets: Vec<_> = entries.iter().map(|entry| entry.offset).collect();
+    let offsets: Vec<_> = entries.iter().map(|entry| entry.offset.0).collect();
     assert_eq!(offsets, [0, 8, 32, 60]);
     let kinds: Vec<_> = entries.iter().map(|entry| entry.kind).collect();
     assert_eq!(
@@ -205,13 +202,13 @@ fn checksums_decode_all_kinds_and_find_entries() {
             ChecksumKind::Sha256
         ]
     );
-    let sha1 = table.get(32).unwrap();
-    assert_eq!(sha1.name_offset, 40);
+    let sha1 = table.get(ChecksumOffset(32)).unwrap();
+    assert_eq!(sha1.name_offset, NameOffset(40));
     assert_eq!(sha1.checksum, &[0x22; 20]);
-    assert!(table.contains(60));
+    assert!(table.contains(ChecksumOffset(60)));
     // An offset inside an entry does not identify an entry.
-    assert_eq!(table.get(12), None);
-    assert_eq!(table.get(100), None);
+    assert_eq!(table.get(ChecksumOffset(12)), None);
+    assert_eq!(table.get(ChecksumOffset(100)), None);
     assert_eq!(ChecksumKind::from_raw(3), Some(ChecksumKind::Sha256));
     assert_eq!(ChecksumKind::Sha256.raw(), 3);
     assert_eq!(ChecksumKind::from_raw(4), None);
@@ -221,9 +218,9 @@ fn checksums_decode_all_kinds_and_find_entries() {
 fn checksums_accept_a_last_entry_without_padding() {
     let mut data = [checksum(0, 1, &[0; 16]), checksum(4, 3, &[1; 32])].concat();
     data.truncate(data.len() - 2);
-    let table = FileChecksums::decode(&data).unwrap();
+    let table = FileChecksums::parse(&data).unwrap();
     assert_eq!(table.len(), 2);
-    assert_eq!(table.get(24).unwrap().checksum, &[1; 32]);
+    assert_eq!(table.get(ChecksumOffset(24)).unwrap().checksum, &[1; 32]);
 }
 
 #[test]
@@ -246,12 +243,12 @@ fn checksums_reject_invalid_entries() {
         (nonzero, ErrorKind::InvalidFormat),
     ];
     for (data, kind) in cases {
-        assert_eq!(error_kind(FileChecksums::decode(&data)), kind, "{data:x?}");
+        assert_eq!(error_kind(FileChecksums::parse(&data)), kind, "{data:x?}");
     }
     // The padding of the first entry is cut off, so the second entry
     // cannot start: the remaining bytes form a truncated entry.
     assert_eq!(
-        error_kind(FileChecksums::decode(&partial_padding)),
+        error_kind(FileChecksums::parse(&partial_padding)),
         ErrorKind::UnexpectedEof
     );
 }
@@ -259,12 +256,12 @@ fn checksums_reject_invalid_entries() {
 #[test]
 fn inlinee_lines_decode_both_signatures() {
     let normal = [u32s(&[0]), u32s(&[0x1234, 0x18, 42]), u32s(&[0x1235, 0, 7])].concat();
-    let lines = InlineeLines::decode(&normal).unwrap();
+    let lines = InlineeLines::parse(&normal).unwrap();
     assert_eq!(lines.signature(), InlineeSignature::Normal);
     assert_eq!(lines.len(), 2);
     let entries: Vec<_> = lines.iter().collect();
     assert_eq!(entries[0].inlinee, IdIndex(0x1234));
-    assert_eq!(entries[0].checksum_offset, 0x18);
+    assert_eq!(entries[0].checksum_offset, ChecksumOffset(0x18));
     assert_eq!(entries[0].source_line, 42);
     assert!(entries[0].extra_files.is_empty());
 
@@ -274,17 +271,17 @@ fn inlinee_lines_decode_both_signatures() {
         u32s(&[0x1235, 0x18, 11, 0]),
     ]
     .concat();
-    let lines = InlineeLines::decode(&extra).unwrap();
+    let lines = InlineeLines::parse(&extra).unwrap();
     assert_eq!(lines.signature(), InlineeSignature::ExtraFiles);
     assert_eq!(lines.signature().raw(), 1);
     let entries: Vec<_> = lines.into_iter().collect();
     assert_eq!(entries.len(), 2);
-    let files: Vec<_> = entries[0].extra_files.iter().collect();
+    let files: Vec<_> = entries[0].extra_files.iter().map(|file| file.0).collect();
     assert_eq!(files, [0x18, 0x30]);
     assert_eq!(entries[1].source_line, 11);
     assert!(entries[1].extra_files.is_empty());
 
-    assert!(InlineeLines::decode(&u32s(&[0])).unwrap().is_empty());
+    assert!(InlineeLines::parse(&u32s(&[0])).unwrap().is_empty());
 }
 
 #[test]
@@ -297,53 +294,58 @@ fn inlinee_lines_reject_invalid_data() {
         (u32s(&[1, 0x1000, 0, 1, 2, 0]), ErrorKind::UnexpectedEof),
     ];
     for (data, kind) in cases {
-        assert_eq!(error_kind(InlineeLines::decode(&data)), kind, "{data:x?}");
+        assert_eq!(error_kind(InlineeLines::parse(&data)), kind, "{data:x?}");
     }
 }
 
 #[test]
 fn classifier_names_kinds_and_keeps_unknown_layouts_raw() {
-    assert_eq!(
-        SubsectionKind::from_raw(DEBUG_S_LINES),
-        SubsectionKind::Lines
-    );
-    assert_eq!(
-        SubsectionKind::from_raw(0xfd),
-        SubsectionKind::CoffSymbolRva
-    );
-    assert_eq!(
-        SubsectionKind::from_raw(0x100),
-        SubsectionKind::XfgHashVirtual
-    );
-    assert_eq!(
-        SubsectionKind::from_raw(DEBUG_S_IGNORE | DEBUG_S_LINES),
-        SubsectionKind::Ignored(0x8000_00f2)
-    );
-    assert_eq!(
-        SubsectionKind::from_raw(0x42),
-        SubsectionKind::Unknown(0x42)
-    );
-    for raw in [0xf1, 0xf2, 0xfe, 0x100, 0x8000_00f2, 0x42] {
-        assert_eq!(SubsectionKind::from_raw(raw).raw(), raw);
-    }
-    assert!(SubsectionKind::FileChecksums.is_decoded());
-    assert!(SubsectionKind::FrameData.is_decoded());
-    assert!(!SubsectionKind::InlineeTokenMap.is_decoded());
-    assert!(!SubsectionKind::Ignored(DEBUG_S_IGNORE).is_decoded());
+    assert_eq!(DEBUG_S_LINES, SubsectionKind(0xf2));
+    assert_eq!(DEBUG_S_COFF_SYMBOL_RVA, SubsectionKind(0xfd));
+    assert_eq!(DEBUG_S_XFGHASH_VIRTUAL, SubsectionKind(0x100));
+    let ignored = SubsectionKind(DEBUG_S_IGNORE.0 | DEBUG_S_LINES.0);
+    assert_eq!(ignored, SubsectionKind(0x8000_00f2));
+    assert!(ignored.is_ignored());
+    assert!(DEBUG_S_IGNORE.is_ignored());
+    assert!(!DEBUG_S_LINES.is_ignored());
+    assert_eq!(ignored.without_ignore_flag(), DEBUG_S_LINES);
+    assert_eq!(DEBUG_S_LINES.without_ignore_flag(), DEBUG_S_LINES);
+    assert_eq!(DEBUG_S_LINES.name(), Some("DEBUG_S_LINES"));
+    assert_eq!(DEBUG_S_IGNORE.name(), Some("DEBUG_S_IGNORE"));
+    assert_eq!(ignored.name(), None);
+    assert_eq!(SubsectionKind(0x42).name(), None);
+    assert_eq!(format!("{DEBUG_S_FILECHKSMS:?}"), "DEBUG_S_FILECHKSMS");
+    assert_eq!(format!("{ignored:?}"), "SubsectionKind(0x800000f2)");
+    assert_eq!(format!("{DEBUG_S_LINES:#06x}"), "0x00f2");
+    assert_eq!(format!("{ignored:#x}"), "0x800000f2");
+    assert_eq!(format!("{ignored:X}"), "800000F2");
+    assert!(DEBUG_S_FILECHKSMS.is_decoded());
+    assert!(DEBUG_S_FRAMEDATA.is_decoded());
+    assert!(!DEBUG_S_INLINEE_MDTOKEN_MAP.is_decoded());
+    assert!(!DEBUG_S_IGNORE.is_decoded());
+    assert!(!ignored.is_decoded());
+    assert!(!SubsectionKind(0x42).is_decoded());
 
     let data = [1, 2, 3, 4];
     assert_eq!(
         LineSubsection::decode(DEBUG_S_INLINEE_MDTOKEN_MAP, &data).unwrap(),
         LineSubsection::Unsupported {
-            kind: SubsectionKind::InlineeTokenMap,
+            kind: DEBUG_S_INLINEE_MDTOKEN_MAP,
+            data: &data,
+        }
+    );
+    assert_eq!(
+        LineSubsection::decode(SubsectionKind(0x42), &data).unwrap(),
+        LineSubsection::Unsupported {
+            kind: SubsectionKind(0x42),
             data: &data,
         }
     );
     // The ignore bit keeps even a known kind raw, also with malformed data.
     assert_eq!(
-        LineSubsection::decode(DEBUG_S_IGNORE | DEBUG_S_LINES, &data).unwrap(),
+        LineSubsection::decode(ignored, &data).unwrap(),
         LineSubsection::Ignored {
-            kind: DEBUG_S_IGNORE | DEBUG_S_LINES,
+            kind: ignored,
             data: &data,
         }
     );
@@ -363,24 +365,24 @@ fn decodes_coff_symbol_rvas() {
     else {
         panic!("expected DEBUG_S_COFF_SYMBOL_RVA");
     };
-    assert!(SubsectionKind::CoffSymbolRva.is_decoded());
+    assert!(DEBUG_S_COFF_SYMBOL_RVA.is_decoded());
     assert_eq!(rvas.len(), 7);
-    assert_eq!(rvas.get(2), Some(0x1_0078));
+    assert_eq!(rvas.get(2), Some(Rva(0x1_0078)));
     assert_eq!(rvas.get(7), None);
-    assert_eq!(rvas.iter().next_back(), Some(u32::MAX));
+    assert_eq!(rvas.iter().next_back(), Some(Rva(u32::MAX)));
     assert_eq!(
-        rvas.iter().collect::<Vec<_>>(),
+        rvas.iter().map(|rva| rva.0).collect::<Vec<_>>(),
         [0, 0, 0x1_0078, 0, 0x1_0078, 0x1_0080, u32::MAX]
     );
 }
 
 #[test]
 fn coff_symbol_rvas_accept_empty_data_and_reject_partial_entries() {
-    assert!(CoffSymbolRvas::decode(&[]).unwrap().is_empty());
+    assert!(CoffSymbolRvas::parse(&[]).unwrap().is_empty());
     for length in [1, 2, 3, 5] {
         let data = vec![0; length];
         assert_eq!(
-            error_kind(CoffSymbolRvas::decode(&data)),
+            error_kind(CoffSymbolRvas::parse(&data)),
             ErrorKind::InvalidFormat,
             "{length} bytes"
         );
@@ -388,8 +390,8 @@ fn coff_symbol_rvas_accept_empty_data_and_reject_partial_entries() {
 }
 
 /// Serialize one C13 subsection with its header and zero padding.
-fn subsection(kind: u32, data: &[u8]) -> Vec<u8> {
-    let mut bytes = u32s(&[kind, u32::try_from(data.len()).unwrap()]);
+fn subsection(kind: SubsectionKind, data: &[u8]) -> Vec<u8> {
+    let mut bytes = u32s(&[kind.0, u32::try_from(data.len()).unwrap()]);
     bytes.extend_from_slice(data);
     while !bytes.len().is_multiple_of(4) {
         bytes.push(0);
@@ -461,7 +463,7 @@ fn module_lines_decode_and_validate_references() {
         LineSubsection::Unsupported { .. }
     ));
     assert_eq!(lines.checksums().unwrap().len(), 2);
-    lines.validate().unwrap();
+    lines.check().unwrap();
 }
 
 #[test]
@@ -475,7 +477,7 @@ fn module_lines_reject_invalid_file_references() {
     ] {
         let stream = module_stream(&c13);
         let lines = ModuleLines::parse(&stream).unwrap();
-        let error = lines.validate().unwrap_err();
+        let error = lines.check().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidReference);
         assert_eq!(error.stream_location(), Some((StreamId(5), location)));
     }
@@ -483,7 +485,7 @@ fn module_lines_reject_invalid_file_references() {
     // Line blocks without a file checksum subsection.
     let lines = [lines_header(0, 1, 0, 8), block(0, &[(0, 1)], None)].concat();
     let stream = module_stream(&subsection(DEBUG_S_LINES, &lines));
-    let error = ModuleLines::parse(&stream).unwrap().validate().unwrap_err();
+    let error = ModuleLines::parse(&stream).unwrap().check().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }
 

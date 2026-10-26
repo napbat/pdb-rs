@@ -65,10 +65,7 @@ fn rejects_named_reference_outside_directory_or_to_nil_stream() {
 #[test]
 fn applies_typed_stream_limit_before_loading_info() {
     let bytes = container(None, 1);
-    let options = pdbrs::native::ReadOptions {
-        max_stream_bytes: 4,
-        ..pdbrs::native::ReadOptions::default()
-    };
+    let options = pdbrs::native::ReadOptions::default().with_max_stream_bytes(4);
     let error = Pdb::with_options(bytes.as_slice(), options).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
 }

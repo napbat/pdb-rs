@@ -27,7 +27,7 @@ pub fn read(data: &[u8]) {
 
 /// Read each stream of `msf` and check the reported sizes.
 fn walk<S: ReadAt>(msf: &Msf<S>) {
-    let _ = msf.check_free_page_map();
+    let _ = msf.validate_free_page_map();
     for id in (0..msf.stream_count()).map(StreamId) {
         let Some(Some(stream)) = ok(msf.stream(id)) else {
             continue;
@@ -99,7 +99,7 @@ pub fn repack(data: &[u8]) {
     let written = Msf::read(bytes.as_slice()).expect("a written container opens");
     assert_eq!(written.block_size(), page_size);
     let report = written
-        .check_free_page_map()
+        .validate_free_page_map()
         .expect("a written free page map is valid");
     assert_eq!(report.unreferenced_allocated_count(), 0);
     let copy = streams(&written).expect("written streams read");

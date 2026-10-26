@@ -1,6 +1,7 @@
 //! Tests for the string table of `/names` and the DBI EC substream.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::hash::{hash_string_v1, hash_string_v2};
 use pdbrs::native::names::{HashVersion, SIGNATURE, StringEntry, StringTable, StringTableBuilder};
 
@@ -75,18 +76,18 @@ fn v1_table_resolves_offsets_and_names() {
     let table = StringTable::parse(&bytes).unwrap();
 
     assert_eq!(table.hash_version(), HashVersion::V1);
-    assert_eq!(table.hash_version().value(), 1);
+    assert_eq!(table.hash_version().raw(), 1);
     assert_eq!(table.strings(), strings.as_slice());
     assert_eq!(table.bucket_count(), 7);
     assert_eq!(table.name_count(), 3);
     assert_eq!(table.bucket_offsets().collect::<Vec<_>>(), buckets);
     for (name, &offset) in names.iter().zip(&offsets) {
-        assert_eq!(table.get(offset).unwrap(), *name);
-        assert_eq!(table.find(name).unwrap(), Some(offset));
+        assert_eq!(table.get(NameOffset(offset)).unwrap(), *name);
+        assert_eq!(table.find(name).unwrap(), Some(NameOffset(offset)));
     }
     // An offset in the middle of a name returns the rest of the name.
-    assert_eq!(table.get(offsets[0] + 1).unwrap(), &first[1..]);
-    assert_eq!(table.get(0).unwrap(), b"");
+    assert_eq!(table.get(NameOffset(offsets[0] + 1)).unwrap(), &first[1..]);
+    assert_eq!(table.get(NameOffset(0)).unwrap(), b"");
     assert_eq!(table.find(b"absent").unwrap(), None);
 
     let entries: Vec<StringEntry<'_>> = table.entries().collect();
@@ -94,12 +95,12 @@ fn v1_table_resolves_offsets_and_names() {
     for entry in &entries {
         assert_eq!(
             buckets[usize::try_from(entry.bucket).unwrap()],
-            entry.offset
+            entry.offset.0
         );
         assert_eq!(table.get(entry.offset).unwrap(), entry.name);
     }
 
-    let placement = table.verify_buckets().unwrap();
+    let placement = table.validate_buckets().unwrap();
     assert_eq!((placement.home, placement.probed), (2, 1));
 }
 
@@ -112,8 +113,8 @@ fn probing_wraps_past_the_last_bucket() {
     assert_eq!(buckets[0], offsets[1]);
     let bytes = table(1, &strings, &buckets, 2);
     let table = StringTable::parse(&bytes).unwrap();
-    assert_eq!(table.find(&second).unwrap(), Some(offsets[1]));
-    let placement = table.verify_buckets().unwrap();
+    assert_eq!(table.find(&second).unwrap(), Some(NameOffset(offsets[1])));
+    let placement = table.validate_buckets().unwrap();
     assert_eq!((placement.home, placement.probed), (1, 1));
 }
 
@@ -124,7 +125,7 @@ fn full_table_without_empty_buckets_verifies() {
     let bytes = table(1, &strings, &buckets, 2);
     let table = StringTable::parse(&bytes).unwrap();
     assert_eq!(table.find(b"absent").unwrap(), None);
-    let placement = table.verify_buckets().unwrap();
+    let placement = table.validate_buckets().unwrap();
     assert_eq!((placement.home, placement.probed), (1, 1));
 }
 
@@ -135,8 +136,8 @@ fn empty_table_has_no_entries() {
     assert_eq!(table.bucket_count(), 0);
     assert_eq!(table.entries().count(), 0);
     assert_eq!(table.find(b"a").unwrap(), None);
-    assert_eq!(table.verify_buckets().unwrap().home, 0);
-    assert_error(table.get(0), ErrorKind::InvalidReference);
+    assert_eq!(table.validate_buckets().unwrap().home, 0);
+    assert_error(table.get(NameOffset(0)), ErrorKind::InvalidReference);
 }
 
 #[test]
@@ -156,14 +157,14 @@ fn v2_table_uses_the_version_2_hash() {
     let bytes = table(2, b"\0a\0", &[0, 1], 1);
     let table = StringTable::parse(&bytes).unwrap();
     assert_eq!(table.hash_version(), HashVersion::V2);
-    assert_eq!(table.get(1).unwrap(), b"a");
-    assert_eq!(table.find(b"a").unwrap(), Some(1));
+    assert_eq!(table.get(NameOffset(1)).unwrap(), b"a");
+    assert_eq!(table.find(b"a").unwrap(), Some(NameOffset(1)));
     assert_eq!(table.find(b"b").unwrap(), None);
-    let placement = table.verify_buckets().unwrap();
+    let placement = table.validate_buckets().unwrap();
     assert_eq!((placement.home, placement.probed), (1, 0));
     let moved_bytes = self::table(2, b"\0a\0", &[1, 0], 1);
     let moved = StringTable::parse(&moved_bytes).unwrap();
-    assert_error(moved.verify_buckets(), ErrorKind::InvalidFormat);
+    assert_error(moved.validate_buckets(), ErrorKind::InvalidFormat);
 }
 
 #[test]
@@ -175,7 +176,7 @@ fn unreachable_bucket_is_invalid() {
     buckets[slot] = 1;
     let bytes = table(1, b"\0lost\0", &buckets, 1);
     let table = StringTable::parse(&bytes).unwrap();
-    assert_error(table.verify_buckets(), ErrorKind::InvalidFormat);
+    assert_error(table.validate_buckets(), ErrorKind::InvalidFormat);
     assert_eq!(table.find(name).unwrap(), None);
 }
 
@@ -224,8 +225,8 @@ fn bucket_and_count_errors() {
     );
     let bytes = table(1, b"\0ab", &[0], 0);
     let table = StringTable::parse(&bytes).unwrap();
-    assert_error(table.get(1), ErrorKind::InvalidReference);
-    assert_error(table.get(u32::MAX), ErrorKind::InvalidReference);
+    assert_error(table.get(NameOffset(1)), ErrorKind::InvalidReference);
+    assert_error(table.get(NameOffset(u32::MAX)), ErrorKind::InvalidReference);
 }
 
 #[test]
@@ -259,15 +260,15 @@ fn builder_grows_like_the_microsoft_name_table() {
         }
         // The bucket counts of `NMT::grow`.
         assert_eq!(counts, [2, 4, 4, 7, 7, 11, 11, 11, 17, 17]);
-        assert_eq!(offsets[1], 7);
-        assert_eq!(builder.insert(b"name1").unwrap(), 7);
+        assert_eq!(offsets[1], NameOffset(7));
+        assert_eq!(builder.insert(b"name1").unwrap(), NameOffset(7));
         assert_eq!(builder.name_count(), 10);
-        assert_eq!(builder.get(7), Some(&b"name1"[..]));
+        assert_eq!(builder.get(NameOffset(7)), Some(&b"name1"[..]));
         let mut bytes = Vec::new();
         builder.encode(&mut bytes).unwrap();
         let parsed = StringTable::parse(&bytes).unwrap();
         assert_eq!(parsed.hash_version(), version);
-        let placement = parsed.verify_buckets().unwrap();
+        let placement = parsed.validate_buckets().unwrap();
         assert_eq!(placement.home + placement.probed, 10);
         for (index, offset) in offsets.iter().enumerate() {
             let name = format!("name{index}");
@@ -277,8 +278,8 @@ fn builder_grows_like_the_microsoft_name_table() {
     let mut builder = StringTableBuilder::new(HashVersion::V1).unwrap();
     assert_error(builder.insert(b"a\0b"), ErrorKind::InvalidFormat);
     // As in `NMT`, the empty name gets its own NUL byte; offset 0 marks an empty bucket.
-    assert_eq!(builder.insert(b"").unwrap(), 1);
-    assert_eq!(builder.insert(b"").unwrap(), 1);
+    assert_eq!(builder.insert(b"").unwrap(), NameOffset(1));
+    assert_eq!(builder.insert(b"").unwrap(), NameOffset(1));
     assert_eq!(builder.strings(), b"\0\0");
     assert_eq!(builder.name_count(), 1);
     assert_error(

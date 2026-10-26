@@ -2,9 +2,10 @@
 //! references, cycles and the depth and work limits.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::Producer;
 use pdbrs::native::types::{
-    DEFAULT_HASH_BUCKETS, HashLayout, ReferenceLimits, TypeStream, TypeStreamOptions, TypeTable,
-    validate_type_references, write_type_stream,
+    DEFAULT_HASH_BUCKETS, ReferenceLimits, TypeStream, TypeStreamOptions, TypeTable,
+    encode_type_stream, validate_type_references,
 };
 
 /// Frame a payload as a padded record of `kind`.
@@ -45,20 +46,25 @@ fn argument_list() -> Vec<u8> {
 
 /// A stream with `records`.
 fn stream(records: &[Vec<u8>]) -> TypeStream {
-    let options = TypeStreamOptions {
-        index_begin: 0x1000,
-        hash_bucket_count: DEFAULT_HASH_BUCKETS,
-        hash_stream: None,
-        hash_aux_stream: None,
-        layout: HashLayout::Microsoft,
-        adjusters: &[],
-    };
+    let options = TypeStreamOptions::default()
+        .with_index_begin(0x1000)
+        .with_hash_bucket_count(DEFAULT_HASH_BUCKETS)
+        .with_hash_stream(None)
+        .with_hash_aux_stream(None)
+        .with_producer(Producer::Microsoft);
     TypeStream::parse(
-        write_type_stream(&records.concat(), &options)
+        encode_type_stream(&records.concat(), &options)
             .unwrap()
             .stream,
     )
     .unwrap()
+}
+
+/// Return limits with `max_depth` and `max_work`.
+fn reference_limits(max_depth: u32, max_work: u64) -> ReferenceLimits {
+    ReferenceLimits::default()
+        .with_max_depth(max_depth)
+        .with_max_work(max_work)
 }
 
 fn validate(
@@ -147,15 +153,9 @@ fn enforces_the_depth_limit() {
             }
         })
         .collect();
-    let limits = ReferenceLimits {
-        max_depth: 10,
-        max_work: 1000,
-    };
+    let limits = reference_limits(10, 1000);
     assert_eq!(validate(&chain, limits).unwrap().max_depth, 10);
-    let limits = ReferenceLimits {
-        max_depth: 9,
-        max_work: 1000,
-    };
+    let limits = reference_limits(9, 1000);
     assert_eq!(
         validate(&chain, limits).unwrap_err().kind(),
         ErrorKind::LimitExceeded
@@ -174,10 +174,7 @@ fn enforces_the_depth_limit() {
         validate(&forward, limits).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
-    let limits = ReferenceLimits {
-        max_depth: 10,
-        max_work: 1000,
-    };
+    let limits = reference_limits(10, 1000);
     assert_eq!(validate(&forward, limits).unwrap().max_depth, 10);
 }
 
@@ -185,15 +182,9 @@ fn enforces_the_depth_limit() {
 fn enforces_the_work_limit() {
     let records = vec![modifier(0x74), modifier(0x1000), modifier(0x1001)];
     // Three references to check and two record references to visit.
-    let limits = ReferenceLimits {
-        max_depth: 100,
-        max_work: 5,
-    };
+    let limits = reference_limits(100, 5);
     assert!(validate(&records, limits).is_ok());
-    let limits = ReferenceLimits {
-        max_depth: 100,
-        max_work: 4,
-    };
+    let limits = reference_limits(100, 4);
     assert_eq!(
         validate(&records, limits).unwrap_err().kind(),
         ErrorKind::LimitExceeded

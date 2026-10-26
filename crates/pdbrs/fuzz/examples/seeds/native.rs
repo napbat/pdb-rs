@@ -176,7 +176,7 @@ fn injected_sources(
             continue;
         };
         corpus.add_parts("native_named", &[5], &[block, names], &content)?;
-        if source.compression == SourceCompression::DotNet {
+        if source.compression == SourceCompression::DOT_NET {
             corpus.add_parts("native_named", &[6], &[], &content)?;
         }
     }
@@ -219,10 +219,10 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
         corpus.add("native_symbols", stream.symbol_data())?;
         for subsection in stream.c13_subsections() {
             let subsection = subsection?;
-            if kinds.take(3, subsection.kind) {
+            if kinds.take(3, subsection.kind.0) {
                 corpus.add_parts(
                     "native_lines",
-                    &subsection.kind.to_le_bytes(),
+                    &subsection.kind.0.to_le_bytes(),
                     &[],
                     subsection.data,
                 )?;
@@ -278,7 +278,7 @@ fn shared_symbols(pdb: &Pdb<&[u8]>, dbi: &Dbi, corpus: &mut Corpus) -> Outcome {
     };
     let globals = load(dbi.header().global_stream)?;
     let publics = load(dbi.header().public_stream)?;
-    let minimal = u8::from(pdb.symbol_bucket_count().get() != 4096);
+    let minimal = u8::from(pdb.symbol_bucket_count().count() != 4096);
     corpus.add_parts(
         "native_indexes",
         &[minimal],

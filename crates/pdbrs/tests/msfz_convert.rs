@@ -92,7 +92,7 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
         let back = Container::read(back.as_slice()).unwrap();
         assert_eq!(back.kind(), ContainerKind::NativeMsf7);
         assert_eq!(streams(&back), expected);
-        let report = back.msf().unwrap().check_free_page_map().unwrap();
+        let report = back.msf().unwrap().validate_free_page_map().unwrap();
         assert_eq!(report.unreferenced_allocated_count(), 0);
 
         // The second conversion gives the same MSFZ bytes.

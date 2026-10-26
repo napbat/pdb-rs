@@ -36,13 +36,13 @@ use super::section::{SectionHeader, SectionHeaderStream, SectionHeaders};
 use crate::{Error, ErrorKind, Result};
 
 /// A relative virtual address in the image: a byte offset from the image base.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Rva(pub u32);
 
 /// A relative virtual address in the original image that the PDB describes.
 ///
 /// Without OMAP, the original image is the image.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PdbRva(pub u32);
 
 /// An address as a section number and a byte offset in the section.
@@ -187,27 +187,28 @@ impl<'a> AddressMap<'a> {
     /// Convert a PDB section offset to an image RVA.
     ///
     /// The function converts the section offset to a [`PdbRva`] with
-    /// [`AddressMap::pdb_rva`], then to an [`Rva`] with [`AddressMap::image_rva`].
+    /// [`AddressMap::pdb_rva`], then to an [`Rva`] with [`AddressMap::pdb_rva_to_rva`].
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`AddressMap::pdb_rva`] and [`AddressMap::image_rva`].
+    /// Returns the errors of [`AddressMap::pdb_rva`] and [`AddressMap::pdb_rva_to_rva`].
     pub fn rva(&self, address: SectionOffset) -> Result<Translation<Rva>> {
         let pdb_rva = self.pdb_rva(address)?;
-        self.image_rva(pdb_rva)
+        self.pdb_rva_to_rva(pdb_rva)
     }
 
     /// Convert an image RVA to a PDB section offset.
     ///
     /// The function converts the RVA to a [`PdbRva`] with
-    /// [`AddressMap::to_pdb_rva`], then to a section offset with
+    /// [`AddressMap::rva_to_pdb_rva`], then to a section offset with
     /// [`AddressMap::pdb_section_offset`].
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`AddressMap::to_pdb_rva`] and [`AddressMap::pdb_section_offset`].
+    /// Returns the errors of [`AddressMap::rva_to_pdb_rva`] and
+    /// [`AddressMap::pdb_section_offset`].
     pub fn section_offset(&self, rva: Rva) -> Result<Translation<SectionOffset>> {
-        match self.to_pdb_rva(rva)? {
+        match self.rva_to_pdb_rva(rva)? {
             Translation::Mapped(pdb_rva) => {
                 self.pdb_section_offset(pdb_rva).map(Translation::Mapped)
             }
@@ -264,7 +265,7 @@ impl<'a> AddressMap<'a> {
     /// - [`ErrorKind::MissingStream`] if the PDB has OMAP and the map has no
     ///   [`DebugStream::OmapFromSource`] table.
     /// - [`ErrorKind::OffsetOverflow`] if the mapped RVA does not fit in 32 bits.
-    pub fn image_rva(&self, rva: PdbRva) -> Result<Translation<Rva>> {
+    pub fn pdb_rva_to_rva(&self, rva: PdbRva) -> Result<Translation<Rva>> {
         match self.remap {
             Remap::Direct => Ok(Translation::Mapped(Rva(rva.0))),
             Remap::NotLoaded => Err(not_loaded()),
@@ -284,7 +285,7 @@ impl<'a> AddressMap<'a> {
     /// - [`ErrorKind::MissingStream`] if the PDB has OMAP and the map has no
     ///   [`DebugStream::OmapToSource`] table.
     /// - [`ErrorKind::OffsetOverflow`] if the mapped RVA does not fit in 32 bits.
-    pub fn to_pdb_rva(&self, rva: Rva) -> Result<Translation<PdbRva>> {
+    pub fn rva_to_pdb_rva(&self, rva: Rva) -> Result<Translation<PdbRva>> {
         match self.remap {
             Remap::Direct => Ok(Translation::Mapped(PdbRva(rva.0))),
             Remap::NotLoaded => Err(not_loaded()),
@@ -333,7 +334,8 @@ impl<'a> AddressMap<'a> {
 /// [`AddressMap`].
 ///
 /// [`Pdb::address_tables`]: crate::native::Pdb::address_tables
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AddressTables {
     /// The image section headers ([`DebugStream::SectionHeader`]).
     pub sections: SectionHeaderStream,
@@ -346,6 +348,18 @@ pub struct AddressTables {
 }
 
 impl AddressTables {
+    /// Return tables with the image section headers `sections` and no original section
+    /// headers or OMAP tables.
+    #[must_use]
+    pub const fn new(sections: SectionHeaderStream) -> Self {
+        Self {
+            sections,
+            original: None,
+            to_source: None,
+            from_source: None,
+        }
+    }
+
     /// Return the address map of the tables.
     ///
     /// If no OMAP table is present, the map has no OMAP and ignores the

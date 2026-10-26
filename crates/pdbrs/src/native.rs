@@ -70,3 +70,26 @@ impl Identity {
         }
     }
 }
+
+/// The identity change that a writer applies to a PDB.
+///
+/// The PDB Info stream and the DBI header both store an age. An image matches a PDB if the
+/// GUID and the age of its `RSDS` debug entry equal the GUID and the DBI age.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum IdentityPolicy {
+    /// Keep the signature, the GUID and both ages. The image keeps matching.
+    Preserve,
+    /// Add 1 to the Info age and write the new age to the DBI header too, as an incremental
+    /// link does. The image must get the new age.
+    IncrementAge,
+    /// Write a new identity. The DBI header gets the same age.
+    Replace {
+        /// The 32-bit signature (often a time stamp).
+        signature: u32,
+        /// The GUID bytes in their serialized order.
+        guid: [u8; 16],
+        /// The new age.
+        age: u32,
+    },
+}

@@ -21,6 +21,7 @@ use alloc::vec::Vec;
 
 use super::{TypeHeader, TypeRecord, TypeStream};
 use crate::native::codeview::id_record::{LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE};
+use crate::native::codeview::index::NameOffset;
 use crate::native::codeview::type_record::{
     LF_CLASS, LF_CLASS2, LF_ENUM, LF_INTERFACE, LF_INTERFACE2, LF_STRUCTURE, LF_STRUCTURE2,
     LF_UNION, LF_UNION2, Tag, TypeLeaf,
@@ -36,7 +37,8 @@ const VALUE_SIZE: usize = 4;
 const PAIR_SIZE: usize = 8;
 
 /// One entry of the index offset buffer.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct IndexOffset {
     /// The record index: a type index in TPI, an ID index in IPI.
     pub index: u32,
@@ -45,16 +47,17 @@ pub struct IndexOffset {
 }
 
 /// One entry of the hash adjuster table.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashAdjuster {
     /// The offset of the UDT name in the `/names` string table.
-    pub name_offset: u32,
+    pub name_offset: NameOffset,
     /// The record index of the UDT that is at the head of its hash chain.
     pub index: u32,
 }
 
 /// The decoded hash stream of one TPI or IPI stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TypeHashes<'a> {
     /// The hash stream, for error locations.
     stream: StreamId,
@@ -94,7 +97,7 @@ impl<'a> TypeHashes<'a> {
     /// Decode the hash stream `bytes` of a type stream with `header`.
     ///
     /// This function checks the structure of the buffers. Call
-    /// [`TypeHashes::verify`] to check the buffers against the records.
+    /// [`TypeHashes::check`] to check the buffers against the records.
     ///
     /// # Errors
     ///
@@ -251,7 +254,7 @@ impl<'a> TypeHashes<'a> {
     /// - [`ErrorKind::InvalidFormat`] if a hash value or an index offset pair
     ///   does not match its record.
     /// - The errors of [`TypeStream::records`] and [`type_record_hash`].
-    pub fn verify(&self, types: &TypeStream) -> Result<()> {
+    pub fn check(&self, types: &TypeStream) -> Result<()> {
         let header = types.header();
         if (
             header.index_begin,
@@ -308,7 +311,7 @@ impl<'a> TypeHashes<'a> {
     /// The function starts at the last pair with an index that is not
     /// greater than `index`, and frames records from there. Without pairs,
     /// it starts at the first record. The result is correct only for the
-    /// type stream of this hash stream; [`TypeHashes::verify`] checks that.
+    /// type stream of this hash stream; [`TypeHashes::check`] checks that.
     ///
     /// # Errors
     ///
@@ -507,7 +510,7 @@ fn parse_adjusters(stream: StreamId, base: u32, bytes: &[u8]) -> Result<Vec<Hash
             .with_context("type hash adjusters cannot be allocated")
     })?;
     for _ in 0..entries {
-        let name_offset = words.next()?;
+        let name_offset = NameOffset(words.next()?);
         let index = words.next()?;
         adjusters.push(HashAdjuster { name_offset, index });
     }

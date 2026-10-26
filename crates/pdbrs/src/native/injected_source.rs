@@ -18,7 +18,7 @@
 //!
 //! This module does not decode the `/names` string table. The caller resolves the name offsets.
 //!
-//! The .NET symbol writers use the compression byte 101 ([`SourceCompression::DotNet`]). Their
+//! The .NET symbol writers use the compression byte 101 ([`SourceCompression::DOT_NET`]). Their
 //! streams hold a [`DotNetDocument`] record, not the file contents. A file whose virtual file
 //! name ends with `.natvis` is a Natvis file ([`InjectedSourceKind::Natvis`]).
 //!
@@ -38,6 +38,7 @@ pub use natvis::{Natvis, is_natvis_name};
 
 use alloc::vec::Vec;
 
+use super::codeview::index::NameOffset;
 use super::hash::hash_buffer_v8;
 use super::hash_table::{Cursor, HashTable, HashTableEntry, HashTableValue};
 use super::msf::StreamId;
@@ -63,57 +64,31 @@ const HEADER_PADDING: usize = 44;
 const ENTRY_SIZE: u32 = 40;
 
 /// The compression of an injected source file (`SrcCompress` in Microsoft `pdb.h`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SourceCompression {
+///
+/// The value is open: an entry can have a byte that `pdb.h` and LLVM do not define.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SourceCompression(pub u8);
+
+impl SourceCompression {
     /// The stream holds the file contents without compression (`srccompressNone`).
-    None,
+    pub const NONE: Self = Self(0);
     /// Run-length encoding (`srccompressRLE`). This reader does not decode it.
-    RunLength,
+    pub const RUN_LENGTH: Self = Self(1);
     /// Huffman encoding (`srccompressHuffman`). This reader does not decode it.
-    Huffman,
+    pub const HUFFMAN: Self = Self(2);
     /// LZ compression (`srccompressLZ`). This reader does not decode it.
-    Lz,
+    pub const LZ: Self = Self(3);
     /// A .NET document record (the value 101, LLVM `PDB_SourceCompression::DotNet`).
     ///
     /// It is not a compression method: the stream holds a [`DotNetDocument`].
-    DotNet,
-    /// A value that `pdb.h` and LLVM do not define.
-    Unknown(u8),
-}
-
-impl SourceCompression {
-    /// Decode the raw compression byte.
-    #[must_use]
-    pub const fn from_raw(value: u8) -> Self {
-        match value {
-            0 => Self::None,
-            1 => Self::RunLength,
-            2 => Self::Huffman,
-            3 => Self::Lz,
-            101 => Self::DotNet,
-            other => Self::Unknown(other),
-        }
-    }
-
-    /// Return the raw compression byte.
-    #[must_use]
-    pub const fn to_raw(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::RunLength => 1,
-            Self::Huffman => 2,
-            Self::Lz => 3,
-            Self::DotNet => 101,
-            Self::Unknown(value) => value,
-        }
-    }
+    pub const DOT_NET: Self = Self(101);
 }
 
 /// The kind of the contents of an injected source file.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum InjectedSourceKind {
-    /// A .NET document record: the compression is [`SourceCompression::DotNet`].
+    /// A .NET document record: the compression is [`SourceCompression::DOT_NET`].
     DotNetDocument,
     /// A Natvis file: the virtual file name ends with `.natvis`. See [`Natvis`].
     Natvis,
@@ -124,20 +99,21 @@ pub enum InjectedSourceKind {
 /// One entry of the `/src/headerblock` table (`SrcHeaderBlockEntry`).
 ///
 /// The record size (40) and the version ([`SOURCE_VERSION_ONE`]) are checked and not stored.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct InjectedSource {
     /// The CRC of the file contents: [`hash_buffer_v8`]. For
-    /// [`SourceCompression::DotNet`], the CRC of the stream bytes.
+    /// [`SourceCompression::DOT_NET`], the CRC of the stream bytes.
     pub crc: u32,
     /// The size of the file contents after decompression. For
-    /// [`SourceCompression::DotNet`], the size of the stream.
+    /// [`SourceCompression::DOT_NET`], the size of the stream.
     pub file_size: u32,
     /// The `/names` offset of the original file name.
-    pub file_name_offset: u32,
+    pub file_name_offset: NameOffset,
     /// The `/names` offset of the object file name.
-    pub object_name_offset: u32,
+    pub object_name_offset: NameOffset,
     /// The `/names` offset of the virtual file name. The table key has the same value.
-    pub virtual_file_name_offset: u32,
+    pub virtual_file_name_offset: NameOffset,
     /// The compression of the stream contents.
     pub compression: SourceCompression,
     /// The `fVirtual` flag: `true` for a file that the compiler injected.
@@ -159,10 +135,10 @@ impl HashTableValue<'_> for InjectedSource {
         let version = word(4);
         let crc = word(8);
         let file_size = word(12);
-        let file_name_offset = word(16);
-        let object_name_offset = word(20);
-        let virtual_file_name_offset = word(24);
-        let compression = SourceCompression::from_raw(entry[28]);
+        let file_name_offset = NameOffset(word(16));
+        let object_name_offset = NameOffset(word(20));
+        let virtual_file_name_offset = NameOffset(word(24));
+        let compression = SourceCompression(entry[28]);
         let flags = entry[29];
         let padding = u16::from_le_bytes([entry[30], entry[31]]);
         let mut reserved = [0; 8];
@@ -211,13 +187,13 @@ impl HashTableValue<'_> for InjectedSource {
             SOURCE_VERSION_ONE,
             self.crc,
             self.file_size,
-            self.file_name_offset,
-            self.object_name_offset,
-            self.virtual_file_name_offset,
+            self.file_name_offset.0,
+            self.object_name_offset.0,
+            self.virtual_file_name_offset.0,
         ] {
             output.u32(word)?;
         }
-        output.u8(self.compression.to_raw())?;
+        output.u8(self.compression.0)?;
         output.u8(u8::from(self.is_virtual))?;
         output.u16(0)?;
         output.bytes(&self.reserved)
@@ -231,7 +207,7 @@ impl InjectedSource {
     /// [`InjectedSource::virtual_file_name_offset`].
     #[must_use]
     pub fn kind(&self, virtual_file_name: &[u8]) -> InjectedSourceKind {
-        if self.compression == SourceCompression::DotNet {
+        if self.compression == SourceCompression::DOT_NET {
             InjectedSourceKind::DotNetDocument
         } else if is_natvis_name(virtual_file_name) {
             InjectedSourceKind::Natvis
@@ -266,7 +242,7 @@ impl InjectedSource {
     ///   .NET document record.
     /// - [`ErrorKind::InvalidFormat`] if the size or the CRC differs.
     pub fn verify_content<'c>(&self, content: &'c [u8], stream: StreamId) -> Result<&'c [u8]> {
-        if self.compression != SourceCompression::None {
+        if self.compression != SourceCompression::NONE {
             return Err(stream_error(
                 ErrorKind::UnsupportedVersion,
                 "injected source compression is not supported",
@@ -280,7 +256,7 @@ impl InjectedSource {
     /// Check the stream of a .NET document entry and decode its record.
     ///
     /// `content` holds the full stream `stream`. The entry must have the compression
-    /// [`SourceCompression::DotNet`]. The entry file size and CRC apply to the stream bytes.
+    /// [`SourceCompression::DOT_NET`]. The entry file size and CRC apply to the stream bytes.
     /// Decode the embedded source with [`EmbeddedSource::decode`](crate::portable::embedded::EmbeddedSource::decode)
     /// and check it with [`DotNetDocument::verify_checksum`].
     ///
@@ -296,7 +272,7 @@ impl InjectedSource {
         content: &'c [u8],
         stream: StreamId,
     ) -> Result<DotNetDocument<'c>> {
-        if self.compression != SourceCompression::DotNet {
+        if self.compression != SourceCompression::DOT_NET {
             return Err(stream_error(
                 ErrorKind::UnsupportedVersion,
                 "injected source does not hold a .NET document record",
@@ -337,7 +313,8 @@ fn stream_error(kind: ErrorKind, context: &'static str, stream: StreamId) -> Err
 /// The header of the `/src/headerblock` stream (`SrcHeaderBlock`).
 ///
 /// The version ([`SOURCE_VERSION_ONE`]) and the zero padding are checked and not stored.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SourceBlockHeader {
     /// The size of the stream in bytes.
     pub size: u32,
@@ -407,7 +384,7 @@ impl<'a> SourceHeaderBlock<'a> {
         if let Some(index) = table
             .entries()
             .iter()
-            .position(|entry| entry.key != entry.value.virtual_file_name_offset)
+            .position(|entry| entry.key != entry.value.virtual_file_name_offset.0)
         {
             return Err(cursor.fail(
                 ErrorKind::InvalidFormat,

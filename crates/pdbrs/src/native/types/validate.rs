@@ -29,18 +29,18 @@ use crate::{Error, ErrorKind, Result};
 const TPI_STREAM: u32 = 2;
 
 /// The limits of [`validate_type_references`].
+///
+/// The [`Default`] value has a depth limit of 4096 and a work limit of 2^28
+/// references.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ReferenceLimits {
-    /// The largest valid depth: the number of records in the longest chain
-    /// of record references.
-    pub max_depth: u32,
-    /// The largest number of references that the function visits, in all
-    /// passes together.
-    pub max_work: u64,
+    /// The largest valid depth.
+    max_depth: u32,
+    /// The largest number of visited references.
+    max_work: u64,
 }
 
 impl Default for ReferenceLimits {
-    /// Return a depth limit of 4096 and a work limit of 2^28 references.
     fn default() -> Self {
         Self {
             max_depth: 4096,
@@ -49,8 +49,39 @@ impl Default for ReferenceLimits {
     }
 }
 
+impl ReferenceLimits {
+    /// Set the largest valid depth: the number of records in the longest
+    /// chain of record references.
+    #[must_use]
+    pub const fn with_max_depth(mut self, max_depth: u32) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    /// Return the largest valid depth.
+    #[must_use]
+    pub const fn max_depth(self) -> u32 {
+        self.max_depth
+    }
+
+    /// Set the largest number of references that the function visits, in all
+    /// passes together.
+    #[must_use]
+    pub const fn with_max_work(mut self, max_work: u64) -> Self {
+        self.max_work = max_work;
+        self
+    }
+
+    /// Return the largest number of references that the function visits.
+    #[must_use]
+    pub const fn max_work(self) -> u64 {
+        self.max_work
+    }
+}
+
 /// The result of [`validate_type_references`].
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ReferenceSummary {
     /// The number of type indices in all records.
     pub references: u64,

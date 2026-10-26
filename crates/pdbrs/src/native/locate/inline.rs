@@ -41,12 +41,16 @@ use core::iter::FusedIterator;
 
 use super::CodeChunk;
 use crate::native::address::Rva;
+use crate::native::codeview::index::ChecksumOffset;
 use crate::native::codeview::symbol::{
     Annotation, Annotations, BinaryAnnotations, ChunkRange, CodeError, CodeState,
 };
 use crate::{Error, ErrorKind, Result};
 
 /// One source line range of an inline site.
+///
+/// The default value is a statement range of one line: line 0 of the file checksum offset 0,
+/// at code offset 0 of chunk 0, without a length and without columns.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineRange {
@@ -63,7 +67,7 @@ pub struct InlineRange {
     pub code_length: Option<u32>,
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the module.
-    pub file: u32,
+    pub file: ChecksumOffset,
     /// The source line.
     pub line: u32,
     /// The number of source lines in the range. The default is 1.
@@ -74,6 +78,22 @@ pub struct InlineRange {
     pub column_end: Option<u32>,
     /// `true` for a statement and `false` for an expression.
     pub is_statement: bool,
+}
+
+impl Default for InlineRange {
+    fn default() -> Self {
+        Self {
+            chunk: 0,
+            code_offset: 0,
+            code_length: None,
+            file: ChecksumOffset::default(),
+            line: 0,
+            line_count: 1,
+            column_start: None,
+            column_end: None,
+            is_statement: true,
+        }
+    }
 }
 
 impl InlineRange {
@@ -102,7 +122,7 @@ impl InlineRange {
 #[derive(Clone, Copy, Debug)]
 struct LineState {
     /// The file checksum offset.
-    file: u32,
+    file: ChecksumOffset,
     /// The line.
     line: u32,
     /// The line count.
@@ -126,7 +146,7 @@ pub struct InlineRanges<'a> {
     /// The code offset, the code chunk and the open code range.
     code: CodeState,
     /// The file checksum offset.
-    file: u32,
+    file: ChecksumOffset,
     /// The line. It is signed so that a negative intermediate value is not
     /// an overflow; a range with a line outside `u32` is an error.
     line: i64,
@@ -151,7 +171,7 @@ impl<'a> InlineRanges<'a> {
     /// inlinee, from its `DEBUG_S_INLINEELINES` entry
     /// ([`InlineeLine`](crate::native::lines::InlineeLine)).
     #[must_use]
-    pub fn new(annotations: &BinaryAnnotations<'a>, file: u32, line: u32) -> Self {
+    pub fn new(annotations: &BinaryAnnotations<'a>, file: ChecksumOffset, line: u32) -> Self {
         Self {
             annotations: annotations.iter(),
             code: CodeState::default(),
@@ -170,7 +190,7 @@ impl<'a> InlineRanges<'a> {
     /// one.
     fn step(&mut self, annotation: Annotation) -> Result<Option<InlineRange>> {
         match annotation {
-            Annotation::ChangeFile(file) => self.file = file,
+            Annotation::ChangeFile(file) => self.file = ChecksumOffset(file),
             Annotation::ChangeLineOffset(delta)
             | Annotation::ChangeCodeOffsetAndLineOffset {
                 line_delta: delta, ..

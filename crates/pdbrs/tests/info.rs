@@ -2,7 +2,7 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::Identity;
-use pdbrs::native::info::Info;
+use pdbrs::native::info::{Feature, Info};
 use pdbrs::native::msf::StreamId;
 
 const STRINGS: &[u8] = b"/names\0/opaque\xff\0";
@@ -73,7 +73,7 @@ fn preserves_identity_feature_codes_and_byte_names() {
     assert_eq!(info.named_streams().len(), 2);
     assert_eq!(info.named_stream_capacity(), 8);
     assert_eq!(info.next_name_index(), 3);
-    assert_eq!(info.features().collect::<Vec<_>>(), [0xdead_beef]);
+    assert_eq!(info.features().collect::<Vec<_>>(), [Feature(0xdead_beef)]);
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn the_name_index_word_is_not_a_feature_code() {
     word(&mut bytes, 20_140_508);
     let info = Info::parse(bytes).unwrap();
     assert_eq!(info.next_name_index(), 0);
-    assert_eq!(info.features().collect::<Vec<_>>(), [20_140_508]);
+    assert_eq!(info.features().collect::<Vec<_>>(), [Feature::VC140]);
 
     let mut bytes = fixture();
     bytes.truncate(bytes.len() - 8);

@@ -16,6 +16,7 @@ use crate::native::output::Output;
 ///
 /// Each slot holds the index of a stream with one kind of debug data.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum DebugStream {
     /// Old frame pointer omission data.
     Fpo,

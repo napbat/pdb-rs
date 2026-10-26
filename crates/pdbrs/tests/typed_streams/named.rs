@@ -2,14 +2,13 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::auxiliary::{LINK_INFO_STREAM_NAME, LINK_INFO_VERSION_TWO, LinkInfo};
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::injected_source::{
     HEADER_BLOCK_STREAM_NAME, InjectedFile, InjectedSource, SourceCompression, SourceHeaderBlock,
     SourceHeaderBlockBuilder, content_stream_name,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{HashVersion, StringTableBuilder};
-use pdbrs::native::{Pdb, ReadOptions};
+use pdbrs::native::{Pdb, Producer, ReadOptions};
 
 use super::{Order, PAGE, container, crosses_page, info, open, to_u32, to_u64};
 
@@ -91,19 +90,17 @@ impl Named {
         record.encode(&mut link_info).unwrap();
 
         let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
-        let mut builder =
-            SourceHeaderBlockBuilder::new(HashTableProducer::Microsoft, 7, 1).unwrap();
+        let mut builder = SourceHeaderBlockBuilder::new(Producer::Microsoft, 7, 1).unwrap();
         let mut sources = Vec::new();
         for index in 0..FILE_COUNT {
             let (virtual_file_name, stream) = (virtual_name(index), content(index));
-            let file = InjectedFile {
-                file_name: &virtual_file_name,
-                object_name: b"",
-                virtual_file_name: &virtual_file_name,
-                compression: SourceCompression::None,
-                is_virtual: false,
-                stream: &stream,
-            };
+            let mut file = InjectedFile::default();
+            file.file_name = &virtual_file_name;
+            file.object_name = b"";
+            file.virtual_file_name = &virtual_file_name;
+            file.compression = SourceCompression::NONE;
+            file.is_virtual = false;
+            file.stream = &stream;
             sources.push(builder.add_file(&mut names, &file).unwrap());
         }
         let mut header_block = Vec::new();
@@ -225,7 +222,7 @@ fn injected_source_across_pages_decodes_and_verifies() {
     let entry = block
         .entries()
         .iter()
-        .find(|entry| entry.key == target.virtual_file_name_offset)
+        .find(|entry| entry.key == target.virtual_file_name_offset.0)
         .unwrap();
     assert_eq!(entry.value, target);
 
@@ -270,10 +267,8 @@ fn named_stream_loads_check_the_stream_size_against_the_limit() {
     ] {
         let size = full.stream_bytes(id).unwrap().len();
         assert!(size > info_size, "the Info stream fits in each limit");
-        let options = |max_stream_bytes| ReadOptions {
-            max_stream_bytes,
-            ..ReadOptions::default()
-        };
+        let options =
+            |max_stream_bytes| ReadOptions::default().with_max_stream_bytes(max_stream_bytes);
         let exact = Pdb::with_options(bytes.as_slice(), options(size)).unwrap();
         assert_eq!(exact.named_stream_bytes(name).unwrap().unwrap().len(), size);
         let small = Pdb::with_options(bytes.as_slice(), options(size - 1)).unwrap();

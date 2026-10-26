@@ -301,7 +301,7 @@ pdbrs uses these layouts and rules, and no imported document states them:
 - Scope links are module stream offsets that include the 4-byte signature (#5).
 - `link.exe` writes `LF_UDT_MOD_SRC_LINE` without padding, and the MSVC fixtures split field lists at `0xfb00` bytes (LLVM uses `0xff00`) (#29).
 - MASM (`ml64` 14.50) ends some `LF_STRUCTURE` records with `f1` and two stale bytes instead of `f3 f2 f1`; the static runtime libraries contain them (`clang-lld-x64-static`, #29).
-- The hash table growth rules of Microsoft `map.h` and LLVM `HashTable.h` (#32), and the hash stream forms of Microsoft and LLVM (`HashLayout`, #29).
+- The hash table growth rules of Microsoft `map.h` and LLVM `HashTable.h` (#32), and the hash stream forms of Microsoft and LLVM (`TypeHeader::producer`, `TypeStreamOptions::with_producer`, #29).
 - `link /PDBSTRIPPED` output: the rules of `strip_private` come from `msvc-x64-stripped/demo.stripped.pdb`, and for `NOTM` PDBs from a `link /DEBUG:LAZY /PDBSTRIPPED` scratch link (#34, #32).
 - `pdbtool pdz-encode` writes stream 0 as an empty stream and the Info stream and the DBI header as uncompressed fragments (#37, #38).
 - In a `NOTM` PDB, the inlinee of an inline site is an ID of the module records, not an IPI index; `SymbolLocator` resolves it there (#30).

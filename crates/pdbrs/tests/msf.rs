@@ -853,7 +853,7 @@ fn free_page_maps_of_all_fixtures_agree_with_the_directory() {
         let msf = fixture.open();
         assert_eq!(msf.page_count(), fixture.page_count);
         assert_eq!(msf.active_free_page_map(), 1);
-        let report = msf.check_free_page_map().unwrap();
+        let report = msf.validate_free_page_map().unwrap();
         assert_eq!(report.active(), 1);
         assert_eq!(
             report.unreferenced_allocated(),

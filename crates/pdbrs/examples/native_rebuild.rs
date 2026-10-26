@@ -10,8 +10,8 @@
 
 use std::error::Error;
 
+use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
-use pdbrs::native::info::IdentityPolicy;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);

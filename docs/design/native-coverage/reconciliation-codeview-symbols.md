@@ -230,11 +230,11 @@ Each decoder in `crates/pdbrs/src/native/codeview/symbol/` has an encoder next t
 
 ### `microsoft-pdb-rs/docs/codeview/symbols/s_pub.md`
 - Documents: The `S_PUB32` (0x110e) record (u32 flags, offset, segment, name), which appears only in the global symbol stream.
-- pdbrs: implemented — `Public::read` in `crates/pdbrs/src/native/codeview/symbol/global.rs` reads the layout. `PublicFlags` names bits 0-3. `symbols/psi.rs` checks the PSI address map order against the `S_PUB32` addresses. `PublicSymbolIndex::build` (`symbols/psi/write.rs`) writes the PSI again, and `native::locate::SymbolLocator` gives the public symbol for an address (#30).
+- pdbrs: implemented — `Public::read` in `crates/pdbrs/src/native/codeview/symbol/global.rs` reads the layout. `PublicFlags` names bits 0-3. `symbols/psi.rs` checks the PSI address map order against the `S_PUB32` addresses. `PublicSymbolIndex::encode_parts` (`symbols/psi/write.rs`) writes the PSI again, and `native::locate::SymbolLocator` gives the public symbol for an address (#30).
 - Conflicts:
   - Omission: the document does not describe `flags`. cvinfo.h `CV_PUBSYMFLAGS_e` gives `cvpsfCode` 0x1, `cvpsfFunction` 0x2, `cvpsfManaged` 0x4, `cvpsfMSIL` 0x8. LLVM `PublicSymFlags` and pdbrs `PublicFlags` agree.
 - Undocumented assumptions:
-  - The PSI address map is sorted by section, then offset, then name (`cmpAddrMapByAddrAndName` in `PDB/dbi/gsi.cpp`, LLVM `computeAddrMap`). `IndexProducer::Microsoft` compares section and offset as signed values; `IndexProducer::Llvm` compares them as unsigned values. Records with the same address and name keep the order of their symbol offsets (#30).
+  - The PSI address map is sorted by section, then offset, then name (`cmpAddrMapByAddrAndName` in `PDB/dbi/gsi.cpp`, LLVM `computeAddrMap`). `Producer::Microsoft` compares section and offset as signed values; `Producer::Llvm` compares them as unsigned values. Records with the same address and name keep the order of their symbol offsets (#30).
   - In a hash bucket, a shorter name comes first; names of the same length compare without case if both are ASCII; equal names keep the order of their symbol offsets. The MSVC `LINK` 14.51 fixtures confirm the last rule (`symbols/table/write.rs`, #30).
 
 ### `microsoft-pdb-rs/docs/codeview/symbols/s_refsyms.md`

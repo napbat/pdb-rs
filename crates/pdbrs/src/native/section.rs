@@ -215,8 +215,8 @@ impl<'a> SectionHeaders<'a> {
 
     /// Return an iterator over the headers in stream order.
     #[must_use]
-    pub fn iter(&self) -> SectionHeaderIter<'a> {
-        SectionHeaderIter {
+    pub fn iter(&self) -> SectionHeadersIter<'a> {
+        SectionHeadersIter {
             records: self.records.iter(),
         }
     }
@@ -240,7 +240,7 @@ impl<'a> SectionHeaders<'a> {
 
 impl<'a> IntoIterator for &SectionHeaders<'a> {
     type Item = SectionHeader;
-    type IntoIter = SectionHeaderIter<'a>;
+    type IntoIter = SectionHeadersIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -249,12 +249,12 @@ impl<'a> IntoIterator for &SectionHeaders<'a> {
 
 /// An iterator over section headers.
 #[derive(Clone, Debug)]
-pub struct SectionHeaderIter<'a> {
+pub struct SectionHeadersIter<'a> {
     /// The records of [`WORDS`] words each.
     records: core::slice::Iter<'a, [[u8; 4]; WORDS]>,
 }
 
-impl Iterator for SectionHeaderIter<'_> {
+impl Iterator for SectionHeadersIter<'_> {
     type Item = SectionHeader;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -274,7 +274,7 @@ impl Iterator for SectionHeaderIter<'_> {
     }
 }
 
-impl DoubleEndedIterator for SectionHeaderIter<'_> {
+impl DoubleEndedIterator for SectionHeadersIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.records
             .next_back()
@@ -282,6 +282,6 @@ impl DoubleEndedIterator for SectionHeaderIter<'_> {
     }
 }
 
-impl ExactSizeIterator for SectionHeaderIter<'_> {}
+impl ExactSizeIterator for SectionHeadersIter<'_> {}
 
-impl FusedIterator for SectionHeaderIter<'_> {}
+impl FusedIterator for SectionHeadersIter<'_> {}

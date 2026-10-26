@@ -100,7 +100,7 @@ fn decode_leaf(record: Record<'_>) {
 pub(crate) fn walk_types(stream: &TypeStream, hash: Option<&[u8]>) {
     let hashes = hash.and_then(|bytes| ok(TypeHashes::parse(stream.header(), bytes)));
     if let Some(hashes) = &hashes {
-        let _ = hashes.verify(stream);
+        let _ = hashes.check(stream);
         let _ = (hashes.bucket_count(), hashes.adjusters().len());
         let _ = hashes.hash_values().count();
         let _ = hashes.index_offsets().count();
@@ -154,7 +154,7 @@ pub(crate) fn walk_ids(
     names: Option<&StringTable<'_>>,
 ) {
     if let Some(hashes) = hash.and_then(|bytes| ok(TypeHashes::parse(stream.header(), bytes))) {
-        let _ = hashes.verify(stream);
+        let _ = hashes.check(stream);
     }
     let Some(table) = ok(IdTable::new(stream)) else {
         return;
@@ -175,7 +175,7 @@ pub(crate) fn walk_ids(
             }
             Some(IdRecord::UdtModuleSourceLine(line)) => {
                 if let Some(names) = names {
-                    let _ = names.get(line.name_offset.0);
+                    let _ = names.get(line.name_offset);
                 }
             }
             Some(IdRecord::BuildInfo(info)) => {

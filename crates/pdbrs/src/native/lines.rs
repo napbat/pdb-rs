@@ -33,7 +33,7 @@
 //! Each decoded value has an `encode` function that appends the subsection
 //! data again. [`LineSubsection::encode_framed`] adds the subsection header
 //! and the alignment padding. Encoders for new data take typed parts, for
-//! example [`LinesHeader::encode`] and [`encode_line_block`].
+//! example [`LinesHeader::encode`] and [`LineBlock::encode_parts`].
 //!
 //! File names stay byte offsets into the `/names` stream. This module does
 //! not read the `/names` stream.
@@ -54,6 +54,7 @@
 //!   in `cvdump/dumpsym7.cpp` of `microsoft/microsoft-pdb`.
 
 use alloc::vec::Vec;
+use core::fmt;
 
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
@@ -75,12 +76,9 @@ pub use assembly_input::{AssemblyInput, MergedAssemblyInput, MergedAssemblyInput
 pub use blocks::{
     ALWAYS_STEP_INTO_LINE, ColumnEntries, ColumnEntriesIter, ColumnEntry, LineBlock, LineBlocks,
     LineEntries, LineEntriesIter, LineEntry, LinesHeader, LinesSubsection, NEVER_STEP_INTO_LINE,
-    encode_line_block,
 };
-pub use checksums::{
-    ChecksumKind, FileChecksum, FileChecksums, FileChecksumsIter, encode_file_checksum,
-};
-pub use coff_symbol_rva::{CoffSymbolRvas, CoffSymbolRvasIter, encode_coff_symbol_rvas};
+pub use checksums::{ChecksumKind, FileChecksum, FileChecksums, FileChecksumsIter};
+pub use coff_symbol_rva::{CoffSymbolRvas, CoffSymbolRvasIter};
 pub use cross_scope::{
     CrossScopeContext, CrossScopeExport, CrossScopeExports, CrossScopeExportsIter, CrossScopeIds,
     CrossScopeIdsIter, CrossScopeImport, CrossScopeImports, CrossScopeImportsIter,
@@ -89,10 +87,10 @@ pub use cross_scope::{
 pub use frame_data::{FrameDataRecords, FrameDataRecordsIter, FrameDataSubsection};
 pub use inlinee::{
     ChecksumOffsets, ChecksumOffsetsIter, InlineeLine, InlineeLines, InlineeLinesIter,
-    InlineeSignature, encode_inlinee_line,
+    InlineeSignature,
 };
 pub use module::{ModuleLines, ModuleSubsection};
-pub use string_table::{StringTableIter, StringTableSubsection};
+pub use string_table::{StringTableSubsection, StringTableSubsectionIter};
 pub use symbol_records::SymbolsSubsection;
 pub use token_map::{TokenMap, TokenMapEntries, TokenMapEntriesIter, TokenMapEntry, TokenMapValue};
 pub use xfg_hash::{
@@ -100,148 +98,141 @@ pub use xfg_hash::{
     XfgVirtualHashesIter,
 };
 
-/// The kind bit that tells a reader to ignore the subsection.
-pub const DEBUG_S_IGNORE: u32 = 0x8000_0000;
-/// Symbol records (`DEBUG_S_SYMBOLS`).
-pub const DEBUG_S_SYMBOLS: u32 = 0xf1;
-/// Line blocks (`DEBUG_S_LINES`).
-pub const DEBUG_S_LINES: u32 = 0xf2;
-/// A string table (`DEBUG_S_STRINGTABLE`).
-pub const DEBUG_S_STRINGTABLE: u32 = 0xf3;
-/// File checksums (`DEBUG_S_FILECHKSMS`).
-pub const DEBUG_S_FILECHKSMS: u32 = 0xf4;
-/// Frame data (`DEBUG_S_FRAMEDATA`).
-pub const DEBUG_S_FRAMEDATA: u32 = 0xf5;
-/// Inlinee source lines (`DEBUG_S_INLINEELINES`).
-pub const DEBUG_S_INLINEELINES: u32 = 0xf6;
-/// Cross-scope imports (`DEBUG_S_CROSSSCOPEIMPORTS`).
-pub const DEBUG_S_CROSSSCOPEIMPORTS: u32 = 0xf7;
-/// Cross-scope exports (`DEBUG_S_CROSSSCOPEEXPORTS`).
-pub const DEBUG_S_CROSSSCOPEEXPORTS: u32 = 0xf8;
-/// IL lines (`DEBUG_S_IL_LINES`).
-pub const DEBUG_S_IL_LINES: u32 = 0xf9;
-/// A function metadata token map (`DEBUG_S_FUNC_MDTOKEN_MAP`).
-pub const DEBUG_S_FUNC_MDTOKEN_MAP: u32 = 0xfa;
-/// A type metadata token map (`DEBUG_S_TYPE_MDTOKEN_MAP`).
-pub const DEBUG_S_TYPE_MDTOKEN_MAP: u32 = 0xfb;
-/// Merged assembly input (`DEBUG_S_MERGED_ASSEMBLYINPUT`).
-pub const DEBUG_S_MERGED_ASSEMBLYINPUT: u32 = 0xfc;
-/// COFF symbol RVAs (`DEBUG_S_COFF_SYMBOL_RVA`).
-pub const DEBUG_S_COFF_SYMBOL_RVA: u32 = 0xfd;
-/// An inlinee metadata token map (`DEBUG_S_INLINEE_MDTOKEN_MAP`).
-pub const DEBUG_S_INLINEE_MDTOKEN_MAP: u32 = 0xfe;
-/// XFG type hashes (`DEBUG_S_XFGHASH_TYPE`).
-pub const DEBUG_S_XFGHASH_TYPE: u32 = 0xff;
-/// XFG virtual hashes (`DEBUG_S_XFGHASH_VIRTUAL`).
-pub const DEBUG_S_XFGHASH_VIRTUAL: u32 = 0x100;
+/// The kind of a C13 subsection (`DEBUG_S_SUBSECTION_TYPE` in `cvinfo.h`).
+///
+/// The type keeps values that this crate does not know. `Debug` prints the
+/// `cvinfo.h` name of a known kind and the hexadecimal value of another
+/// kind. `LowerHex` and `UpperHex` format the raw value.
+#[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SubsectionKind(pub u32);
 
-/// The class of a raw C13 subsection kind.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum SubsectionKind {
-    /// [`DEBUG_S_SYMBOLS`]. This crate decodes it.
-    Symbols,
-    /// [`DEBUG_S_LINES`]. This crate decodes it.
-    Lines,
-    /// [`DEBUG_S_STRINGTABLE`]. This crate decodes it.
-    StringTable,
-    /// [`DEBUG_S_FILECHKSMS`]. This crate decodes it.
-    FileChecksums,
-    /// [`DEBUG_S_FRAMEDATA`]. This crate decodes it.
-    FrameData,
-    /// [`DEBUG_S_INLINEELINES`]. This crate decodes it.
-    InlineeLines,
-    /// [`DEBUG_S_CROSSSCOPEIMPORTS`]. This crate decodes it.
-    CrossScopeImports,
-    /// [`DEBUG_S_CROSSSCOPEEXPORTS`]. This crate decodes it.
-    CrossScopeExports,
-    /// [`DEBUG_S_IL_LINES`]. This crate decodes it.
-    IlLines,
-    /// [`DEBUG_S_FUNC_MDTOKEN_MAP`]. This crate decodes it.
-    FunctionTokenMap,
-    /// [`DEBUG_S_TYPE_MDTOKEN_MAP`]. This crate decodes it.
-    TypeTokenMap,
-    /// [`DEBUG_S_MERGED_ASSEMBLYINPUT`]. This crate decodes it.
-    MergedAssemblyInput,
-    /// [`DEBUG_S_COFF_SYMBOL_RVA`]. This crate decodes it.
-    CoffSymbolRva,
-    /// [`DEBUG_S_INLINEE_MDTOKEN_MAP`]. No available source defines the layout.
-    InlineeTokenMap,
-    /// [`DEBUG_S_XFGHASH_TYPE`]. This crate decodes it.
-    XfgHashType,
-    /// [`DEBUG_S_XFGHASH_VIRTUAL`]. This crate decodes it.
-    XfgHashVirtual,
-    /// A kind with the [`DEBUG_S_IGNORE`] bit. The value is the raw kind.
-    Ignored(u32),
-    /// A kind without a known name. The value is the raw kind.
-    Unknown(u32),
-}
+/// The kind bit that tells a reader to ignore the subsection.
+pub const DEBUG_S_IGNORE: SubsectionKind = SubsectionKind(0x8000_0000);
+/// Symbol records (`DEBUG_S_SYMBOLS`).
+pub const DEBUG_S_SYMBOLS: SubsectionKind = SubsectionKind(0xf1);
+/// Line blocks (`DEBUG_S_LINES`).
+pub const DEBUG_S_LINES: SubsectionKind = SubsectionKind(0xf2);
+/// A string table (`DEBUG_S_STRINGTABLE`).
+pub const DEBUG_S_STRINGTABLE: SubsectionKind = SubsectionKind(0xf3);
+/// File checksums (`DEBUG_S_FILECHKSMS`).
+pub const DEBUG_S_FILECHKSMS: SubsectionKind = SubsectionKind(0xf4);
+/// Frame data (`DEBUG_S_FRAMEDATA`).
+pub const DEBUG_S_FRAMEDATA: SubsectionKind = SubsectionKind(0xf5);
+/// Inlinee source lines (`DEBUG_S_INLINEELINES`).
+pub const DEBUG_S_INLINEELINES: SubsectionKind = SubsectionKind(0xf6);
+/// Cross-scope imports (`DEBUG_S_CROSSSCOPEIMPORTS`).
+pub const DEBUG_S_CROSSSCOPEIMPORTS: SubsectionKind = SubsectionKind(0xf7);
+/// Cross-scope exports (`DEBUG_S_CROSSSCOPEEXPORTS`).
+pub const DEBUG_S_CROSSSCOPEEXPORTS: SubsectionKind = SubsectionKind(0xf8);
+/// IL lines (`DEBUG_S_IL_LINES`).
+pub const DEBUG_S_IL_LINES: SubsectionKind = SubsectionKind(0xf9);
+/// A function metadata token map (`DEBUG_S_FUNC_MDTOKEN_MAP`).
+pub const DEBUG_S_FUNC_MDTOKEN_MAP: SubsectionKind = SubsectionKind(0xfa);
+/// A type metadata token map (`DEBUG_S_TYPE_MDTOKEN_MAP`).
+pub const DEBUG_S_TYPE_MDTOKEN_MAP: SubsectionKind = SubsectionKind(0xfb);
+/// Merged assembly input (`DEBUG_S_MERGED_ASSEMBLYINPUT`).
+pub const DEBUG_S_MERGED_ASSEMBLYINPUT: SubsectionKind = SubsectionKind(0xfc);
+/// COFF symbol RVAs (`DEBUG_S_COFF_SYMBOL_RVA`).
+pub const DEBUG_S_COFF_SYMBOL_RVA: SubsectionKind = SubsectionKind(0xfd);
+/// An inlinee metadata token map (`DEBUG_S_INLINEE_MDTOKEN_MAP`).
+pub const DEBUG_S_INLINEE_MDTOKEN_MAP: SubsectionKind = SubsectionKind(0xfe);
+/// XFG type hashes (`DEBUG_S_XFGHASH_TYPE`).
+pub const DEBUG_S_XFGHASH_TYPE: SubsectionKind = SubsectionKind(0xff);
+/// XFG virtual hashes (`DEBUG_S_XFGHASH_VIRTUAL`).
+pub const DEBUG_S_XFGHASH_VIRTUAL: SubsectionKind = SubsectionKind(0x100);
 
 impl SubsectionKind {
-    /// Classify a raw subsection kind.
+    /// Return the `cvinfo.h` name of the kind, or `None` for an unknown
+    /// value.
+    ///
+    /// A kind with the [`DEBUG_S_IGNORE`] bit and other bits has no name.
     #[must_use]
-    pub const fn from_raw(kind: u32) -> Self {
-        match kind {
-            DEBUG_S_SYMBOLS => Self::Symbols,
-            DEBUG_S_LINES => Self::Lines,
-            DEBUG_S_STRINGTABLE => Self::StringTable,
-            DEBUG_S_FILECHKSMS => Self::FileChecksums,
-            DEBUG_S_FRAMEDATA => Self::FrameData,
-            DEBUG_S_INLINEELINES => Self::InlineeLines,
-            DEBUG_S_CROSSSCOPEIMPORTS => Self::CrossScopeImports,
-            DEBUG_S_CROSSSCOPEEXPORTS => Self::CrossScopeExports,
-            DEBUG_S_IL_LINES => Self::IlLines,
-            DEBUG_S_FUNC_MDTOKEN_MAP => Self::FunctionTokenMap,
-            DEBUG_S_TYPE_MDTOKEN_MAP => Self::TypeTokenMap,
-            DEBUG_S_MERGED_ASSEMBLYINPUT => Self::MergedAssemblyInput,
-            DEBUG_S_COFF_SYMBOL_RVA => Self::CoffSymbolRva,
-            DEBUG_S_INLINEE_MDTOKEN_MAP => Self::InlineeTokenMap,
-            DEBUG_S_XFGHASH_TYPE => Self::XfgHashType,
-            DEBUG_S_XFGHASH_VIRTUAL => Self::XfgHashVirtual,
-            _ if kind & DEBUG_S_IGNORE != 0 => Self::Ignored(kind),
-            _ => Self::Unknown(kind),
-        }
+    pub const fn name(self) -> Option<&'static str> {
+        Some(match self {
+            DEBUG_S_IGNORE => "DEBUG_S_IGNORE",
+            DEBUG_S_SYMBOLS => "DEBUG_S_SYMBOLS",
+            DEBUG_S_LINES => "DEBUG_S_LINES",
+            DEBUG_S_STRINGTABLE => "DEBUG_S_STRINGTABLE",
+            DEBUG_S_FILECHKSMS => "DEBUG_S_FILECHKSMS",
+            DEBUG_S_FRAMEDATA => "DEBUG_S_FRAMEDATA",
+            DEBUG_S_INLINEELINES => "DEBUG_S_INLINEELINES",
+            DEBUG_S_CROSSSCOPEIMPORTS => "DEBUG_S_CROSSSCOPEIMPORTS",
+            DEBUG_S_CROSSSCOPEEXPORTS => "DEBUG_S_CROSSSCOPEEXPORTS",
+            DEBUG_S_IL_LINES => "DEBUG_S_IL_LINES",
+            DEBUG_S_FUNC_MDTOKEN_MAP => "DEBUG_S_FUNC_MDTOKEN_MAP",
+            DEBUG_S_TYPE_MDTOKEN_MAP => "DEBUG_S_TYPE_MDTOKEN_MAP",
+            DEBUG_S_MERGED_ASSEMBLYINPUT => "DEBUG_S_MERGED_ASSEMBLYINPUT",
+            DEBUG_S_COFF_SYMBOL_RVA => "DEBUG_S_COFF_SYMBOL_RVA",
+            DEBUG_S_INLINEE_MDTOKEN_MAP => "DEBUG_S_INLINEE_MDTOKEN_MAP",
+            DEBUG_S_XFGHASH_TYPE => "DEBUG_S_XFGHASH_TYPE",
+            DEBUG_S_XFGHASH_VIRTUAL => "DEBUG_S_XFGHASH_VIRTUAL",
+            _ => return None,
+        })
     }
 
-    /// Return the raw kind value.
+    /// Return `true` if the kind has the [`DEBUG_S_IGNORE`] bit.
     #[must_use]
-    pub const fn raw(self) -> u32 {
-        match self {
-            Self::Symbols => DEBUG_S_SYMBOLS,
-            Self::Lines => DEBUG_S_LINES,
-            Self::StringTable => DEBUG_S_STRINGTABLE,
-            Self::FileChecksums => DEBUG_S_FILECHKSMS,
-            Self::FrameData => DEBUG_S_FRAMEDATA,
-            Self::InlineeLines => DEBUG_S_INLINEELINES,
-            Self::CrossScopeImports => DEBUG_S_CROSSSCOPEIMPORTS,
-            Self::CrossScopeExports => DEBUG_S_CROSSSCOPEEXPORTS,
-            Self::IlLines => DEBUG_S_IL_LINES,
-            Self::FunctionTokenMap => DEBUG_S_FUNC_MDTOKEN_MAP,
-            Self::TypeTokenMap => DEBUG_S_TYPE_MDTOKEN_MAP,
-            Self::MergedAssemblyInput => DEBUG_S_MERGED_ASSEMBLYINPUT,
-            Self::CoffSymbolRva => DEBUG_S_COFF_SYMBOL_RVA,
-            Self::InlineeTokenMap => DEBUG_S_INLINEE_MDTOKEN_MAP,
-            Self::XfgHashType => DEBUG_S_XFGHASH_TYPE,
-            Self::XfgHashVirtual => DEBUG_S_XFGHASH_VIRTUAL,
-            Self::Ignored(kind) | Self::Unknown(kind) => kind,
-        }
+    pub const fn is_ignored(self) -> bool {
+        self.0 & DEBUG_S_IGNORE.0 != 0
+    }
+
+    /// Return the kind without the [`DEBUG_S_IGNORE`] bit.
+    #[must_use]
+    pub const fn without_ignore_flag(self) -> Self {
+        Self(self.0 & !DEBUG_S_IGNORE.0)
     }
 
     /// Return `true` if [`LineSubsection::decode`] decodes this kind.
     ///
-    /// The function returns `false` for [`SubsectionKind::Ignored`]: the
-    /// decoder handles that class explicitly and does not decode the data.
+    /// The function returns `false` for a kind with the [`DEBUG_S_IGNORE`]
+    /// bit: the decoder handles these kinds explicitly and does not decode
+    /// the data.
     #[must_use]
     pub const fn is_decoded(self) -> bool {
-        !matches!(
+        matches!(
             self,
-            Self::InlineeTokenMap | Self::Ignored(_) | Self::Unknown(_)
+            DEBUG_S_SYMBOLS
+                | DEBUG_S_LINES
+                | DEBUG_S_STRINGTABLE
+                | DEBUG_S_FILECHKSMS
+                | DEBUG_S_FRAMEDATA
+                | DEBUG_S_INLINEELINES
+                | DEBUG_S_CROSSSCOPEIMPORTS
+                | DEBUG_S_CROSSSCOPEEXPORTS
+                | DEBUG_S_IL_LINES
+                | DEBUG_S_FUNC_MDTOKEN_MAP
+                | DEBUG_S_TYPE_MDTOKEN_MAP
+                | DEBUG_S_MERGED_ASSEMBLYINPUT
+                | DEBUG_S_COFF_SYMBOL_RVA
+                | DEBUG_S_XFGHASH_TYPE
+                | DEBUG_S_XFGHASH_VIRTUAL
         )
     }
 }
 
+impl fmt::Debug for SubsectionKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name() {
+            Some(name) => formatter.write_str(name),
+            None => write!(formatter, "SubsectionKind({:#010x})", self.0),
+        }
+    }
+}
+
+impl fmt::LowerHex for SubsectionKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::LowerHex::fmt(&self.0, formatter)
+    }
+}
+
+impl fmt::UpperHex for SubsectionKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::UpperHex::fmt(&self.0, formatter)
+    }
+}
+
 /// The data of one C13 subsection.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LineSubsection<'a> {
     /// A [`DEBUG_S_SYMBOLS`] subsection.
@@ -279,14 +270,14 @@ pub enum LineSubsection<'a> {
     /// `cvinfo.h` tells readers to ignore the contents, so the data stays
     /// raw for all values of the other kind bits.
     Ignored {
-        /// The raw kind, with the [`DEBUG_S_IGNORE`] bit.
-        kind: u32,
+        /// The kind, with the [`DEBUG_S_IGNORE`] bit.
+        kind: SubsectionKind,
         /// The raw subsection data.
         data: &'a [u8],
     },
     /// A subsection of a kind that this crate does not decode.
     Unsupported {
-        /// The class of the raw kind.
+        /// The kind.
         kind: SubsectionKind,
         /// The raw subsection data.
         data: &'a [u8],
@@ -294,7 +285,7 @@ pub enum LineSubsection<'a> {
 }
 
 impl<'a> LineSubsection<'a> {
-    /// Decode the data of a subsection with the raw `kind`.
+    /// Decode the data of a subsection of `kind`.
     ///
     /// `data` excludes the subsection header and the alignment padding
     /// after the data, as in [`Subsection::data`](crate::native::dbi::Subsection::data).
@@ -304,42 +295,36 @@ impl<'a> LineSubsection<'a> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of the `decode` function of the kind, for example
-    /// [`LinesSubsection::decode`]. The errors do not have a file offset or
+    /// Returns the errors of the `parse` function of the kind, for example
+    /// [`LinesSubsection::parse`]. The errors do not have a file offset or
     /// a stream location.
-    pub fn decode(kind: u32, data: &'a [u8]) -> Result<Self> {
-        Ok(match SubsectionKind::from_raw(kind) {
-            SubsectionKind::Symbols => Self::Symbols(SymbolsSubsection::decode(data)?),
-            SubsectionKind::Lines => Self::Lines(LinesSubsection::decode(data)?),
-            SubsectionKind::StringTable => Self::StringTable(StringTableSubsection::decode(data)?),
-            SubsectionKind::FileChecksums => Self::FileChecksums(FileChecksums::decode(data)?),
-            SubsectionKind::FrameData => Self::FrameData(FrameDataSubsection::decode(data)?),
-            SubsectionKind::InlineeLines => Self::InlineeLines(InlineeLines::decode(data)?),
-            SubsectionKind::CrossScopeImports => {
-                Self::CrossScopeImports(CrossScopeImports::decode(data)?)
+    pub fn decode(kind: SubsectionKind, data: &'a [u8]) -> Result<Self> {
+        Ok(match kind {
+            DEBUG_S_SYMBOLS => Self::Symbols(SymbolsSubsection::parse(data)?),
+            DEBUG_S_LINES => Self::Lines(LinesSubsection::parse(data)?),
+            DEBUG_S_STRINGTABLE => Self::StringTable(StringTableSubsection::parse(data)?),
+            DEBUG_S_FILECHKSMS => Self::FileChecksums(FileChecksums::parse(data)?),
+            DEBUG_S_FRAMEDATA => Self::FrameData(FrameDataSubsection::parse(data)?),
+            DEBUG_S_INLINEELINES => Self::InlineeLines(InlineeLines::parse(data)?),
+            DEBUG_S_CROSSSCOPEIMPORTS => Self::CrossScopeImports(CrossScopeImports::parse(data)?),
+            DEBUG_S_CROSSSCOPEEXPORTS => Self::CrossScopeExports(CrossScopeExports::parse(data)?),
+            DEBUG_S_IL_LINES => Self::IlLines(LinesSubsection::parse(data)?),
+            DEBUG_S_FUNC_MDTOKEN_MAP => Self::FunctionTokenMap(TokenMap::parse(data)?),
+            DEBUG_S_TYPE_MDTOKEN_MAP => Self::TypeTokenMap(TokenMap::parse(data)?),
+            DEBUG_S_MERGED_ASSEMBLYINPUT => {
+                Self::MergedAssemblyInput(MergedAssemblyInput::parse(data)?)
             }
-            SubsectionKind::CrossScopeExports => {
-                Self::CrossScopeExports(CrossScopeExports::decode(data)?)
-            }
-            SubsectionKind::IlLines => Self::IlLines(LinesSubsection::decode(data)?),
-            SubsectionKind::FunctionTokenMap => Self::FunctionTokenMap(TokenMap::decode(data)?),
-            SubsectionKind::TypeTokenMap => Self::TypeTokenMap(TokenMap::decode(data)?),
-            SubsectionKind::MergedAssemblyInput => {
-                Self::MergedAssemblyInput(MergedAssemblyInput::decode(data)?)
-            }
-            SubsectionKind::CoffSymbolRva => Self::CoffSymbolRvas(CoffSymbolRvas::decode(data)?),
-            SubsectionKind::XfgHashType => Self::XfgTypeHashes(XfgTypeHashes::decode(data)?),
-            SubsectionKind::XfgHashVirtual => {
-                Self::XfgVirtualHashes(XfgVirtualHashes::decode(data)?)
-            }
-            SubsectionKind::Ignored(kind) => Self::Ignored { kind, data },
-            kind => Self::Unsupported { kind, data },
+            DEBUG_S_COFF_SYMBOL_RVA => Self::CoffSymbolRvas(CoffSymbolRvas::parse(data)?),
+            DEBUG_S_XFGHASH_TYPE => Self::XfgTypeHashes(XfgTypeHashes::parse(data)?),
+            DEBUG_S_XFGHASH_VIRTUAL => Self::XfgVirtualHashes(XfgVirtualHashes::parse(data)?),
+            _ if kind.is_ignored() => Self::Ignored { kind, data },
+            _ => Self::Unsupported { kind, data },
         })
     }
 
-    /// Return the raw kind of the subsection.
+    /// Return the kind of the subsection.
     #[must_use]
-    pub const fn kind(&self) -> u32 {
+    pub const fn kind(&self) -> SubsectionKind {
         match self {
             Self::Symbols(_) => DEBUG_S_SYMBOLS,
             Self::Lines(_) => DEBUG_S_LINES,
@@ -356,8 +341,7 @@ impl<'a> LineSubsection<'a> {
             Self::CoffSymbolRvas(_) => DEBUG_S_COFF_SYMBOL_RVA,
             Self::XfgTypeHashes(_) => DEBUG_S_XFGHASH_TYPE,
             Self::XfgVirtualHashes(_) => DEBUG_S_XFGHASH_VIRTUAL,
-            Self::Ignored { kind, .. } => *kind,
-            Self::Unsupported { kind, .. } => kind.raw(),
+            Self::Ignored { kind, .. } | Self::Unsupported { kind, .. } => *kind,
         }
     }
 
@@ -408,7 +392,7 @@ impl<'a> LineSubsection<'a> {
     /// 32 bits.
     pub fn encode_framed(&self, out: &mut Vec<u8>) -> Result<()> {
         let start = out.len();
-        Output::new(out).u32(self.kind())?;
+        Output::new(out).u32(self.kind().0)?;
         Output::new(out).u32(0)?;
         self.encode(out)?;
         // The header is 8 bytes, so `start + 8` is inside `out`.
@@ -432,7 +416,7 @@ macro_rules! entry_list {
         $parse:expr
     ) => {
         $(#[$list_meta])*
-        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
         pub struct $list<'a> {
             /// The serialized entries.
             entries: &'a [[u8; $size]],

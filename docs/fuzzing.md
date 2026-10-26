@@ -14,7 +14,7 @@ to the same value. It does not check that other readers accept the output.
 
 | Target | Input | Public API under test |
 | --- | --- | --- |
-| `msf` | MSF 7.0 file | `pdbrs::probe`, `Msf::read`, `Msf::with_limits`, each stream, `check_free_page_map`, `OldDirectory` |
+| `msf` | MSF 7.0 file | `pdbrs::probe`, `Msf::read`, `Msf::with_limits`, each stream, `validate_free_page_map`, `OldDirectory` |
 | `msf_repack` | selector byte, MSF file | `Msf::repack` round trip: page size and stream 0 policy, written streams, free page map |
 | `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::read`, stream bytes |
 | `msfz` | MSFZ file | `pdbrs::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
@@ -23,7 +23,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_pdb` | native PDB file | `native::Pdb` and every stream that it names: Info, named streams, TPI, IPI, hash streams, DBI, FPO, frame data, modules, symbol records, GSI, PSI |
 | `native_info` | Info stream | `Info::parse`, named stream lookup, feature codes |
 | `native_hash_table` | hash table | `HashTable::<u32>::parse`, `check_placement` |
-| `native_names` | `/names` stream | `StringTable::parse`, `get`, `find`, `verify_buckets` |
+| `native_names` | `/names` stream | `StringTable::parse`, `get`, `find`, `validate_buckets` |
 | `native_types` | hash part, TPI stream | `TypeStream`, `TypeHashes`, `TypeTable`, `ForwardRefs`, `TypeLeaf`, field lists, `type_record_hash` |
 | `native_ids` | hash part, `/names` part, TPI end, IPI stream | `IdTable`: `decode`, `validate`, `resolve_string` |
 | `native_leaf` | record kind, payload | `TypeLeaf`, `IdRecord`, `Symbol`, `FieldList`, `Integer::parse_prefix` |
@@ -42,11 +42,11 @@ to the same value. It does not check that other readers accept the output.
 | `embedded_source` | blob | `EmbeddedSource::parse`, `decode` and `encode` round trips in both formats |
 | `portable_rebuild` | Portable PDB | `copy_exact`, `to_parts`, `PdbParts::plan`, `to_embedded`, `Pdb::edit` round trips |
 | `portable_build` | builder commands | `PdbBuilder` with typed records: `plan`, `to_vec`, read back documents and sequence points |
-| `native_type_encode` | as `native_types` | `TypeLeaf::encode`, `encode_field_list`, `write_type_stream`, `TypeHashes::verify` of the output |
-| `native_id_encode` | as `native_ids` | `IdRecord::encode`, `write_type_stream` |
+| `native_type_encode` | as `native_types` | `TypeLeaf::encode`, `encode_field_list`, `encode_type_stream`, `TypeHashes::check` of the output |
+| `native_id_encode` | as `native_ids` | `IdRecord::encode`, `encode_type_stream` |
 | `native_leaf_encode` | as `native_leaf` | `TypeLeaf`, `IdRecord`, `Symbol` and `Numeric` encoders on one record |
 | `native_symbol_encode` | as `native_symbols` | `Symbol::encode`, `SymbolRecordWriter`, `ModuleSymbolWriter` |
-| `native_index_encode` | as `native_indexes` (bit 1 selects LLVM) | `GlobalSymbolIndex::build`, `PublicSymbolIndex::build` |
+| `native_index_encode` | as `native_indexes` (bit 1 selects LLVM) | `GlobalSymbolIndex::encode_parts`, `PublicSymbolIndex::encode_parts` |
 | `native_lines_encode` | as `native_lines` | `LineSubsection::encode`, `encode_framed` |
 | `native_module_encode` | as `native_module` | `ModuleStream::encode`, `ModuleLines::encode`, `ModuleStreamParts::encode` |
 | `native_info_encode` | as `native_info` | `Info::encode`, `InfoBuilder::from_info` and `encode` |
@@ -73,7 +73,7 @@ input bytes again, the target also compares the bytes. These rules apply:
 - `TypeLeaf::encode` and `IdRecord::encode` give the input bytes for a record "of a stream
   that pads its records". The targets compare the bytes only for a record with a length that
   is a multiple of 4.
-- `write_type_stream` and the GSI and PSI builders can reject decoded contents, for example
+- `encode_type_stream` and the GSI and PSI builders can reject decoded contents, for example
   an LLVM layout with hash adjusters. If they accept the contents, the output must parse
   with the same records, buckets, thunks and section starts.
 

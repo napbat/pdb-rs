@@ -28,7 +28,8 @@ const TYPE_ENTRY_SIZE: usize = 12;
 const VIRTUAL_ENTRY_SIZE: usize = 16;
 
 /// One entry of a `DEBUG_S_XFGHASH_TYPE` subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct XfgTypeHash {
     /// The XFG hash.
     pub hash: u64,
@@ -37,15 +38,6 @@ pub struct XfgTypeHash {
 }
 
 impl XfgTypeHash {
-    /// Create an entry from its fields.
-    #[must_use]
-    pub const fn new(hash: u64, function_type: TypeIndex) -> Self {
-        Self {
-            hash,
-            function_type,
-        }
-    }
-
     /// Decode a serialized entry.
     const fn parse(bytes: [u8; TYPE_ENTRY_SIZE]) -> Self {
         let [h0, h1, h2, h3, h4, h5, h6, h7, t0, t1, t2, t3] = bytes;
@@ -68,7 +60,8 @@ impl XfgTypeHash {
 }
 
 /// One entry of a `DEBUG_S_XFGHASH_VIRTUAL` subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct XfgVirtualHash {
     /// The XFG hash.
     pub hash: u64,
@@ -79,16 +72,6 @@ pub struct XfgVirtualHash {
 }
 
 impl XfgVirtualHash {
-    /// Create an entry from its fields.
-    #[must_use]
-    pub const fn new(hash: u64, class: TypeIndex, offset: u32) -> Self {
-        Self {
-            hash,
-            class,
-            offset,
-        }
-    }
-
     /// Decode a serialized entry.
     const fn parse(bytes: [u8; VIRTUAL_ENTRY_SIZE]) -> Self {
         let [
@@ -150,14 +133,14 @@ entry_list!(
 );
 
 impl<'a> XfgTypeHashes<'a> {
-    /// Decode the data of a `DEBUG_S_XFGHASH_TYPE` subsection.
+    /// Parse the data of a `DEBUG_S_XFGHASH_TYPE` subsection.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// if the size is not a multiple of 12. The error does not have a file
     /// offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         if !data.len().is_multiple_of(TYPE_ENTRY_SIZE) {
             return Err(invalid("XFG type hash size is not a multiple of 12"));
         }
@@ -179,14 +162,14 @@ impl<'a> XfgTypeHashes<'a> {
 }
 
 impl<'a> XfgVirtualHashes<'a> {
-    /// Decode the data of a `DEBUG_S_XFGHASH_VIRTUAL` subsection.
+    /// Parse the data of a `DEBUG_S_XFGHASH_VIRTUAL` subsection.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// if the size is not a multiple of 16. The error does not have a file
     /// offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         if !data.len().is_multiple_of(VIRTUAL_ENTRY_SIZE) {
             return Err(invalid("XFG virtual hash size is not a multiple of 16"));
         }

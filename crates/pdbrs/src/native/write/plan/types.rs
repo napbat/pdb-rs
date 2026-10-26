@@ -8,12 +8,12 @@ use super::super::{PdbBuilder, RecordTable};
 use super::BuildOptions;
 use crate::Result;
 use crate::native::codeview::id_record::IdTable;
-use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, NameOffset, TypeIndex};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::native::types::{
-    HashAdjuster, ReferenceLimits, TypeStream, TypeStreamOptions, TypeTable,
-    validate_type_references, write_type_stream,
+    HashAdjuster, ReferenceLimits, TypeStream, TypeStreamOptions, TypeTable, encode_type_stream,
+    validate_type_references,
 };
 
 /// A planned TPI or IPI stream.
@@ -57,7 +57,7 @@ fn adjusters<T>(table: &RecordTable<'_, T>) -> Result<Vec<HashAdjuster>> {
         .map_err(|_| no_memory())?;
     for &(position, name_offset) in &table.adjusters {
         adjusters.push(HashAdjuster {
-            name_offset,
+            name_offset: NameOffset(name_offset),
             index: record_index(position, "hash adjuster index does not fit in 32 bits")?,
         });
     }
@@ -71,17 +71,14 @@ fn write(
     options: &BuildOptions,
     hash_stream: Option<StreamId>,
 ) -> Result<PlannedTypes> {
-    let written = write_type_stream(
-        records,
-        &TypeStreamOptions {
-            index_begin: FIRST_RECORD_INDEX,
-            hash_bucket_count: options.hash_buckets,
-            hash_stream,
-            hash_aux_stream: None,
-            layout: options.hash_layout,
-            adjusters,
-        },
-    )?;
+    let stream_options = TypeStreamOptions::default()
+        .with_index_begin(FIRST_RECORD_INDEX)
+        .with_hash_bucket_count(options.hash_buckets)
+        .with_hash_stream(hash_stream)
+        .with_hash_aux_stream(None)
+        .with_producer(options.hash_layout)
+        .with_adjusters(adjusters);
+    let written = encode_type_stream(records, &stream_options)?;
     let parsed = TypeStream::parse(written.stream.clone())?;
     Ok(PlannedTypes {
         stream: written.stream,

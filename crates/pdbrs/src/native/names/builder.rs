@@ -20,11 +20,12 @@
 use alloc::vec::Vec;
 
 use super::{HashVersion, SIGNATURE, StringTable, home_bucket, name_at};
+use crate::native::codeview::index::NameOffset;
 use crate::native::output::{Output, no_memory, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// An owned string table that can grow and encode.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StringTableBuilder {
     /// The hash function version.
     version: HashVersion,
@@ -112,8 +113,8 @@ impl StringTableBuilder {
 
     /// Return the name at `offset`, without its NUL.
     #[must_use]
-    pub fn get(&self, offset: u32) -> Option<&[u8]> {
-        name_at(&self.strings, offset)
+    pub fn get(&self, offset: NameOffset) -> Option<&[u8]> {
+        name_at(&self.strings, offset.0)
     }
 
     /// Return the offset of `name`, and add the name if the table does not have it.
@@ -127,9 +128,9 @@ impl StringTableBuilder {
     /// - [`ErrorKind::InvalidReference`] if a bucket does not refer to a name.
     /// - [`ErrorKind::LimitExceeded`] if the string buffer, the bucket count or the name count
     ///   does not fit in `u32`, or if an allocation fails.
-    pub fn insert(&mut self, name: &[u8]) -> Result<u32> {
+    pub fn insert(&mut self, name: &[u8]) -> Result<NameOffset> {
         let bucket = match self.find(name)? {
-            Probe::Found(offset) => return Ok(offset),
+            Probe::Found(offset) => return Ok(NameOffset(offset)),
             Probe::Empty(bucket) => bucket,
         };
         let offset = to_u32(self.strings.len(), "string table buffer is too large")?;
@@ -146,7 +147,7 @@ impl StringTableBuilder {
             to_u32(grown, "string table bucket count")?;
             self.rehash(grown)?;
         }
-        Ok(offset)
+        Ok(NameOffset(offset))
     }
 
     /// Append the serialized table to `out`.
@@ -159,7 +160,7 @@ impl StringTableBuilder {
         let mut output = Output::new(out);
         output.reserve(16 + self.strings.len() + self.buckets.len() * 4)?;
         output.u32(SIGNATURE)?;
-        output.u32(self.version.value())?;
+        output.u32(self.version.raw())?;
         output.u32(to_u32(self.strings.len(), "string table buffer size")?)?;
         output.bytes(&self.strings)?;
         output.u32(to_u32(self.buckets.len(), "string table bucket count")?)?;

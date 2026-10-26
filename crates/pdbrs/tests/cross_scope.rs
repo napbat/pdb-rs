@@ -1,11 +1,11 @@
 //! Tests for the reference validation of cross-scope subsections (#31).
 
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::index::{IdIndex, NameOffset, TypeIndex};
 use pdbrs::native::dbi::{Dbi, ModuleRegionSizes, ModuleStream, ModuleStreamParts};
 use pdbrs::native::lines::{
     CrossScopeContext, CrossScopeExport, CrossScopeImport, CrossScopeModules, CrossScopeRule,
     DEBUG_S_CROSSSCOPEEXPORTS, DEBUG_S_CROSSSCOPEIMPORTS, LineSubsection, ModuleLines,
-    validate_cross_scope,
+    SubsectionKind, validate_cross_scope,
 };
 use pdbrs::native::names::{HashVersion, StringTable, StringTableBuilder};
 
@@ -30,7 +30,7 @@ fn module_dbi(sizes: ModuleRegionSizes) -> Dbi {
 }
 
 /// Build a module stream with the framed subsections `(kind, data)`.
-fn module_stream(subsections: &[(u32, Vec<u8>)]) -> ModuleStream {
+fn module_stream(subsections: &[(SubsectionKind, Vec<u8>)]) -> ModuleStream {
     let mut c13 = Vec::new();
     for (kind, data) in subsections {
         LineSubsection::decode(*kind, data)
@@ -38,25 +38,23 @@ fn module_stream(subsections: &[(u32, Vec<u8>)]) -> ModuleStream {
             .encode_framed(&mut c13)
             .unwrap();
     }
-    let parts = ModuleStreamParts {
-        symbols: None,
-        c11: &[],
-        c13: &c13,
-        global_refs: &[],
-    };
-    let encoded = parts.encode().unwrap();
-    let dbi = module_dbi(encoded.sizes);
+    let mut parts = ModuleStreamParts::default();
+    parts.c13 = &c13;
+    let mut bytes = Vec::new();
+    let sizes = parts.encode(&mut bytes).unwrap();
+    let dbi = module_dbi(sizes);
     let module = dbi.modules().next().unwrap().unwrap();
-    ModuleStream::parse(encoded.bytes, &module).unwrap()
+    ModuleStream::parse(bytes, &module).unwrap()
 }
 
 /// Return the data of an export subsection with `(local, global)` pairs.
 fn exports(pairs: &[(u32, u32)]) -> Vec<u8> {
     let mut data = Vec::new();
     for &(local, global) in pairs {
-        CrossScopeExport::new(local, global)
-            .encode(&mut data)
-            .unwrap();
+        let mut export = CrossScopeExport::default();
+        export.local_id = local;
+        export.global_id = global;
+        export.encode(&mut data).unwrap();
     }
     data
 }
@@ -65,7 +63,7 @@ fn exports(pairs: &[(u32, u32)]) -> Vec<u8> {
 fn imports(entries: &[(u32, &[u32])]) -> Vec<u8> {
     let mut data = Vec::new();
     for &(offset, ids) in entries {
-        CrossScopeImport::encode_parts(offset, ids, &mut data).unwrap();
+        CrossScopeImport::encode_parts(NameOffset(offset), ids, &mut data).unwrap();
     }
     data
 }
@@ -124,9 +122,9 @@ fn checks_export_global_ids_by_stream() {
 #[test]
 fn checks_imports_against_names_and_module_exports() {
     let mut builder = StringTableBuilder::new(HashVersion::V1).unwrap();
-    let exporter = builder.insert(b"C:\\OBJ\\A.OBJ").unwrap();
-    let silent = builder.insert(b"b.obj").unwrap();
-    let missing = builder.insert(b"c.obj").unwrap();
+    let exporter = builder.insert(b"C:\\OBJ\\A.OBJ").unwrap().0;
+    let silent = builder.insert(b"b.obj").unwrap().0;
+    let missing = builder.insert(b"c.obj").unwrap().0;
     let mut names_bytes = Vec::new();
     builder.encode(&mut names_bytes).unwrap();
     let names = StringTable::parse(&names_bytes).unwrap();

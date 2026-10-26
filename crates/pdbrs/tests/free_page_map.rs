@@ -110,7 +110,7 @@ fn basic(active: u32) -> Image {
 fn consistent_maps_report_free_old_directory_pages_and_no_leaks() {
     for active in [1, 2] {
         let image = basic(active);
-        let report = image.msf().check_free_page_map().unwrap();
+        let report = image.msf().validate_free_page_map().unwrap();
         assert_eq!(report.active(), active);
         assert_eq!(report.old_directory_free_pages(), 2);
         assert_eq!(report.old_directory_allocated_pages(), 0);
@@ -122,7 +122,7 @@ fn consistent_maps_report_free_old_directory_pages_and_no_leaks() {
 fn allocated_old_directory_pages_are_accepted_and_counted() {
     let mut image = basic(1);
     image.set_free(6, false);
-    let report = image.msf().check_free_page_map().unwrap();
+    let report = image.msf().validate_free_page_map().unwrap();
     assert_eq!(report.old_directory_free_pages(), 1);
     assert_eq!(report.old_directory_allocated_pages(), 1);
 }
@@ -133,7 +133,7 @@ fn allocated_pages_without_a_reference_are_reported_as_runs() {
     for page in [8, 11, 12, 13, 15] {
         image.set_free(page, false);
     }
-    let report = image.msf().check_free_page_map().unwrap();
+    let report = image.msf().validate_free_page_map().unwrap();
     let expected: [Range<u32>; 3] = [8..9, 11..14, 15..16];
     assert_eq!(report.unreferenced_allocated(), &expected);
     assert_eq!(report.unreferenced_allocated_count(), 5);
@@ -145,7 +145,7 @@ fn free_referenced_pages_are_rejected_at_their_bitmap_byte() {
     for page in [0, 1, 2, 3, 4, 7, 9, 10] {
         let mut image = basic(1);
         image.set_free(page, true);
-        let error = image.msf().check_free_page_map().unwrap_err();
+        let error = image.msf().validate_free_page_map().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "page {page}");
         let offset = u64::try_from(image.fpm_offset(page)).unwrap();
         assert_eq!(error.offset(), Some(offset), "page {page}");
@@ -160,7 +160,7 @@ fn bits_after_the_declared_pages_are_ignored() {
     image.bytes.truncate(13 * PAGE);
     let offset = image.fpm_offset(13);
     image.bytes[offset] &= 0b0001_1111;
-    let report = image.msf().check_free_page_map().unwrap();
+    let report = image.msf().validate_free_page_map().unwrap();
     assert_eq!(report.unreferenced_allocated_count(), 0);
 }
 
@@ -170,12 +170,12 @@ fn the_bitmap_continues_in_the_map_page_of_the_next_interval() {
     let page_count = 4096 + 600;
     let streams = [(0, Vec::new()), (1024, vec![4100, 4101])];
     let mut image = Image::new(page_count, 1, &streams);
-    let report = image.msf().check_free_page_map().unwrap();
+    let report = image.msf().validate_free_page_map().unwrap();
     assert_eq!(report.unreferenced_allocated_count(), 0);
     assert_eq!(image.fpm_offset(4100), 513 * PAGE);
 
     image.set_free(4101, true);
-    let error = image.msf().check_free_page_map().unwrap_err();
+    let error = image.msf().validate_free_page_map().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.offset(), Some(u64::try_from(513 * PAGE).unwrap()));
 
@@ -184,6 +184,6 @@ fn the_bitmap_continues_in_the_map_page_of_the_next_interval() {
         assert!(is_reserved(reserved));
     }
     image.set_free(4098, true);
-    let error = image.msf().check_free_page_map().unwrap_err();
+    let error = image.msf().validate_free_page_map().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

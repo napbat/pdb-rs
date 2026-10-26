@@ -2,19 +2,20 @@
 
 use alloc::vec::Vec;
 
-use super::{FileChecksums, LineSubsection, invalid, too_large};
+use super::{FileChecksums, LineSubsection, SubsectionKind, invalid, too_large};
+use crate::native::codeview::index::ChecksumOffset;
 use crate::native::dbi::ModuleStream;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
 /// One decoded subsection of a module stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ModuleSubsection<'a> {
     /// The offset of the subsection header in the C13 line region.
     pub offset: u32,
-    /// The raw subsection kind.
-    pub kind: u32,
+    /// The subsection kind.
+    pub kind: SubsectionKind,
     /// The decoded data.
     pub data: LineSubsection<'a>,
 }
@@ -23,7 +24,7 @@ pub struct ModuleSubsection<'a> {
 ///
 /// A module has at most one file checksum subsection. Line blocks and
 /// inlinee entries refer to its entries by byte offset.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ModuleLines<'a> {
     /// The module stream index for errors.
     stream: u32,
@@ -39,7 +40,7 @@ impl<'a> ModuleLines<'a> {
     /// Frame and decode all subsections of the C13 line region of `module`.
     ///
     /// The function does not check the file checksum references. Call
-    /// [`ModuleLines::validate`] for that.
+    /// [`ModuleLines::check`] for that.
     ///
     /// # Errors
     ///
@@ -140,9 +141,9 @@ impl<'a> ModuleLines<'a> {
     /// identify an entry, or if the module has references but no file
     /// checksum subsection. The error identifies the module stream and the
     /// header of the subsection with the reference.
-    pub fn validate(&self) -> Result<()> {
+    pub fn check(&self) -> Result<()> {
         let checksums = self.checksums();
-        let check = |offset: u32, subsection: &ModuleSubsection<'a>| {
+        let check = |offset: ChecksumOffset, subsection: &ModuleSubsection<'a>| {
             if checksums.is_some_and(|table| table.contains(offset)) {
                 Ok(())
             } else {

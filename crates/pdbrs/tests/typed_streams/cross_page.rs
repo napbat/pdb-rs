@@ -1,7 +1,7 @@
 //! Records and fields that cross a page boundary of a stream with noncontiguous pages.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ChecksumOffset, NameOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::dbi::{Dbi, DebugStream, Module, ModuleStream};
@@ -54,9 +54,9 @@ fn names_string_across_pages_resolves() {
         assert_eq!(names, expected, "{order:?}");
         let table = StringTable::parse(&names).unwrap();
         let name = string_name(index);
-        assert_eq!(table.get(*offset).unwrap(), name.as_slice());
-        assert_eq!(table.find(&name).unwrap(), Some(*offset));
-        table.verify_buckets().unwrap();
+        assert_eq!(table.get(NameOffset(*offset)).unwrap(), name.as_slice());
+        assert_eq!(table.find(&name).unwrap(), Some(NameOffset(*offset)));
+        table.validate_buckets().unwrap();
     }
 }
 
@@ -169,12 +169,12 @@ fn module_symbol_and_checksum_across_pages_decode_like_one_buffer() {
         let entry = lines
             .checksums()
             .unwrap()
-            .get(TARGET_CHECKSUM_OFFSET)
+            .get(ChecksumOffset(TARGET_CHECKSUM_OFFSET))
             .unwrap();
         assert_eq!(entry.kind, ChecksumKind::Sha256);
-        assert_eq!(entry.name_offset, 12);
+        assert_eq!(entry.name_offset, NameOffset(12));
         assert_eq!(entry.checksum, sha256(11));
-        lines.validate().unwrap();
+        lines.check().unwrap();
     }
 }
 

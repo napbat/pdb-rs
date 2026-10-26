@@ -166,11 +166,11 @@ fn address_translation_round_trips_inside_sections() {
         assert_eq!(map.image_section_rva(address).unwrap(), Rva(rva));
         assert_eq!(map.image_section_offset(Rva(rva)).unwrap(), address);
         assert_eq!(
-            map.image_rva(PdbRva(rva)).unwrap(),
+            map.pdb_rva_to_rva(PdbRva(rva)).unwrap(),
             Translation::Mapped(Rva(rva))
         );
         assert_eq!(
-            map.to_pdb_rva(Rva(rva)).unwrap(),
+            map.rva_to_pdb_rva(Rva(rva)).unwrap(),
             Translation::Mapped(PdbRva(rva))
         );
     }
@@ -218,8 +218,8 @@ fn omap_slots_without_tables_make_translation_fail() {
             ErrorKind::MissingStream,
         );
         assert_error(map.section_offset(Rva(0x1000)), ErrorKind::MissingStream);
-        assert_error(map.image_rva(PdbRva(0x1000)), ErrorKind::MissingStream);
-        assert_error(map.to_pdb_rva(Rva(0x1000)), ErrorKind::MissingStream);
+        assert_error(map.pdb_rva_to_rva(PdbRva(0x1000)), ErrorKind::MissingStream);
+        assert_error(map.rva_to_pdb_rva(Rva(0x1000)), ErrorKind::MissingStream);
         // The image section headers do not need OMAP.
         assert_eq!(
             map.image_section_rva(SectionOffset {

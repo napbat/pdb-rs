@@ -2,6 +2,7 @@
 //! section contributions, the section map and the source file info.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::ModuleIndex;
 use pdbrs::native::dbi::{
     Dbi, DbiBuilder, DbiHeader, Module, OwnedModule, OwnedModuleSources, OwnedSectionMap,
     OwnedSourceInfo, SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
@@ -9,6 +10,7 @@ use pdbrs::native::dbi::{
     SourceInfo, Substream,
 };
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::section::Machine;
 
 fn words(values: &[u32]) -> Vec<u8> {
     values
@@ -27,19 +29,19 @@ fn assert_error<T: core::fmt::Debug>(result: pdbrs::Result<T>, kind: ErrorKind) 
 }
 
 fn header() -> DbiHeader {
-    DbiHeader {
-        age: 7,
-        global_stream: Some(StreamId(0x10)),
-        build_number: 0x8e33,
-        public_stream: None,
-        pdb_dll_version: 0x8da0,
-        symbol_stream: Some(StreamId(0x12)),
-        pdb_dll_rebuild: 3,
-        mfc_type_server_index: 0x0102_0304,
-        flags: 0xfff5,
-        machine: 0x8664,
-        reserved: 0xa5a5_a5a5,
-    }
+    let mut header = DbiHeader::default();
+    header.age = 7;
+    header.global_stream = Some(StreamId(0x10));
+    header.build_number = 0x8e33;
+    header.public_stream = None;
+    header.pdb_dll_version = 0x8da0;
+    header.symbol_stream = Some(StreamId(0x12));
+    header.pdb_dll_rebuild = 3;
+    header.mfc_type_server_index = 0x0102_0304;
+    header.flags = 0xfff5;
+    header.machine = Machine::AMD64;
+    header.reserved = 0xa5a5_a5a5;
+    header
 }
 
 #[test]
@@ -87,7 +89,11 @@ fn header_rejects_values_that_do_not_fit() {
     let mut bytes = vec![9];
     let too_large = usize::try_from(i32::MAX).unwrap() + 1;
     let mut sizes = [0; 7];
-    sizes[Substream::Ec as usize] = too_large;
+    let ec = Substream::ALL
+        .iter()
+        .position(|&kind| kind == Substream::Ec)
+        .unwrap();
+    sizes[ec] = too_large;
     assert_error(
         header().encode(&sizes, &mut bytes),
         ErrorKind::LimitExceeded,
@@ -165,7 +171,7 @@ fn module_records_decode_and_encode_all_fields() {
             contribution.padding1,
             contribution.module
         ),
-        (2, 0xaaaa, 7)
+        (2, 0xaaaa, ModuleIndex(7))
     );
     assert_eq!(
         (contribution.data_crc, contribution.reloc_crc),
@@ -234,18 +240,18 @@ fn module_encode_rejects_bad_values() {
 
 fn contribution(version: SectionContributionVersion) -> SectionContribution {
     let crc = version != SectionContributionVersion::V40;
-    SectionContribution {
-        section: 1,
-        padding1: 0xcccc,
-        offset: -4,
-        size: 16,
-        characteristics: 0x6000_0020,
-        module: 2,
-        padding2: 0xdddd,
-        data_crc: crc.then_some(7),
-        reloc_crc: crc.then_some(8),
-        coff_section: (version == SectionContributionVersion::V2).then_some(9),
-    }
+    let mut contribution = SectionContribution::default();
+    contribution.section = 1;
+    contribution.padding1 = 0xcccc;
+    contribution.offset = -4;
+    contribution.size = 16;
+    contribution.characteristics = 0x6000_0020;
+    contribution.module = ModuleIndex(2);
+    contribution.padding2 = 0xdddd;
+    contribution.data_crc = crc.then_some(7);
+    contribution.reloc_crc = crc.then_some(8);
+    contribution.coff_section = (version == SectionContributionVersion::V2).then_some(9);
+    contribution
 }
 
 #[test]
@@ -300,6 +306,26 @@ fn section_contribution_encode_errors() {
 }
 
 #[test]
+fn section_contribution_module_index_fits_in_16_bits() {
+    let mut record = contribution(SectionContributionVersion::V60);
+    record.module = ModuleIndex(0xffff);
+    let mut bytes = Vec::new();
+    record
+        .encode(SectionContributionVersion::V60, &mut bytes)
+        .unwrap();
+    let stream = [words(&[SECTION_CONTRIBUTION_V60]), bytes].concat();
+    let parsed = SectionContributions::parse(&stream).unwrap();
+    assert_eq!(parsed.iter().next().unwrap().module, ModuleIndex(0xffff));
+    record.module = ModuleIndex(0x1_0000);
+    let mut bytes = vec![3];
+    assert_error(
+        record.encode(SectionContributionVersion::V60, &mut bytes),
+        ErrorKind::LimitExceeded,
+    );
+    assert_eq!(bytes, [3]);
+}
+
+#[test]
 fn v40_substream_cannot_start_with_a_version_value() {
     // The first word of this V40 record equals the V60 version value. A
     // reader would then select the V60 layout, so the encoder rejects it.
@@ -317,16 +343,16 @@ fn v40_substream_cannot_start_with_a_version_value() {
 }
 
 fn map_entry(frame: u16) -> SectionMapEntry {
-    SectionMapEntry {
-        flags: SegmentFlags(0x010d),
-        overlay: 1,
-        group: 2,
-        frame,
-        section_name: 0xffff,
-        class_name: 0xfffe,
-        offset: 0x10,
-        length: 0x2000,
-    }
+    let mut entry = SectionMapEntry::default();
+    entry.flags = SegmentFlags(0x010d);
+    entry.overlay = 1;
+    entry.group = 2;
+    entry.frame = frame;
+    entry.section_name = 0xffff;
+    entry.class_name = 0xfffe;
+    entry.offset = 0x10;
+    entry.length = 0x2000;
+    entry
 }
 
 #[test]
@@ -350,16 +376,12 @@ fn section_map_round_trip() {
 
 #[test]
 fn section_map_count_overflow() {
-    let map = OwnedSectionMap {
-        logical_count: 0,
-        entries: vec![SectionMapEntry::default(); 65_536],
-    };
+    let mut map = OwnedSectionMap::default();
+    map.logical_count = 0;
+    map.entries = vec![SectionMapEntry::default(); 65_536];
     let mut bytes = Vec::new();
     assert_error(map.encode(&mut bytes), ErrorKind::LimitExceeded);
-    let map = OwnedSectionMap {
-        logical_count: 0,
-        entries: vec![SectionMapEntry::default(); 65_535],
-    };
+    map.entries.truncate(65_535);
     map.encode(&mut bytes).unwrap();
     assert_eq!(bytes.len(), 4 + 65_535 * 20);
 }
@@ -427,19 +449,17 @@ fn source_info_16_bit_overflow() {
     info.encode(&mut bytes).unwrap();
     assert_eq!(SourceInfo::parse(&bytes).unwrap().file_count(), 70_000);
 
-    let wide = OwnedSourceInfo {
-        raw_file_count: 0,
-        modules: vec![OwnedModuleSources {
-            raw_start: 0,
-            name_offsets: vec![0; 65_536],
-        }],
-        names: vec![0; 4],
-    };
+    let mut module = OwnedModuleSources::default();
+    module.raw_start = 0;
+    module.name_offsets = vec![0; 65_536];
+    let mut wide = OwnedSourceInfo::default();
+    wide.raw_file_count = 0;
+    wide.modules = vec![module];
+    wide.names = vec![0; 4];
     assert_error(wide.encode(&mut Vec::new()), ErrorKind::LimitExceeded);
-    let many = OwnedSourceInfo {
-        raw_file_count: 0,
-        modules: vec![OwnedModuleSources::default(); 65_536],
-        names: Vec::new(),
-    };
+    let mut many = OwnedSourceInfo::default();
+    many.raw_file_count = 0;
+    many.modules = vec![OwnedModuleSources::default(); 65_536];
+    many.names = Vec::new();
     assert_error(many.encode(&mut Vec::new()), ErrorKind::LimitExceeded);
 }

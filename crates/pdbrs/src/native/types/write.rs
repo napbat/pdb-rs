@@ -1,6 +1,6 @@
 //! Writers of TPI and IPI streams and their hash streams.
 //!
-//! [`write_type_stream`] takes the complete records of a stream and gives
+//! [`encode_type_stream`] takes the complete records of a stream and gives
 //! the stream bytes and the hash stream bytes. The hash stream has three
 //! buffers:
 //!
@@ -14,13 +14,15 @@
 //!
 //! Microsoft `link.exe` and LLVM `lld-link` order the buffers differently,
 //! and they select the records of the index offset pairs with different
-//! rules. [`HashLayout`] selects the form of one producer.
+//! rules. [`TypeStreamOptions::with_producer`] selects the form of one
+//! producer.
 
 use alloc::vec::Vec;
 
 use super::{
     HEADER_SIZE, HashAdjuster, HashBuffer, IndexOffset, TPI_V80, TypeHeader, type_record_hash,
 };
+use crate::native::Producer;
 use crate::native::codeview::Records;
 use crate::native::codeview::index::FIRST_RECORD_INDEX;
 use crate::native::msf::StreamId;
@@ -39,73 +41,45 @@ const NIL_STREAM: u16 = 0xffff;
 /// The hash key size that version 8.0 requires.
 const HASH_KEY_SIZE: u32 = 4;
 
-/// The layout of the hash stream and the rule for index offset pairs.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum HashLayout {
-    /// Microsoft `tpi.cpp`.
-    ///
-    /// - The buffers are the hash values, the index offsets and the hash
-    ///   adjusters, in this order.
-    /// - A record gets an index offset pair if it is the first record, or
-    ///   if its start offset is in a later 8 KiB block than the offset of
-    ///   the last pair (`TPI1::RecordTiOff`).
-    /// - Without a hash stream, each buffer has the offset 0 and the length
-    ///   `0xffff_ffff`.
-    Microsoft,
-    /// LLVM `TpiStreamBuilder`.
-    ///
-    /// - The buffers are the hash values and the index offsets. The empty
-    ///   hash adjuster buffer has the offset of the end of the hash values.
-    /// - A record gets an index offset pair if it is the first record, or
-    ///   if its end is in a later 8 KiB block than its start
-    ///   (`updateTypeIndexOffsets`).
-    /// - Without a hash stream, each buffer has the offset 0 and the length 0.
-    Llvm,
-}
-
-impl HashLayout {
-    /// Return the layout that a header shows.
-    ///
-    /// A header with a hash stream and index offsets that start where the
-    /// empty hash adjuster buffer starts is [`HashLayout::Llvm`]. A header
-    /// without a hash stream and with zero-length buffers is
-    /// [`HashLayout::Llvm`] too. All other headers are
-    /// [`HashLayout::Microsoft`]. The two layouts give the same bytes when
-    /// they cannot be told apart.
-    #[must_use]
-    pub const fn of(header: &TypeHeader) -> Self {
-        let adjusters = header.hash_adjustments;
-        let offsets = header.index_offsets;
-        let llvm = match header.hash_stream {
-            Some(_) => {
-                adjusters.length == 0 && offsets.length != 0 && adjusters.offset == offsets.offset
-            }
-            None => header.hash_values.length == 0,
-        };
-        if llvm { Self::Llvm } else { Self::Microsoft }
-    }
-}
-
 /// The parameters of a TPI or IPI stream.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// The [`Default`] value gives a stream that starts at
+/// [`FIRST_RECORD_INDEX`], with [`DEFAULT_HASH_BUCKETS`], without a hash
+/// stream, in the [`Producer::Microsoft`] layout and without hash adjusters.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TypeStreamOptions<'a> {
-    /// The index of the first record, usually [`FIRST_RECORD_INDEX`].
-    pub index_begin: u32,
-    /// The number of hash buckets, usually [`DEFAULT_HASH_BUCKETS`].
-    pub hash_bucket_count: u32,
+    /// The index of the first record.
+    index_begin: u32,
+    /// The number of hash buckets.
+    hash_bucket_count: u32,
     /// The stream of the hash data. `None` writes no hash stream.
-    pub hash_stream: Option<StreamId>,
+    hash_stream: Option<StreamId>,
     /// The stream of the auxiliary hash data, if present.
-    pub hash_aux_stream: Option<StreamId>,
-    /// The hash stream layout and the index offset rule.
-    pub layout: HashLayout,
+    hash_aux_stream: Option<StreamId>,
+    /// The producer whose hash stream layout and index offset rule the
+    /// writer follows.
+    producer: Producer,
     /// The hash adjusters, in the order that the producer added them.
-    pub adjusters: &'a [HashAdjuster],
+    adjusters: &'a [HashAdjuster],
+}
+
+impl Default for TypeStreamOptions<'_> {
+    fn default() -> Self {
+        Self {
+            index_begin: FIRST_RECORD_INDEX,
+            hash_bucket_count: DEFAULT_HASH_BUCKETS,
+            hash_stream: None,
+            hash_aux_stream: None,
+            producer: Producer::Microsoft,
+            adjusters: &[],
+        }
+    }
 }
 
 impl<'a> TypeStreamOptions<'a> {
     /// Return the options of a stream with `header`, so that the writer keeps
-    /// its hash parameters and its producer layout.
+    /// its hash parameters and its producer layout
+    /// ([`TypeHeader::producer`]).
     #[must_use]
     pub const fn from_header(header: &TypeHeader, adjusters: &'a [HashAdjuster]) -> Self {
         Self {
@@ -113,14 +87,112 @@ impl<'a> TypeStreamOptions<'a> {
             hash_bucket_count: header.hash_bucket_count,
             hash_stream: header.hash_stream,
             hash_aux_stream: header.hash_aux_stream,
-            layout: HashLayout::of(header),
+            producer: header.producer(),
             adjusters,
         }
+    }
+
+    /// Set the index of the first record, usually [`FIRST_RECORD_INDEX`].
+    #[must_use]
+    pub const fn with_index_begin(mut self, index_begin: u32) -> Self {
+        self.index_begin = index_begin;
+        self
+    }
+
+    /// Return the index of the first record.
+    #[must_use]
+    pub const fn index_begin(self) -> u32 {
+        self.index_begin
+    }
+
+    /// Set the number of hash buckets, usually [`DEFAULT_HASH_BUCKETS`].
+    #[must_use]
+    pub const fn with_hash_bucket_count(mut self, hash_bucket_count: u32) -> Self {
+        self.hash_bucket_count = hash_bucket_count;
+        self
+    }
+
+    /// Return the number of hash buckets.
+    #[must_use]
+    pub const fn hash_bucket_count(self) -> u32 {
+        self.hash_bucket_count
+    }
+
+    /// Set the stream of the hash data. `None` writes no hash stream.
+    #[must_use]
+    pub const fn with_hash_stream(mut self, hash_stream: Option<StreamId>) -> Self {
+        self.hash_stream = hash_stream;
+        self
+    }
+
+    /// Return the stream of the hash data.
+    #[must_use]
+    pub const fn hash_stream(self) -> Option<StreamId> {
+        self.hash_stream
+    }
+
+    /// Set the stream of the auxiliary hash data.
+    #[must_use]
+    pub const fn with_hash_aux_stream(mut self, hash_aux_stream: Option<StreamId>) -> Self {
+        self.hash_aux_stream = hash_aux_stream;
+        self
+    }
+
+    /// Return the stream of the auxiliary hash data.
+    #[must_use]
+    pub const fn hash_aux_stream(self) -> Option<StreamId> {
+        self.hash_aux_stream
+    }
+
+    /// Set the producer whose hash stream layout and index offset rule the
+    /// writer follows:
+    ///
+    /// - [`Producer::Microsoft`] (Microsoft `tpi.cpp`):
+    ///   - The buffers are the hash values, the index offsets and the hash
+    ///     adjusters, in this order.
+    ///   - A record gets an index offset pair if it is the first record, or
+    ///     if its start offset is in a later 8 KiB block than the offset of
+    ///     the last pair (`TPI1::RecordTiOff`).
+    ///   - Without a hash stream, each buffer has the offset 0 and the
+    ///     length `0xffff_ffff`.
+    /// - [`Producer::Llvm`] (LLVM `TpiStreamBuilder`):
+    ///   - The buffers are the hash values and the index offsets. The empty
+    ///     hash adjuster buffer has the offset of the end of the hash values.
+    ///   - A record gets an index offset pair if it is the first record, or
+    ///     if its end is in a later 8 KiB block than its start
+    ///     (`updateTypeIndexOffsets`).
+    ///   - Without a hash stream, each buffer has the offset 0 and the
+    ///     length 0.
+    ///   - The writer rejects hash adjusters.
+    #[must_use]
+    pub const fn with_producer(mut self, producer: Producer) -> Self {
+        self.producer = producer;
+        self
+    }
+
+    /// Return the producer whose hash stream layout the writer follows.
+    #[must_use]
+    pub const fn producer(self) -> Producer {
+        self.producer
+    }
+
+    /// Set the hash adjusters, in the order that the producer added them.
+    #[must_use]
+    pub const fn with_adjusters(mut self, adjusters: &'a [HashAdjuster]) -> Self {
+        self.adjusters = adjusters;
+        self
+    }
+
+    /// Return the hash adjusters.
+    #[must_use]
+    pub const fn adjusters(self) -> &'a [HashAdjuster] {
+        self.adjusters
     }
 }
 
 /// The bytes of a written TPI or IPI stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeStreamBytes {
     /// The stream: the header and the records.
     pub stream: Vec<u8>,
@@ -138,20 +210,20 @@ fn no_memory() -> Error {
     Error::new(ErrorKind::LimitExceeded, None).with_context("type stream cannot be allocated")
 }
 
-/// Return the index offset pairs of records with `sizes` under `layout`.
-fn index_offsets(sizes: &[u32], index_begin: u32, layout: HashLayout) -> Result<Vec<IndexOffset>> {
+/// Return the index offset pairs of records with `sizes` under the layout of `producer`.
+fn index_offsets(sizes: &[u32], index_begin: u32, producer: Producer) -> Result<Vec<IndexOffset>> {
     let mut pairs: Vec<IndexOffset> = Vec::new();
     let mut offset = 0_u32;
     for (index, &size) in (index_begin..).zip(sizes) {
         let end = offset
             .checked_add(size)
             .ok_or_else(|| too_large("type record bytes do not fit in 32 bits"))?;
-        let add = match (layout, pairs.last()) {
+        let add = match (producer, pairs.last()) {
             (_, None) => true,
-            (HashLayout::Microsoft, Some(last)) => {
+            (Producer::Microsoft, Some(last)) => {
                 last.offset / INDEX_OFFSET_BLOCK < offset / INDEX_OFFSET_BLOCK
             }
-            (HashLayout::Llvm, Some(_)) => end / INDEX_OFFSET_BLOCK > offset / INDEX_OFFSET_BLOCK,
+            (Producer::Llvm, Some(_)) => end / INDEX_OFFSET_BLOCK > offset / INDEX_OFFSET_BLOCK,
         };
         if add {
             pairs.try_reserve(1).map_err(|_| no_memory())?;
@@ -162,7 +234,7 @@ fn index_offsets(sizes: &[u32], index_begin: u32, layout: HashLayout) -> Result<
     Ok(pairs)
 }
 
-/// Serialize hash adjusters as Microsoft `Map::save` does after `Map::add`
+/// Encode hash adjusters as Microsoft `Map::save` does after `Map::add`
 /// of each adjuster in order.
 ///
 /// The map starts with one slot. A key goes to the first free slot from
@@ -176,7 +248,7 @@ fn index_offsets(sizes: &[u32], index_begin: u32, layout: HashLayout) -> Result<
 /// # Errors
 ///
 /// Returns [`ErrorKind::LimitExceeded`] if the map cannot be allocated.
-pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
+pub fn encode_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
     let mut slots: Vec<Option<HashAdjuster>> = Vec::new();
     slots.try_reserve(1).map_err(|_| no_memory())?;
     slots.push(None);
@@ -223,7 +295,7 @@ pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
     }
     Output::new(&mut out).u32(0)?;
     for entry in slots.iter().flatten() {
-        Output::new(&mut out).u32(entry.name_offset)?;
+        Output::new(&mut out).u32(entry.name_offset.0)?;
         Output::new(&mut out).u32(entry.index)?;
     }
     Ok(out)
@@ -232,8 +304,8 @@ pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
 /// Insert or replace an adjuster. Return `true` for a new key.
 fn insert(slots: &mut [Option<HashAdjuster>], adjuster: HashAdjuster) -> bool {
     let count = slots.len();
-    let start = usize::from(adjuster.name_offset.to_le_bytes()[0])
-        | usize::from(adjuster.name_offset.to_le_bytes()[1]) << 8;
+    let start = usize::from(adjuster.name_offset.0.to_le_bytes()[0])
+        | usize::from(adjuster.name_offset.0.to_le_bytes()[1]) << 8;
     let mut position = start % count;
     loop {
         match &mut slots[position] {
@@ -265,7 +337,7 @@ fn insert(slots: &mut [Option<HashAdjuster>], adjuster: HashAdjuster) -> bool {
 /// - [`ErrorKind::LimitExceeded`] if a count or a size does not fit its
 ///   field, or if the output cannot be allocated.
 /// - The errors of [`type_record_hash`].
-pub fn write_type_stream(
+pub fn encode_type_stream(
     records: &[u8],
     options: &TypeStreamOptions<'_>,
 ) -> Result<TypeStreamBytes> {
@@ -273,7 +345,7 @@ pub fn write_type_stream(
         return Err(Error::new(ErrorKind::InvalidFormat, None)
             .with_context("type stream options are not valid"));
     }
-    if options.layout == HashLayout::Llvm && !options.adjusters.is_empty() {
+    if options.producer == Producer::Llvm && !options.adjusters.is_empty() {
         return Err(Error::new(ErrorKind::InvalidFormat, None)
             .with_context("the LLVM hash layout has no hash adjusters"));
     }
@@ -303,15 +375,15 @@ pub fn write_type_stream(
         Some(_) => Some(hash_stream(&sizes, &hashes, options)?),
         None => None,
     };
-    let buffers = match (&hash_stream, options.layout) {
+    let buffers = match (&hash_stream, options.producer) {
         (Some((_, buffers)), _) => *buffers,
-        (None, HashLayout::Microsoft) => {
+        (None, Producer::Microsoft) => {
             [HashBuffer {
                 offset: 0,
                 length: u32::MAX,
             }; 3]
         }
-        (None, HashLayout::Llvm) => {
+        (None, Producer::Llvm) => {
             [HashBuffer {
                 offset: 0,
                 length: 0,
@@ -362,11 +434,11 @@ fn hash_stream(
     hashes: &[u32],
     options: &TypeStreamOptions<'_>,
 ) -> Result<(Vec<u8>, [HashBuffer; 3])> {
-    let pairs = index_offsets(sizes, options.index_begin, options.layout)?;
+    let pairs = index_offsets(sizes, options.index_begin, options.producer)?;
     let adjusters = if options.adjusters.is_empty() {
         Vec::new()
     } else {
-        serialize_hash_adjusters(options.adjusters)?
+        encode_hash_adjusters(options.adjusters)?
     };
     let length = |bytes: usize| {
         u32::try_from(bytes).map_err(|_| too_large("type hash buffer does not fit in 32 bits"))
@@ -382,8 +454,8 @@ fn hash_stream(
         offset: 0,
         length: values_length,
     };
-    let (index_offsets, hash_adjustments) = match options.layout {
-        HashLayout::Microsoft => {
+    let (index_offsets, hash_adjustments) = match options.producer {
+        Producer::Microsoft => {
             let pairs_end = values_length
                 .checked_add(pairs_length)
                 .ok_or_else(|| too_large("type hash stream does not fit in 32 bits"))?;
@@ -398,7 +470,7 @@ fn hash_stream(
                 },
             )
         }
-        HashLayout::Llvm => (
+        Producer::Llvm => (
             HashBuffer {
                 offset: offset(values_length)?,
                 length: pairs_length,

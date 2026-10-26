@@ -164,8 +164,7 @@ fn header_block(
 
 /// Verify the content of one injected source.
 fn injected_source(source: &InjectedSource, content: &[u8]) {
-    let _ = SourceCompression::from_raw(0);
-    if source.compression == SourceCompression::DotNet {
+    if source.compression == SourceCompression::DOT_NET {
         if let Some(document) = ok(source.verify_document(content, STREAM)) {
             embedded(&document);
         }

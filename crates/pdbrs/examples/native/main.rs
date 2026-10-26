@@ -169,7 +169,7 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     };
     let names = StringTable::parse(&names_bytes)?;
     info_and_names(pdb, &names, &mut report)?;
-    if let Some(placement) = report.supported(names.verify_buckets(), "/names hashing")? {
+    if let Some(placement) = report.supported(names.validate_buckets(), "/names hashing")? {
         report.add(
             "/names strings",
             usize::try_from(placement.home)? + usize::try_from(placement.probed)?,
@@ -241,7 +241,7 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
 fn container(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
     match pdb.container() {
         Container::Msf(msf) => {
-            let map = msf.check_free_page_map()?;
+            let map = msf.validate_free_page_map()?;
             println!("container: MSF 7.00, page size {}", msf.block_size());
             println!("container: pages: {}", msf.page_count());
             println!(

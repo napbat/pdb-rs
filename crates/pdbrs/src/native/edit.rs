@@ -113,6 +113,7 @@
 use alloc::vec::Vec;
 
 use crate::io::ReadAt;
+use crate::native::IdentityPolicy;
 use crate::native::Pdb;
 use crate::native::auxiliary::NamedStreamKind;
 use crate::native::codeview::SymbolKind;
@@ -122,7 +123,6 @@ use crate::native::codeview::symbol::{
     Public, S_CONSTANT, S_GDATA32, S_GTHREAD32, S_LDATA32, S_LTHREAD32, S_PUB32, S_UDT, SymbolData,
 };
 use crate::native::codeview::type_record::TypeLeaf;
-use crate::native::info::IdentityPolicy;
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::{Error, ErrorKind, Result};

@@ -12,7 +12,7 @@ use crate::native::output::Output;
 use crate::native::words::word;
 
 /// One `IMAGE_FUNCTION_ENTRY` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FunctionEntry {
     /// The address of the first byte of the function (`StartingAddress`).
@@ -21,18 +21,6 @@ pub struct FunctionEntry {
     pub end: u32,
     /// The address of the end of the prologue (`EndOfPrologue`).
     pub end_of_prologue: u32,
-}
-
-impl FunctionEntry {
-    /// Make a record from its fields.
-    #[must_use]
-    pub const fn new(start: u32, end: u32, end_of_prologue: u32) -> Self {
-        Self {
-            start,
-            end,
-            end_of_prologue,
-        }
-    }
 }
 
 impl Codec for FunctionEntry {

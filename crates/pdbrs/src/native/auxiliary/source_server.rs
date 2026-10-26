@@ -34,6 +34,7 @@ const MARKER_PREFIX: &[u8] = b"SRCSRV:";
 
 /// A section of a `srcsrv` stream.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum SourceServerSection {
     /// The `SRCSRV: ini` section.
     Ini,
@@ -59,7 +60,8 @@ impl SourceServerSection {
 }
 
 /// A `KEY=value` line of the `ini` or `variables` section.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SourceServerVariable<'a> {
     /// The bytes before the first `=`.
     pub key: &'a [u8],
@@ -68,7 +70,8 @@ pub struct SourceServerVariable<'a> {
 }
 
 /// A line of the `source files` section.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SourceServerFile<'a> {
     /// The line without its line end.
     pub line: &'a [u8],
@@ -88,7 +91,7 @@ impl<'a> SourceServerFile<'a> {
 }
 
 /// A decoded `srcsrv` stream, borrowed from the stream bytes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SourceServer<'a> {
     /// The stream bytes.
     bytes: &'a [u8],

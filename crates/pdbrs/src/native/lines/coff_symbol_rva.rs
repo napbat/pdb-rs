@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 
 use super::{entry_list, invalid};
 use crate::Result;
+use crate::native::address::Rva;
 use crate::native::output::Output;
 
 /// The size of one entry.
@@ -24,20 +25,20 @@ entry_list!(
     CoffSymbolRvas,
     /// An iterator over [`CoffSymbolRvas`].
     CoffSymbolRvasIter,
-    u32,
+    Rva,
     RVA_SIZE,
-    u32::from_le_bytes
+    |bytes| Rva(u32::from_le_bytes(bytes))
 );
 
 impl<'a> CoffSymbolRvas<'a> {
-    /// Decode the data of a subsection.
+    /// Parse the data of a subsection.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// if the data size is not a multiple of 4. The error does not have a
     /// file offset.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         if !data.len().is_multiple_of(RVA_SIZE) {
             return Err(invalid(
                 "COFF symbol RVA subsection size is not a multiple of 4",
@@ -55,23 +56,23 @@ impl<'a> CoffSymbolRvas<'a> {
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         write_rvas(self.iter(), out)
     }
-}
 
-/// Append the data of a `DEBUG_S_COFF_SYMBOL_RVA` subsection to `out`: one
-/// RVA for each COFF symbol table record of the object file.
-///
-/// # Errors
-///
-/// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if
-/// the output cannot grow.
-pub fn encode_coff_symbol_rvas(rvas: &[u32], out: &mut Vec<u8>) -> Result<()> {
-    write_rvas(rvas.iter().copied(), out)
+    /// Append the data of a `DEBUG_S_COFF_SYMBOL_RVA` subsection to `out`:
+    /// one RVA for each COFF symbol table record of the object file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
+    /// if the output cannot grow.
+    pub fn encode_parts(rvas: &[Rva], out: &mut Vec<u8>) -> Result<()> {
+        write_rvas(rvas.iter().copied(), out)
+    }
 }
 
 /// Append each RVA of `rvas` to `out`.
-fn write_rvas(rvas: impl Iterator<Item = u32>, out: &mut Vec<u8>) -> Result<()> {
+fn write_rvas(rvas: impl Iterator<Item = Rva>, out: &mut Vec<u8>) -> Result<()> {
     for rva in rvas {
-        Output::new(out).u32(rva)?;
+        Output::new(out).u32(rva.0)?;
     }
     Ok(())
 }

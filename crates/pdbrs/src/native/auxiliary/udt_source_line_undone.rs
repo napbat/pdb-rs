@@ -16,7 +16,7 @@ use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// A decoded `/UDTSRCLINEUNDONE` stream, borrowed from the stream bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct UdtSourceLineUndone<'a> {
     bytes: &'a [u8],
 }
@@ -74,7 +74,7 @@ impl<'a> UdtSourceLineUndone<'a> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
-    pub fn encode_indices(
+    pub fn encode_parts(
         indices: impl IntoIterator<Item = TypeIndex>,
         out: &mut Vec<u8>,
     ) -> Result<()> {

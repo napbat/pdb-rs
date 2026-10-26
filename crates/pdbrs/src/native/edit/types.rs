@@ -11,14 +11,15 @@ use super::plan::{Changes, Context, missing};
 use super::{AddedRecords, INDEX_END_OFFSET, IPI_STREAM, TPI_STREAM, unsupported};
 use crate::io::ReadAt;
 use crate::native::Pdb;
+use crate::native::Producer;
 use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdTable;
 use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::native::types::{
-    HashBuffer, HashLayout, IndexOffset, ReferenceLimits, TypeHashes, TypeHeader, TypeStream,
-    TypeTable, type_record_hash, validate_type_references,
+    HashBuffer, IndexOffset, ReferenceLimits, TypeHashes, TypeHeader, TypeStream, TypeTable,
+    type_record_hash, validate_type_references,
 };
 use crate::{Error, ErrorKind, Result};
 
@@ -159,7 +160,7 @@ fn append<S: ReadAt>(pdb: &Pdb<S>, source: &TypeStream, added: &AddedRecords) ->
     stream.extend_from_slice(&added.records);
     let stream = TypeStream::parse(stream)?;
     if let Some(bytes) = &hash {
-        TypeHashes::parse(stream.header(), bytes)?.verify(&stream)?;
+        TypeHashes::parse(stream.header(), bytes)?.check(&stream)?;
     }
     Ok(Appended { stream, hash })
 }
@@ -209,13 +210,14 @@ fn buffer_bytes(bytes: &[u8], buffer: HashBuffer) -> Result<&[u8]> {
 
 /// Return the index offset pairs of the added records.
 ///
-/// The rule continues the rule of the source producer (see [`HashLayout`]).
+/// The rule continues the rule of the source producer (see
+/// [`TypeHeader::producer`]).
 fn added_pairs(
     header: &TypeHeader,
     last: Option<IndexOffset>,
     sizes: &[u32],
 ) -> Result<Vec<IndexOffset>> {
-    let layout = HashLayout::of(header);
+    let producer = header.producer();
     let mut last = last;
     let mut pairs = Vec::new();
     let mut offset = header.record_bytes;
@@ -223,12 +225,12 @@ fn added_pairs(
         let end = offset
             .checked_add(size)
             .ok_or_else(|| too_large("type record bytes do not fit in 32 bits"))?;
-        let add = match (layout, last) {
+        let add = match (producer, last) {
             (_, None) => true,
-            (HashLayout::Microsoft, Some(last)) => {
+            (Producer::Microsoft, Some(last)) => {
                 last.offset / INDEX_OFFSET_BLOCK < offset / INDEX_OFFSET_BLOCK
             }
-            (HashLayout::Llvm, Some(_)) => end / INDEX_OFFSET_BLOCK > offset / INDEX_OFFSET_BLOCK,
+            (Producer::Llvm, Some(_)) => end / INDEX_OFFSET_BLOCK > offset / INDEX_OFFSET_BLOCK,
         };
         if add {
             let pair = IndexOffset { index, offset };

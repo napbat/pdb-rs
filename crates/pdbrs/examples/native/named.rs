@@ -10,7 +10,6 @@ use pdbrs::native::auxiliary::{
 };
 use pdbrs::native::codeview::id_record::IdTable;
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::info::Feature;
 use pdbrs::native::info::InfoBuilder;
 use pdbrs::native::injected_source::{
@@ -20,7 +19,7 @@ use pdbrs::native::injected_source::{
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{StringTable, StringTableBuilder};
 use pdbrs::native::types::{TypeStream, TypeTable};
-use pdbrs::native::{Identity, Pdb};
+use pdbrs::native::{Identity, Pdb, Producer};
 use pdbrs::portable::embedded::EmbeddedFormat;
 
 use crate::{Outcome, Report};
@@ -46,14 +45,14 @@ pub(crate) fn info_and_names(
     let Identity::Modern { guid, age } = info.identity() else {
         return Err("PDB Info stream has no GUID identity".into());
     };
-    let mut model = InfoBuilder::new(HashTableProducer::Microsoft, info.signature(), guid, age)?;
+    let mut model = InfoBuilder::new(Producer::Microsoft, info.signature(), guid, age)?;
     let mut streams: Vec<_> = info.named_streams().collect();
     streams.sort_by_key(|named| named.name_offset);
     for named in &streams {
         model.set_named_stream(named.name, named.stream)?;
     }
     model.set_next_name_index(info.next_name_index());
-    let features: Vec<Feature> = info.typed_features().collect();
+    let features: Vec<Feature> = info.features().collect();
     model.set_features(&features)?;
     let mut rebuilt = Vec::new();
     model.encode(&mut rebuilt)?;
@@ -70,7 +69,7 @@ pub(crate) fn info_and_names(
     let mut encoded = Vec::new();
     names.encode(&mut encoded)?;
     report.reencoded("/names string tables", &original, &encoded);
-    let mut offsets: Vec<u32> = names.entries().map(|entry| entry.offset).collect();
+    let mut offsets: Vec<_> = names.entries().map(|entry| entry.offset).collect();
     offsets.sort_unstable();
     let mut builder = StringTableBuilder::new(names.hash_version())?;
     for offset in offsets {
@@ -219,7 +218,7 @@ fn injected_source(
     id: StreamId,
     report: &mut Report,
 ) -> Outcome {
-    if source.compression != SourceCompression::DotNet {
+    if source.compression != SourceCompression::DOT_NET {
         report.supported(source.verify_content(content, id), "injected source")?;
         return Ok(());
     }
@@ -246,9 +245,10 @@ fn injected_source(
         .verify_checksum(&decoded)
         .map_err(|error| error.with_stream(id, 0))?;
     report.add(
-        match check {
-            ChecksumCheck::Verified => ".NET document checksums verified (SHA-256)",
-            ChecksumCheck::NotVerified => ".NET document checksums not verified",
+        if check == ChecksumCheck::Verified {
+            ".NET document checksums verified (SHA-256)"
+        } else {
+            ".NET document checksums not verified"
         },
         1,
     );

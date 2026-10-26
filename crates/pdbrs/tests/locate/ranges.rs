@@ -1,6 +1,7 @@
 //! Inline annotation ranges and line entry lookup.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::ChecksumOffset;
 use pdbrs::native::codeview::symbol::BinaryAnnotations;
 use pdbrs::native::lines::LinesSubsection;
 use pdbrs::native::locate::{InlineRange, InlineRanges, find_line};
@@ -10,7 +11,7 @@ use crate::{annotation, lines_subsection, signed};
 /// Run `bytes` from file 0 and line 100 and return the ranges.
 fn ranges(bytes: &[u8]) -> pdbrs::Result<Vec<InlineRange>> {
     let annotations = BinaryAnnotations::parse(bytes).unwrap();
-    InlineRanges::new(&annotations, 0, 100).collect()
+    InlineRanges::new(&annotations, ChecksumOffset(0), 100).collect()
 }
 
 #[test]
@@ -36,7 +37,7 @@ fn code_length_ends_a_range_and_moves_the_offset_past_it() {
             first.file,
             first.line
         ),
-        (0, 0x10, Some(8), 0, 101)
+        (0, 0x10, Some(8), ChecksumOffset(0), 101)
     );
     // The second range starts after a gap: 0x18 plus 8.
     assert_eq!(
@@ -47,7 +48,7 @@ fn code_length_ends_a_range_and_moves_the_offset_past_it() {
             second.file,
             second.line
         ),
-        (0, 0x20, Some(4), 0x18, 103)
+        (0, 0x20, Some(4), ChecksumOffset(0x18), 103)
     );
 }
 
@@ -185,7 +186,7 @@ fn invalid_programs_give_errors() {
 fn errors_stop_the_iterator() {
     let bytes = [annotation(8, &[2]), annotation(3, &[0])].concat();
     let annotations = BinaryAnnotations::parse(&bytes).unwrap();
-    let mut iterator = InlineRanges::new(&annotations, 0, 1);
+    let mut iterator = InlineRanges::new(&annotations, ChecksumOffset(0), 1);
     assert!(iterator.next().unwrap().is_err());
     assert!(iterator.next().is_none());
 }
@@ -205,7 +206,7 @@ fn two_blocks() -> Vec<u8> {
 #[test]
 fn find_line_boundaries() {
     let bytes = two_blocks();
-    let lines = LinesSubsection::decode(&bytes).unwrap();
+    let lines = LinesSubsection::parse(&bytes).unwrap();
     let line =
         |offset| find_line(&lines, offset).map(|found| (found.entry.line_start, found.length));
     // Before the first entry.
@@ -219,7 +220,10 @@ fn find_line_boundaries() {
     // The last byte of the first block and the first byte of the next block.
     assert_eq!(line(0x1f), Some((12, 0x14)));
     let found = find_line(&lines, 0x20).unwrap();
-    assert_eq!((found.entry.line_start, found.checksum_offset), (20, 8));
+    assert_eq!(
+        (found.entry.line_start, found.checksum_offset),
+        (20, ChecksumOffset(8))
+    );
     // The last byte of the contribution and the byte after it.
     assert_eq!(line(0x3f), Some((30, 0x10)));
     assert_eq!(line(0x40), None);

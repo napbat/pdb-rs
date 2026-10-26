@@ -38,21 +38,13 @@ use crate::{Error, ErrorKind, Result};
 pub const OMAP_RECORD_SIZE: usize = 8;
 
 /// One `OMAP_DATA` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct OmapRecord {
     /// The first source address of the range (`rva`).
     pub rva: u32,
     /// The target address of `rva` (`rvaTo`). The value 0 marks a range without a mapping.
     pub rva_to: u32,
-}
-
-impl OmapRecord {
-    /// Make a record from its fields.
-    #[must_use]
-    pub const fn new(rva: u32, rva_to: u32) -> Self {
-        Self { rva, rva_to }
-    }
 }
 
 impl Codec for OmapRecord {
@@ -78,7 +70,7 @@ impl DebugRecord for OmapRecord {
 }
 
 /// A decoded OMAP table, sorted by source address.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct OmapStream {
     /// The records in ascending `rva` order. Equal `rva` values are permitted.
     records: RecordStream<OmapRecord>,

@@ -32,7 +32,8 @@ const PDB_BIT: u32 = 0x8000_0000;
 const ALIGNMENT: usize = 4;
 
 /// One input assembly of a merged assembly.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AssemblyInput<'a> {
     /// The time stamp.
     pub timestamp: u32,
@@ -46,25 +47,7 @@ pub struct AssemblyInput<'a> {
     pub name: &'a [u8],
 }
 
-impl<'a> AssemblyInput<'a> {
-    /// Create an entry from its fields.
-    #[must_use]
-    pub const fn new(
-        timestamp: u32,
-        index: u32,
-        has_pdb: bool,
-        version: &'a [u8],
-        name: &'a [u8],
-    ) -> Self {
-        Self {
-            timestamp,
-            index,
-            has_pdb,
-            version,
-            name,
-        }
-    }
-
+impl AssemblyInput<'_> {
     /// Append the entry and its padding to `out`.
     ///
     /// The entry starts at a 4-byte boundary of the subsection data.
@@ -120,7 +103,7 @@ impl<'a> AssemblyInput<'a> {
 
 /// A decoded `DEBUG_S_MERGED_ASSEMBLYINPUT` subsection.
 ///
-/// [`MergedAssemblyInput::decode`] validates all entries. The entry iterator
+/// [`MergedAssemblyInput::parse`] validates all entries. The entry iterator
 /// then cannot fail.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MergedAssemblyInput<'a> {
@@ -131,7 +114,7 @@ pub struct MergedAssemblyInput<'a> {
 }
 
 impl<'a> MergedAssemblyInput<'a> {
-    /// Decode the data of a `DEBUG_S_MERGED_ASSEMBLYINPUT` subsection.
+    /// Parse the data of a `DEBUG_S_MERGED_ASSEMBLYINPUT` subsection.
     ///
     /// These rules apply:
     ///
@@ -149,7 +132,7 @@ impl<'a> MergedAssemblyInput<'a> {
     ///   version size is smaller than 2 or a padding byte is not zero.
     ///
     /// The errors do not have a file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let mut rest = data;
         let mut count = 0usize;
         while !rest.is_empty() {
@@ -231,7 +214,7 @@ impl<'a> Iterator for MergedAssemblyInputIter<'a> {
     type Item = AssemblyInput<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // `MergedAssemblyInput::decode` validated the entries, so this cannot fail.
+        // `MergedAssemblyInput::parse` validated the entries, so this cannot fail.
         let (entry, _, rest) = split_entry(self.bytes).ok()?;
         self.bytes = rest;
         self.left = self.left.saturating_sub(1);

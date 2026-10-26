@@ -1,10 +1,9 @@
 //! Encoding, named-stream changes, feature codes and the identity policy of the PDB Info stream.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::Identity;
-use pdbrs::native::hash_table::HashTableProducer;
-use pdbrs::native::info::{Feature, IdentityPolicy, Info, InfoBuilder, PeMatch};
+use pdbrs::native::info::{Feature, Info, InfoBuilder, PeMatch};
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::{Identity, IdentityPolicy, Producer};
 
 const GUID: [u8; 16] = [0x42; 16];
 
@@ -56,7 +55,7 @@ fn a_decoded_stream_encodes_to_the_same_bytes() {
     let mut out = Vec::new();
     info.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let builder = InfoBuilder::from_info_with(&info, producer).unwrap();
         assert_eq!(encode(&builder), bytes);
     }
@@ -66,36 +65,36 @@ fn a_decoded_stream_encodes_to_the_same_bytes() {
 fn feature_codes_are_typed_and_unknown_codes_stay() {
     let info = Info::parse(decoded()).unwrap();
     assert_eq!(
-        info.typed_features().collect::<Vec<_>>(),
-        [Feature::Vc140, Feature::Unknown(0xdead_beef)]
+        info.features().collect::<Vec<_>>(),
+        [Feature::VC140, Feature(0xdead_beef)]
     );
-    assert!(info.has_feature(Feature::Vc140));
-    assert!(!info.has_feature(Feature::MinimalDebugInfo));
-    for feature in [
-        Feature::Vc110,
-        Feature::Vc140,
-        Feature::NoTypeMerge,
-        Feature::MinimalDebugInfo,
-        Feature::Unknown(5),
-    ] {
-        assert_eq!(Feature::from_code(feature.code()), feature);
-    }
-    assert_eq!(Feature::MinimalDebugInfo.code().to_le_bytes(), *b"MINI");
-    assert_eq!(Feature::NoTypeMerge.code().to_le_bytes(), *b"NOTM");
+    assert!(info.has_feature(Feature::VC140));
+    assert!(!info.has_feature(Feature::MINIMAL_DEBUG_INFO));
+    assert_eq!(Feature::VC110.0, 20_091_201);
+    assert_eq!(Feature::VC140.0, 20_140_508);
+    assert_eq!(Feature::MINIMAL_DEBUG_INFO.0.to_le_bytes(), *b"MINI");
+    assert_eq!(Feature::NO_TYPE_MERGE.0.to_le_bytes(), *b"NOTM");
     let mut builder = InfoBuilder::from_info(&info).unwrap();
+    assert_eq!(
+        builder.features().collect::<Vec<_>>(),
+        [Feature::VC140, Feature(0xdead_beef)]
+    );
     builder
-        .set_features(&[Feature::Vc140, Feature::MinimalDebugInfo])
+        .set_features(&[Feature::VC140, Feature::MINIMAL_DEBUG_INFO])
         .unwrap();
     let rebuilt = Info::parse(encode(&builder)).unwrap();
     assert_eq!(
-        rebuilt.features().collect::<Vec<_>>(),
+        rebuilt
+            .features()
+            .map(|feature| feature.0)
+            .collect::<Vec<_>>(),
         [20_140_508, 0x494e_494d]
     );
 }
 
 #[test]
 fn new_maps_grow_like_the_producers() {
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let mut builder = InfoBuilder::new(producer, 9, GUID, 1).unwrap();
         assert_eq!(builder.named_stream_capacity(), 1);
         let mut capacities = Vec::new();
@@ -118,7 +117,7 @@ fn new_maps_grow_like_the_producers() {
 
 #[test]
 fn existing_names_and_removals_keep_the_string_buffer_rules() {
-    let mut builder = InfoBuilder::new(HashTableProducer::Microsoft, 9, GUID, 1).unwrap();
+    let mut builder = InfoBuilder::new(Producer::Microsoft, 9, GUID, 1).unwrap();
     builder.set_named_stream(b"/names", StreamId(7)).unwrap();
     builder.set_named_stream(b"/LinkInfo", StreamId(5)).unwrap();
     let strings = builder.string_buffer().to_vec();
@@ -150,7 +149,7 @@ fn existing_names_and_removals_keep_the_string_buffer_rules() {
 
 #[test]
 fn identity_policies_keep_the_ages_consistent() {
-    let mut builder = InfoBuilder::new(HashTableProducer::Microsoft, 9, GUID, 2).unwrap();
+    let mut builder = InfoBuilder::new(Producer::Microsoft, 9, GUID, 2).unwrap();
     // `pdbstr -w` writes Info age 2 and keeps DBI age 1; the image matches age 1.
     let mut dbi_age = 1;
     let matched = builder
@@ -183,7 +182,7 @@ fn identity_policies_keep_the_ages_consistent() {
         .apply_identity(IdentityPolicy::Preserve, &mut larger)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let mut last = InfoBuilder::new(HashTableProducer::Llvm, 0, GUID, u32::MAX).unwrap();
+    let mut last = InfoBuilder::new(Producer::Llvm, 0, GUID, u32::MAX).unwrap();
     let error = last
         .apply_identity(IdentityPolicy::IncrementAge, &mut larger)
         .unwrap_err();

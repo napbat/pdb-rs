@@ -6,7 +6,7 @@ The fixture counts come from the native fixture PDBs (see [fixture evidence](../
 
 `TypeLeaf::decode`, `Member` and `IdRecord::decode` read the records. `TypeLeaf::encode`, `Member::encode`, `encode_field_list` and `IdRecord::encode` write them again to the same bytes.
 `validate_type_references` checks type and ID references by role, with depth and work limits.
-`write_type_stream` writes the TPI and IPI streams with their hash streams. `PdbBuilder` (#33) and `PdbEditor::add_type` (#34) use these encoders.
+`encode_type_stream` writes the TPI and IPI streams with their hash streams. `PdbBuilder` (#33) and `PdbEditor::add_type` (#34) use these encoders.
 The same decoders read the module type streams of a PDB without type merging (`NOTM`, see the [streams](streams.md) page).
 The `types` example prints each UDT, enum and procedure signature in a C-like form, and the evidence on #1 compares its output with DIA2Dump and `llvm-pdbutil pretty`.
 

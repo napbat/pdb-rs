@@ -37,10 +37,8 @@ fn typed_loads_check_the_stream_size_against_the_limit() {
         let size = full.stream_bytes(id).unwrap().len();
         assert!(size > info_size, "the Info stream fits in each limit");
 
-        let options = |max_stream_bytes| ReadOptions {
-            max_stream_bytes,
-            ..ReadOptions::default()
-        };
+        let options =
+            |max_stream_bytes| ReadOptions::default().with_max_stream_bytes(max_stream_bytes);
         let exact = Pdb::with_options(bytes.as_slice(), options(size)).unwrap();
         load(&exact, &dbi, id).unwrap();
 

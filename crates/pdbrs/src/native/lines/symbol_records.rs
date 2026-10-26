@@ -17,7 +17,7 @@ const PREFIX_SIZE: usize = 4;
 
 /// A decoded `DEBUG_S_SYMBOLS` subsection.
 ///
-/// [`SymbolsSubsection::decode`] frames all records. Use
+/// [`SymbolsSubsection::parse`] frames all records. Use
 /// [`Symbol::decode`](crate::native::codeview::symbol::Symbol::decode) to
 /// decode the payload of a record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -41,7 +41,7 @@ impl<'a> SymbolsSubsection<'a> {
     /// [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) for a
     /// length that does not cover the kind. The errors do not have a file
     /// offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let mut count = 0;
         for record in Records::new(data) {
             record?;
@@ -65,7 +65,7 @@ impl<'a> SymbolsSubsection<'a> {
     /// Return the records. Record offsets are relative to the subsection
     /// data.
     ///
-    /// [`SymbolsSubsection::decode`] framed the records, so the iterator does
+    /// [`SymbolsSubsection::parse`] framed the records, so the iterator does
     /// not return an error.
     #[must_use]
     pub const fn records(&self) -> Records<'a> {

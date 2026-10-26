@@ -15,7 +15,7 @@
 //! A table puts each name at bucket [`HashVersion::hash`] `% bucket_count` and
 //! uses linear probing on collisions. Version 1 uses [`hash_string_v1`] and
 //! version 2 uses [`hash_string_v2`] (Microsoft `NMT::setHashFunc`).
-//! [`StringTable::find`] and [`StringTable::verify_buckets`] use the hash of the
+//! [`StringTable::find`] and [`StringTable::validate_buckets`] use the hash of the
 //! table version.
 //!
 //! [`StringTable::encode`] writes a decoded table again with the same bytes.
@@ -33,6 +33,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::codeview::Fields;
+use super::codeview::index::NameOffset;
 use super::hash::{hash_string_v1, hash_string_v2};
 use super::output::{Output, to_u32};
 use crate::{Error, ErrorKind, Result};
@@ -42,6 +43,7 @@ pub const SIGNATURE: u32 = 0xeffe_effe;
 
 /// The hash function version of a string table.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum HashVersion {
     /// Version 1 (`verLongHash`): [`hash_string_v1`] with linear probing.
     V1,
@@ -52,7 +54,7 @@ pub enum HashVersion {
 impl HashVersion {
     /// Return the serialized value of the version.
     #[must_use]
-    pub const fn value(self) -> u32 {
+    pub const fn raw(self) -> u32 {
         match self {
             Self::V1 => 1,
             Self::V2 => 2,
@@ -74,12 +76,13 @@ impl HashVersion {
 }
 
 /// A name in a non-empty bucket of a string table.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StringEntry<'a> {
     /// The zero-based index of the bucket.
     pub bucket: u32,
     /// The byte offset of the name in the string buffer.
-    pub offset: u32,
+    pub offset: NameOffset,
     /// The name without its terminating NUL. It is not decoded as text.
     pub name: &'a [u8],
 }
@@ -113,7 +116,7 @@ impl<'a> StringTable<'a> {
     /// The function checks that each non-empty bucket refers to a
     /// NUL-terminated name and that the name count equals the number of
     /// non-empty buckets. It does not check the hash placement of names;
-    /// [`StringTable::verify_buckets`] does that.
+    /// [`StringTable::validate_buckets`] does that.
     ///
     /// # Errors
     ///
@@ -162,7 +165,7 @@ impl<'a> StringTable<'a> {
         };
         let mut used = 0_u32;
         for offset in table.bucket_offsets().filter(|&offset| offset != 0) {
-            table.get(offset)?;
+            table.get(NameOffset(offset))?;
             // The bucket count fits in `u32`, so the count of used buckets fits too.
             used = used.saturating_add(1);
         }
@@ -186,7 +189,7 @@ impl<'a> StringTable<'a> {
         let mut output = Output::new(out);
         output.reserve(16 + self.strings.len() + self.buckets.len() * 4)?;
         output.u32(SIGNATURE)?;
-        output.u32(self.hash_version.value())?;
+        output.u32(self.hash_version.raw())?;
         output.u32(to_u32(self.strings.len(), "string table buffer size")?)?;
         output.bytes(self.strings)?;
         output.u32(to_u32(self.buckets.len(), "string table bucket count")?)?;
@@ -235,7 +238,7 @@ impl<'a> StringTable<'a> {
             .filter_map(move |(offset, bucket)| {
                 name_at(strings, offset).map(|name| StringEntry {
                     bucket,
-                    offset,
+                    offset: NameOffset(offset),
                     name,
                 })
             })
@@ -250,8 +253,8 @@ impl<'a> StringTable<'a> {
     ///
     /// Returns [`ErrorKind::InvalidReference`] if the offset is outside the
     /// string buffer or no NUL follows it.
-    pub fn get(&self, offset: u32) -> Result<&'a [u8]> {
-        name_at(self.strings, offset).ok_or_else(|| {
+    pub fn get(&self, offset: NameOffset) -> Result<&'a [u8]> {
+        name_at(self.strings, offset.0).ok_or_else(|| {
             Error::new(ErrorKind::InvalidReference, None)
                 .with_context("string table offset does not refer to a NUL-terminated name")
         })
@@ -267,7 +270,7 @@ impl<'a> StringTable<'a> {
     ///
     /// Returns [`ErrorKind::InvalidReference`] if a bucket on the probe
     /// sequence does not refer to a NUL-terminated name.
-    pub fn find(&self, name: &[u8]) -> Result<Option<u32>> {
+    pub fn find(&self, name: &[u8]) -> Result<Option<NameOffset>> {
         let count = self.buckets.len();
         if count == 0 {
             return Ok(None);
@@ -278,8 +281,8 @@ impl<'a> StringTable<'a> {
             if offset == 0 {
                 return Ok(None);
             }
-            if self.get(offset)? == name {
-                return Ok(Some(offset));
+            if self.get(NameOffset(offset))? == name {
+                return Ok(Some(NameOffset(offset)));
             }
         }
         Ok(None)
@@ -296,7 +299,7 @@ impl<'a> StringTable<'a> {
     ///
     /// - [`ErrorKind::InvalidFormat`] if an empty bucket hides a name.
     /// - [`ErrorKind::InvalidReference`] if a bucket does not refer to a name.
-    pub fn verify_buckets(&self) -> Result<BucketPlacement> {
+    pub fn validate_buckets(&self) -> Result<BucketPlacement> {
         let count = self.buckets.len();
         let mut placement = BucketPlacement::default();
         // Start after an empty bucket. A full table has no empty bucket, and
@@ -312,7 +315,7 @@ impl<'a> StringTable<'a> {
                 run = 0;
                 continue;
             }
-            let home = home_bucket(self.hash_version, self.get(offset)?, count);
+            let home = home_bucket(self.hash_version, self.get(NameOffset(offset))?, count);
             let distance = (slot + count - home) % count;
             if distance > run {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)

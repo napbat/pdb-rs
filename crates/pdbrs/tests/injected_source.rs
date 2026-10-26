@@ -1,8 +1,9 @@
 //! Behavior tests for the `/src/headerblock` stream and injected source contents.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::Producer;
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::hash::hash_buffer_v8;
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::injected_source::{
     CHECKSUM_SHA1, DOCUMENT_TYPE_TEXT, DotNetDocument, HEADER_BLOCK_STREAM_NAME, InjectedFile,
     LANGUAGE_CSHARP, SOURCE_FILE_STREAM_PREFIX, SOURCE_VERSION_ONE, SourceCompression,
@@ -96,10 +97,10 @@ fn decodes_the_header_and_verifies_each_source() {
     for ((entry, &(bucket, key)), content) in block.entries().iter().zip(&ENTRIES).zip(CONTENTS) {
         assert_eq!((entry.bucket, entry.key), (bucket, key));
         let source = entry.value;
-        assert_eq!(source.virtual_file_name_offset, key);
-        assert_eq!(source.file_name_offset, key - 400);
-        assert_eq!(source.object_name_offset, 2139);
-        assert_eq!(source.compression, SourceCompression::None);
+        assert_eq!(source.virtual_file_name_offset, NameOffset(key));
+        assert_eq!(source.file_name_offset, NameOffset(key - 400));
+        assert_eq!(source.object_name_offset, NameOffset(2139));
+        assert_eq!(source.compression, SourceCompression::NONE);
         assert!(!source.is_virtual);
         assert_eq!(source.reserved, [0; 8]);
         assert_eq!(
@@ -128,7 +129,7 @@ fn content_checks_reject_other_sizes_crcs_and_compression() {
     bytes[entry_offset(1, 28)] = 3;
     let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
     let source = block.entries()[1].value;
-    assert_eq!(source.compression, SourceCompression::Lz);
+    assert_eq!(source.compression, SourceCompression::LZ);
     let error = source
         .verify_content(CONTENTS[1], StreamId(86))
         .unwrap_err();
@@ -138,15 +139,15 @@ fn content_checks_reject_other_sizes_crcs_and_compression() {
 #[test]
 fn compression_bytes_map_to_the_known_algorithms() {
     let expected = [
-        SourceCompression::None,
-        SourceCompression::RunLength,
-        SourceCompression::Huffman,
-        SourceCompression::Lz,
-        SourceCompression::Unknown(4),
+        SourceCompression::NONE,
+        SourceCompression::RUN_LENGTH,
+        SourceCompression::HUFFMAN,
+        SourceCompression::LZ,
     ];
     for (raw, compression) in (0..).zip(expected) {
-        assert_eq!(SourceCompression::from_raw(raw), compression);
+        assert_eq!(SourceCompression(raw), compression);
     }
+    assert_eq!(SourceCompression::DOT_NET.0, 101);
 }
 
 #[test]
@@ -266,7 +267,7 @@ fn decoded_blocks_encode_again_and_copy_into_a_builder() {
     let mut out = Vec::new();
     block.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let copy = SourceHeaderBlockBuilder::from_block(&block, producer).unwrap();
         assert_eq!(encode_block(&copy), bytes);
     }
@@ -280,8 +281,7 @@ fn the_model_inserts_entries_in_virtual_name_offset_order() {
     sources.sort_by_key(|source| source.virtual_file_name_offset);
     let header = block.header();
     let mut builder =
-        SourceHeaderBlockBuilder::new(HashTableProducer::Microsoft, header.file_time, header.age)
-            .unwrap();
+        SourceHeaderBlockBuilder::new(Producer::Microsoft, header.file_time, header.age).unwrap();
     for source in &sources {
         assert_eq!(builder.insert(*source).unwrap(), None);
     }
@@ -308,16 +308,15 @@ fn the_model_inserts_entries_in_virtual_name_offset_order() {
 #[test]
 fn add_file_inserts_names_and_computes_crc_and_size() {
     let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
-    let mut builder = SourceHeaderBlockBuilder::new(HashTableProducer::Llvm, 0, 0).unwrap();
+    let mut builder = SourceHeaderBlockBuilder::new(Producer::Llvm, 0, 0).unwrap();
     let content = b"<AutoVisualizer/>\r\n";
-    let file = InjectedFile {
-        file_name: b"C:\\Src\\App.natvis",
-        object_name: b"",
-        virtual_file_name: b"c:\\src\\app.natvis",
-        compression: SourceCompression::None,
-        is_virtual: false,
-        stream: content,
-    };
+    let mut file = InjectedFile::default();
+    file.file_name = b"C:\\Src\\App.natvis";
+    file.object_name = b"";
+    file.virtual_file_name = b"c:\\src\\app.natvis";
+    file.compression = SourceCompression::NONE;
+    file.is_virtual = false;
+    file.stream = content;
     let source = builder.add_file(&mut names, &file).unwrap();
     assert_eq!(source.crc, hash_buffer_v8(content));
     assert_eq!(source.file_size, 19);
@@ -340,7 +339,7 @@ fn add_file_inserts_names_and_computes_crc_and_size() {
     names.encode(&mut table).unwrap();
     let names = StringTable::parse(&table).unwrap();
     assert_eq!(
-        names.get(block.entries()[0].key).unwrap(),
+        names.get(NameOffset(block.entries()[0].key)).unwrap(),
         file.virtual_file_name
     );
     assert_eq!(
@@ -352,29 +351,24 @@ fn add_file_inserts_names_and_computes_crc_and_size() {
 #[test]
 fn add_file_rejects_other_compression_and_empty_virtual_names() {
     let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
-    let mut builder = SourceHeaderBlockBuilder::new(HashTableProducer::Microsoft, 1, 1).unwrap();
-    let file = InjectedFile {
-        file_name: b"a",
-        object_name: b"o",
-        virtual_file_name: b"a",
-        compression: SourceCompression::Lz,
-        is_virtual: false,
-        stream: b"x",
-    };
+    let mut builder = SourceHeaderBlockBuilder::new(Producer::Microsoft, 1, 1).unwrap();
+    let mut file = InjectedFile::default();
+    file.file_name = b"a";
+    file.object_name = b"o";
+    file.virtual_file_name = b"a";
+    file.compression = SourceCompression::LZ;
+    file.is_virtual = false;
+    file.stream = b"x";
     let error = builder.add_file(&mut names, &file).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let empty = InjectedFile {
-        virtual_file_name: b"",
-        compression: SourceCompression::DotNet,
-        ..file
-    };
+    let mut empty = file;
+    empty.virtual_file_name = b"";
+    empty.compression = SourceCompression::DOT_NET;
     let error = builder.add_file(&mut names, &empty).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let nul = InjectedFile {
-        virtual_file_name: b"a\0b",
-        compression: SourceCompression::None,
-        ..file
-    };
+    let mut nul = file;
+    nul.virtual_file_name = b"a\0b";
+    nul.compression = SourceCompression::NONE;
     assert!(builder.add_file(&mut names, &nul).is_err());
     assert!(builder.table().is_empty());
     // The header gets the file time and the age of the builder.
@@ -398,14 +392,13 @@ fn dotnet_documents_encode_the_decoded_bytes_again() {
         }),
     ];
     for embedded in cases {
-        let document = DotNetDocument::new(
-            LANGUAGE_CSHARP,
-            VENDOR_MICROSOFT,
-            DOCUMENT_TYPE_TEXT,
-            CHECKSUM_SHA1,
-            &checksum,
-            embedded,
-        );
+        let mut document = DotNetDocument::default();
+        document.language = LANGUAGE_CSHARP;
+        document.language_vendor = VENDOR_MICROSOFT;
+        document.document_type = DOCUMENT_TYPE_TEXT;
+        document.checksum_algorithm = CHECKSUM_SHA1;
+        document.checksum = &checksum;
+        document.embedded = embedded;
         let mut bytes = Vec::new();
         document.encode(&mut bytes).unwrap();
         let decoded = DotNetDocument::parse(&bytes).unwrap();
@@ -415,8 +408,6 @@ fn dotnet_documents_encode_the_decoded_bytes_again() {
         assert_eq!(again, bytes);
     }
     let mut empty = Vec::new();
-    DotNetDocument::new([0; 16], [0; 16], [0; 16], [0; 16], &[], None)
-        .encode(&mut empty)
-        .unwrap();
+    DotNetDocument::default().encode(&mut empty).unwrap();
     assert_eq!(empty, [0; 72]);
 }

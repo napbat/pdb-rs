@@ -14,11 +14,11 @@
 //!
 //! [`Info::encode`] writes a decoded stream again with the same bytes. [`InfoBuilder`] makes
 //! or changes a stream with the insertion rules of Microsoft `NMTNI` and LLVM
-//! `NamedStreamMap`, and [`IdentityPolicy`] sets the matching identity.
+//! `NamedStreamMap`, and [`IdentityPolicy`](super::IdentityPolicy) sets the matching identity.
 
 mod builder;
 
-pub use builder::{IdentityPolicy, InfoBuilder, PeMatch};
+pub use builder::{InfoBuilder, PeMatch};
 
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -36,49 +36,26 @@ pub const VERSION_VC70: u32 = 20_000_404;
 const INFO_STREAM: StreamId = StreamId(1);
 
 /// A feature code after the named-stream map (`PdbRaw_FeatureSig` in LLVM `RawConstants.h`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Feature {
-    /// `20091201`: the writer is Visual C++ 11.0 or later.
-    Vc110,
-    /// `20140508`: the PDB has an IPI stream (Visual C++ 14.0 or later).
-    Vc140,
-    /// `NOTM` (LLVM `NoTypeMerge`): the writer did not merge the type records.
-    NoTypeMerge,
-    /// `MINI`: a FASTLINK PDB (`/DEBUG:FASTLINK`). The symbol indexes use the larger
-    /// bucket count, and the type records stay in the object files.
-    MinimalDebugInfo,
-    /// A code that this crate does not know.
-    Unknown(u32),
-}
+///
+/// The value is open: a stream can have codes that this crate does not know.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Feature(pub u32);
 
 impl Feature {
-    /// Decode a serialized feature code.
-    #[must_use]
-    pub const fn from_code(code: u32) -> Self {
-        match code {
-            20_091_201 => Self::Vc110,
-            20_140_508 => Self::Vc140,
-            0x4d54_4f4e => Self::NoTypeMerge,
-            0x494e_494d => Self::MinimalDebugInfo,
-            other => Self::Unknown(other),
-        }
-    }
-
-    /// Return the serialized feature code.
-    #[must_use]
-    pub const fn code(self) -> u32 {
-        match self {
-            Self::Vc110 => 20_091_201,
-            Self::Vc140 => 20_140_508,
-            Self::NoTypeMerge => 0x4d54_4f4e,
-            Self::MinimalDebugInfo => 0x494e_494d,
-            Self::Unknown(code) => code,
-        }
-    }
+    /// `20091201`: the writer is Visual C++ 11.0 or later.
+    pub const VC110: Self = Self(20_091_201);
+    /// `20140508`: the PDB has an IPI stream (Visual C++ 14.0 or later).
+    pub const VC140: Self = Self(20_140_508);
+    /// `NOTM` (LLVM `NoTypeMerge`): the writer did not merge the type records.
+    pub const NO_TYPE_MERGE: Self = Self(0x4d54_4f4e);
+    /// `MINI`: a FASTLINK PDB (`/DEBUG:FASTLINK`). The symbol indexes use the larger
+    /// bucket count, and the type records stay in the object files.
+    pub const MINIMAL_DEBUG_INFO: Self = Self(0x494e_494d);
 }
 
 /// A named stream entry, with its name preserved as bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct NamedStream<'a> {
     /// The name without its terminating NUL.
     pub name: &'a [u8],
@@ -240,24 +217,19 @@ impl Info {
         self.next_name_index
     }
 
-    /// Return feature codes, including codes unknown to this reader.
-    pub fn features(&self) -> impl ExactSizeIterator<Item = u32> + '_ {
+    /// Return the feature codes in stream order, including codes unknown to this reader.
+    pub fn features(&self) -> impl ExactSizeIterator<Item = Feature> + '_ {
         self.bytes[self.features.clone()]
             .as_chunks::<4>()
             .0
             .iter()
-            .map(|word| u32::from_le_bytes(*word))
-    }
-
-    /// Return the typed feature codes in stream order.
-    pub fn typed_features(&self) -> impl ExactSizeIterator<Item = Feature> + '_ {
-        self.features().map(Feature::from_code)
+            .map(|word| Feature(u32::from_le_bytes(*word)))
     }
 
     /// Return `true` if the stream has the feature code of `feature`.
     #[must_use]
     pub fn has_feature(&self, feature: Feature) -> bool {
-        self.features().any(|code| code == feature.code())
+        self.features().any(|code| code == feature)
     }
 
     /// Return the serialized bytes of the stream.

@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 
 use super::{NamedContent, PdbContents};
 use crate::native::Identity;
+use crate::native::IdentityPolicy;
 use crate::native::auxiliary::{
     LinkInfo, NamedStreamKind, SourceLink, SourceServer, TmCache, TmCacheBuilder, TypeMapStream,
     UdtSourceLineUndone,
@@ -18,15 +19,13 @@ use crate::native::codeview::symbol::{
 };
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::dbi::OwnedModule;
-use crate::native::hash_table::HashTableProducer;
-use crate::native::info::IdentityPolicy;
 use crate::native::injected_source::SourceHeaderBlock;
 use crate::native::lines::ModuleLines;
 use crate::native::msf::StreamId;
 use crate::native::msf::WriteOptions;
 use crate::native::names::{StringTable, StringTableBuilder};
-use crate::native::symbols::{IndexProducer, SymbolOffset, ThunkTable};
-use crate::native::types::{HashLayout, TypeHashes, TypeStream};
+use crate::native::symbols::{SymbolOffset, ThunkTable};
+use crate::native::types::{TypeHashes, TypeStream};
 use crate::native::write::{
     BuildOptions, IdHandle, ModuleSymbolHandle, PdbBuilder, Resolver, StreamHandle, SymbolHandle,
     TypeHandle,
@@ -71,17 +70,13 @@ impl PdbContents {
     #[must_use]
     pub fn build_options(&self) -> BuildOptions {
         let header = self.tpi.0.header();
-        let layout = HashLayout::of(header);
-        let (index_producer, info_producer) = match layout {
-            HashLayout::Llvm => (IndexProducer::Llvm, HashTableProducer::Llvm),
-            HashLayout::Microsoft => (IndexProducer::Microsoft, HashTableProducer::Microsoft),
-        };
+        let producer = header.producer();
         BuildOptions {
             msf: WriteOptions::default().with_page_size(self.page_size),
-            hash_layout: layout,
+            hash_layout: producer,
             hash_buckets: header.hash_bucket_count,
-            index_producer,
-            info_producer,
+            index_producer: producer,
+            info_producer: producer,
             // A source without a hash stream keeps none, for example the
             // .NET fixture of #14.
             type_hash_stream: header.hash_stream.is_some(),
@@ -111,7 +106,7 @@ impl PdbContents {
             return Err(unsupported("PDB Info stream has no GUID identity"));
         };
         let mut builder = PdbBuilder::new(self.info.signature(), guid, age)?;
-        let features: Vec<_> = self.info.typed_features().collect();
+        let features: Vec<_> = self.info.features().collect();
         builder.set_features(&features)?;
         builder.set_dbi_age(self.dbi.header().age);
         builder.apply_identity(policy)?;
@@ -141,7 +136,7 @@ impl PdbContents {
         }
         for adjuster in adjusters(tpi, tpi_hash.as_deref())? {
             let handle = TypeHandle(position(adjuster.index, tpi.header().index_begin)?);
-            builder.add_type_hash_adjuster(handle, adjuster.name_offset)?;
+            builder.add_type_hash_adjuster(handle, adjuster.name_offset.0)?;
         }
         if let Some((ipi, ipi_hash)) = &self.ipi {
             for record in ipi.records() {
@@ -149,7 +144,7 @@ impl PdbContents {
             }
             for adjuster in adjusters(ipi, ipi_hash.as_deref())? {
                 let handle = IdHandle(position(adjuster.index, ipi.header().index_begin)?);
-                builder.add_id_hash_adjuster(handle, adjuster.name_offset)?;
+                builder.add_id_hash_adjuster(handle, adjuster.name_offset.0)?;
             }
         }
         Ok(())
@@ -215,7 +210,7 @@ impl PdbContents {
         let mut files = sources.map(|info| info.modules());
         for (module, stream) in self.dbi.modules().zip(&self.modules) {
             let module = module?;
-            let index = u16::try_from(module.index)
+            let index = u16::try_from(module.index.0)
                 .map_err(|_| unsupported("PDB has more than 65535 modules"))?;
             let target = builder.add_module(OwnedModule::from_module(&module)?)?;
             if let Some(list) = files.as_mut().and_then(Iterator::next) {

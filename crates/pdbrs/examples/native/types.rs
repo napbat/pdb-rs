@@ -13,7 +13,7 @@ use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::names::StringTable;
 use pdbrs::native::types::{
     ForwardRefs, HEADER_SIZE, ReferenceLimits, TypeHashes, TypeStream, TypeStreamOptions,
-    TypeTable, validate_type_references, write_type_stream,
+    TypeTable, encode_type_stream, validate_type_references,
 };
 
 use crate::{Outcome, Report};
@@ -53,7 +53,7 @@ fn rebuild(
 ) -> Outcome<bool> {
     let adjusters = hashes.map(TypeHashes::adjusters).unwrap_or_default();
     let options = TypeStreamOptions::from_header(stream.header(), adjusters);
-    let written = write_type_stream(records, &options)?;
+    let written = encode_type_stream(records, &options)?;
     let same_stream = written.stream == stream.bytes();
     let same_hash = written.hash_stream.as_deref() == hash_bytes;
     if !same_stream || !same_hash {
@@ -118,7 +118,7 @@ pub(crate) fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Re
         .transpose();
     let hashes = report.supported(parsed, "TPI hash stream")?.flatten();
     if let Some(hashes) = &hashes {
-        report.supported(hashes.verify(tpi), "TPI hash values")?;
+        report.supported(hashes.check(tpi), "TPI hash values")?;
     }
     let table = TypeTable::new(tpi)?;
     let forward = report.supported(
@@ -243,7 +243,7 @@ pub(crate) fn identifiers<'a>(
         && let Some(parsed) =
             report.supported(TypeHashes::parse(ipi.header(), bytes), "IPI hash stream")?
     {
-        report.supported(parsed.verify(ipi), "IPI hash values")?;
+        report.supported(parsed.check(ipi), "IPI hash values")?;
         hashes = Some(parsed);
     }
     let ids = IdTable::new(ipi)?;
@@ -275,7 +275,7 @@ pub(crate) fn identifiers<'a>(
                 ids.resolve_string(id, &mut text)?;
             }
             IdRecord::UdtModuleSourceLine(line) => {
-                names.get(line.name_offset.0)?;
+                names.get(line.name_offset)?;
             }
             _ => {}
         }

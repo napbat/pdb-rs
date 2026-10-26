@@ -55,6 +55,7 @@ const SHORT_RECORD: &str = ".NET document record is shorter than its fields";
 
 /// The result of a checksum check.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ChecksumCheck {
     /// The algorithm is SHA-256 and the checksum matches the source.
     Verified,
@@ -63,7 +64,7 @@ pub enum ChecksumCheck {
 }
 
 /// A decoded .NET document record, borrowed from the stream bytes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DotNetDocument<'a> {
     /// The language GUID, for example [`LANGUAGE_CSHARP`].
@@ -81,26 +82,6 @@ pub struct DotNetDocument<'a> {
 }
 
 impl<'a> DotNetDocument<'a> {
-    /// Make a record from its fields.
-    #[must_use]
-    pub const fn new(
-        language: [u8; 16],
-        language_vendor: [u8; 16],
-        document_type: [u8; 16],
-        checksum_algorithm: [u8; 16],
-        checksum: &'a [u8],
-        embedded: Option<EmbeddedSource<'a>>,
-    ) -> Self {
-        Self {
-            language,
-            language_vendor,
-            document_type,
-            checksum_algorithm,
-            checksum,
-            embedded,
-        }
-    }
-
     /// Append the record, the full stream contents, to `out`.
     ///
     /// The embedded source is written as a blob with its 4-byte format field. A decoded record

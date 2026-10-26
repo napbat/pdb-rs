@@ -1,7 +1,7 @@
 //! The subsection kinds of object files and managed code.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{NameOffset, TypeIndex};
 use pdbrs::native::fpo::FrameData;
 use pdbrs::native::lines::{
     AssemblyInput, CrossScopeExport, CrossScopeExports, CrossScopeImport, CrossScopeImports,
@@ -9,10 +9,44 @@ use pdbrs::native::lines::{
     DEBUG_S_FUNC_MDTOKEN_MAP, DEBUG_S_IGNORE, DEBUG_S_MERGED_ASSEMBLYINPUT, DEBUG_S_STRINGTABLE,
     DEBUG_S_SYMBOLS, DEBUG_S_TYPE_MDTOKEN_MAP, DEBUG_S_XFGHASH_TYPE, DEBUG_S_XFGHASH_VIRTUAL,
     FrameDataSubsection, LineSubsection, MergedAssemblyInput, StringTableSubsection,
-    SymbolsSubsection, TokenMap, TokenMapEntry, TokenMapValue, XfgTypeHashes, XfgVirtualHashes,
+    SubsectionKind, SymbolsSubsection, TokenMap, TokenMapEntry, TokenMapValue, XfgTypeHashes,
+    XfgVirtualHashes,
 };
 
 use crate::{error_kind, round_trip, u32s};
+
+/// Return a cross-scope export with the given IDs.
+fn export(local_id: u32, global_id: u32) -> CrossScopeExport {
+    let mut export = CrossScopeExport::default();
+    export.local_id = local_id;
+    export.global_id = global_id;
+    export
+}
+
+/// Return a token map entry with the given fields.
+fn token_entry(key: u32, value: TokenMapValue) -> TokenMapEntry {
+    let mut entry = TokenMapEntry::default();
+    entry.key = key;
+    entry.value = value;
+    entry
+}
+
+/// Return a merged assembly input entry with the given fields.
+fn assembly_input<'a>(
+    timestamp: u32,
+    index: u32,
+    has_pdb: bool,
+    version: &'a [u8],
+    name: &'a [u8],
+) -> AssemblyInput<'a> {
+    let mut input = AssemblyInput::default();
+    input.timestamp = timestamp;
+    input.index = index;
+    input.has_pdb = has_pdb;
+    input.version = version;
+    input.name = name;
+    input
+}
 
 #[test]
 fn symbols_round_trip_and_reject_truncated_records() {
@@ -31,11 +65,11 @@ fn symbols_round_trip_and_reject_truncated_records() {
     round_trip(DEBUG_S_SYMBOLS, &[]);
 
     assert_eq!(
-        error_kind(SymbolsSubsection::decode(&data[..10])),
+        error_kind(SymbolsSubsection::parse(&data[..10])),
         ErrorKind::UnexpectedEof
     );
     assert_eq!(
-        error_kind(SymbolsSubsection::decode(&[0x01, 0x00, 0x06, 0x00])),
+        error_kind(SymbolsSubsection::parse(&[0x01, 0x00, 0x06, 0x00])),
         ErrorKind::InvalidFormat
     );
 }
@@ -60,7 +94,7 @@ fn string_tables_round_trip_and_find_strings() {
     round_trip(DEBUG_S_STRINGTABLE, &[]);
 
     assert_eq!(
-        error_kind(StringTableSubsection::decode(b"\0abc")),
+        error_kind(StringTableSubsection::parse(b"\0abc")),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
@@ -109,7 +143,7 @@ fn frame_data_round_trips_with_and_without_relocation() {
 
     for size in [1, 8, 33, 37] {
         assert_eq!(
-            error_kind(FrameDataSubsection::decode(&vec![0; size])),
+            error_kind(FrameDataSubsection::parse(&vec![0; size])),
             ErrorKind::InvalidFormat,
             "{size} bytes"
         );
@@ -119,8 +153,8 @@ fn frame_data_round_trips_with_and_without_relocation() {
 #[test]
 fn cross_scope_subsections_round_trip() {
     let mut imports = Vec::new();
-    CrossScopeImport::encode_parts(0x10, &[0x1001, 0x8000_1002], &mut imports).unwrap();
-    CrossScopeImport::encode_parts(0x20, &[], &mut imports).unwrap();
+    CrossScopeImport::encode_parts(NameOffset(0x10), &[0x1001, 0x8000_1002], &mut imports).unwrap();
+    CrossScopeImport::encode_parts(NameOffset(0x20), &[], &mut imports).unwrap();
     let LineSubsection::CrossScopeImports(decoded) =
         round_trip(DEBUG_S_CROSSSCOPEIMPORTS, &imports)
     else {
@@ -128,7 +162,7 @@ fn cross_scope_subsections_round_trip() {
     };
     let entries: Vec<_> = decoded.iter().collect();
     assert_eq!(entries.len(), 2);
-    assert_eq!(entries[0].module_name_offset, 0x10);
+    assert_eq!(entries[0].module_name_offset, NameOffset(0x10));
     assert_eq!(
         entries[0].ids.iter().collect::<Vec<_>>(),
         [0x1001, 0x8000_1002]
@@ -136,26 +170,22 @@ fn cross_scope_subsections_round_trip() {
     assert!(entries[1].ids.is_empty());
     for bad in [&imports[..4], &imports[..12]] {
         assert_eq!(
-            error_kind(CrossScopeImports::decode(bad)),
+            error_kind(CrossScopeImports::parse(bad)),
             ErrorKind::UnexpectedEof
         );
     }
 
     let mut exports = Vec::new();
-    CrossScopeExport::new(1, 0x1003)
-        .encode(&mut exports)
-        .unwrap();
-    CrossScopeExport::new(2, 0x1004)
-        .encode(&mut exports)
-        .unwrap();
+    export(1, 0x1003).encode(&mut exports).unwrap();
+    export(2, 0x1004).encode(&mut exports).unwrap();
     let LineSubsection::CrossScopeExports(decoded) =
         round_trip(DEBUG_S_CROSSSCOPEEXPORTS, &exports)
     else {
         panic!("expected DEBUG_S_CROSSSCOPEEXPORTS");
     };
-    assert_eq!(decoded.get(1), Some(CrossScopeExport::new(2, 0x1004)));
+    assert_eq!(decoded.get(1), Some(export(2, 0x1004)));
     assert_eq!(
-        error_kind(CrossScopeExports::decode(&exports[..12])),
+        error_kind(CrossScopeExports::parse(&exports[..12])),
         ErrorKind::InvalidFormat
     );
 }
@@ -163,11 +193,11 @@ fn cross_scope_subsections_round_trip() {
 #[test]
 fn token_maps_round_trip_and_check_counts() {
     let entries = [
-        TokenMapEntry::new(0x1004, TokenMapValue::Token(0x0600_0001)),
-        TokenMapEntry::new(0x1005, TokenMapValue::Offset(0x40)),
+        token_entry(0x1004, TokenMapValue::Token(0x0600_0001)),
+        token_entry(0x1005, TokenMapValue::Offset(0x40)),
     ];
     let mut data = Vec::new();
-    TokenMap::encode_entries(&entries, &mut data).unwrap();
+    TokenMap::encode_parts(&entries, &mut data).unwrap();
     assert_eq!(data, u32s(&[2, 0x1004, 0x8600_0001, 0x1005, 0x40]));
     for kind in [DEBUG_S_FUNC_MDTOKEN_MAP, DEBUG_S_TYPE_MDTOKEN_MAP] {
         let (LineSubsection::FunctionTokenMap(map) | LineSubsection::TypeTokenMap(map)) =
@@ -182,21 +212,18 @@ fn token_maps_round_trip_and_check_counts() {
         );
     }
     assert_eq!(
-        error_kind(TokenMap::decode(&[1, 0])),
+        error_kind(TokenMap::parse(&[1, 0])),
         ErrorKind::UnexpectedEof
     );
     assert_eq!(
-        error_kind(TokenMap::decode(&data[..16])),
+        error_kind(TokenMap::parse(&data[..16])),
         ErrorKind::UnexpectedEof
     );
     let long = [data.clone(), vec![0; 4]].concat();
+    assert_eq!(error_kind(TokenMap::parse(&long)), ErrorKind::InvalidFormat);
+    let wide = [token_entry(1, TokenMapValue::Token(0x8000_0000))];
     assert_eq!(
-        error_kind(TokenMap::decode(&long)),
-        ErrorKind::InvalidFormat
-    );
-    let wide = [TokenMapEntry::new(1, TokenMapValue::Token(0x8000_0000))];
-    assert_eq!(
-        error_kind(TokenMap::encode_entries(&wide, &mut Vec::new())),
+        error_kind(TokenMap::encode_parts(&wide, &mut Vec::new())),
         ErrorKind::InvalidFormat
     );
 }
@@ -204,10 +231,10 @@ fn token_maps_round_trip_and_check_counts() {
 #[test]
 fn merged_assembly_input_round_trips_and_checks_padding() {
     let mut data = Vec::new();
-    AssemblyInput::new(0x5f00_0000, 3, true, &[1, 0, 0, 0], b"lib.dll")
+    assembly_input(0x5f00_0000, 3, true, &[1, 0, 0, 0], b"lib.dll")
         .encode_padded(&mut data)
         .unwrap();
-    AssemblyInput::new(0, 4, false, &[], b"b")
+    assembly_input(0, 4, false, &[], b"b")
         .encode(&mut data)
         .unwrap();
     // 8 + 6 + 8 = 22 bytes, padded to 24, then 8 + 2 + 2 bytes without padding.
@@ -227,24 +254,24 @@ fn merged_assembly_input_round_trips_and_checks_padding() {
     let mut bad_padding = data.clone();
     bad_padding[23] = 1;
     assert_eq!(
-        error_kind(MergedAssemblyInput::decode(&bad_padding)),
+        error_kind(MergedAssemblyInput::parse(&bad_padding)),
         ErrorKind::InvalidFormat
     );
     let mut small_version = data.clone();
     small_version[8] = 1;
     assert_eq!(
-        error_kind(MergedAssemblyInput::decode(&small_version)),
+        error_kind(MergedAssemblyInput::parse(&small_version)),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        error_kind(MergedAssemblyInput::decode(&data[..21])),
+        error_kind(MergedAssemblyInput::parse(&data[..21])),
         ErrorKind::UnexpectedEof
     );
     assert_eq!(
-        error_kind(MergedAssemblyInput::decode(&data[..23])),
+        error_kind(MergedAssemblyInput::parse(&data[..23])),
         ErrorKind::UnexpectedEof
     );
-    let wide = AssemblyInput::new(0, 0x8000_0000, false, &[], b"x");
+    let wide = assembly_input(0, 0x8000_0000, false, &[], b"x");
     assert_eq!(
         error_kind(wide.encode(&mut Vec::new())),
         ErrorKind::InvalidFormat
@@ -275,11 +302,11 @@ fn xfg_hashes_round_trip_producer_bytes() {
     let entry = hashes.get(0).unwrap();
     assert_eq!((entry.class, entry.offset), (TypeIndex(0x1000), 0x10));
     assert_eq!(
-        error_kind(XfgTypeHashes::decode(&types[..8])),
+        error_kind(XfgTypeHashes::parse(&types[..8])),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        error_kind(XfgVirtualHashes::decode(&virtuals[..12])),
+        error_kind(XfgVirtualHashes::parse(&virtuals[..12])),
         ErrorKind::InvalidFormat
     );
 }
@@ -287,13 +314,8 @@ fn xfg_hashes_round_trip_producer_bytes() {
 #[test]
 fn ignored_subsections_keep_their_bytes() {
     let data = [9, 8, 7];
-    let decoded = round_trip(DEBUG_S_IGNORE | DEBUG_S_STRINGTABLE, &data);
-    assert_eq!(
-        decoded,
-        LineSubsection::Ignored {
-            kind: DEBUG_S_IGNORE | DEBUG_S_STRINGTABLE,
-            data: &data,
-        }
-    );
+    let kind = SubsectionKind(DEBUG_S_IGNORE.0 | DEBUG_S_STRINGTABLE.0);
+    let decoded = round_trip(kind, &data);
+    assert_eq!(decoded, LineSubsection::Ignored { kind, data: &data });
     round_trip(DEBUG_S_IGNORE, &[]);
 }

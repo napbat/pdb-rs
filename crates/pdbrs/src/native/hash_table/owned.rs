@@ -10,16 +10,7 @@
 //!    growth inserts the present entries again in bucket order into an empty table.
 //! 3. A removal clears the present bit and sets the deleted bit of the bucket.
 //!
-//! The producers differ in these points:
-//!
-//! | Rule | [`HashTableProducer::Microsoft`] | [`HashTableProducer::Llvm`] |
-//! | --- | --- | --- |
-//! | Capacity of a table from the default constructor (`Map()`, `HashTable()`) | 1 | 8 |
-//! | Present bit vector words | At least 1; extended to the highest bit set since the last growth | Up to the highest present bit |
-//! | Deleted bit vector words | Extended to the highest bit set since the last growth | Up to the highest deleted bit |
-//!
-//! Some tables use another first capacity: the LLVM named-stream map starts with 1 bucket
-//! (`OffsetIndexMap(1)`). Use [`OwnedHashTable::with_capacity`] for them.
+//! The producers differ in some points. [`OwnedHashTable`] lists them.
 //!
 //! A table decoded from a file keeps its bit vector words exactly, so that
 //! [`OwnedHashTable::encode`] gives the same bytes again.
@@ -27,27 +18,15 @@
 use alloc::vec::Vec;
 
 use super::{HashTable, HashTableEntry, HashTableValue};
+use crate::native::Producer;
 use crate::native::output::{Output, no_memory, to_u32};
 use crate::{Error, ErrorKind, Result};
 
-/// The producer whose insertion and serialization rules a table follows.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum HashTableProducer {
-    /// The Microsoft PDB library (`mspdbcore.dll`), which `link.exe` uses.
-    #[default]
-    Microsoft,
-    /// LLVM (`lld-link` and `llvm-pdbutil`).
-    Llvm,
-}
-
-impl HashTableProducer {
-    /// Return the bucket count of a table from the default constructor of the producer.
-    #[must_use]
-    pub const fn initial_capacity(self) -> u32 {
-        match self {
-            Self::Microsoft => 1,
-            Self::Llvm => 8,
-        }
+/// Return the bucket count of a table from the default constructor of `producer`.
+pub(crate) const fn initial_capacity(producer: Producer) -> u32 {
+    match producer {
+        Producer::Microsoft => 1,
+        Producer::Llvm => 8,
     }
 }
 
@@ -85,10 +64,21 @@ enum Slot {
 ///
 /// The table stores only the present entries, so a large capacity does not allocate buckets.
 /// The entries are in bucket order.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// The [`Producer`] of the table selects these rules:
+///
+/// | Rule | [`Producer::Microsoft`] | [`Producer::Llvm`] |
+/// | --- | --- | --- |
+/// | Capacity of a table from the default constructor (`Map()`, `HashTable()`) | 1 | 8 |
+/// | Present bit vector words | At least 1; extended to the highest bit set since the last growth | Up to the highest present bit |
+/// | Deleted bit vector words | Extended to the highest bit set since the last growth | Up to the highest deleted bit |
+///
+/// Some tables use another first capacity: the LLVM named-stream map starts with 1 bucket
+/// (`OffsetIndexMap(1)`). Use [`OwnedHashTable::with_capacity`] for them.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct OwnedHashTable<V> {
     /// The insertion and serialization rules.
-    producer: HashTableProducer,
+    producer: Producer,
     /// The number of buckets.
     capacity: u32,
     /// The present entries in bucket order.
@@ -105,8 +95,8 @@ impl<V: Clone> OwnedHashTable<V> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn new(producer: HashTableProducer) -> Result<Self> {
-        Self::with_capacity(producer, producer.initial_capacity())
+    pub fn new(producer: Producer) -> Result<Self> {
+        Self::with_capacity(producer, initial_capacity(producer))
     }
 
     /// Create an empty table with `capacity` buckets.
@@ -115,13 +105,13 @@ impl<V: Clone> OwnedHashTable<V> {
     ///
     /// - [`ErrorKind::InvalidFormat`] if `capacity` is zero.
     /// - [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn with_capacity(producer: HashTableProducer, capacity: u32) -> Result<Self> {
+    pub fn with_capacity(producer: Producer, capacity: u32) -> Result<Self> {
         if capacity == 0 {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("hash table capacity is zero"));
         }
         let mut present = Vec::new();
-        if producer == HashTableProducer::Microsoft {
+        if producer == Producer::Microsoft {
             // `ISet(1)` of a new `Map` has one word.
             present.try_reserve_exact(1).map_err(|_| no_memory())?;
             present.push(0);
@@ -140,7 +130,7 @@ impl<V: Clone> OwnedHashTable<V> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn from_table(table: &HashTable<'_, V>, producer: HashTableProducer) -> Result<Self> {
+    pub fn from_table(table: &HashTable<'_, V>, producer: Producer) -> Result<Self> {
         let mut entries = Vec::new();
         entries
             .try_reserve_exact(table.len())
@@ -157,7 +147,7 @@ impl<V: Clone> OwnedHashTable<V> {
 
     /// Return the insertion and serialization rules.
     #[must_use]
-    pub const fn producer(&self) -> HashTableProducer {
+    pub const fn producer(&self) -> Producer {
         self.producer
     }
 
@@ -323,7 +313,7 @@ impl<V: Clone> OwnedHashTable<V> {
 
     /// Apply the bit vector rule of the producer after a change.
     fn normalize(&mut self) {
-        if self.producer == HashTableProducer::Llvm {
+        if self.producer == Producer::Llvm {
             for words in [&mut self.present, &mut self.deleted] {
                 let used = words
                     .iter()

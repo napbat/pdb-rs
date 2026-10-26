@@ -11,9 +11,9 @@ mod program;
 
 use pdbrs::ContainerKind;
 use pdbrs::io::ReadAt;
+use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
 use pdbrs::native::container::Container;
-use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::msf::{Msf, StreamId};
 use pdbrs::native::write::BuildOptions;
 use pdbrs::{Format, Pdb as AnyPdb};

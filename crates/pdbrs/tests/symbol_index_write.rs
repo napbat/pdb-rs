@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 
-use pdbrs::ErrorKind;
+use pdbrs::native::Producer;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{
-    BucketCount, GlobalSymbolIndex, HashEntry, HashRecord, IndexProducer, PublicSymbolIndex,
-    SectionStart, SymbolOffset, ThunkTable, indexed_name,
+    BucketCount, GlobalSymbolIndex, HashEntry, PublicSymbolIndex, SectionStart, SymbolOffset,
+    ThunkTable, indexed_name,
 };
+use pdbrs::{ErrorKind, Result};
 
 /// The stream ID of the rebuilt index streams.
 const INDEX: StreamId = StreamId(9);
@@ -53,8 +54,55 @@ fn entries(offsets: &[SymbolOffset]) -> Vec<HashEntry> {
     offsets.iter().copied().map(HashEntry::new).collect()
 }
 
+/// Return an entry with a reference count of 1 in `bucket`.
+fn in_bucket(symbol: SymbolOffset, bucket: u32) -> HashEntry {
+    let mut entry = HashEntry::new(symbol);
+    entry.bucket = Some(bucket);
+    entry
+}
+
+/// Return an entry with `reference_count` in the bucket of its name.
+fn with_references(symbol: SymbolOffset, reference_count: u32) -> HashEntry {
+    let mut entry = HashEntry::new(symbol);
+    entry.reference_count = reference_count;
+    entry
+}
+
+/// Encode a global symbol index into a new vector.
+fn encode_globals(
+    stream: &[u8],
+    entries: &[HashEntry],
+    buckets: BucketCount,
+    producer: Producer,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    GlobalSymbolIndex::encode_parts(stream, entries, buckets, producer, &mut bytes)?;
+    Ok(bytes)
+}
+
+/// Encode a public symbol index with the standard bucket count into a new vector.
+fn encode_publics(
+    stream: &[u8],
+    entries: &[HashEntry],
+    producer: Producer,
+    thunks: ThunkTable<'_>,
+    starts: &[SectionStart],
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    PublicSymbolIndex::encode_parts(
+        stream,
+        entries,
+        BucketCount::Standard,
+        producer,
+        thunks,
+        starts,
+        &mut bytes,
+    )?;
+    Ok(bytes)
+}
+
 fn build_globals(stream: &[u8], entries: &[HashEntry], buckets: BucketCount) -> Vec<u8> {
-    GlobalSymbolIndex::build(stream, entries, buckets, IndexProducer::Microsoft).unwrap()
+    encode_globals(stream, entries, buckets, Producer::Microsoft).unwrap()
 }
 
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
@@ -91,16 +139,13 @@ fn colliding_names(length: u32, count: usize) -> (u32, Vec<Vec<u8>>) {
 
 #[test]
 fn empty_global_index_follows_the_producer() {
-    let microsoft =
-        GlobalSymbolIndex::build(&[], &[], BucketCount::Standard, IndexProducer::Microsoft)
-            .unwrap();
+    let microsoft = encode_globals(&[], &[], BucketCount::Standard, Producer::Microsoft).unwrap();
     assert_eq!(microsoft.len(), 16);
     assert_eq!(u32_at(&microsoft, 0), u32::MAX);
     assert_eq!(u32_at(&microsoft, 4), 0xf12f_091a);
     assert_eq!(u32_at(&microsoft, 8), 0);
     assert_eq!(u32_at(&microsoft, 12), 0);
-    let llvm =
-        GlobalSymbolIndex::build(&[], &[], BucketCount::Standard, IndexProducer::Llvm).unwrap();
+    let llvm = encode_globals(&[], &[], BucketCount::Standard, Producer::Llvm).unwrap();
     assert_eq!(llvm.len(), 16 + STANDARD_BITMAP);
     assert_eq!(u32_at(&llvm, 12), 516);
     assert!(llvm[16..].iter().all(|&byte| byte == 0));
@@ -124,14 +169,12 @@ fn one_record_gives_one_bucket() {
     assert_eq!(u32_at(&bytes, 20), 1);
     assert_eq!(u32_at(&bytes, bytes.len() - 4), 0);
     let index = GlobalSymbolIndex::parse(bytes, INDEX, BucketCount::Standard).unwrap();
-    let found: Vec<_> = index.hash_table().lookup(b"Point").collect();
-    assert_eq!(
-        found,
-        [HashRecord {
-            symbol: offset,
-            reference_count: 1,
-        }]
-    );
+    let found: Vec<_> = index
+        .hash_table()
+        .lookup(b"Point")
+        .map(|record| (record.symbol, record.reference_count))
+        .collect();
+    assert_eq!(found, [(offset, 1)]);
     assert_ne!(skipped, offset);
     assert_eq!(index.hash_table().len(), 1);
 }
@@ -179,10 +222,7 @@ fn names_that_differ_in_case_keep_the_offset_order() {
     assert_eq!(BucketCount::Standard.bucket_of(b"Value"), bucket_index);
     let mut input = entries(&[mixed, lower, upper]);
     // Keep "val" in the same bucket to test the length rule.
-    input.push(HashEntry {
-        bucket: Some(bucket_index),
-        ..HashEntry::new(shorter)
-    });
+    input.push(in_bucket(shorter, bucket_index));
     let bytes = build_globals(&stream, &input, BucketCount::Standard);
     let index = GlobalSymbolIndex::parse(bytes, INDEX, BucketCount::Standard).unwrap();
     assert_eq!(
@@ -200,10 +240,7 @@ fn ascii_letters_sort_as_lowercase() {
     let high = udt(&mut stream, b"\xc3\xa9");
     let input: Vec<HashEntry> = [high, lower, upper, underscore]
         .into_iter()
-        .map(|offset| HashEntry {
-            bucket: Some(7),
-            ..HashEntry::new(offset)
-        })
+        .map(|offset| in_bucket(offset, 7))
         .collect();
     let bytes = build_globals(&stream, &input, BucketCount::Standard);
     let index = GlobalSymbolIndex::parse(bytes, INDEX, BucketCount::Standard).unwrap();
@@ -239,16 +276,7 @@ fn reference_counts_and_producer_buckets_round_trip() {
     let mut stream = Vec::new();
     let first = udt(&mut stream, b"first");
     let second = udt(&mut stream, b"second");
-    let input = [
-        HashEntry {
-            reference_count: 23,
-            ..HashEntry::new(first)
-        },
-        HashEntry {
-            bucket: Some(4095),
-            ..HashEntry::new(second)
-        },
-    ];
+    let input = [with_references(first, 23), in_bucket(second, 4095)];
     let bytes = build_globals(&stream, &input, BucketCount::Standard);
     let index = GlobalSymbolIndex::parse(bytes.clone(), INDEX, BucketCount::Standard).unwrap();
     let table = index.hash_table();
@@ -258,9 +286,10 @@ fn reference_counts_and_producer_buckets_round_trip() {
     let decoded: Vec<HashEntry> = table
         .buckets()
         .flat_map(|bucket| {
-            bucket.records.map(move |record| HashEntry {
-                bucket: Some(bucket.index),
-                ..HashEntry::from(record)
+            bucket.records.map(move |record| {
+                let mut entry = HashEntry::from(record);
+                entry.bucket = Some(bucket.index);
+                entry
             })
         })
         .collect();
@@ -275,11 +304,10 @@ fn public_index_without_thunks_round_trips() {
     let mut stream = Vec::new();
     let late = public(&mut stream, b"late", 2, 0x10);
     let early = public(&mut stream, b"early", 1, 0x40);
-    let bytes = PublicSymbolIndex::build(
+    let bytes = encode_publics(
         &stream,
         &entries(&[late, early]),
-        BucketCount::Standard,
-        IndexProducer::Llvm,
+        Producer::Llvm,
         ThunkTable::default(),
         &[],
     )
@@ -319,22 +347,20 @@ fn public_index_without_thunks_round_trips() {
 fn public_index_writes_thunks_and_section_starts() {
     let mut stream = Vec::new();
     let only = public(&mut stream, b"main", 1, 0);
-    let starts = [SectionStart {
-        offset: 0x11000,
-        section: 2,
-        padding: [0xff, 0xff],
-    }];
-    let thunks = ThunkTable {
-        thunk_size: 5,
-        section: 2,
-        offset: 5,
-        targets: &[0x1_0010, 0x1_0020, 0x1_0010],
-    };
-    let bytes = PublicSymbolIndex::build(
+    let mut start = SectionStart::default();
+    start.offset = 0x11000;
+    start.section = 2;
+    start.padding = [0xff, 0xff];
+    let starts = [start];
+    let mut thunks = ThunkTable::default();
+    thunks.thunk_size = 5;
+    thunks.section = 2;
+    thunks.offset = 5;
+    thunks.targets = &[0x1_0010, 0x1_0020, 0x1_0010];
+    let bytes = encode_publics(
         &stream,
         &entries(&[only]),
-        BucketCount::Standard,
-        IndexProducer::Microsoft,
+        Producer::Microsoft,
         thunks,
         &starts,
     )
@@ -367,11 +393,10 @@ fn address_map_ties_sort_by_name_then_offset() {
     let alpha = public(&mut stream, b"alpha", 1, 0x20);
     let twin = public(&mut stream, b"alpha", 1, 0x20);
     let first = public(&mut stream, b"zeta", 1, 0x10);
-    let bytes = PublicSymbolIndex::build(
+    let bytes = encode_publics(
         &stream,
         &entries(&[twin, beta, first, alpha]),
-        BucketCount::Standard,
-        IndexProducer::Microsoft,
+        Producer::Microsoft,
         ThunkTable::default(),
         &[],
     )
@@ -390,24 +415,16 @@ fn address_order_follows_the_producer_signedness() {
     let high_section = public(&mut stream, b"last", 0x8000, 0);
     let input = entries(&[low, high, first_section, high_section]);
     let map = |producer| {
-        let bytes = PublicSymbolIndex::build(
-            &stream,
-            &input,
-            BucketCount::Standard,
-            producer,
-            ThunkTable::default(),
-            &[],
-        )
-        .unwrap();
+        let bytes = encode_publics(&stream, &input, producer, ThunkTable::default(), &[]).unwrap();
         let index = PublicSymbolIndex::parse(bytes, INDEX, BucketCount::Standard).unwrap();
         index.address_map().collect::<Vec<_>>()
     };
     assert_eq!(
-        map(IndexProducer::Llvm),
+        map(Producer::Llvm),
         [first_section, low, high, high_section]
     );
     assert_eq!(
-        map(IndexProducer::Microsoft),
+        map(Producer::Microsoft),
         [high_section, high, first_section, low]
     );
 }
@@ -457,11 +474,11 @@ fn invalid_entries_give_errors() {
     let mut stream = Vec::new();
     let offset = udt(&mut stream, b"type");
     let build = |entry: HashEntry| {
-        GlobalSymbolIndex::build(
+        encode_globals(
             &stream,
             &[entry],
             BucketCount::Standard,
-            IndexProducer::Microsoft,
+            Producer::Microsoft,
         )
         .unwrap_err()
         .kind()
@@ -474,36 +491,20 @@ fn invalid_entries_give_errors() {
         build(HashEntry::new(SymbolOffset(u32::MAX))),
         ErrorKind::LimitExceeded
     );
+    assert_eq!(build(with_references(offset, 0)), ErrorKind::InvalidFormat);
     assert_eq!(
-        build(HashEntry {
-            reference_count: 0,
-            ..HashEntry::new(offset)
-        }),
-        ErrorKind::InvalidFormat
-    );
-    assert_eq!(
-        build(HashEntry {
-            reference_count: 0x8000_0000,
-            ..HashEntry::new(offset)
-        }),
+        build(with_references(offset, 0x8000_0000)),
         ErrorKind::LimitExceeded
     );
-    assert_eq!(
-        build(HashEntry {
-            bucket: Some(4096),
-            ..HashEntry::new(offset)
-        }),
-        ErrorKind::InvalidFormat
-    );
+    assert_eq!(build(in_bucket(offset, 4096)), ErrorKind::InvalidFormat);
     assert_eq!(
         build(HashEntry::new(SymbolOffset(0x100))),
         ErrorKind::InvalidReference
     );
-    let public = PublicSymbolIndex::build(
+    let public = encode_publics(
         &stream,
         &[HashEntry::new(offset)],
-        BucketCount::Standard,
-        IndexProducer::Microsoft,
+        Producer::Microsoft,
         ThunkTable::default(),
         &[],
     )
@@ -518,12 +519,65 @@ fn largest_symbol_offset_passes_the_width_check() {
     let mut stream = Vec::new();
     udt(&mut stream, b"x");
     let entry = HashEntry::new(SymbolOffset(0x7fff_fffe));
-    let error = GlobalSymbolIndex::build(
+    let error = encode_globals(
         &stream,
         &[entry],
         BucketCount::Standard,
-        IndexProducer::Microsoft,
+        Producer::Microsoft,
     )
     .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
+}
+
+#[test]
+fn encoders_append_and_keep_the_output_on_error() {
+    let mut stream = Vec::new();
+    let udt_offset = udt(&mut stream, b"Point");
+    let public_offset = public(&mut stream, b"main", 1, 0);
+    let globals = build_globals(&stream, &entries(&[udt_offset]), BucketCount::Standard);
+    let mut out = vec![0xaa];
+    GlobalSymbolIndex::encode_parts(
+        &stream,
+        &entries(&[udt_offset]),
+        BucketCount::Standard,
+        Producer::Microsoft,
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(out[0], 0xaa);
+    assert_eq!(&out[1..], globals);
+    let publics = encode_publics(
+        &stream,
+        &entries(&[public_offset]),
+        Producer::Microsoft,
+        ThunkTable::default(),
+        &[],
+    )
+    .unwrap();
+    let mut out = vec![0xbb];
+    PublicSymbolIndex::encode_parts(
+        &stream,
+        &entries(&[public_offset]),
+        BucketCount::Standard,
+        Producer::Microsoft,
+        ThunkTable::default(),
+        &[],
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(out[0], 0xbb);
+    assert_eq!(&out[1..], publics);
+    // An `S_UDT` record is not a valid public entry.
+    let mut out = vec![0xcc];
+    PublicSymbolIndex::encode_parts(
+        &stream,
+        &entries(&[udt_offset]),
+        BucketCount::Standard,
+        Producer::Microsoft,
+        ThunkTable::default(),
+        &[],
+        &mut out,
+    )
+    .unwrap_err();
+    assert_eq!(out, [0xcc]);
 }

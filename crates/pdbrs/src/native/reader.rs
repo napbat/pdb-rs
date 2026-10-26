@@ -13,8 +13,7 @@ use super::debug_stream::{
 };
 use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
-use super::msf::{Msf, MsfLimits, StreamId, WriteOptions};
-use super::msfz::MsfzLimits;
+use super::msf::{Msf, StreamId, WriteOptions};
 use super::section::SectionHeaderStream;
 use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
 use super::types::TypeStream;
@@ -22,23 +21,48 @@ use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
 /// Resource limits for native container metadata and explicitly loaded streams.
-#[derive(Clone, Copy, Debug)]
+///
+/// The default uses [`ContainerLimits::default`] and a stream limit of 64 MiB.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ReadOptions {
-    /// Limits for the MSF 7.00 directory and block metadata.
-    pub msf: MsfLimits,
-    /// Limits for the MSFZ directory, the Chunk Table and the chunk cache.
-    pub msfz: MsfzLimits,
-    /// Maximum bytes in any stream materialized by a typed accessor.
-    pub max_stream_bytes: usize,
+    limits: ContainerLimits,
+    max_stream_bytes: usize,
 }
 
 impl Default for ReadOptions {
     fn default() -> Self {
         Self {
-            msf: MsfLimits::default(),
-            msfz: MsfzLimits::default(),
+            limits: ContainerLimits::default(),
             max_stream_bytes: 64 * 1024 * 1024,
         }
+    }
+}
+
+impl ReadOptions {
+    /// Return the limits for the MSF 7.00 and MSFZ container metadata.
+    #[must_use]
+    pub const fn limits(self) -> ContainerLimits {
+        self.limits
+    }
+
+    /// Set the limits for the MSF 7.00 and MSFZ container metadata.
+    #[must_use]
+    pub const fn with_limits(mut self, limits: ContainerLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Return the maximum bytes in any stream that a typed accessor loads.
+    #[must_use]
+    pub const fn max_stream_bytes(self) -> usize {
+        self.max_stream_bytes
+    }
+
+    /// Set the maximum bytes in any stream that a typed accessor loads.
+    #[must_use]
+    pub const fn with_max_stream_bytes(mut self, max_stream_bytes: usize) -> Self {
+        self.max_stream_bytes = max_stream_bytes;
+        self
     }
 }
 
@@ -47,6 +71,9 @@ impl Default for ReadOptions {
 /// The container is MSF 7.00 or MSFZ. Opening does not decode all streams. Accessors load and
 /// validate the requested stream. Raw access remains available for data without a semantic
 /// decoder.
+///
+/// With the `std` feature, `Pdb<S>` is `Sync` if `S` is `Sync`. Without `std`, the MSFZ chunk
+/// cache uses a `RefCell`, so the value is not `Sync`.
 #[derive(Debug)]
 pub struct Pdb<S> {
     container: Container<S>,
@@ -71,12 +98,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Returns an error for malformed or unsupported input, missing Info,
     /// invalid named-stream references, exceeded limits or failed I/O.
     pub fn with_options(source: S, options: ReadOptions) -> Result<Self> {
-        let container = Container::with_limits(
-            source,
-            ContainerLimits::default()
-                .with_msf(options.msf)
-                .with_msfz(options.msfz),
-        )?;
+        let container = Container::with_limits(source, options.limits)?;
         if container.stream_count() <= 1 {
             return Err(Error::new(ErrorKind::MissingStream, None).with_context("PDB Info"));
         }
@@ -437,6 +459,8 @@ impl<'a> Pdb<&'a [u8]> {
 #[cfg(all(feature = "std", any(unix, windows)))]
 impl Pdb<crate::io::FileReader> {
     /// Open a native PDB without loading all file bytes into memory.
+    ///
+    /// Requires the `std` feature and Unix or Windows.
     ///
     /// # Errors
     ///

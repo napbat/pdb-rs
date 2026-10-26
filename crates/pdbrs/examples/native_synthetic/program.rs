@@ -24,7 +24,9 @@ use pdbrs::Result;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::field_list::{DataMember, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{FunctionId, IdRecord};
-use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
+use pdbrs::native::codeview::index::{
+    ChecksumOffset, ModuleIndex, ModuleSymbolOffset, NameOffset, TypeIndex,
+};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     Compile3, CompileFlags, CpuType, Data, FrameProcedure, FrameProcedureFlags, ObjectName,
@@ -42,18 +44,16 @@ use pdbrs::native::dbi::{
 };
 use pdbrs::native::debug_stream::RecordStream;
 use pdbrs::native::lines::{
-    ChecksumKind, DEBUG_S_FILECHKSMS, DEBUG_S_LINES, LineEntry, LineSubsection, LinesHeader,
-    encode_file_checksum, encode_line_block,
+    ChecksumKind, DEBUG_S_FILECHKSMS, DEBUG_S_LINES, FileChecksum, LineBlock, LineEntry,
+    LineSubsection, LinesHeader, SubsectionKind,
 };
-use pdbrs::native::section::SectionHeader;
+use pdbrs::native::section::{Machine, SectionHeader};
 use pdbrs::native::write::{ModuleSymbolHandle, PdbBuilder, TypeHandle};
 
 /// The identity of the synthetic PDB.
 pub const GUID: [u8; 16] = *b"pdbrs-synthetic!";
 /// The signature of the synthetic PDB.
 pub const SIGNATURE: u32 = 0x6533_3300;
-/// The x64 machine value.
-const MACHINE_AMD64: u16 = 0x8664;
 /// The `CV_CFL_AMD64` compile machine value.
 const CV_CFL_AMD64: CpuType = CpuType::X64;
 /// The x64 register number of `RSP` (`CV_AMD64_RSP`).
@@ -233,23 +233,11 @@ fn add_module(
     file: u32,
     functions: [(TypeHandle, TypeHandle); 2],
 ) -> Result<[ModuleSymbolHandle; 2]> {
-    let module = builder.add_module(OwnedModule {
-        unused1: 0,
-        section_contribution: contribution(1, 0, 0x50, TEXT_CHARACTERISTICS),
-        flags: 0,
-        stream: None,
-        symbol_bytes: 0,
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 0,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: b"C:\\synthetic\\synthetic.obj".to_vec(),
-        object_file: b"C:\\synthetic\\synthetic.obj".to_vec(),
-        name_padding: [0; 3],
-    })?;
+    let mut record = OwnedModule::default();
+    record.section_contribution = contribution(1, 0, 0x50, TEXT_CHARACTERISTICS);
+    record.name = b"C:\\synthetic\\synthetic.obj".to_vec();
+    record.object_file = b"C:\\synthetic\\synthetic.obj".to_vec();
+    let module = builder.add_module(record)?;
     module.push_file(SOURCE)?;
     let mut object = ObjectName::default();
     object.signature = 0;
@@ -307,20 +295,32 @@ fn add_module(
     }
     module.push_subsection_with(move |_, out| {
         let mut data = Vec::new();
-        encode_file_checksum(file, ChecksumKind::None, &[], &mut data)?;
+        FileChecksum::encode_parts(NameOffset(file), ChecksumKind::None, &[], &mut data)?;
         frame(DEBUG_S_FILECHKSMS, &data, out)
     })?;
     for function in [SUM, MAIN] {
         module.push_subsection_with(move |_, out| {
             let mut data = Vec::new();
-            LinesHeader::new(function.offset, 1, 0, function.size).encode(&mut data)?;
+            let mut header = LinesHeader::default();
+            header.code_offset = function.offset;
+            header.segment = 1;
+            header.flags = 0;
+            header.code_size = function.size;
+            header.encode(&mut data)?;
             let lines: Vec<LineEntry> = function
                 .lines
                 .iter()
-                .map(|&(offset, line)| LineEntry::new(offset, line, 0, true))
+                .map(|&(offset, line)| {
+                    let mut entry = LineEntry::default();
+                    entry.offset = offset;
+                    entry.line_start = line;
+                    entry.end_delta = 0;
+                    entry.is_statement = true;
+                    entry
+                })
                 .collect();
             // The file checksum entry of the source is at offset 0.
-            encode_line_block(0, &lines, None, &mut data)?;
+            LineBlock::encode_parts(ChecksumOffset(0), &lines, None, &mut data)?;
             frame(DEBUG_S_LINES, &data, out)
         })?;
     }
@@ -333,7 +333,7 @@ fn add_module(
 /// Append a C13 subsection of `kind` with `data`, its header and its padding.
 ///
 /// The subsection codec decodes the data and frames it.
-fn frame(kind: u32, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
+fn frame(kind: SubsectionKind, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
     LineSubsection::decode(kind, data)?.encode_framed(out)
 }
 
@@ -386,35 +386,27 @@ fn add_globals(
 }
 
 /// Return a V60 section contribution of module 0.
-const fn contribution(
-    section: u16,
-    offset: i32,
-    size: i32,
-    characteristics: u32,
-) -> SectionContribution {
-    SectionContribution {
-        section,
-        padding1: 0,
-        offset,
-        size,
-        characteristics,
-        module: 0,
-        padding2: 0,
-        data_crc: Some(0),
-        reloc_crc: Some(0),
-        coff_section: None,
-    }
+fn contribution(section: u16, offset: i32, size: i32, characteristics: u32) -> SectionContribution {
+    let mut contribution = SectionContribution::default();
+    contribution.section = section;
+    contribution.offset = offset;
+    contribution.size = size;
+    contribution.characteristics = characteristics;
+    contribution.module = ModuleIndex(0);
+    contribution.data_crc = Some(0);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    contribution
 }
 
 /// Add the DBI header, the section contributions, the section map and the
 /// section headers.
 fn add_image_tables(builder: &mut PdbBuilder<'_>) -> Result<()> {
-    builder.set_dbi_header(DbiHeader {
-        // The new version format (bit 15), major version 14 and minor version 51 (0x33).
-        build_number: 0x8000 | (14 << 8) | 0x33,
-        machine: MACHINE_AMD64,
-        ..DbiHeader::default()
-    });
+    let mut header = DbiHeader::default();
+    // The new version format (bit 15), major version 14 and minor version 51 (0x33).
+    header.build_number = 0x8000 | (14 << 8) | 0x33;
+    header.machine = Machine::AMD64;
+    builder.set_dbi_header(header);
     builder.set_section_contributions(
         SectionContributionVersion::V60,
         vec![
@@ -422,37 +414,36 @@ fn add_image_tables(builder: &mut PdbBuilder<'_>) -> Result<()> {
             contribution(2, 0, 4, DATA_CHARACTERISTICS),
         ],
     );
-    let segment = |flags: u16, frame: u16, length: u32| SectionMapEntry {
-        flags: SegmentFlags(flags),
-        overlay: 0,
-        group: 0,
-        frame,
-        section_name: 0xffff,
-        class_name: 0xffff,
-        offset: 0,
-        length,
+    let segment = |flags: u16, frame: u16, length: u32| {
+        let mut entry = SectionMapEntry::default();
+        entry.flags = SegmentFlags(flags);
+        entry.frame = frame;
+        entry.section_name = 0xffff;
+        entry.class_name = 0xffff;
+        entry.length = length;
+        entry
     };
     let selector = SegmentFlags::IS_SELECTOR.0 | SegmentFlags::ADDRESS_IS_32_BIT.0;
-    builder.set_section_map(Some(OwnedSectionMap {
-        logical_count: 3,
-        entries: vec![
-            segment(
-                selector | SegmentFlags::READ.0 | SegmentFlags::EXECUTE.0,
-                1,
-                0x100,
-            ),
-            segment(
-                selector | SegmentFlags::READ.0 | SegmentFlags::WRITE.0,
-                2,
-                0x100,
-            ),
-            segment(
-                SegmentFlags::IS_ABSOLUTE_ADDRESS.0 | SegmentFlags::ADDRESS_IS_32_BIT.0,
-                0,
-                u32::MAX,
-            ),
-        ],
-    }));
+    let mut map = OwnedSectionMap::default();
+    map.logical_count = 3;
+    map.entries = vec![
+        segment(
+            selector | SegmentFlags::READ.0 | SegmentFlags::EXECUTE.0,
+            1,
+            0x100,
+        ),
+        segment(
+            selector | SegmentFlags::READ.0 | SegmentFlags::WRITE.0,
+            2,
+            0x100,
+        ),
+        segment(
+            SegmentFlags::IS_ABSOLUTE_ADDRESS.0 | SegmentFlags::ADDRESS_IS_32_BIT.0,
+            0,
+            u32::MAX,
+        ),
+    ];
+    builder.set_section_map(Some(map));
     let mut text = SectionHeader::new(*b".text\0\0\0", 0x100, 0x1000);
     text.characteristics = TEXT_CHARACTERISTICS;
     let mut data = SectionHeader::new(*b".data\0\0\0", 0x100, 0x2000);

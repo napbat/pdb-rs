@@ -8,7 +8,7 @@ use pdbrs::native::Pdb;
 use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
-use pdbrs::native::codeview::index::ModuleSymbolOffset;
+use pdbrs::native::codeview::index::{ChecksumOffset, ModuleSymbolOffset};
 use pdbrs::native::codeview::symbol::{
     Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
     Symbol, SymbolData, Trampoline, TrampolineKind,
@@ -109,7 +109,7 @@ fn module_symbols(
 ) -> Outcome {
     let lines = report.supported(ModuleLines::parse(stream), "C13 line data")?;
     if let Some(lines) = &lines {
-        lines.validate()?;
+        lines.check()?;
     }
     let checksums = lines.as_ref().and_then(ModuleLines::checksums);
     let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
@@ -137,14 +137,14 @@ fn module_symbols(
             SymbolData::InlineSite(site) => {
                 for annotation in &site.annotations {
                     if let Annotation::ChangeFile(offset) = annotation
-                        && !checksums.is_some_and(|table| table.contains(offset))
+                        && !checksums.is_some_and(|table| table.contains(ChecksumOffset(offset)))
                     {
                         return Err("inline site names a missing file checksum".into());
                     }
                 }
             }
             SymbolData::FileStatic(value) => {
-                context.names.get(value.module_name_offset.0)?;
+                context.names.get(value.module_name_offset)?;
                 report.add("file statics joined to /names", 1);
             }
             SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
@@ -198,7 +198,7 @@ fn oem_attribute(oem: &Oem<'_>, report: &mut Report) -> Outcome {
 /// Resolve the file names and inlinees of one module's line data.
 fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Report) -> Outcome {
     let checksums = lines.checksums();
-    let file_name = |offset: u32| -> Outcome {
+    let file_name = |offset: ChecksumOffset| -> Outcome {
         let entry = checksums
             .and_then(|table| table.get(offset))
             .ok_or("line data names a missing file checksum")?;
@@ -341,17 +341,17 @@ pub(crate) fn shared_symbols(
 /// and 0xffffffff marks an external symbol that the linker resolved to an
 /// absolute value, for example `__guard_flags` (#13).
 fn coff_symbol_rvas(
-    rvas: impl Iterator<Item = u32>,
+    rvas: impl Iterator<Item = Rva>,
     context: &Context<'_>,
     report: &mut Report,
 ) -> Outcome {
     for rva in rvas {
-        if rva == 0 {
+        if rva == Rva(0) {
             report.add("COFF symbol RVAs without an address", 1);
-        } else if rva == u32::MAX {
+        } else if rva == Rva(u32::MAX) {
             report.add("COFF symbol RVAs of absolute symbols", 1);
         } else if let Some(map) = &context.addresses {
-            map.section_offset(Rva(rva))?;
+            map.section_offset(rva)?;
             report.add("COFF symbol RVAs inside a section", 1);
         } else {
             report.add("addresses without section headers", 1);

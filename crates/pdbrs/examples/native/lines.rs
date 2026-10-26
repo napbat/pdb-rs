@@ -3,7 +3,8 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
-use pdbrs::native::dbi::{Dbi, ModuleRegionSizes};
+use pdbrs::native::codeview::index::ChecksumOffset;
+use pdbrs::native::dbi::Dbi;
 use pdbrs::native::info::Feature;
 use pdbrs::native::lines::{
     CrossScopeContext, CrossScopeModules, LineSubsection, ModuleLines, validate_cross_scope,
@@ -50,12 +51,13 @@ pub(crate) fn cross_scope(
     let base = CrossScopeContext::new(context.tpi_end, context.ids.index_end())
         .with_names(&context.names)
         .with_modules(&modules);
-    let validation =
-        if info.has_feature(Feature::NoTypeMerge) || info.has_feature(Feature::MinimalDebugInfo) {
-            base.without_export_mapping()
-        } else {
-            base
-        };
+    let validation = if info.has_feature(Feature::NO_TYPE_MERGE)
+        || info.has_feature(Feature::MINIMAL_DEBUG_INFO)
+    {
+        base.without_export_mapping()
+    } else {
+        base
+    };
     for stream in &streams {
         let lines = ModuleLines::parse(stream)?;
         let count = lines
@@ -88,7 +90,7 @@ pub(crate) fn cross_scope(
 /// File references of IL lines resolve through `checksum_name`.
 pub(crate) fn other_subsection(
     data: &LineSubsection<'_>,
-    checksum_name: &dyn Fn(u32) -> Outcome,
+    checksum_name: &dyn Fn(ChecksumOffset) -> Outcome,
     context: &Context<'_>,
     report: &mut Report,
 ) -> Outcome {
@@ -166,7 +168,7 @@ pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Rep
         };
         let refs = stream.global_refs()?;
         if !refs.is_empty() {
-            refs.validate(
+            refs.check(
                 records
                     .as_ref()
                     .ok_or("global references without symbol records")?,
@@ -185,15 +187,14 @@ pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Rep
             regions.0 += 1;
             regions.1 += usize::from(c13 != stream.c13_data());
         }
-        let encoded = stream.encode()?;
-        let expected = ModuleRegionSizes {
-            symbol_bytes: module.symbol_bytes,
-            c11_bytes: module.c11_bytes,
-            c13_bytes: module.c13_bytes,
-        };
+        let mut encoded = Vec::new();
+        let sizes = stream.encode(&mut encoded)?;
+        let expected = (module.symbol_bytes, module.c11_bytes, module.c13_bytes);
         let source = pdb.stream_bytes(stream.stream())?;
         streams.0 += 1;
-        streams.1 += usize::from(encoded.bytes != source || encoded.sizes != expected);
+        streams.1 += usize::from(
+            encoded != source || (sizes.symbol_bytes, sizes.c11_bytes, sizes.c13_bytes) != expected,
+        );
     }
     println!(
         "C13 subsections re-encoded: {}, different: {}",

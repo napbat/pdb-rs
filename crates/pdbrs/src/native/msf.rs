@@ -20,7 +20,7 @@
 //!   interval are free page map pages.
 //! - No page occurs more than once in the page map, the stream directory and all stream pages.
 //!
-//! Opening does not read the free page maps. [`Msf::check_free_page_map`] reads the active
+//! Opening does not read the free page maps. [`Msf::validate_free_page_map`] reads the active
 //! free page map and compares it with the page references. The reader does not check unused
 //! bytes after the end of a structure.
 //!

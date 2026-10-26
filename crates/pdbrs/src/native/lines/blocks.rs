@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
+use crate::native::codeview::index::ChecksumOffset;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
@@ -44,7 +45,8 @@ const END_DELTA_MASK: u32 = 0x7f;
 const STATEMENT_BIT: u32 = 0x8000_0000;
 
 /// The header of a `DEBUG_S_LINES` subsection (`CV_DebugSLinesHeader_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LinesHeader {
     /// The section offset of the code contribution.
     pub code_offset: u32,
@@ -57,17 +59,6 @@ pub struct LinesHeader {
 }
 
 impl LinesHeader {
-    /// Create a header from its fields.
-    #[must_use]
-    pub const fn new(code_offset: u32, segment: u16, flags: u16, code_size: u32) -> Self {
-        Self {
-            code_offset,
-            segment,
-            flags,
-            code_size,
-        }
-    }
-
     /// Return `true` if each block has column entries.
     #[must_use]
     pub const fn has_columns(&self) -> bool {
@@ -94,7 +85,7 @@ impl LinesHeader {
 
 /// A decoded `DEBUG_S_LINES` subsection.
 ///
-/// [`LinesSubsection::decode`] validates all blocks. The block iterator
+/// [`LinesSubsection::parse`] validates all blocks. The block iterator
 /// then cannot fail.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct LinesSubsection<'a> {
@@ -107,7 +98,7 @@ pub struct LinesSubsection<'a> {
 }
 
 impl<'a> LinesSubsection<'a> {
-    /// Decode and validate the data of a `DEBUG_S_LINES` subsection.
+    /// Parse and validate the data of a `DEBUG_S_LINES` subsection.
     ///
     /// These rules apply:
     ///
@@ -133,7 +124,7 @@ impl<'a> LinesSubsection<'a> {
     /// - [`ErrorKind::LimitExceeded`] if a block size does not fit in memory.
     ///
     /// The errors do not have a file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let (header_bytes, blocks) = data
             .split_first_chunk::<HEADER_SIZE>()
             .ok_or_else(|| truncated("line subsection header is truncated"))?;
@@ -196,7 +187,7 @@ impl<'a> LinesSubsection<'a> {
 
     /// Append the subsection data to `out`: the header and all blocks.
     ///
-    /// The output is equal to the data that [`LinesSubsection::decode`]
+    /// The output is equal to the data that [`LinesSubsection::parse`]
     /// read.
     ///
     /// # Errors
@@ -213,11 +204,12 @@ impl<'a> LinesSubsection<'a> {
 }
 
 /// The lines of one source file in a `DEBUG_S_LINES` subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LineBlock<'a> {
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the same module.
-    pub checksum_offset: u32,
+    pub checksum_offset: ChecksumOffset,
     /// The line entries.
     pub lines: LineEntries<'a>,
     /// The column entries, if the header has the column flag.
@@ -232,7 +224,7 @@ impl LineBlock<'_> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`encode_line_block`].
+    /// Returns the errors of [`LineBlock::encode_parts`].
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         write_block(
             self.checksum_offset,
@@ -241,38 +233,38 @@ impl LineBlock<'_> {
             out,
         )
     }
-}
 
-/// Append one block of a `DEBUG_S_LINES` subsection to `out`.
-///
-/// Give `columns` only if the subsection header has the column flag
-/// ([`LinesHeader::has_columns`]). Give one column entry for each line
-/// entry. The function computes the block size.
-///
-/// # Errors
-///
-/// - [`ErrorKind::InvalidFormat`] if the number of column entries is not
-///   the number of line entries, or if a line entry does not fit its bit
-///   fields ([`LineEntry::encode`]).
-/// - [`ErrorKind::LimitExceeded`] if the count or the block size does not
-///   fit in 32 bits, or if the output cannot grow.
-pub fn encode_line_block(
-    checksum_offset: u32,
-    lines: &[LineEntry],
-    columns: Option<&[ColumnEntry]>,
-    out: &mut Vec<u8>,
-) -> Result<()> {
-    write_block(
-        checksum_offset,
-        lines.iter().copied(),
-        columns.map(|columns| columns.iter().copied()),
-        out,
-    )
+    /// Append one block of a `DEBUG_S_LINES` subsection to `out`.
+    ///
+    /// Give `columns` only if the subsection header has the column flag
+    /// ([`LinesHeader::has_columns`]). Give one column entry for each line
+    /// entry. The function computes the block size.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the number of column entries is
+    ///   not the number of line entries, or if a line entry does not fit
+    ///   its bit fields ([`LineEntry::encode`]).
+    /// - [`ErrorKind::LimitExceeded`] if the count or the block size does
+    ///   not fit in 32 bits, or if the output cannot grow.
+    pub fn encode_parts(
+        checksum_offset: ChecksumOffset,
+        lines: &[LineEntry],
+        columns: Option<&[ColumnEntry]>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        write_block(
+            checksum_offset,
+            lines.iter().copied(),
+            columns.map(|columns| columns.iter().copied()),
+            out,
+        )
+    }
 }
 
 /// Append one block with the entries of `lines` and `columns` to `out`.
 fn write_block(
-    checksum_offset: u32,
+    checksum_offset: ChecksumOffset,
     lines: impl ExactSizeIterator<Item = LineEntry>,
     columns: Option<impl ExactSizeIterator<Item = ColumnEntry>>,
     out: &mut Vec<u8>,
@@ -291,7 +283,7 @@ fn write_block(
         .checked_mul(entry_size)
         .and_then(|size| size.checked_add(BLOCK_HEADER_SIZE))
         .ok_or_else(|| too_large("line block size does not fit in 32 bits"))?;
-    Output::new(out).u32(checksum_offset)?;
+    Output::new(out).u32(checksum_offset.0)?;
     Output::new(out).u32(to_u32(count, "line block count does not fit in 32 bits")?)?;
     Output::new(out).u32(to_u32(size, "line block size does not fit in 32 bits")?)?;
     for line in lines {
@@ -304,7 +296,8 @@ fn write_block(
 }
 
 /// One line entry (`CV_Line_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LineEntry {
     /// The code offset relative to [`LinesHeader::code_offset`].
     pub offset: u32,
@@ -320,17 +313,6 @@ pub struct LineEntry {
 }
 
 impl LineEntry {
-    /// Create a line entry from its fields.
-    #[must_use]
-    pub const fn new(offset: u32, line_start: u32, end_delta: u8, is_statement: bool) -> Self {
-        Self {
-            offset,
-            line_start,
-            end_delta,
-            is_statement,
-        }
-    }
-
     /// Decode a serialized line entry.
     const fn parse(bytes: [u8; LINE_SIZE]) -> Self {
         let [o0, o1, o2, o3, f0, f1, f2, f3] = bytes;
@@ -367,7 +349,8 @@ impl LineEntry {
 }
 
 /// One column entry (`CV_Column_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ColumnEntry {
     /// The first column.
     pub start: u16,
@@ -376,12 +359,6 @@ pub struct ColumnEntry {
 }
 
 impl ColumnEntry {
-    /// Create a column entry from its fields.
-    #[must_use]
-    pub const fn new(start: u16, end: u16) -> Self {
-        Self { start, end }
-    }
-
     /// Decode a serialized column entry.
     const fn parse(bytes: [u8; COLUMN_SIZE]) -> Self {
         let [s0, s1, e0, e1] = bytes;
@@ -437,7 +414,7 @@ impl<'a> Iterator for LineBlocks<'a> {
     type Item = LineBlock<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // `LinesSubsection::decode` validated the blocks, so this cannot fail.
+        // `LinesSubsection::parse` validated the blocks, so this cannot fail.
         let (block, rest) = split_block(self.bytes, self.header).ok()?;
         self.bytes = rest;
         self.left = self.left.saturating_sub(1);
@@ -482,7 +459,7 @@ fn split_block(bytes: &[u8], header: LinesHeader) -> Result<(LineBlock<'_>, &[u8
     // column entries, so the split point is inside `entries`.
     let (lines, columns) = entries.split_at(count * LINE_SIZE);
     let block = LineBlock {
-        checksum_offset,
+        checksum_offset: ChecksumOffset(checksum_offset),
         lines: LineEntries::new(lines),
         columns: header.has_columns().then(|| ColumnEntries::new(columns)),
     };

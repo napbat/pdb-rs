@@ -52,7 +52,10 @@
 use alloc::vec::Vec;
 
 use super::address::{AddressMap, Rva, SectionOffset};
-use super::codeview::index::IdIndex;
+use super::codeview::SymbolKind;
+use super::codeview::index::{
+    ChecksumOffset, IdIndex, ModuleIndex, ModuleSymbolOffset, NameOffset,
+};
 use super::codeview::symbol::Public;
 use super::dbi::{Dbi, ModuleStream};
 use super::section::SectionHeaders;
@@ -97,7 +100,7 @@ pub struct SymbolLocator {
     /// The `DEBUG_S_LINES` subsections by RVA.
     lines: RangeIndex<LineKey>,
     /// The section contributions by RVA, with the module index.
-    contributions: RangeIndex<u32>,
+    contributions: RangeIndex<ModuleIndex>,
     /// The public symbols by RVA. Each range has a length of 1.
     publics: RangeIndex<SymbolOffset>,
     /// The inlinee names, sorted by ID scope and ID.
@@ -112,7 +115,7 @@ pub struct SymbolLocator {
     /// The public symbol index, if the DBI stream names one.
     public_index: Option<PublicSymbolIndex>,
     /// The modules whose symbol walk stopped at an undecoded scope kind.
-    incomplete: Vec<u32>,
+    incomplete: Vec<ModuleIndex>,
 }
 
 /// The data of one module.
@@ -123,14 +126,14 @@ struct ModuleData {
     /// The module stream, if the module has one.
     stream: Option<ModuleStream>,
     /// The file checksum offsets with their `/names` offsets, sorted.
-    files: Vec<(u32, u32)>,
+    files: Vec<(ChecksumOffset, NameOffset)>,
     /// The inlinee lines: the inlinee, the file checksum offset and the
     /// start line. Sorted by inlinee; the first entry of an inlinee wins.
-    inlinees: Vec<(IdIndex, u32, u32)>,
+    inlinees: Vec<(IdIndex, ChecksumOffset, u32)>,
     /// The module stream offset of the record that stopped the symbol walk:
     /// a scope kind that this crate does not decode. The locator does not
     /// read records at or after it.
-    walk_end: Option<u32>,
+    walk_end: Option<ModuleSymbolOffset>,
     /// The parent address and the chunk of each `S_SEPCODE` record, in
     /// stream order.
     separated: Vec<(SectionOffset, SeparatedChunk)>,
@@ -140,7 +143,7 @@ struct ModuleData {
 #[derive(Clone, Copy, Debug)]
 struct SeparatedChunk {
     /// The module stream offset of the record.
-    offset: u32,
+    offset: ModuleSymbolOffset,
     /// The address of the separated code.
     address: SectionOffset,
     /// The length of the separated code in bytes.
@@ -151,16 +154,16 @@ struct SeparatedChunk {
 #[derive(Clone, Copy, Debug)]
 struct ProcedureKey {
     /// The module index.
-    module: u32,
+    module: ModuleIndex,
     /// The module stream offset of the record.
-    offset: u32,
+    offset: ModuleSymbolOffset,
 }
 
 /// The place of a `DEBUG_S_LINES` subsection.
 #[derive(Clone, Copy, Debug)]
 struct LineKey {
     /// The module index.
-    module: u32,
+    module: ModuleIndex,
     /// The offset of the subsection data in the C13 line region.
     start: usize,
     /// The length of the subsection data.
@@ -182,25 +185,25 @@ struct InlineeName {
 }
 
 /// A module with its zero-based index.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ModuleRef<'a> {
     /// The zero-based index of the module in the DBI stream.
-    pub index: u32,
+    pub index: ModuleIndex,
     /// The module name.
     pub name: &'a [u8],
 }
 
 /// A procedure, managed procedure or thunk record of a module.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ProcedureInfo<'a> {
     /// The zero-based module index.
-    pub module: u32,
+    pub module: ModuleIndex,
     /// The offset of the record in the module stream.
-    pub offset: u32,
+    pub offset: ModuleSymbolOffset,
     /// The record kind, for example `S_GPROC32_ID`.
-    pub kind: u16,
+    pub kind: SymbolKind,
     /// The name.
     pub name: &'a [u8],
     /// The section-relative address of the first byte.
@@ -213,11 +216,11 @@ pub struct ProcedureInfo<'a> {
 }
 
 /// An `S_BLOCK32` scope inside a procedure.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct BlockInfo<'a> {
     /// The offset of the record in the module stream.
-    pub offset: u32,
+    pub offset: ModuleSymbolOffset,
     /// The block name. It is often empty.
     pub name: &'a [u8],
     /// The RVA of the first byte.
@@ -227,14 +230,14 @@ pub struct BlockInfo<'a> {
 }
 
 /// A source line with its code range.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SourceLine<'a> {
     /// The file name from the `/names` stream.
     pub file: &'a [u8],
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the module.
-    pub checksum_offset: u32,
+    pub checksum_offset: ChecksumOffset,
     /// The first line.
     ///
     /// `0xfeefee` and `0xf00f00` are special values; see
@@ -255,11 +258,11 @@ pub struct SourceLine<'a> {
 }
 
 /// One inlined function in an inline call chain.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineFrame<'a> {
     /// The offset of the `S_INLINESITE` record in the module stream.
-    pub offset: u32,
+    pub offset: ModuleSymbolOffset,
     /// The `LF_FUNC_ID` or `LF_MFUNC_ID` record of the inlined function.
     pub inlinee: IdIndex,
     /// The name of the ID record.
@@ -276,7 +279,7 @@ pub struct InlineFrame<'a> {
 }
 
 /// The result of an address query.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Location<'a> {
     /// The RVA of the query.
@@ -299,7 +302,7 @@ pub struct Location<'a> {
 }
 
 /// A public symbol at or before an address.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct PublicMatch<'a> {
     /// The offset of the record in the symbol record stream.
@@ -321,8 +324,8 @@ impl SymbolLocator {
 
     /// Return the module with a zero-based index, if it exists.
     #[must_use]
-    pub fn module(&self, index: u32) -> Option<ModuleRef<'_>> {
-        let data = self.modules.get(usize::try_from(index).ok()?)?;
+    pub fn module(&self, index: ModuleIndex) -> Option<ModuleRef<'_>> {
+        let data = self.modules.get(usize::try_from(index.0).ok()?)?;
         Some(ModuleRef {
             index,
             name: &data.name,
@@ -333,7 +336,7 @@ impl SymbolLocator {
     /// this crate does not decode. The locator does not index the records
     /// after that point.
     #[must_use]
-    pub fn incomplete_modules(&self) -> &[u32] {
+    pub fn incomplete_modules(&self) -> &[ModuleIndex] {
         &self.incomplete
     }
 
@@ -455,7 +458,7 @@ impl SymbolLocator {
     /// these the first one in module and stream order. DIA
     /// (`findLinesByRVA`) gives the same line for the folded code of the
     /// fixtures of #27.
-    fn line_at(&self, rva: Rva, preferred: Option<u32>) -> Result<Option<SourceLine<'_>>> {
+    fn line_at(&self, rva: Rva, preferred: Option<ModuleIndex>) -> Result<Option<SourceLine<'_>>> {
         let Some(span) = self
             .lines
             .find_first_preferred(rva.0, |key| Some(key.module) == preferred)
@@ -469,7 +472,7 @@ impl SymbolLocator {
             .as_ref()
             .and_then(|stream| stream.c13_data().get(key.start..key.start + key.length))
             .ok_or_else(|| internal("line subsection range is outside the module stream"))?;
-        let subsection = crate::native::lines::LinesSubsection::decode(data)?;
+        let subsection = crate::native::lines::LinesSubsection::parse(data)?;
         // The span starts at the code offset of the subsection, so the
         // difference fits in `u32`.
         let Some(found) = find_line(&subsection, rva.0 - span.start) else {
@@ -493,8 +496,8 @@ impl SymbolLocator {
     }
 
     /// Return the module data of an index.
-    fn module_data(&self, index: u32) -> Result<&ModuleData> {
-        usize::try_from(index)
+    fn module_data(&self, index: ModuleIndex) -> Result<&ModuleData> {
+        usize::try_from(index.0)
             .ok()
             .and_then(|index| self.modules.get(index))
             .ok_or_else(|| {
@@ -504,7 +507,11 @@ impl SymbolLocator {
     }
 
     /// Return the file name of a file checksum offset of a module.
-    fn file_name<'s>(&'s self, module: &ModuleData, checksum_offset: u32) -> Result<&'s [u8]> {
+    fn file_name<'s>(
+        &'s self,
+        module: &ModuleData,
+        checksum_offset: ChecksumOffset,
+    ) -> Result<&'s [u8]> {
         let position = module
             .files
             .binary_search_by_key(&checksum_offset, |&(offset, _)| offset)
@@ -517,7 +524,7 @@ impl SymbolLocator {
             Error::new(ErrorKind::MissingStream, None)
                 .with_context("line data needs the /names stream")
         })?;
-        usize::try_from(name_offset)
+        usize::try_from(name_offset.0)
             .ok()
             .and_then(|start| strings.get(start..))
             .and_then(|rest| {
@@ -533,9 +540,9 @@ impl SymbolLocator {
 
     /// Return the name of an inlinee of the module `module`: the unqualified
     /// and the qualified name.
-    fn inlinee_name(&self, module: u32, id: IdIndex) -> Result<(&[u8], &[u8])> {
+    fn inlinee_name(&self, module: ModuleIndex, id: IdIndex) -> Result<(&[u8], &[u8])> {
         let scope = if self.no_type_merge {
-            module
+            module.0
         } else {
             inlinee::MERGED_IDS
         };

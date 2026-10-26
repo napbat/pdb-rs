@@ -35,6 +35,20 @@ fn parse(bytes: Vec<u8>, sizes: ModuleRegionSizes) -> ModuleStream {
     ModuleStream::parse(bytes, &module).unwrap()
 }
 
+/// Encode `parts` and return the stream bytes and the region sizes.
+fn encode(parts: &ModuleStreamParts<'_>) -> pdbrs::Result<(Vec<u8>, ModuleRegionSizes)> {
+    let mut bytes = Vec::new();
+    let sizes = parts.encode(&mut bytes)?;
+    Ok((bytes, sizes))
+}
+
+/// Encode `stream` again and return the stream bytes and the region sizes.
+fn reencode(stream: &ModuleStream) -> (Vec<u8>, ModuleRegionSizes) {
+    let mut bytes = Vec::new();
+    let sizes = stream.encode(&mut bytes).unwrap();
+    (bytes, sizes)
+}
+
 /// One `S_END` record and one 8-byte `S_PUB32`-kind record.
 const SYMBOLS: [u8; 12] = [2, 0, 6, 0, 6, 0, 0x0e, 0x11, 1, 2, 3, 4];
 
@@ -51,36 +65,34 @@ fn c13() -> Vec<u8> {
 fn writer_joins_regions_and_reports_sizes() {
     let c13 = c13();
     let refs = [SymbolOffset(0), SymbolOffset(8)];
-    let parts = ModuleStreamParts {
-        symbols: Some(&SYMBOLS),
-        c11: &[0xaa; 4],
-        c13: &c13,
-        global_refs: &refs,
-    };
-    let encoded = parts.encode().unwrap();
+    let mut parts = ModuleStreamParts::default();
+    parts.symbols = Some(&SYMBOLS);
+    parts.c11 = &[0xaa; 4];
+    parts.c13 = &c13;
+    parts.global_refs = &refs;
+    let (bytes, sizes) = encode(&parts).unwrap();
     assert_eq!(
-        encoded.sizes,
-        ModuleRegionSizes {
-            symbol_bytes: 16,
-            c11_bytes: 4,
-            c13_bytes: 16,
-        }
+        (sizes.symbol_bytes, sizes.c11_bytes, sizes.c13_bytes),
+        (16, 4, 16)
     );
     let mut expected = u32s(&[4]);
     expected.extend_from_slice(&SYMBOLS);
     expected.extend_from_slice(&[0xaa; 4]);
     expected.extend_from_slice(&c13);
     expected.extend_from_slice(&u32s(&[8, 0, 8]));
-    assert_eq!(encoded.bytes, expected);
+    assert_eq!(bytes, expected);
 
-    let stream = parse(encoded.bytes.clone(), encoded.sizes);
-    assert_eq!(stream.region_sizes(), encoded.sizes);
+    let stream = parse(bytes.clone(), sizes);
+    assert_eq!(stream.region_sizes(), sizes);
     assert_eq!(stream.symbol_data(), SYMBOLS);
     assert_eq!(
         stream.global_refs().unwrap().iter().collect::<Vec<_>>(),
         refs
     );
-    assert_eq!(stream.encode().unwrap(), encoded);
+    assert_eq!(reencode(&stream), (bytes, sizes));
+    let mut appended = vec![0xcc];
+    assert_eq!(stream.encode(&mut appended).unwrap(), sizes);
+    assert_eq!(appended[1..], expected);
     let lines = ModuleLines::parse(&stream).unwrap();
     let mut region = Vec::new();
     lines.encode(&mut region).unwrap();
@@ -90,18 +102,13 @@ fn writer_joins_regions_and_reports_sizes() {
 #[test]
 fn writer_distinguishes_absent_and_empty_symbol_regions() {
     for (symbols, symbol_bytes) in [(None, 0), (Some(&[][..]), 4)] {
-        let parts = ModuleStreamParts {
-            symbols,
-            ..ModuleStreamParts::default()
-        };
-        let encoded = parts.encode().unwrap();
-        assert_eq!(encoded.sizes.symbol_bytes, symbol_bytes);
-        assert_eq!(
-            encoded.bytes.len(),
-            usize::try_from(symbol_bytes).unwrap() + 4
-        );
-        let stream = parse(encoded.bytes.clone(), encoded.sizes);
-        assert_eq!(stream.encode().unwrap(), encoded);
+        let mut parts = ModuleStreamParts::default();
+        parts.symbols = symbols;
+        let (bytes, sizes) = encode(&parts).unwrap();
+        assert_eq!(sizes.symbol_bytes, symbol_bytes);
+        assert_eq!(bytes.len(), usize::try_from(symbol_bytes).unwrap() + 4);
+        let stream = parse(bytes.clone(), sizes);
+        assert_eq!(reencode(&stream), (bytes, sizes));
     }
 }
 
@@ -121,31 +128,30 @@ fn writer_rejects_malformed_regions() {
         (&[], &c13[..12], ErrorKind::UnexpectedEof),
     ];
     for (symbols, c13, kind) in cases {
-        let parts = ModuleStreamParts {
-            symbols: Some(symbols),
-            c13,
-            ..ModuleStreamParts::default()
-        };
-        let error = parts.encode().unwrap_err();
+        let mut parts = ModuleStreamParts::default();
+        parts.symbols = Some(symbols);
+        parts.c13 = c13;
+        let mut out = vec![0xcc];
+        let error = parts.encode(&mut out).unwrap_err();
         assert_eq!(error.kind(), kind, "{symbols:?} {c13:?}");
         assert_eq!(error.stream_location(), None);
+        assert_eq!(out, [0xcc]);
     }
 }
 
 #[test]
-fn global_refs_validate_against_the_symbol_record_stream() {
+fn global_refs_check_against_the_symbol_record_stream() {
     // Records at offsets 0 and 4 of a 12-byte symbol record stream.
     let records = RecordOffsets::frame(&SYMBOLS, StreamId(7)).unwrap();
     for (offset, valid) in [(0, true), (4, true), (2, false), (12, false)] {
-        let parts = ModuleStreamParts {
-            global_refs: &[SymbolOffset(4), SymbolOffset(offset)],
-            ..ModuleStreamParts::default()
-        };
-        let encoded = parts.encode().unwrap();
-        let stream = parse(encoded.bytes, encoded.sizes);
+        let refs = [SymbolOffset(4), SymbolOffset(offset)];
+        let mut parts = ModuleStreamParts::default();
+        parts.global_refs = &refs;
+        let (bytes, sizes) = encode(&parts).unwrap();
+        let stream = parse(bytes, sizes);
         let refs = stream.global_refs().unwrap();
         assert_eq!(refs.len(), 2);
-        let result = refs.validate(&records);
+        let result = refs.check(&records);
         if valid {
             result.unwrap();
         } else {
@@ -165,5 +171,8 @@ fn global_refs_reject_a_partial_reference() {
     let error = stream.global_refs().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.stream_location(), Some((StreamId(5), 4)));
-    assert_eq!(error_kind(stream.encode()), ErrorKind::InvalidFormat);
+    assert_eq!(
+        error_kind(stream.encode(&mut Vec::new())),
+        ErrorKind::InvalidFormat
+    );
 }

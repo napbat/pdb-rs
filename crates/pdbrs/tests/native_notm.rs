@@ -6,6 +6,7 @@
 //! them as streams of the module (#32, #33, #34).
 
 use pdbrs::ErrorKind;
+use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
@@ -15,7 +16,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
-use pdbrs::native::info::{Feature, IdentityPolicy};
+use pdbrs::native::info::Feature;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::write::{BuildOptions, PdbBuilder};
 
@@ -26,34 +27,34 @@ const OTHER_MODULE: u32 = 0x20;
 
 /// Return a module record with a name and no section contribution.
 fn module_record(name: &[u8]) -> OwnedModule {
-    OwnedModule {
-        unused1: 0,
-        section_contribution: SectionContribution {
-            section: 0xffff,
-            padding1: 0,
-            offset: -1,
-            size: -1,
-            characteristics: 0,
-            module: 0xffff,
-            padding2: 0,
-            data_crc: Some(0),
-            reloc_crc: Some(0),
-            coff_section: None,
-        },
-        flags: 0,
-        stream: None,
-        symbol_bytes: 0,
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 0,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: name.to_vec(),
-        object_file: name.to_vec(),
-        name_padding: [0; 3],
-    }
+    let mut contribution = SectionContribution::default();
+    contribution.section = 0xffff;
+    contribution.padding1 = 0;
+    contribution.offset = -1;
+    contribution.size = -1;
+    contribution.characteristics = 0;
+    contribution.module = ModuleIndex(0xffff);
+    contribution.padding2 = 0;
+    contribution.data_crc = Some(0);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    let mut module = OwnedModule::default();
+    module.unused1 = 0;
+    module.section_contribution = contribution;
+    module.flags = 0;
+    module.stream = None;
+    module.symbol_bytes = 0;
+    module.c11_bytes = 0;
+    module.c13_bytes = 0;
+    module.source_file_count = 0;
+    module.padding = 0;
+    module.file_name_offset = 0;
+    module.source_file_name_index = 0;
+    module.pdb_file_path_index = 0;
+    module.name = name.to_vec();
+    module.object_file = name.to_vec();
+    module.name_padding = [0; 3];
+    module
 }
 
 /// Return `count` encoded type records without a stream header.
@@ -92,7 +93,7 @@ fn type_reference(flags: u32) -> ModuleTypeReference {
 fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
     let mut builder = PdbBuilder::new(7, [7; 16], 1).expect("builder");
     builder
-        .set_features(&[Feature::Vc140, Feature::NoTypeMerge])
+        .set_features(&[Feature::VC140, Feature::NO_TYPE_MERGE])
         .expect("features");
     let types = builder.add_stream(type_records(2)).expect("type stream");
     let own = builder
@@ -149,7 +150,7 @@ fn module_type_streams(pdb: &Pdb<&[u8]>) -> Vec<(u32, ModuleTypeSource)> {
         .expect("dependencies")
         .module_types
         .iter()
-        .map(|dependency| (dependency.module, dependency.source))
+        .map(|dependency| (dependency.module.0, dependency.source))
         .collect()
 }
 
@@ -176,7 +177,7 @@ fn own_stream(pdb: &Pdb<&[u8]>) -> StreamId {
 fn module_symbols_resolve_against_their_type_records() {
     let bytes = notm();
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
-    assert!(pdb.info().has_feature(Feature::NoTypeMerge));
+    assert!(pdb.info().has_feature(Feature::NO_TYPE_MERGE));
     assert_eq!(
         module_type_streams(&pdb)[1],
         (
@@ -216,7 +217,7 @@ fn rebuild_carries_the_module_type_streams() {
         .and_then(|plan| plan.to_vec())
         .expect("the rebuild plans");
     let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
-    assert!(rebuilt.info().has_feature(Feature::NoTypeMerge));
+    assert!(rebuilt.info().has_feature(Feature::NO_TYPE_MERGE));
     assert_eq!(module_type_streams(&rebuilt), module_type_streams(&pdb));
     assert_eq!(
         stream(&rebuilt, own_stream(&rebuilt)),
@@ -232,7 +233,7 @@ fn rebuild_carries_the_module_type_streams() {
 fn precompiled() -> Vec<u8> {
     let mut builder = PdbBuilder::new(7, [7; 16], 1).expect("builder");
     builder
-        .set_features(&[Feature::Vc140, Feature::NoTypeMerge])
+        .set_features(&[Feature::VC140, Feature::NO_TYPE_MERGE])
         .expect("features");
     for (name, flags) in [(&b"pch.obj"[..], 0x0c), (b"use.obj", 0x0a)] {
         let types = builder.add_stream(type_records(2)).expect("type stream");
@@ -266,7 +267,7 @@ fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
     let objects: Vec<_> = dependencies
         .object_precompiled_types
         .iter()
-        .map(|entry| (entry.module, entry.owner, entry.object_file.clone()))
+        .map(|entry| (entry.module.0, entry.owner.0, entry.object_file.clone()))
         .collect();
     assert_eq!(
         objects,
@@ -327,7 +328,7 @@ fn strip_removes_the_module_type_streams_and_the_feature() {
     let stripped = plan.to_vec().expect("output");
     let stripped = Pdb::parse(stripped.as_slice()).expect("stripped");
     assert_eq!(stream(&stripped, own), None);
-    assert!(!stripped.info().has_feature(Feature::NoTypeMerge));
-    assert!(stripped.info().has_feature(Feature::Vc140));
+    assert!(!stripped.info().has_feature(Feature::NO_TYPE_MERGE));
+    assert!(stripped.info().has_feature(Feature::VC140));
     assert_eq!(module_type_streams(&stripped), []);
 }

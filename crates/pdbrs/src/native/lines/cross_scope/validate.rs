@@ -80,7 +80,7 @@ pub struct CrossScopeViolation {
 }
 
 /// The names and the exported local IDs of one module.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ScopeModule {
     /// The module name.
     module_name: Vec<u8>,
@@ -99,7 +99,7 @@ impl ScopeModule {
 }
 
 /// The modules that cross-scope imports can name.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct CrossScopeModules {
     /// The modules in the order of [`CrossScopeModules::add`].
     modules: Vec<ScopeModule>,
@@ -311,7 +311,7 @@ pub fn validate_cross_scope(
                             CrossScopeRule::ImportModuleName,
                             offset,
                             entry,
-                            import.module_name_offset,
+                            import.module_name_offset.0,
                         )?;
                         continue;
                     };
@@ -327,7 +327,7 @@ pub fn validate_cross_scope(
                             CrossScopeRule::ImportModuleUnknown,
                             offset,
                             entry,
-                            import.module_name_offset,
+                            import.module_name_offset.0,
                         )?;
                         continue;
                     };

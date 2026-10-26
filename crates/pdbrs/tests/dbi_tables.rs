@@ -2,6 +2,7 @@
 //! server map and EC substreams.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::index::{ModuleIndex, NameOffset};
 use pdbrs::native::dbi::{
     Dbi, SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContributionVersion,
     SectionContributions, SectionMap, SegmentFlags, SourceInfo,
@@ -98,7 +99,7 @@ fn v60_contributions_keep_raw_fields() {
     assert_eq!(first.offset, 0x10);
     assert_eq!(first.size, -16);
     assert_eq!(first.characteristics, 0x6000_0020);
-    assert_eq!(first.module, 2);
+    assert_eq!(first.module, ModuleIndex(2));
     assert_eq!(first.padding2, 0xdddd);
     assert_eq!(first.data_crc, Some(7));
     assert_eq!(first.reloc_crc, Some(8));
@@ -149,7 +150,7 @@ fn v2_and_v40_contribution_layouts() {
         (2, 0x20, 0x30)
     );
     assert_eq!(record.characteristics, 0x40);
-    assert_eq!(record.module, 1);
+    assert_eq!(record.module, ModuleIndex(1));
     assert_eq!(
         (record.data_crc, record.reloc_crc, record.coff_section),
         (None, None, None)
@@ -269,7 +270,7 @@ fn source_info_lists_files_per_module() {
             modules[0].raw_start,
             modules[0].first_file
         ),
-        (0, 0, 0)
+        (ModuleIndex(0), 0, 0)
     );
     assert_eq!(modules[0].file_count(), 2);
     assert_eq!(modules[0].name_offsets().collect::<Vec<_>>(), [0, 5]);
@@ -284,7 +285,7 @@ fn source_info_lists_files_per_module() {
             modules[1].raw_start,
             modules[1].first_file
         ),
-        (1, 2, 2)
+        (ModuleIndex(1), 2, 2)
     );
     assert_eq!(
         modules[1].file_names().next().unwrap().unwrap(),
@@ -359,13 +360,13 @@ fn dbi_accessors_decode_substreams() {
     let dbi = Dbi::parse(bytes).unwrap();
 
     let contributions = dbi.section_contributions().unwrap().unwrap();
-    assert_eq!(contributions.iter().next().unwrap().module, 1);
+    assert_eq!(contributions.iter().next().unwrap().module, ModuleIndex(1));
     assert!(dbi.section_map().unwrap().unwrap().is_empty());
     let sources = dbi.source_info().unwrap().unwrap();
     assert_eq!(sources.modules().nth(1).unwrap().file_count(), 1);
     assert_eq!(dbi.type_server_map().unwrap(), []);
     let names = dbi.ec_names().unwrap().unwrap();
-    assert_eq!(names.find(b"a").unwrap(), Some(1));
+    assert_eq!(names.find(b"a").unwrap(), Some(NameOffset(1)));
 }
 
 #[test]

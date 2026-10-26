@@ -26,6 +26,7 @@ use alloc::vec::Vec;
 
 use super::Pdb;
 use super::codeview::SymbolKind;
+use super::codeview::index::ModuleIndex;
 use super::codeview::symbol::{
     ModuleTypeSource, S_FASTLINK, S_MOD_TYPEREF, S_OBJNAME, Symbol, SymbolData,
 };
@@ -36,21 +37,21 @@ use crate::Result;
 use crate::io::ReadAt;
 
 /// The modules that share the precompiled types of one precompiled header.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct PrecompiledTypes {
     /// The `S_OBJNAME` signature that the modules share.
     pub signature: u32,
     /// The indices of the modules, in module order.
-    pub modules: Vec<u32>,
+    pub modules: Vec<ModuleIndex>,
 }
 
 /// A FASTLINK module whose object file keeps the full records.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FastLinkObject {
     /// The index of the module.
-    pub module: u32,
+    pub module: ModuleIndex,
     /// The module name: the object file, or the member name in a library.
     pub module_name: Vec<u8>,
     /// The object file or the library that holds the object file.
@@ -60,25 +61,25 @@ pub struct FastLinkObject {
 }
 
 /// A module that uses an entry of the DBI type-server map.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ModuleTypeServer {
     /// The index of the module.
-    pub module: u32,
+    pub module: ModuleIndex,
     /// The index of the entry in [`ExternalDependencies::type_servers`] (`iTSM`).
     pub type_server: u8,
 }
 
 /// A module of a `NOTM` PDB whose type and ID indices refer to precompiled types that stay in
 /// the object file of the owner module.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ObjectPrecompiledTypes {
     /// The index of the module.
-    pub module: u32,
+    pub module: ModuleIndex,
     /// The index of the module that owns the precompiled types (the `/Yc` object). It is
     /// `module` for the owner itself.
-    pub owner: u32,
+    pub owner: ModuleIndex,
     /// The object file of the owner module, which holds the precompiled types in `.debug$P`.
     pub object_file: Vec<u8>,
 }
@@ -88,9 +89,20 @@ pub struct ObjectPrecompiledTypes {
 #[non_exhaustive]
 pub struct ModuleTypeDependency {
     /// The index of the module.
-    pub module: u32,
+    pub module: ModuleIndex,
     /// Where the type records of the module are.
     pub source: ModuleTypeSource,
+}
+
+impl ModuleTypeDependency {
+    /// Create a dependency of module 0 on `source`.
+    #[must_use]
+    pub const fn new(source: ModuleTypeSource) -> Self {
+        Self {
+            module: ModuleIndex(0),
+            source,
+        }
+    }
 }
 
 /// The external dependencies of a PDB.
@@ -143,8 +155,8 @@ impl<S: ReadAt> Pdb<S> {
     /// fails.
     pub fn external_dependencies(&self, dbi: &Dbi) -> Result<ExternalDependencies> {
         let mut dependencies = ExternalDependencies {
-            mini_pdb: self.info().has_feature(Feature::MinimalDebugInfo),
-            no_type_merge: self.info().has_feature(Feature::NoTypeMerge),
+            mini_pdb: self.info().has_feature(Feature::MINIMAL_DEBUG_INFO),
+            no_type_merge: self.info().has_feature(Feature::NO_TYPE_MERGE),
             type_servers: dbi.type_server_map()?,
             ..ExternalDependencies::default()
         };
@@ -211,12 +223,12 @@ fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) 
     for dependency in &dependencies.module_types {
         let owner = match dependency.source {
             ModuleTypeSource::PrecompiledTypeOwner { .. } => dependency.module,
-            ModuleTypeSource::PrecompiledTypeUser { owner, .. } => owner.0,
+            ModuleTypeSource::PrecompiledTypeUser { owner, .. } => owner,
             _ => continue,
         };
         let object = dbi
             .modules()
-            .nth(usize::try_from(owner).unwrap_or(usize::MAX))
+            .nth(usize::try_from(owner.0).unwrap_or(usize::MAX))
             .ok_or_else(|| {
                 crate::Error::new(crate::ErrorKind::InvalidReference, None)
                     .with_context("S_MOD_TYPEREF names a missing owner of precompiled types")
@@ -233,7 +245,11 @@ fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) 
 }
 
 /// Add `module` to the group of `signature`.
-fn add_precompiled(groups: &mut Vec<PrecompiledTypes>, signature: u32, module: u32) -> Result<()> {
+fn add_precompiled(
+    groups: &mut Vec<PrecompiledTypes>,
+    signature: u32,
+    module: ModuleIndex,
+) -> Result<()> {
     if let Some(group) = groups.iter_mut().find(|group| group.signature == signature) {
         group.modules.try_reserve(1).map_err(|_| no_memory())?;
         group.modules.push(module);

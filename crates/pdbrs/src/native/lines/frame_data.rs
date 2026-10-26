@@ -38,7 +38,7 @@ pub struct FrameDataSubsection<'a> {
 }
 
 impl<'a> FrameDataSubsection<'a> {
-    /// Decode the data of a `DEBUG_S_FRAMEDATA` subsection.
+    /// Parse the data of a `DEBUG_S_FRAMEDATA` subsection.
     ///
     /// A size of 4 plus a multiple of 32 has the relocation value. A
     /// multiple of 32 has no relocation value.
@@ -48,7 +48,7 @@ impl<'a> FrameDataSubsection<'a> {
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// for another size. The error does not have a file offset or a stream
     /// location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let (relocation, records) = match data.len() % FRAME_DATA_SIZE {
             0 => (None, data),
             RELOCATION_SIZE => {

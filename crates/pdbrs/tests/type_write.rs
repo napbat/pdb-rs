@@ -2,10 +2,12 @@
 //! adjusters and the two producer layouts.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::Producer;
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{
-    DEFAULT_HASH_BUCKETS, HashAdjuster, HashLayout, IndexOffset, TypeHashes, TypeStream,
-    TypeStreamOptions, serialize_hash_adjusters, type_record_hash, write_type_stream,
+    DEFAULT_HASH_BUCKETS, HashAdjuster, TypeHashes, TypeStream, TypeStreamOptions,
+    encode_hash_adjusters, encode_type_stream, type_record_hash,
 };
 
 /// An `LF_ARGLIST` record of exactly `size` bytes (a multiple of 4, at least 8).
@@ -26,26 +28,41 @@ fn records() -> Vec<u8> {
     (0..10).flat_map(|_| argument_list(1000)).collect()
 }
 
-fn options(layout: HashLayout, adjusters: &[HashAdjuster]) -> TypeStreamOptions<'_> {
-    TypeStreamOptions {
-        index_begin: 0x1000,
-        hash_bucket_count: DEFAULT_HASH_BUCKETS,
-        hash_stream: Some(StreamId(9)),
-        hash_aux_stream: None,
-        layout,
-        adjusters,
-    }
+fn options(producer: Producer, adjusters: &[HashAdjuster]) -> TypeStreamOptions<'_> {
+    TypeStreamOptions::default()
+        .with_index_begin(0x1000)
+        .with_hash_bucket_count(DEFAULT_HASH_BUCKETS)
+        .with_hash_stream(Some(StreamId(9)))
+        .with_hash_aux_stream(None)
+        .with_producer(producer)
+        .with_adjusters(adjusters)
 }
 
-/// Write the records, parse the result and verify the hash stream.
-fn write_and_verify(layout: HashLayout, adjusters: &[HashAdjuster]) -> (TypeStream, Vec<u8>) {
+/// Return an adjuster of the name at `name_offset` and the record `index`.
+fn adjuster(name_offset: u32, index: u32) -> HashAdjuster {
+    let mut adjuster = HashAdjuster::default();
+    adjuster.name_offset = NameOffset(name_offset);
+    adjuster.index = index;
+    adjuster
+}
+
+/// Return the index offset pairs of `hashes` as `(index, offset)` tuples.
+fn pairs(hashes: &TypeHashes<'_>) -> Vec<(u32, u32)> {
+    hashes
+        .index_offsets()
+        .map(|pair| (pair.index, pair.offset))
+        .collect()
+}
+
+/// Write the records, parse the result and check the hash stream.
+fn write_and_check(producer: Producer, adjusters: &[HashAdjuster]) -> (TypeStream, Vec<u8>) {
     let records = records();
-    let written = write_type_stream(&records, &options(layout, adjusters)).unwrap();
+    let written = encode_type_stream(&records, &options(producer, adjusters)).unwrap();
     let stream = TypeStream::parse(written.stream).unwrap();
     let hash = written.hash_stream.unwrap();
     {
         let hashes = TypeHashes::parse(stream.header(), &hash).unwrap();
-        hashes.verify(&stream).unwrap();
+        hashes.check(&stream).unwrap();
         let expected: Vec<u32> = records
             .chunks(1000)
             .map(|record| type_record_hash(record).unwrap() % DEFAULT_HASH_BUCKETS)
@@ -53,13 +70,24 @@ fn write_and_verify(layout: HashLayout, adjusters: &[HashAdjuster]) -> (TypeStre
         assert_eq!(hashes.hash_values().collect::<Vec<_>>(), expected);
     }
     assert_eq!(stream.record_bytes(), records);
-    assert_eq!(HashLayout::of(stream.header()), layout);
+    assert_eq!(stream.header().producer(), producer);
     (stream, hash)
 }
 
 #[test]
+fn default_options_name_the_first_index_and_the_default_buckets() {
+    let options = TypeStreamOptions::default();
+    assert_eq!(options.index_begin(), 0x1000);
+    assert_eq!(options.hash_bucket_count(), DEFAULT_HASH_BUCKETS);
+    assert_eq!(options.hash_stream(), None);
+    assert_eq!(options.hash_aux_stream(), None);
+    assert_eq!(options.producer(), Producer::Microsoft);
+    assert_eq!(options.adjusters(), &[] as &[HashAdjuster]);
+}
+
+#[test]
 fn microsoft_layout_orders_values_offsets_and_adjusters() {
-    let (stream, hash) = write_and_verify(HashLayout::Microsoft, &[]);
+    let (stream, hash) = write_and_check(Producer::Microsoft, &[]);
     let header = stream.header();
     assert_eq!((header.index_begin, header.index_end), (0x1000, 0x100a));
     assert_eq!(header.hash_stream, Some(StreamId(9)));
@@ -81,24 +109,12 @@ fn microsoft_layout_orders_values_offsets_and_adjusters() {
     );
     let hashes = TypeHashes::parse(header, &hash).unwrap();
     // A pair starts at the first record that starts in a new 8 KiB block.
-    assert_eq!(
-        hashes.index_offsets().collect::<Vec<_>>(),
-        [
-            IndexOffset {
-                index: 0x1000,
-                offset: 0
-            },
-            IndexOffset {
-                index: 0x1009,
-                offset: 9000
-            },
-        ]
-    );
+    assert_eq!(pairs(&hashes), [(0x1000, 0), (0x1009, 9000)]);
 }
 
 #[test]
 fn llvm_layout_puts_offsets_after_values() {
-    let (stream, hash) = write_and_verify(HashLayout::Llvm, &[]);
+    let (stream, hash) = write_and_check(Producer::Llvm, &[]);
     let header = stream.header();
     assert_eq!(
         (header.index_offsets.offset, header.index_offsets.length),
@@ -113,28 +129,15 @@ fn llvm_layout_puts_offsets_after_values() {
     );
     let hashes = TypeHashes::parse(header, &hash).unwrap();
     // A pair starts at the record that ends in a new 8 KiB block.
-    assert_eq!(
-        hashes.index_offsets().collect::<Vec<_>>(),
-        [
-            IndexOffset {
-                index: 0x1000,
-                offset: 0
-            },
-            IndexOffset {
-                index: 0x1008,
-                offset: 8000
-            },
-        ]
-    );
+    assert_eq!(pairs(&hashes), [(0x1000, 0), (0x1008, 8000)]);
 }
 
 #[test]
 fn streams_without_a_hash_stream_follow_the_producer() {
     let records = records();
-    for (layout, length) in [(HashLayout::Microsoft, u32::MAX), (HashLayout::Llvm, 0)] {
-        let mut options = options(layout, &[]);
-        options.hash_stream = None;
-        let written = write_type_stream(&records, &options).unwrap();
+    for (producer, length) in [(Producer::Microsoft, u32::MAX), (Producer::Llvm, 0)] {
+        let options = options(producer, &[]).with_hash_stream(None);
+        let written = encode_type_stream(&records, &options).unwrap();
         assert_eq!(written.hash_stream, None);
         let stream = TypeStream::parse(written.stream).unwrap();
         let header = stream.header();
@@ -146,13 +149,13 @@ fn streams_without_a_hash_stream_follow_the_producer() {
         ] {
             assert_eq!((buffer.offset, buffer.length), (0, length));
         }
-        assert_eq!(HashLayout::of(header), layout);
+        assert_eq!(header.producer(), producer);
     }
 }
 
 #[test]
 fn empty_streams_have_empty_buffers() {
-    let written = write_type_stream(&[], &options(HashLayout::Microsoft, &[])).unwrap();
+    let written = encode_type_stream(&[], &options(Producer::Microsoft, &[])).unwrap();
     assert_eq!(written.hash_stream, Some(Vec::new()));
     let stream = TypeStream::parse(written.stream).unwrap();
     assert_eq!(stream.header().record_count(), 0);
@@ -162,25 +165,13 @@ fn empty_streams_have_empty_buffers() {
 #[test]
 fn adjusters_follow_the_microsoft_map_layout() {
     let adjusters = [
-        HashAdjuster {
-            name_offset: 5,
-            index: 0x1000,
-        },
-        HashAdjuster {
-            name_offset: 7,
-            index: 0x1001,
-        },
-        HashAdjuster {
-            name_offset: 0x1_0003,
-            index: 0x1002,
-        },
+        adjuster(5, 0x1000),
+        adjuster(7, 0x1001),
+        adjuster(0x1_0003, 0x1002),
         // The same key again replaces the value.
-        HashAdjuster {
-            name_offset: 5,
-            index: 0x1003,
-        },
+        adjuster(5, 0x1003),
     ];
-    let bytes = serialize_hash_adjusters(&adjusters).unwrap();
+    let bytes = encode_hash_adjusters(&adjusters).unwrap();
     let words: Vec<u32> = bytes
         .chunks(4)
         .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
@@ -193,25 +184,16 @@ fn adjusters_follow_the_microsoft_map_layout() {
             3, 6, 1, 0b10_1010, 0, 7, 0x1001, 0x1_0003, 0x1002, 5, 0x1003
         ]
     );
-    let (stream, hash) = write_and_verify(HashLayout::Microsoft, &adjusters[..3]);
+    let (stream, hash) = write_and_check(Producer::Microsoft, &adjusters[..3]);
     let header = stream.header();
     assert_eq!(header.hash_adjustments.offset, 56);
     let hashes = TypeHashes::parse(header, &hash).unwrap();
     assert_eq!(
         hashes.adjusters(),
         [
-            HashAdjuster {
-                name_offset: 7,
-                index: 0x1001
-            },
-            HashAdjuster {
-                name_offset: 0x1_0003,
-                index: 0x1002
-            },
-            HashAdjuster {
-                name_offset: 5,
-                index: 0x1000
-            },
+            adjuster(7, 0x1001),
+            adjuster(0x1_0003, 0x1002),
+            adjuster(5, 0x1000),
         ]
     );
 }
@@ -219,12 +201,9 @@ fn adjusters_follow_the_microsoft_map_layout() {
 #[test]
 fn many_adjusters_grow_the_map() {
     let adjusters: Vec<HashAdjuster> = (0..100)
-        .map(|value| HashAdjuster {
-            name_offset: value * 37,
-            index: 0x1000 + value % 10,
-        })
+        .map(|value| adjuster(value * 37, 0x1000 + value % 10))
         .collect();
-    let (stream, hash) = write_and_verify(HashLayout::Microsoft, &adjusters);
+    let (stream, hash) = write_and_check(Producer::Microsoft, &adjusters);
     let hashes = TypeHashes::parse(stream.header(), &hash).unwrap();
     let mut found: Vec<_> = hashes.adjusters().to_vec();
     found.sort_by_key(|adjuster| adjuster.name_offset);
@@ -234,37 +213,32 @@ fn many_adjusters_grow_the_map() {
 #[test]
 fn rejects_invalid_options_and_records() {
     let records = records();
-    let adjusters = [HashAdjuster {
-        name_offset: 1,
-        index: 0x1000,
-    }];
-    let error = write_type_stream(&records, &options(HashLayout::Llvm, &adjusters)).unwrap_err();
+    let adjusters = [adjuster(1, 0x1000)];
+    let error = encode_type_stream(&records, &options(Producer::Llvm, &adjusters)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let mut low = options(HashLayout::Microsoft, &[]);
-    low.index_begin = 0xfff;
+    let low = options(Producer::Microsoft, &[]).with_index_begin(0xfff);
     assert_eq!(
-        write_type_stream(&records, &low).unwrap_err().kind(),
+        encode_type_stream(&records, &low).unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
-    let mut no_buckets = options(HashLayout::Microsoft, &[]);
-    no_buckets.hash_bucket_count = 0;
+    let no_buckets = options(Producer::Microsoft, &[]).with_hash_bucket_count(0);
     assert_eq!(
-        write_type_stream(&records, &no_buckets).unwrap_err().kind(),
+        encode_type_stream(&records, &no_buckets)
+            .unwrap_err()
+            .kind(),
         ErrorKind::InvalidFormat
     );
-    let mut nil = options(HashLayout::Microsoft, &[]);
-    nil.hash_stream = Some(StreamId(0xffff));
+    let nil = options(Producer::Microsoft, &[]).with_hash_stream(Some(StreamId(0xffff)));
     assert_eq!(
-        write_type_stream(&records, &nil).unwrap_err().kind(),
+        encode_type_stream(&records, &nil).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
     let truncated =
-        write_type_stream(&records[..999], &options(HashLayout::Microsoft, &[])).unwrap_err();
+        encode_type_stream(&records[..999], &options(Producer::Microsoft, &[])).unwrap_err();
     assert_eq!(truncated.kind(), ErrorKind::UnexpectedEof);
-    let mut overflow = options(HashLayout::Microsoft, &[]);
-    overflow.index_begin = u32::MAX - 5;
+    let overflow = options(Producer::Microsoft, &[]).with_index_begin(u32::MAX - 5);
     assert_eq!(
-        write_type_stream(&records, &overflow).unwrap_err().kind(),
+        encode_type_stream(&records, &overflow).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
 }

@@ -23,6 +23,7 @@ use super::{
     FIXED_SIZE, SectionContribution, SectionContributionVersion, align4, c_string, copy_bytes,
     dbi_error, stream_id, stream_index, u16_at, u32_at,
 };
+use crate::native::codeview::index::ModuleIndex;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
 use crate::{ErrorKind, Result};
@@ -39,7 +40,7 @@ const FLAG_EC_ENABLED: u16 = 1 << 1;
 #[non_exhaustive]
 pub struct Module<'a> {
     /// The zero-based position of the record in the module info substream.
-    pub index: u32,
+    pub index: ModuleIndex,
     /// The logical offset of the record in the DBI stream.
     pub offset: u32,
     /// The `u32` at offset 0. Microsoft writers store a stale pointer here.
@@ -111,7 +112,8 @@ impl Module<'_> {
     ///   section contribution does not have the
     ///   [`SectionContributionVersion::V60`] fields.
     /// - [`ErrorKind::LimitExceeded`] if the stream index is larger than
-    ///   `0xfffe` or if the output cannot grow.
+    ///   `0xfffe`, if the module index of the section contribution does not
+    ///   fit in 16 bits or if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let end = FIXED_SIZE + self.name.len() + 1 + self.object_file.len() + 1;
         let padding = end.next_multiple_of(4) - end;
@@ -139,7 +141,8 @@ impl Module<'_> {
 /// An owned module info record that a writer can fill.
 ///
 /// The fields have the meaning of the [`Module`] fields with the same names.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OwnedModule {
     /// The `u32` at offset 0.
     pub unused1: u32,
@@ -203,7 +206,7 @@ impl OwnedModule {
     #[must_use]
     pub fn as_module(&self) -> Module<'_> {
         Module {
-            index: 0,
+            index: ModuleIndex(0),
             offset: 0,
             unused1: self.unused1,
             section_contribution: self.section_contribution,
@@ -283,7 +286,7 @@ impl<'a> Modules<'a> {
         name_padding[..padded - after_object].copy_from_slice(&rest[after_object..padded]);
         let contribution = fixed[4..32].as_chunks::<4>().0;
         let module = Module {
-            index: self.index,
+            index: ModuleIndex(self.index),
             offset,
             unused1: u32_at(fixed, 0),
             section_contribution: SectionContribution::decode(

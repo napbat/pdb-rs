@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::codeview::Fields;
+use super::super::codeview::index::ModuleIndex;
 use super::to_u16;
 use crate::native::output::{Output, no_memory, to_u32};
 use crate::{Error, ErrorKind, Result};
@@ -150,9 +151,10 @@ impl<'a> SourceInfo<'a> {
 
 /// The file list of one module.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ModuleSources<'a> {
     /// The zero-based module index.
-    pub module: u16,
+    pub module: ModuleIndex,
     /// The 16-bit start index from the substream. It can overflow, so the
     /// decoder does not use it.
     pub raw_start: u16,
@@ -203,7 +205,7 @@ pub struct ModuleSourceIter<'a> {
     /// The names buffer.
     names: &'a [u8],
     /// The index of the next module.
-    index: u16,
+    index: u32,
     /// The index of the first file entry of the next module.
     next_file: u32,
 }
@@ -220,7 +222,7 @@ impl<'a> Iterator for ModuleSourceIter<'a> {
             .split_at(usize::from(count).min(self.offsets.len()));
         self.offsets = rest;
         let module = ModuleSources {
-            module: self.index,
+            module: ModuleIndex(self.index),
             raw_start: u16::from_le_bytes(*start),
             first_file: self.next_file,
             offsets,
@@ -243,6 +245,7 @@ impl FusedIterator for ModuleSourceIter<'_> {}
 
 /// The owned file list of one module in an [`OwnedSourceInfo`].
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OwnedModuleSources {
     /// The 16-bit start index for the substream.
     ///
@@ -255,6 +258,7 @@ pub struct OwnedModuleSources {
 
 /// An owned source file info substream that a writer can fill.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OwnedSourceInfo {
     /// The 16-bit source file count for the header.
     pub raw_file_count: u16,

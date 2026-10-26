@@ -42,7 +42,7 @@ const HEADER_SIZE: usize = 20;
 const ENTRY_SIZE: usize = 16;
 
 /// One entry of a `/TMCache` stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct TmCacheEntry {
     /// The index of the entry in the entry table.
@@ -286,7 +286,7 @@ impl<'a> TmCache<'a> {
 ///
 /// The layout is the 20-byte header, the stream table, zero bytes to the next multiple of 4,
 /// and the entry table. The `msvc-x64-incremental` fixture has this layout.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TmCacheBuilder {
     /// The stream table slots: stream numbers or `0xffff`.
     streams: Vec<u16>,

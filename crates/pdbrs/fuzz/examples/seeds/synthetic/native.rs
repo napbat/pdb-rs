@@ -365,7 +365,7 @@ fn hash_table(entries: &[(&[u8], u32)]) -> Vec<u8> {
         .map(|(name, offset)| (count.bucket_of(name), *offset))
         .collect();
     sorted.sort_unstable();
-    let words = usize::try_from(count.get() + 1).unwrap_or(0).div_ceil(32);
+    let words = usize::try_from(count.count() + 1).unwrap_or(0).div_ceil(32);
     let mut bitmap = vec![0_u8; words * 4];
     let mut starts = Bytes::default();
     let mut previous = None;

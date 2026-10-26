@@ -8,7 +8,7 @@ use super::{
 };
 use crate::native::address::{AddressMap, Rva, SectionOffset};
 use crate::native::codeview::Records;
-use crate::native::codeview::index::IdIndex;
+use crate::native::codeview::index::{IdIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{Symbol, SymbolData, separated_chunks};
 use crate::{Error, ErrorKind, Result};
 
@@ -17,12 +17,12 @@ use crate::{Error, ErrorKind, Result};
 /// Chunk 0 is the code of the procedure. Chunk `n` is the code of the
 /// `n`-th `S_SEPCODE` record of the module whose parent address is the
 /// start of the procedure, in stream order.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CodeChunk {
     /// The module stream offset of the `S_SEPCODE` record, or `None` for
     /// the code of the procedure.
-    pub offset: Option<u32>,
+    pub offset: Option<ModuleSymbolOffset>,
     /// The section-relative address of the first byte.
     pub address: SectionOffset,
     /// The RVA of the first byte, or `None` if the address is not in an
@@ -33,13 +33,13 @@ pub struct CodeChunk {
 }
 
 /// The line ranges of one `S_INLINESITE` record.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineSiteRanges {
     /// The offset of the record in the module stream.
-    pub offset: u32,
+    pub offset: ModuleSymbolOffset,
     /// The module stream offset of the enclosing scope record.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The inlined function.
     pub inlinee: IdIndex,
     /// The ranges in annotation order. Each code offset is relative to the
@@ -52,9 +52,9 @@ pub struct InlineSiteRanges {
 #[derive(Clone, Debug)]
 struct ScopeRecord<'a> {
     /// The offset of the record in the module stream.
-    offset: u32,
+    offset: ModuleSymbolOffset,
     /// The module stream offset of the enclosing scope record.
-    parent: u32,
+    parent: ModuleSymbolOffset,
     /// The kind and the data of the scope.
     kind: ScopeKind<'a>,
 }
@@ -92,7 +92,7 @@ impl SymbolLocator {
         Ok(ProcedureInfo {
             module: key.module,
             offset: key.offset,
-            kind: symbol.kind().0,
+            kind: symbol.kind(),
             name: symbol.name().unwrap_or_default(),
             address,
             start: optional_rva(&self.address_map()?, address)?,
@@ -167,7 +167,7 @@ impl SymbolLocator {
         let module = self.module_data(procedure.module)?;
         let mut scopes = Vec::new();
         let (data, end) = match module_symbol(module, procedure.offset)?.data() {
-            SymbolData::Procedure(value) => (records_at(module, procedure.offset)?, value.end.0),
+            SymbolData::Procedure(value) => (records_at(module, procedure.offset)?, value.end),
             _ => return Ok(scopes),
         };
         let map = self.address_map()?;
@@ -178,7 +178,9 @@ impl SymbolLocator {
             let record = record?;
             let offset = procedure
                 .offset
+                .0
                 .checked_add(record.offset)
+                .map(ModuleSymbolOffset)
                 .ok_or_else(|| internal("module symbol offset overflows 32 bits"))?;
             if offset >= end || module.walk_end.is_some_and(|stop| offset >= stop) {
                 break;
@@ -205,7 +207,7 @@ impl SymbolLocator {
             };
             let scope = ScopeRecord {
                 offset,
-                parent: links.parent.0,
+                parent: links.parent,
                 kind,
             };
             push(
@@ -334,12 +336,12 @@ fn inline_ranges(
 }
 
 /// Return the symbol records of a module, from a module stream offset on.
-fn records_at(module: &ModuleData, offset: u32) -> Result<&[u8]> {
+fn records_at(module: &ModuleData, offset: ModuleSymbolOffset) -> Result<&[u8]> {
     let stream = module
         .stream
         .as_ref()
         .ok_or_else(|| internal("module has no module stream"))?;
-    usize::try_from(offset)
+    usize::try_from(offset.0)
         .ok()
         .and_then(|offset| offset.checked_sub(stream.symbol_offset()))
         .and_then(|start| stream.symbol_data().get(start..))
@@ -351,7 +353,7 @@ fn records_at(module: &ModuleData, offset: u32) -> Result<&[u8]> {
 }
 
 /// Decode the symbol record at a module stream offset.
-pub(super) fn module_symbol(module: &ModuleData, offset: u32) -> Result<Symbol<'_>> {
+pub(super) fn module_symbol(module: &ModuleData, offset: ModuleSymbolOffset) -> Result<Symbol<'_>> {
     let data = records_at(module, offset)?;
     let record = Records::new(data).next().ok_or_else(|| {
         Error::new(ErrorKind::InvalidReference, None)

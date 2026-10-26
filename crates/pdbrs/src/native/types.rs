@@ -9,12 +9,13 @@
 //! [`TypeStream`] validates the header and frames the records on demand.
 //! [`TypeTable`] finds records by index, and [`ForwardRefs`] resolves
 //! forward references to their definitions. [`TypeHashes`] decodes the
-//! hash stream and verifies it against the records. Use
+//! hash stream and checks it against the records. Use
 //! [`crate::native::codeview::type_record::TypeLeaf`] to decode a TPI record.
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
+use crate::native::Producer;
 use crate::native::codeview::index::FIRST_RECORD_INDEX;
 use crate::native::codeview::{Fields, Record, Records};
 use crate::native::msf::StreamId;
@@ -33,8 +34,8 @@ pub use lookup::{FieldMembers, TypeTable};
 pub use size::type_size;
 pub use validate::{ReferenceLimits, ReferenceSummary, validate_type_references};
 pub use write::{
-    DEFAULT_HASH_BUCKETS, HashLayout, TypeStreamBytes, TypeStreamOptions, serialize_hash_adjusters,
-    write_type_stream,
+    DEFAULT_HASH_BUCKETS, TypeStreamBytes, TypeStreamOptions, encode_hash_adjusters,
+    encode_type_stream,
 };
 
 /// The TPI and IPI version that this crate supports (`PdbTpiV80`).
@@ -68,7 +69,8 @@ const MIN_RECORD_SIZE: u32 = 4;
 ///
 /// The values are the serialized values. Microsoft writes the offset 0 and
 /// the length `0xffff_ffff` in a header that has no hash stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashBuffer {
     /// The signed byte offset in the hash stream.
     pub offset: i32,
@@ -86,7 +88,7 @@ pub struct HashBuffer {
 /// - The hash key size and the hash bucket count are valid.
 /// - If `hash_stream` is present, each non-empty hash buffer has a
 ///   non-negative offset and an end that fits in 32 bits.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct TypeHeader {
     /// The stream version.
@@ -122,10 +124,36 @@ impl TypeHeader {
         // `parse` makes sure that `index_begin <= index_end`.
         self.index_end - self.index_begin
     }
+
+    /// Return the producer whose hash stream layout the header shows.
+    ///
+    /// A header with a hash stream and index offsets that start where the
+    /// empty hash adjuster buffer starts shows [`Producer::Llvm`]. A header
+    /// without a hash stream and with a zero-length hash value buffer shows
+    /// [`Producer::Llvm`] too. All other headers show
+    /// [`Producer::Microsoft`]. The two layouts give the same bytes when they
+    /// cannot be told apart. [`TypeStreamOptions::with_producer`] describes
+    /// the two layouts.
+    #[must_use]
+    pub const fn producer(&self) -> Producer {
+        let adjusters = self.hash_adjustments;
+        let offsets = self.index_offsets;
+        let llvm = match self.hash_stream {
+            Some(_) => {
+                adjusters.length == 0 && offsets.length != 0 && adjusters.offset == offsets.offset
+            }
+            None => self.hash_values.length == 0,
+        };
+        if llvm {
+            Producer::Llvm
+        } else {
+            Producer::Microsoft
+        }
+    }
 }
 
 /// A parsed TPI or IPI stream that owns its bytes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TypeStream {
     /// The full stream, including the header.
     bytes: Vec<u8>,
@@ -162,7 +190,7 @@ impl TypeStream {
     ///
     /// The first record gets the index [`FIRST_RECORD_INDEX`]. The stream
     /// gets a version 8.0 header without a hash stream, as
-    /// [`write_type_stream`] writes it with [`HashLayout::Llvm`].
+    /// [`encode_type_stream`] writes it with [`Producer::Llvm`].
     /// [`TypeStream::record_bytes`] gives `records` again.
     ///
     /// Use this function for the streams that an `S_MOD_TYPEREF` record
@@ -171,19 +199,15 @@ impl TypeStream {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`write_type_stream`]: for example
+    /// Returns the errors of [`encode_type_stream`]: for example
     /// [`ErrorKind::InvalidFormat`] if `records` is not a sequence of
     /// complete records.
     pub fn from_records(records: &[u8]) -> Result<Self> {
-        let options = TypeStreamOptions {
-            index_begin: FIRST_RECORD_INDEX,
-            hash_bucket_count: DEFAULT_HASH_BUCKETS,
-            hash_stream: None,
-            hash_aux_stream: None,
-            layout: HashLayout::Llvm,
-            adjusters: &[],
-        };
-        Self::parse(write_type_stream(records, &options)?.stream)
+        let options = TypeStreamOptions::default()
+            .with_index_begin(FIRST_RECORD_INDEX)
+            .with_hash_bucket_count(DEFAULT_HASH_BUCKETS)
+            .with_producer(Producer::Llvm);
+        Self::parse(encode_type_stream(records, &options)?.stream)
     }
 
     /// Return the validated header.
@@ -274,7 +298,8 @@ impl TypeStream {
 }
 
 /// A type record or an ID record with its index.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeRecord<'a> {
     /// The index of the record.
     pub index: u32,

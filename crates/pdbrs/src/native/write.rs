@@ -76,6 +76,8 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use crate::native::IdentityPolicy;
+use crate::native::Producer;
 use crate::native::codeview::SymbolKind;
 use crate::native::codeview::id_record::IdRecord;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
@@ -84,8 +86,7 @@ use crate::native::dbi::{
     DbiHeader, DebugStream, OwnedModule, OwnedSectionMap, SectionContribution,
     SectionContributionVersion, TypeServer,
 };
-use crate::native::hash_table::HashTableProducer;
-use crate::native::info::{Feature, IdentityPolicy, InfoBuilder, PeMatch};
+use crate::native::info::{Feature, InfoBuilder, PeMatch};
 use crate::native::names::{HashVersion, StringTableBuilder};
 use crate::native::output::no_memory;
 use crate::native::symbols::{SectionStart, ThunkTable};
@@ -250,14 +251,14 @@ impl<'a> PdbBuilder<'a> {
     ///
     /// The Info stream and the DBI header get `age`. The builder has a
     /// `/names` table with the [`HashVersion::V1`] hash and the feature code
-    /// [`Feature::Vc140`], as Microsoft `link.exe` writes.
+    /// [`Feature::VC140`], as Microsoft `link.exe` writes.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
     pub fn new(signature: u32, guid: [u8; 16], age: u32) -> Result<Self> {
-        let mut info = InfoBuilder::new(HashTableProducer::Microsoft, signature, guid, age)?;
-        info.set_features(&[Feature::Vc140])?;
+        let mut info = InfoBuilder::new(Producer::Microsoft, signature, guid, age)?;
+        info.set_features(&[Feature::VC140])?;
         Ok(Self {
             info,
             dbi_age: age,
@@ -319,7 +320,7 @@ impl<'a> PdbBuilder<'a> {
 
     /// Replace the feature codes of the Info stream.
     ///
-    /// [`Feature::MinimalDebugInfo`] selects the larger bucket count of the
+    /// [`Feature::MINIMAL_DEBUG_INFO`] selects the larger bucket count of the
     /// symbol indexes.
     ///
     /// # Errors
@@ -489,6 +490,7 @@ impl<'a> PdbBuilder<'a> {
                     .with_context("PDB builder has no /names table")
             })?
             .insert(name)
+            .map(|offset| offset.0)
     }
 
     /// Replace the `/names` table. `None` writes no `/names` stream.

@@ -10,7 +10,7 @@ use super::{InlineeName, push};
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::codeview::id_record::{IdRecord, IdTable};
-use crate::native::codeview::index::IdIndex;
+use crate::native::codeview::index::{IdIndex, ModuleIndex};
 use crate::native::codeview::symbol::ModuleTypeSource;
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::types::{TypeStream, TypeTable};
@@ -31,7 +31,7 @@ const LIMIT: &str = "symbol locator inlinee names cannot be allocated";
 pub(super) fn inlinee_names<S: ReadAt>(
     pdb: &Pdb<S>,
     inlinees: &mut Vec<(u32, IdIndex)>,
-    sources: &[(u32, ModuleTypeSource)],
+    sources: &[(ModuleIndex, ModuleTypeSource)],
 ) -> Result<Vec<InlineeName>> {
     inlinees.sort_unstable();
     inlinees.dedup();
@@ -45,7 +45,7 @@ pub(super) fn inlinee_names<S: ReadAt>(
             let ids = pdb.ids()?.ok_or_else(|| missing("IPI"))?;
             (ids, pdb.types()?)
         } else {
-            module_records(pdb, sources, scope)?
+            module_records(pdb, sources, ModuleIndex(scope))?
         };
         let id_table = IdTable::new(&ids)?;
         let type_table = match &types {
@@ -66,10 +66,10 @@ pub(super) fn inlinee_names<S: ReadAt>(
 /// are in another stream.
 fn module_records<S: ReadAt>(
     pdb: &Pdb<S>,
-    sources: &[(u32, ModuleTypeSource)],
-    module: u32,
+    sources: &[(ModuleIndex, ModuleTypeSource)],
+    module: ModuleIndex,
 ) -> Result<(TypeStream, Option<TypeStream>)> {
-    let source_of = |module: u32| {
+    let source_of = |module: ModuleIndex| {
         sources
             .iter()
             .find(|entry| entry.0 == module)
@@ -77,7 +77,7 @@ fn module_records<S: ReadAt>(
     };
     let mut source = source_of(module);
     if let Some(ModuleTypeSource::OtherModule { module: owner }) = source {
-        source = source_of(owner.0);
+        source = source_of(owner);
     }
     match source {
         Some(ModuleTypeSource::TypeRecords { stream }) => {

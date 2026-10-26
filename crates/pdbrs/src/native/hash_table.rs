@@ -26,7 +26,7 @@
 
 mod owned;
 
-pub use owned::{HashTableKeys, HashTableProducer, OwnedHashTable};
+pub use owned::{HashTableKeys, OwnedHashTable};
 
 use alloc::vec::Vec;
 
@@ -75,7 +75,8 @@ impl HashTableValue<'_> for u32 {
 }
 
 /// One present bucket of a hash table.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashTableEntry<V> {
     /// The bucket index, less than the capacity.
     pub bucket: u32,

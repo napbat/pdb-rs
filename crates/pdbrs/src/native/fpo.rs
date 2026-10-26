@@ -32,9 +32,11 @@ pub const FPO_RECORD_SIZE: usize = 16;
 pub const FRAME_DATA_SIZE: usize = 32;
 
 /// The frame kind of an `FPO_DATA` record (`cbFrame`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum FrameKind {
     /// The function omits the frame pointer (`FRAME_FPO`, 0).
+    #[default]
     Fpo,
     /// A kernel trap frame (`FRAME_TRAP`, 1).
     Trap,
@@ -50,7 +52,10 @@ pub enum FrameKind {
 /// `cbRegs` (3 bits), `fHasSEH`, `fUseBP`, `reserved` and `cbFrame` (2 bits).
 /// LLVM `object::FpoData` reads `cbProlog` from 4 bits and `fHasSEH` and
 /// `fUseBP` from bits 9 and 10. This decoder follows `winnt.h`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+///
+/// [`Default`] gives a record with all fields 0 and the frame kind
+/// [`FrameKind::Fpo`].
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FpoData {
     /// The RVA of the first byte of the function (`ulOffStart`).
@@ -76,25 +81,6 @@ pub struct FpoData {
 }
 
 impl FpoData {
-    /// Make a record for a function at `start` with `size` bytes.
-    ///
-    /// The other fields are 0, and the frame kind is [`FrameKind::Fpo`].
-    #[must_use]
-    pub const fn new(start: u32, size: u32) -> Self {
-        Self {
-            start,
-            size,
-            locals: 0,
-            params: 0,
-            prolog_size: 0,
-            saved_registers: 0,
-            has_seh: false,
-            uses_bp: false,
-            reserved: false,
-            frame: FrameKind::Fpo,
-        }
-    }
-
     /// Return the attribute word.
     ///
     /// # Errors
@@ -169,7 +155,9 @@ impl DebugRecord for FpoData {
 }
 
 /// One `FRAMEDATA` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+///
+/// [`Default`] gives a record with all fields 0.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FrameData {
     /// The RVA of the first byte of the code block (`ulRvaStart`).
@@ -193,24 +181,6 @@ pub struct FrameData {
 }
 
 impl FrameData {
-    /// Make a record for a code block at `start` with `size` bytes.
-    ///
-    /// The other fields are 0.
-    #[must_use]
-    pub const fn new(start: u32, size: u32) -> Self {
-        Self {
-            start,
-            size,
-            locals_size: 0,
-            params_size: 0,
-            max_stack_size: 0,
-            program: 0,
-            prolog_size: 0,
-            saved_registers_size: 0,
-            flags: 0,
-        }
-    }
-
     /// Return `true` if the block has structured exception handling (`fHasSEH`).
     #[must_use]
     pub const fn has_seh(&self) -> bool {

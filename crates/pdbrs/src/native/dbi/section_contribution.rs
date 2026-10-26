@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::words::{halves, word};
+use crate::native::codeview::index::ModuleIndex;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
@@ -23,6 +24,7 @@ pub const SECTION_CONTRIBUTION_V2: u32 = 0xeffe_0000 + 20_140_516;
 
 /// The record layout of a section contribution substream.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum SectionContributionVersion {
     /// Headerless 20-byte `SC40` records without CRCs.
     V40,
@@ -52,7 +54,7 @@ impl SectionContributionVersion {
     ///
     /// [`SectionContributionVersion::V40`] has no version value.
     #[must_use]
-    pub const fn value(self) -> Option<u32> {
+    pub const fn raw(self) -> Option<u32> {
         match self {
             Self::V40 => None,
             Self::V60 => Some(SECTION_CONTRIBUTION_V60),
@@ -64,8 +66,11 @@ impl SectionContributionVersion {
 /// One section contribution.
 ///
 /// The record of a module info record uses the
-/// [`SectionContributionVersion::V60`] layout.
+/// [`SectionContributionVersion::V60`] layout. [`Default`] gives a zero
+/// record with the [`SectionContributionVersion::V60`] fields: zero CRCs
+/// and no COFF section index.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SectionContribution {
     /// The 1-based section number.
     pub section: u16,
@@ -78,7 +83,9 @@ pub struct SectionContribution {
     /// The `IMAGE_SCN_*` flags of the contributing object file section.
     pub characteristics: u32,
     /// The zero-based index of the contributing module.
-    pub module: u16,
+    ///
+    /// The record stores it in 16 bits.
+    pub module: ModuleIndex,
     /// The raw padding after the module index. Writers can leave it uninitialized.
     pub padding2: u16,
     /// The CRC of the contributed data. [`SectionContributionVersion::V40`] has no CRC.
@@ -87,6 +94,23 @@ pub struct SectionContribution {
     pub reloc_crc: Option<u32>,
     /// The COFF section index. Only [`SectionContributionVersion::V2`] has it.
     pub coff_section: Option<u32>,
+}
+
+impl Default for SectionContribution {
+    fn default() -> Self {
+        Self {
+            section: 0,
+            padding1: 0,
+            offset: 0,
+            size: 0,
+            characteristics: 0,
+            module: ModuleIndex(0),
+            padding2: 0,
+            data_crc: Some(0),
+            reloc_crc: Some(0),
+            coff_section: None,
+        }
+    }
 }
 
 impl SectionContribution {
@@ -101,7 +125,7 @@ impl SectionContribution {
             offset: i32::from_le_bytes(record[1]),
             size: i32::from_le_bytes(record[2]),
             characteristics: word(record, 3),
-            module,
+            module: ModuleIndex(u32::from(module)),
             padding2,
             data_crc: has_crc.then(|| word(record, 5)),
             reloc_crc: has_crc.then(|| word(record, 6)),
@@ -116,7 +140,8 @@ impl SectionContribution {
     /// - [`ErrorKind::InvalidFormat`] if the optional fields do not match
     ///   `version`: [`SectionContributionVersion::V40`] has no CRCs, and only
     ///   [`SectionContributionVersion::V2`] has a COFF section index.
-    /// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    /// - [`ErrorKind::LimitExceeded`] if the module index does not fit in
+    ///   16 bits or if the output cannot grow.
     pub fn encode(&self, version: SectionContributionVersion, out: &mut Vec<u8>) -> Result<()> {
         let has_crc = version != SectionContributionVersion::V40;
         let has_coff = version == SectionContributionVersion::V2;
@@ -127,6 +152,10 @@ impl SectionContribution {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("section contribution fields do not match the version"));
         }
+        let module = u16::try_from(self.module.0).map_err(|_| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("section contribution module index does not fit in 16 bits")
+        })?;
         let mut output = Output::new(out);
         output.reserve(version.record_size())?;
         output.u16(self.section)?;
@@ -134,7 +163,7 @@ impl SectionContribution {
         output.bytes(&self.offset.to_le_bytes())?;
         output.bytes(&self.size.to_le_bytes())?;
         output.u32(self.characteristics)?;
-        output.u16(self.module)?;
+        output.u16(module)?;
         output.u16(self.padding2)?;
         for value in [self.data_crc, self.reloc_crc, self.coff_section]
             .into_iter()
@@ -162,7 +191,7 @@ pub(super) fn encode_section_contributions(
     let size = records.len().saturating_mul(version.record_size());
     let mut output = Output::new(out);
     output.reserve(size.saturating_add(4))?;
-    if let Some(value) = version.value() {
+    if let Some(value) = version.raw() {
         output.u32(value)?;
     }
     for (index, record) in records.enumerate() {
@@ -244,8 +273,8 @@ impl<'a> SectionContributions<'a> {
 
     /// Return an iterator over the records in substream order.
     #[must_use]
-    pub fn iter(&self) -> SectionContributionIter<'a> {
-        SectionContributionIter {
+    pub fn iter(&self) -> SectionContributionsIter<'a> {
+        SectionContributionsIter {
             version: self.version,
             records: self.words.chunks_exact(self.version.words()),
         }
@@ -254,7 +283,7 @@ impl<'a> SectionContributions<'a> {
 
 impl<'a> IntoIterator for &SectionContributions<'a> {
     type Item = SectionContribution;
-    type IntoIter = SectionContributionIter<'a>;
+    type IntoIter = SectionContributionsIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -263,14 +292,14 @@ impl<'a> IntoIterator for &SectionContributions<'a> {
 
 /// An iterator over section contributions.
 #[derive(Clone, Debug)]
-pub struct SectionContributionIter<'a> {
+pub struct SectionContributionsIter<'a> {
     /// The record layout.
     version: SectionContributionVersion,
     /// The records.
     records: core::slice::ChunksExact<'a, [u8; 4]>,
 }
 
-impl Iterator for SectionContributionIter<'_> {
+impl Iterator for SectionContributionsIter<'_> {
     type Item = SectionContribution;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -288,13 +317,13 @@ impl Iterator for SectionContributionIter<'_> {
     }
 }
 
-impl DoubleEndedIterator for SectionContributionIter<'_> {
+impl DoubleEndedIterator for SectionContributionsIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let record = self.records.next_back()?;
         Some(SectionContribution::decode(self.version, record))
     }
 }
 
-impl ExactSizeIterator for SectionContributionIter<'_> {}
+impl ExactSizeIterator for SectionContributionsIter<'_> {}
 
-impl FusedIterator for SectionContributionIter<'_> {}
+impl FusedIterator for SectionContributionsIter<'_> {}

@@ -1,7 +1,8 @@
 //! Behavior tests for the serialized PDB hash table.
 
+use pdbrs::native::Producer;
 use pdbrs::native::hash_table::{
-    HashTable, HashTableEntry, HashTableKeys, HashTableProducer, HashTableValue, OwnedHashTable,
+    HashTable, HashTableEntry, HashTableKeys, HashTableValue, OwnedHashTable,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::{Error, ErrorKind, Result};
@@ -223,7 +224,7 @@ fn a_decoded_table_encodes_to_the_same_bytes() {
     let mut out = Vec::new();
     parsed.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let owned = OwnedHashTable::from_table(&parsed, producer).unwrap();
         let mut out = Vec::new();
         owned.encode(&mut out).unwrap();
@@ -238,7 +239,7 @@ fn a_decoded_table_encodes_to_the_same_bytes() {
 
 #[test]
 fn microsoft_tables_start_with_one_bucket_and_grow_at_two_thirds() {
-    let mut table = OwnedHashTable::<u32>::new(HashTableProducer::Microsoft).unwrap();
+    let mut table = OwnedHashTable::<u32>::new(Producer::Microsoft).unwrap();
     assert_eq!(table.capacity(), 1);
     let mut capacities = Vec::new();
     for key in 1..=6 {
@@ -259,7 +260,7 @@ fn microsoft_tables_start_with_one_bucket_and_grow_at_two_thirds() {
 
 #[test]
 fn llvm_tables_start_with_eight_buckets_and_trim_bit_vectors() {
-    let mut table = OwnedHashTable::<u32>::new(HashTableProducer::Llvm).unwrap();
+    let mut table = OwnedHashTable::<u32>::new(Producer::Llvm).unwrap();
     assert_eq!(table.capacity(), 8);
     let (_, bits, _) = layout(&table);
     assert_eq!(bits, words(&[0, 0]));
@@ -279,7 +280,7 @@ fn llvm_tables_start_with_eight_buckets_and_trim_bit_vectors() {
 
 #[test]
 fn removal_marks_a_deleted_bucket_that_lookups_pass_and_insertions_reuse() {
-    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+    for producer in [Producer::Microsoft, Producer::Llvm] {
         let mut table = OwnedHashTable::<u32>::with_capacity(producer, 40).unwrap();
         for key in [33, 73] {
             table.insert(key, key, &Identity).unwrap();
@@ -294,13 +295,14 @@ fn removal_marks_a_deleted_bucket_that_lookups_pass_and_insertions_reuse() {
         table.insert(113, 1, &Identity).unwrap();
         let (_, bits, entries) = layout(&table);
         assert_eq!(entries, [(33, 113), (34, 73)]);
-        let deleted = match producer {
-            // `ISet::remove` does not shrink the word vector.
-            HashTableProducer::Microsoft => words(&[2, 0, 0]),
-            HashTableProducer::Llvm => words(&[0]),
+        // `ISet::remove` of Microsoft does not shrink the word vector.
+        let deleted = if producer == Producer::Microsoft {
+            words(&[2, 0, 0])
+        } else {
+            words(&[0])
         };
         assert_eq!(bits, [&words(&[2, 0, 0b110])[..], &deleted].concat());
     }
-    let error = OwnedHashTable::<u32>::with_capacity(HashTableProducer::Llvm, 0).unwrap_err();
+    let error = OwnedHashTable::<u32>::with_capacity(Producer::Llvm, 0).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

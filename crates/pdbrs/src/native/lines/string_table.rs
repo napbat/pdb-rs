@@ -21,7 +21,7 @@ pub struct StringTableSubsection<'a> {
 }
 
 impl<'a> StringTableSubsection<'a> {
-    /// Decode the data of a `DEBUG_S_STRINGTABLE` subsection.
+    /// Parse the data of a `DEBUG_S_STRINGTABLE` subsection.
     ///
     /// The data is empty or ends with a NUL byte. LLVM writes an empty
     /// string first, but the decoder does not require it. Zero padding at
@@ -32,7 +32,7 @@ impl<'a> StringTableSubsection<'a> {
     /// Returns [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat)
     /// if the last string has no NUL terminator. The error does not have a
     /// file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.last().is_some_and(|&byte| byte != 0) {
             return Err(invalid("string table does not end with a NUL byte"));
         }
@@ -54,7 +54,7 @@ impl<'a> StringTableSubsection<'a> {
     #[must_use]
     pub fn get(&self, offset: u32) -> Option<&'a [u8]> {
         let rest = self.data.get(usize::try_from(offset).ok()?..)?;
-        // `decode` checked that the table ends with a NUL byte.
+        // `parse` checked that the table ends with a NUL byte.
         let end = rest.iter().position(|&byte| byte == 0)?;
         Some(&rest[..end])
     }
@@ -62,8 +62,8 @@ impl<'a> StringTableSubsection<'a> {
     /// Return an iterator over the strings and their offsets, in table
     /// order.
     #[must_use]
-    pub const fn iter(&self) -> StringTableIter<'a> {
-        StringTableIter {
+    pub const fn iter(&self) -> StringTableSubsectionIter<'a> {
+        StringTableSubsectionIter {
             data: self.data,
             position: 0,
         }
@@ -104,7 +104,7 @@ impl<'a> StringTableSubsection<'a> {
 
 impl<'a> IntoIterator for StringTableSubsection<'a> {
     type Item = (u32, &'a [u8]);
-    type IntoIter = StringTableIter<'a>;
+    type IntoIter = StringTableSubsectionIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -113,7 +113,7 @@ impl<'a> IntoIterator for StringTableSubsection<'a> {
 
 impl<'a> IntoIterator for &StringTableSubsection<'a> {
     type Item = (u32, &'a [u8]);
-    type IntoIter = StringTableIter<'a>;
+    type IntoIter = StringTableSubsectionIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -126,14 +126,14 @@ impl<'a> IntoIterator for &StringTableSubsection<'a> {
 /// terminator. The iteration stops at an offset that does not fit in
 /// 32 bits.
 #[derive(Clone, Debug)]
-pub struct StringTableIter<'a> {
+pub struct StringTableSubsectionIter<'a> {
     /// The table.
     data: &'a [u8],
     /// The offset of the next string.
     position: usize,
 }
 
-impl<'a> Iterator for StringTableIter<'a> {
+impl<'a> Iterator for StringTableSubsectionIter<'a> {
     type Item = (u32, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -142,11 +142,11 @@ impl<'a> Iterator for StringTableIter<'a> {
             .get(self.position..)
             .filter(|rest| !rest.is_empty())?;
         let offset = u32::try_from(self.position).ok()?;
-        // `decode` checked that the table ends with a NUL byte.
+        // `parse` checked that the table ends with a NUL byte.
         let end = rest.iter().position(|&byte| byte == 0)?;
         self.position += end + 1;
         Some((offset, &rest[..end]))
     }
 }
 
-impl FusedIterator for StringTableIter<'_> {}
+impl FusedIterator for StringTableSubsectionIter<'_> {}

@@ -159,8 +159,8 @@ impl SymbolLocator {
                 .with_context("procedure reference has module number 0")
         })?;
         self.procedure_info(ProcedureKey {
-            module: module.0,
-            offset: reference.offset.0,
+            module,
+            offset: reference.offset,
         })
     }
 }

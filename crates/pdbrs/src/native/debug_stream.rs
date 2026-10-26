@@ -36,10 +36,10 @@
 //! [`FrameDataStream`]: super::fpo::FrameDataStream
 //! [`SectionHeaderStream`]: super::section::SectionHeaderStream
 
-pub mod blob;
-pub mod fixup;
-pub mod function;
-pub mod omap;
+mod blob;
+mod fixup;
+mod function;
+mod omap;
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
@@ -49,10 +49,13 @@ use super::msf::StreamId;
 use super::output::Output;
 use crate::{Error, ErrorKind, Result};
 
-pub use blob::{Arm64RuntimeFunction, BlobHeader, RuntimeFunctions, RvaVaBlob, X64RuntimeFunction};
+pub use blob::{
+    Arm64RuntimeFunction, BLOB_HEADER_SIZE, BLOB_VERSION, BlobHeader, RuntimeFunctions, RvaVaBlob,
+    X64RuntimeFunction,
+};
 pub use fixup::{Fixup, FixupStream};
 pub use function::{FunctionEntry, FunctionEntryStream};
-pub use omap::{OmapRecord, OmapStream};
+pub use omap::{OMAP_RECORD_SIZE, OmapRecord, OmapStream};
 
 /// The crate-private codec of a [`DebugRecord`].
 mod sealed {
@@ -113,7 +116,7 @@ impl DebugRecord for Rid {
 pub type TokenRidMap = RecordStream<Rid>;
 
 /// A decoded array of fixed-size records with owned serialized bytes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RecordStream<R> {
     /// The stream bytes; the length is a multiple of `R::SIZE`.
     bytes: Vec<u8>,

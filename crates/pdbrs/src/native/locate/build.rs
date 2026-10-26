@@ -11,7 +11,7 @@ use super::{
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::address::{AddressMap, SectionOffset};
-use crate::native::codeview::index::{IdIndex, ModuleSymbolOffset};
+use crate::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, Symbol, SymbolData};
 use crate::native::dbi::{DebugStream, Module};
 use crate::native::info::Feature;
@@ -39,12 +39,12 @@ struct Lists {
     /// module in a `NOTM` PDB, else [`MERGED_IDS`]) and the inlinee.
     inlinees: Vec<(u32, IdIndex)>,
     /// The `S_MOD_TYPEREF` source of each module that has one.
-    sources: Vec<(u32, ModuleTypeSource)>,
+    sources: Vec<(ModuleIndex, ModuleTypeSource)>,
     /// `true` if the PDB has the `NOTM` feature: the inlinee IDs of a module
     /// refer to the ID records of the module.
     no_type_merge: bool,
     /// The modules whose walk stopped at an undecoded scope kind.
-    incomplete: Vec<u32>,
+    incomplete: Vec<ModuleIndex>,
 }
 
 impl SymbolLocator {
@@ -78,7 +78,7 @@ impl SymbolLocator {
             .map(|bytes| copy(StringTable::parse(&bytes)?.strings()))
             .transpose()?;
         let map = AddressMap::new(SectionHeaders::parse(&section_headers)?, &dbi);
-        let no_type_merge = pdb.info().has_feature(Feature::NoTypeMerge);
+        let no_type_merge = pdb.info().has_feature(Feature::NO_TYPE_MERGE);
         let mut lists = Lists {
             no_type_merge,
             ..Lists::default()
@@ -98,7 +98,7 @@ impl SymbolLocator {
                     offset,
                 };
                 if let Some(start) = optional_rva(&map, address)? {
-                    let span = span(start.0, size, u32::from(contribution.module));
+                    let span = span(start.0, size, contribution.module);
                     push(&mut contributions, span, LIMIT)?;
                 }
             }
@@ -165,13 +165,13 @@ impl Lists {
     /// Index the line subsections, files and inlinee lines of a module.
     fn lines_of(
         &mut self,
-        index: u32,
+        index: ModuleIndex,
         stream: &crate::native::dbi::ModuleStream,
         data: &mut ModuleData,
         map: &AddressMap<'_>,
     ) -> Result<()> {
         let lines = ModuleLines::parse(stream)?;
-        lines.validate()?;
+        lines.check()?;
         if let Some(checksums) = lines.checksums() {
             for entry in checksums {
                 push(&mut data.files, (entry.offset, entry.name_offset), LIMIT)?;
@@ -218,11 +218,11 @@ impl Lists {
     /// if a scope kind that this crate does not decode stopped it.
     fn symbols_of(
         &mut self,
-        index: u32,
+        index: ModuleIndex,
         stream: &crate::native::dbi::ModuleStream,
         data: &mut ModuleData,
         map: &AddressMap<'_>,
-    ) -> Result<Option<u32>> {
+    ) -> Result<Option<ModuleSymbolOffset>> {
         let base = u32::try_from(stream.symbol_offset())
             .map_err(|_| invalid("module symbol offset does not fit in 32 bits"))?;
         let symbols = ModuleSymbols::new(
@@ -240,21 +240,23 @@ impl Lists {
                 Err(error) if error.kind() == ErrorKind::UnsupportedVersion => {
                     push(&mut self.incomplete, index, LIMIT)?;
                     let offset = error.stream_location().map_or(0, |(_, offset)| offset);
-                    walk_end = Some(u32::try_from(offset).unwrap_or(u32::MAX));
+                    walk_end = Some(ModuleSymbolOffset(
+                        u32::try_from(offset).unwrap_or(u32::MAX),
+                    ));
                     break;
                 }
                 Err(error) => return Err(error),
             };
             let (address, length) = match scoped.symbol.data() {
                 SymbolData::Procedure(value) => {
-                    push(&mut starts, (value.address, scoped.offset.0), LIMIT)?;
+                    push(&mut starts, (value.address, scoped.offset), LIMIT)?;
                     (value.address, value.code_length)
                 }
                 SymbolData::ManagedProcedure(value) => (value.address, value.code_length),
                 SymbolData::Thunk(value) => (value.address, u32::from(value.length)),
                 SymbolData::SeparatedCode(value) => {
                     let chunk = SeparatedChunk {
-                        offset: scoped.offset.0,
+                        offset: scoped.offset,
                         address: value.address,
                         length: value.code_length,
                     };
@@ -263,7 +265,7 @@ impl Lists {
                 }
                 SymbolData::InlineSite(site) => {
                     let scope = if self.no_type_merge {
-                        index
+                        index.0
                     } else {
                         MERGED_IDS
                     };
@@ -279,7 +281,7 @@ impl Lists {
             if let Some(start) = optional_rva(map, address)? {
                 let key = ProcedureKey {
                     module: index,
-                    offset: scoped.offset.0,
+                    offset: scoped.offset,
                 };
                 push(&mut self.procedures, span(start.0, length, key), LIMIT)?;
             }

@@ -19,12 +19,11 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::type_record::{Class, ClassKind, ClassOptions, TypeLeaf};
 use pdbrs::native::codeview::{Records, SymbolKind};
-use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{HashTable, RecordOffsets, indexed_name};
 use pdbrs::native::types::TypeHashes;
 use pdbrs::native::write::{BuildOptions, PdbBuilder};
-use pdbrs::native::{Identity, Pdb};
+use pdbrs::native::{Identity, IdentityPolicy, Pdb};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);
@@ -478,7 +477,7 @@ fn added_types_get_the_next_indices_and_hash_values() {
         let id = stream.header().hash_stream.expect("hash stream");
         let hash = edited.stream_bytes(id).expect("hash bytes");
         TypeHashes::parse(stream.header(), &hash)
-            .and_then(|hashes| hashes.verify(&stream))
+            .and_then(|hashes| hashes.check(&stream))
             .expect("hash values");
     }
     let types = edited.types().expect("TPI").expect("TPI present");

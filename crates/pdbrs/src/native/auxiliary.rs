@@ -46,7 +46,7 @@ pub const NUMBERED_SOURCE_LINK_PREFIX: &[u8] = b"sourcelink$";
 pub const SOURCE_SERVER_STREAM_NAME: &[u8] = b"srcsrv";
 
 /// The decoder that a named stream needs, from its exact name bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum NamedStreamKind<'a> {
     /// The `/names` string table.

@@ -22,29 +22,9 @@ use core::cmp::Ordering;
 
 use super::super::{BucketCount, SymbolOffset};
 use super::{HEADER_SIZE, HashRecord, MAX_SIGNED, OFFSET_SCALE, RECORD_SIZE, SIGNATURE, VERSION};
+use crate::native::Producer;
 use crate::native::codeview::symbol::Symbol;
 use crate::{Error, ErrorKind, Result};
-
-/// The producer conventions that a symbol index builder follows.
-///
-/// The producers write the same bytes for most inputs. They differ only in
-/// the cases that each variant describes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IndexProducer {
-    /// The conventions of `mspdbcore.dll`, which MSVC `LINK` uses.
-    ///
-    /// - A hash table without records has no bucket bitmap
-    ///   (`GSI1::CompressBuckets` in `PDB/dbi/gsi.cpp`).
-    /// - The address map compares sections as signed 16-bit values and
-    ///   offsets as signed 32-bit values (`cmpAddrMapByAddr`).
-    Microsoft,
-    /// The conventions of LLVM `GSIStreamBuilder.cpp`, which LLD uses.
-    ///
-    /// - A hash table without records has a bucket bitmap with no bits set.
-    /// - The address map compares sections and offsets as unsigned values
-    ///   (`computeAddrMap`).
-    Llvm,
-}
 
 /// One record to put in a symbol hash table.
 ///
@@ -55,6 +35,7 @@ pub enum IndexProducer {
 /// - Other names of the same length compare byte by byte.
 /// - Names that compare equal keep the order of their symbol offsets.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashEntry {
     /// The offset of the record in the symbol record stream.
     ///
@@ -129,7 +110,7 @@ pub(in crate::native::symbols) fn append_table(
     symbol_records: &[u8],
     entries: &[HashEntry],
     buckets: BucketCount,
-    producer: IndexProducer,
+    producer: Producer,
     output: &mut Vec<u8>,
 ) -> Result<()> {
     let mut placed = place(symbol_records, entries, buckets)?;
@@ -139,7 +120,7 @@ pub(in crate::native::symbols) fn append_table(
             .then_with(|| compare_names(left.name, right.name))
             .then(left.symbol.cmp(&right.symbol))
     })?;
-    let words = (buckets.get() as usize + 1).div_ceil(32);
+    let words = (buckets.count() as usize + 1).div_ceil(32);
     let mut bitmap = Vec::new();
     bitmap
         .try_reserve_exact(words)
@@ -157,7 +138,7 @@ pub(in crate::native::symbols) fn append_table(
         starts.push(scaled(index, OFFSET_SCALE as usize)?);
     }
     let records_size = scaled(placed.len(), RECORD_SIZE)?;
-    let buckets_size = if placed.is_empty() && producer == IndexProducer::Microsoft {
+    let buckets_size = if placed.is_empty() && producer == Producer::Microsoft {
         0
     } else {
         scaled(words + starts.len(), 4)?
@@ -230,7 +211,7 @@ fn place<'a>(
         let name = indexed_name(symbol_records, entry.symbol)?;
         let bucket = match entry.bucket {
             None => buckets.bucket_of(name),
-            Some(bucket) if bucket < buckets.get() => bucket,
+            Some(bucket) if bucket < buckets.count() => bucket,
             Some(_) => {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("symbol hash bucket is not less than the bucket count"));

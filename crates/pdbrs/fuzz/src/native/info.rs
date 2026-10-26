@@ -1,6 +1,7 @@
 //! The PDB Info stream, its named stream map and the `/names` string table.
 
 use pdbrs::native::auxiliary::NamedStreamKind;
+use pdbrs::native::codeview::index::NameOffset;
 use pdbrs::native::hash_table::HashTable;
 use pdbrs::native::info::Info;
 use pdbrs::native::msf::StreamId;
@@ -57,9 +58,9 @@ pub fn names(data: &[u8]) {
 /// Look up each name of a string table by offset and by name.
 pub(crate) fn walk_names(table: &StringTable<'_>) {
     let _ = (table.hash_version(), table.name_count(), table.strings());
-    let verified = table.verify_buckets().is_ok();
+    let verified = table.validate_buckets().is_ok();
     for offset in table.bucket_offsets() {
-        let _ = table.get(offset);
+        let _ = table.get(NameOffset(offset));
     }
     for entry in table.entries() {
         let name = ok(table.get(entry.offset));

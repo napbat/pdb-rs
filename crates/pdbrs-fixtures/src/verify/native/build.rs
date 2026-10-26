@@ -25,8 +25,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 
+use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
-use pdbrs::native::info::IdentityPolicy;
 
 use super::consumers::{
     Consumers, Run, StreamDifferences, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check,

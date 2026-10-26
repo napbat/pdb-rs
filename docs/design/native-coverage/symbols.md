@@ -7,7 +7,7 @@ The fixture counts are the module and shared records of the native fixture PDBs 
 `Symbol::decode` reads every record, and `SymbolData::encode` and `Symbol::encode` write it again to the same bytes.
 `validate_module_symbols` and `validate_shared_symbols` check scope links, type, ID and module references, def-range gaps, def-ranges in inline sites (`Rule::DefRangeOutsideInlineSite`) and subfield offsets against type sizes (`Rule::SubfieldOutsideType`).
 In a PDB without type merging (`NOTM`), the type and ID references of a module resolve against the records that its `S_MOD_TYPEREF` names (#30, #32).
-`ModuleSymbolWriter`, `SymbolRecordWriter`, `GlobalSymbolIndex::build` and `PublicSymbolIndex::build` rebuild the symbol streams and indexes. `PdbBuilder` (#33) and `PdbEditor` (#34) use them.
+`ModuleSymbolWriter`, `SymbolRecordWriter`, `GlobalSymbolIndex::encode_parts` and `PublicSymbolIndex::encode_parts` rebuild the symbol streams and indexes. `PdbBuilder` (#33) and `PdbEditor` (#34) use them.
 The layouts of the kinds above `0x1168` come from the debug type records of `cvinfo.h` in the DIA SDK `diaguids.lib` (#30).
 
 ## Symbol kinds

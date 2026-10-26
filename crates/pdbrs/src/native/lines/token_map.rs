@@ -57,8 +57,16 @@ impl TokenMapValue {
     }
 }
 
+impl Default for TokenMapValue {
+    /// Return `Offset(0)`, the value of the raw value 0.
+    fn default() -> Self {
+        Self::Offset(0)
+    }
+}
+
 /// One entry of a [`TokenMap`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TokenMapEntry {
     /// The key. In a `DEBUG_S_TYPE_MDTOKEN_MAP` subsection it is a type
     /// index ([`TokenMapEntry::type_index`]).
@@ -68,12 +76,6 @@ pub struct TokenMapEntry {
 }
 
 impl TokenMapEntry {
-    /// Create an entry from its fields.
-    #[must_use]
-    pub const fn new(key: u32, value: TokenMapValue) -> Self {
-        Self { key, value }
-    }
-
     /// Return the key as a type index, for an entry of a
     /// `DEBUG_S_TYPE_MDTOKEN_MAP` subsection.
     #[must_use]
@@ -127,7 +129,7 @@ pub struct TokenMap<'a> {
 }
 
 impl<'a> TokenMap<'a> {
-    /// Decode the data of a token map subsection.
+    /// Parse the data of a token map subsection.
     ///
     /// The count and the entries must fill the data exactly.
     ///
@@ -139,7 +141,7 @@ impl<'a> TokenMap<'a> {
     ///   bytes follow the entries.
     ///
     /// The errors do not have a file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let count = read_u32(data, 0).ok_or_else(|| truncated("token map count is truncated"))?;
         let entries = &data[COUNT_SIZE..];
         let size = usize::try_from(count)
@@ -165,7 +167,7 @@ impl<'a> TokenMap<'a> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`TokenMap::encode_entries`].
+    /// Returns the errors of [`TokenMap::encode_parts`].
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         write_map(self.entries.iter(), out)
     }
@@ -178,7 +180,7 @@ impl<'a> TokenMap<'a> {
     ///   value does not fit in 31 bits.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if
     ///   the count does not fit in 32 bits or if the output cannot grow.
-    pub fn encode_entries(entries: &[TokenMapEntry], out: &mut Vec<u8>) -> Result<()> {
+    pub fn encode_parts(entries: &[TokenMapEntry], out: &mut Vec<u8>) -> Result<()> {
         write_map(entries.iter().copied(), out)
     }
 }

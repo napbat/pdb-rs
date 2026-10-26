@@ -1,6 +1,7 @@
 //! Tests of `PdbEditor::strip_private` (#34).
 
 use pdbrs::ErrorKind;
+use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
@@ -11,7 +12,6 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::OwnedModule;
-use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::write::PdbBuilder;
 
 use super::{T_INT4, build, differing_streams, symbols, synthetic};
@@ -21,34 +21,34 @@ const LOCAL: &[u8] = b"local_helper";
 
 /// Add a module with a local procedure and an `S_LPROCREF` record for it.
 fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
-    let module = builder.add_module(OwnedModule {
-        unused1: 0,
-        section_contribution: pdbrs::native::dbi::SectionContribution {
-            section: 1,
-            padding1: 0,
-            offset: 0x40,
-            size: 0x10,
-            characteristics: 0x6000_0020,
-            module: 1,
-            padding2: 0,
-            data_crc: Some(0x1234),
-            reloc_crc: Some(0),
-            coff_section: None,
-        },
-        flags: 0,
-        stream: None,
-        symbol_bytes: 0,
-        c11_bytes: 0,
-        c13_bytes: 0,
-        source_file_count: 0,
-        padding: 0,
-        file_name_offset: 0,
-        source_file_name_index: 0,
-        pdb_file_path_index: 0,
-        name: b"C:\\synthetic\\local.obj".to_vec(),
-        object_file: b"C:\\synthetic\\local.obj".to_vec(),
-        name_padding: [0; 3],
-    })?;
+    let mut contribution = pdbrs::native::dbi::SectionContribution::default();
+    contribution.section = 1;
+    contribution.padding1 = 0;
+    contribution.offset = 0x40;
+    contribution.size = 0x10;
+    contribution.characteristics = 0x6000_0020;
+    contribution.module = ModuleIndex(1);
+    contribution.padding2 = 0;
+    contribution.data_crc = Some(0x1234);
+    contribution.reloc_crc = Some(0);
+    contribution.coff_section = None;
+    let mut record = OwnedModule::default();
+    record.unused1 = 0;
+    record.section_contribution = contribution;
+    record.flags = 0;
+    record.stream = None;
+    record.symbol_bytes = 0;
+    record.c11_bytes = 0;
+    record.c13_bytes = 0;
+    record.source_file_count = 0;
+    record.padding = 0;
+    record.file_name_offset = 0;
+    record.source_file_name_index = 0;
+    record.pdb_file_path_index = 0;
+    record.name = b"C:\\synthetic\\local.obj".to_vec();
+    record.object_file = b"C:\\synthetic\\local.obj".to_vec();
+    record.name_padding = [0; 3];
+    let module = builder.add_module(record)?;
     let mut local = Procedure::new(ProcedureType::Type(T_INT4));
     local.parent = ModuleSymbolOffset(0);
     local.end = ModuleSymbolOffset(0);

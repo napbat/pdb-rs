@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{invalid, pad4, too_large, truncated};
+use crate::native::codeview::index::{ChecksumOffset, NameOffset};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
@@ -17,10 +18,11 @@ const ENTRY_ALIGNMENT: usize = 4;
 ///
 /// The values and sizes come from `line_data.md` of the Microsoft `pdb-rs`
 /// documentation and `FileChecksumKind` in LLVM `CodeView.h`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum ChecksumKind {
     /// No checksum (kind 0, 0 bytes).
+    #[default]
     None,
     /// MD5 (kind 1, 16 bytes).
     Md5,
@@ -67,14 +69,15 @@ impl ChecksumKind {
 }
 
 /// One entry of a file checksum table.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FileChecksum<'a> {
     /// The byte offset of the entry in the subsection data.
     ///
     /// Line blocks and inlinee entries refer to the entry with this value.
-    pub offset: u32,
+    pub offset: ChecksumOffset,
     /// The byte offset of the file name in the `/names` stream.
-    pub name_offset: u32,
+    pub name_offset: NameOffset,
     /// The checksum algorithm.
     pub kind: ChecksumKind,
     /// The checksum bytes. The length is [`ChecksumKind::size`].
@@ -83,9 +86,9 @@ pub struct FileChecksum<'a> {
 
 /// A decoded `DEBUG_S_FILECHKSMS` subsection.
 ///
-/// [`FileChecksums::decode`] validates all entries and records their
+/// [`FileChecksums::parse`] validates all entries and records their
 /// offsets. The entry iterator then cannot fail.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FileChecksums<'a> {
     /// The validated subsection data.
     data: &'a [u8],
@@ -94,7 +97,7 @@ pub struct FileChecksums<'a> {
 }
 
 impl<'a> FileChecksums<'a> {
-    /// Decode and validate the data of a `DEBUG_S_FILECHKSMS` subsection.
+    /// Parse and validate the data of a `DEBUG_S_FILECHKSMS` subsection.
     ///
     /// These rules apply:
     ///
@@ -117,7 +120,7 @@ impl<'a> FileChecksums<'a> {
     ///   allocated.
     ///
     /// The errors do not have a file offset or a stream location.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let mut offsets = Vec::new();
         let mut position = 0;
         while position < data.len() {
@@ -163,15 +166,17 @@ impl<'a> FileChecksums<'a> {
     /// Return `None` if no entry starts at `offset`. An offset inside an
     /// entry does not identify an entry.
     #[must_use]
-    pub fn get(&self, offset: u32) -> Option<FileChecksum<'a>> {
-        self.offsets.binary_search(&offset).ok()?;
-        parse_entry(self.data, offset).ok().map(|(entry, _)| entry)
+    pub fn get(&self, offset: ChecksumOffset) -> Option<FileChecksum<'a>> {
+        self.offsets.binary_search(&offset.0).ok()?;
+        parse_entry(self.data, offset.0)
+            .ok()
+            .map(|(entry, _)| entry)
     }
 
     /// Return `true` if an entry starts at `offset`.
     #[must_use]
-    pub fn contains(&self, offset: u32) -> bool {
-        self.offsets.binary_search(&offset).is_ok()
+    pub fn contains(&self, offset: ChecksumOffset) -> bool {
+        self.offsets.binary_search(&offset.0).is_ok()
     }
 
     /// Return an iterator over the entries in subsection order.
@@ -201,8 +206,8 @@ impl<'a> FileChecksums<'a> {
             .chain([self.data.len()]);
         for (entry, next) in self.iter().zip(ends) {
             write_entry(entry.name_offset, entry.kind, entry.checksum, out)?;
-            // `decode` checked that the entry and its padding end at `next`.
-            let start = usize::try_from(entry.offset).unwrap_or(usize::MAX);
+            // `parse` checked that the entry and its padding end at `next`.
+            let start = usize::try_from(entry.offset.0).unwrap_or(usize::MAX);
             let end = start.saturating_add(ENTRY_HEADER_SIZE + entry.checksum.len());
             let padding = next.saturating_sub(end).min(ENTRY_ALIGNMENT - 1);
             Output::new(out).bytes(&[0; ENTRY_ALIGNMENT - 1][..padding])?;
@@ -211,30 +216,32 @@ impl<'a> FileChecksums<'a> {
     }
 }
 
-/// Append one entry of a file checksum table and its padding to `out`.
-///
-/// The entry starts at a 4-byte boundary of the table. The output offset of
-/// the entry, relative to the table start, is the value that line blocks
-/// and inlinee entries use to refer to it.
-///
-/// # Errors
-///
-/// - [`ErrorKind::InvalidFormat`] if the checksum size is not
-///   [`ChecksumKind::size`].
-/// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
-pub fn encode_file_checksum(
-    name_offset: u32,
-    kind: ChecksumKind,
-    checksum: &[u8],
-    out: &mut Vec<u8>,
-) -> Result<()> {
-    write_entry(name_offset, kind, checksum, out)?;
-    pad4(out, ENTRY_HEADER_SIZE + checksum.len())
+impl FileChecksum<'_> {
+    /// Append one entry of a file checksum table and its padding to `out`.
+    ///
+    /// The entry starts at a 4-byte boundary of the table. The output
+    /// offset of the entry, relative to the table start, is the value that
+    /// line blocks and inlinee entries use to refer to it.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the checksum size is not
+    ///   [`ChecksumKind::size`].
+    /// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode_parts(
+        name_offset: NameOffset,
+        kind: ChecksumKind,
+        checksum: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        write_entry(name_offset, kind, checksum, out)?;
+        pad4(out, ENTRY_HEADER_SIZE + checksum.len())
+    }
 }
 
 /// Append the header and the checksum of one entry to `out`.
 fn write_entry(
-    name_offset: u32,
+    name_offset: NameOffset,
     kind: ChecksumKind,
     checksum: &[u8],
     out: &mut Vec<u8>,
@@ -242,7 +249,7 @@ fn write_entry(
     if checksum.len() != kind.size() {
         return Err(invalid("file checksum size does not match its kind"));
     }
-    Output::new(out).u32(name_offset)?;
+    Output::new(out).u32(name_offset.0)?;
     // The sizes of all kinds are at most 32, so the size fits in `u8`.
     Output::new(out).bytes(&[checksum.len().to_le_bytes()[0], kind.raw()])?;
     Output::new(out).bytes(checksum)
@@ -270,7 +277,7 @@ impl<'a> Iterator for FileChecksumsIter<'_, 'a> {
     type Item = FileChecksum<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // `FileChecksums::decode` validated each offset, so this cannot fail.
+        // `FileChecksums::parse` validated each offset, so this cannot fail.
         let &offset = self.offsets.next()?;
         parse_entry(self.data, offset).ok().map(|(entry, _)| entry)
     }
@@ -308,8 +315,8 @@ fn parse_entry(data: &[u8], offset: u32) -> Result<(FileChecksum<'_>, usize)> {
         .get(checksum_start..end)
         .ok_or_else(|| truncated("file checksum bytes are truncated"))?;
     let entry = FileChecksum {
-        offset,
-        name_offset: u32::from_le_bytes([n0, n1, n2, n3]),
+        offset: ChecksumOffset(offset),
+        name_offset: NameOffset(u32::from_le_bytes([n0, n1, n2, n3])),
         kind,
         checksum,
     };

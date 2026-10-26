@@ -2,10 +2,11 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
+use pdbrs::native::Producer;
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::symbols::{
-    GlobalSymbolIndex, HashEntry, HashTable, IndexProducer, PublicSymbolIndex, SectionStart,
-    ThunkTable, indexed_name,
+    GlobalSymbolIndex, HashEntry, HashTable, PublicSymbolIndex, SectionStart, ThunkTable,
+    indexed_name,
 };
 use pdbrs::{ErrorKind, Result as PdbResult};
 
@@ -26,16 +27,22 @@ pub(crate) fn symbol_indexes(
 ) -> Outcome {
     let header = dbi.header();
     let producer = if header.pdb_dll_version == 0 {
-        IndexProducer::Llvm
+        Producer::Llvm
     } else {
-        IndexProducer::Microsoft
+        Producer::Microsoft
     };
     let (mut encoded, mut different) = (0, 0);
     if let (Some(id), Some(globals)) = (header.global_stream, decoded(pdb.global_symbols(dbi))?) {
         let table = globals.hash_table();
         let entries = entries(table, symbol_records, report)?;
-        let bytes =
-            GlobalSymbolIndex::build(symbol_records, &entries, table.bucket_count(), producer)?;
+        let mut bytes = Vec::new();
+        GlobalSymbolIndex::encode_parts(
+            symbol_records,
+            &entries,
+            table.bucket_count(),
+            producer,
+            &mut bytes,
+        )?;
         encoded += 1;
         different += usize::from(bytes != pdb.stream_bytes(id)?);
     }
@@ -44,20 +51,21 @@ pub(crate) fn symbol_indexes(
         let entries = entries(table, symbol_records, report)?;
         let fields = publics.header();
         let targets: Vec<u32> = publics.thunk_map().collect();
-        let thunks = ThunkTable {
-            thunk_size: fields.thunk_size,
-            section: fields.thunk_table_section,
-            offset: fields.thunk_table_offset,
-            targets: &targets,
-        };
+        let mut thunks = ThunkTable::default();
+        thunks.thunk_size = fields.thunk_size;
+        thunks.section = fields.thunk_table_section;
+        thunks.offset = fields.thunk_table_offset;
+        thunks.targets = &targets;
         let starts: Vec<SectionStart> = publics.section_starts().collect();
-        let bytes = PublicSymbolIndex::build(
+        let mut bytes = Vec::new();
+        PublicSymbolIndex::encode_parts(
             symbol_records,
             &entries,
             table.bucket_count(),
             producer,
             thunks,
             &starts,
+            &mut bytes,
         )?;
         encoded += 1;
         different += usize::from(bytes != pdb.stream_bytes(id)?);

@@ -24,7 +24,8 @@ use crate::{Error, ErrorKind, Result};
 /// An empty `Vec` or `None` gives an empty substream. A
 /// [`SectionContributionVersion::V60`] or [`SectionContributionVersion::V2`]
 /// substream without records still has its 4-byte version value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DbiBuilder {
     /// The header fields.
     pub header: DbiHeader,

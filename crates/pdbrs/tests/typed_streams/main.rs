@@ -9,11 +9,11 @@ mod limits;
 mod named;
 
 use pdbrs::native::Pdb;
+use pdbrs::native::Producer;
 use pdbrs::native::debug_stream::{OmapRecord, OmapStream};
 use pdbrs::native::hash::hash_string_v1;
-use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::info::InfoBuilder;
-use pdbrs::native::lines::{DEBUG_S_FILECHKSMS, DEBUG_S_LINES};
+use pdbrs::native::lines::{DEBUG_S_FILECHKSMS, DEBUG_S_LINES, SubsectionKind};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::SIGNATURE;
 use pdbrs::native::section::{SectionHeader, SectionHeaderStream};
@@ -156,8 +156,7 @@ fn container(streams: &[Option<Vec<u8>>], order: Order) -> Vec<u8> {
 
 /// Build a PDB Info stream with age 1 and the given named streams.
 fn info(named: &[(&[u8], StreamId)]) -> Vec<u8> {
-    let mut builder =
-        InfoBuilder::new(HashTableProducer::Microsoft, 0x1234_5678, [0x42; 16], 1).unwrap();
+    let mut builder = InfoBuilder::new(Producer::Microsoft, 0x1234_5678, [0x42; 16], 1).unwrap();
     for &(name, stream) in named {
         builder.set_named_stream(name, stream).unwrap();
     }
@@ -250,7 +249,7 @@ fn global_index(names: &[Vec<u8>], offsets: &[u32]) -> Vec<u8> {
         .map(|(name, &offset)| (count.bucket_of(name), offset))
         .collect();
     entries.sort_unstable();
-    let words = (usize::try_from(count.get()).unwrap() + 1).div_ceil(32);
+    let words = (usize::try_from(count.count()).unwrap() + 1).div_ceil(32);
     let mut bitmap = vec![0_u8; words * 4];
     let mut starts = Vec::new();
     for (index, &(bucket, _)) in (0_u32..).zip(&entries) {
@@ -275,8 +274,8 @@ fn global_index(names: &[Vec<u8>], offsets: &[u32]) -> Vec<u8> {
 }
 
 /// Serialize one C13 subsection with its header and zero padding.
-fn subsection(kind: u32, data: &[u8]) -> Vec<u8> {
-    let mut bytes = u32s(&[kind, to_u32(data.len())]);
+fn subsection(kind: SubsectionKind, data: &[u8]) -> Vec<u8> {
+    let mut bytes = u32s(&[kind.0, to_u32(data.len())]);
     bytes.extend_from_slice(data);
     while !bytes.len().is_multiple_of(4) {
         bytes.push(0);
@@ -426,7 +425,10 @@ const OMAP_RECORDS: u32 = 70;
 
 /// Return OMAP record `index`.
 fn omap_record(index: u32) -> OmapRecord {
-    OmapRecord::new(0x1000 + 0x10 * index, 0x8000 + 0x10 * index)
+    let mut record = OmapRecord::default();
+    record.rva = 0x1000 + 0x10 * index;
+    record.rva_to = 0x8000 + 0x10 * index;
+    record
 }
 
 /// Build an OMAP stream that is longer than one page.

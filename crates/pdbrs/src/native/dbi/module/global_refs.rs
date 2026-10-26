@@ -82,7 +82,7 @@ impl<'a> GlobalRefs<'a> {
     /// Returns [`ErrorKind::InvalidReference`] for the first reference that
     /// is outside the symbol record stream or inside a record. The error
     /// identifies the module stream and the logical offset of the reference.
-    pub fn validate(&self, records: &RecordOffsets) -> Result<()> {
+    pub fn check(&self, records: &RecordOffsets) -> Result<()> {
         for (position, offset) in self.iter().enumerate() {
             if records.contains(offset) {
                 continue;

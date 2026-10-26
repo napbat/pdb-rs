@@ -44,7 +44,8 @@ const VERSION: u32 = 0xeffe_0000 + 19_990_810;
 const MAX_SIGNED: u32 = 0x7fff_ffff;
 
 /// The decoded fields of a hash table header (`GSIHashHdr`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashHeader {
     /// The header signature. It is always `0xffffffff`.
     pub signature: u32,
@@ -209,7 +210,7 @@ fn parse_buckets(
         }
         return Ok((data.clone(), data, Vec::new()));
     }
-    let bucket_count = buckets.get() as usize;
+    let bucket_count = buckets.count() as usize;
     let words = (bucket_count + 1).div_ceil(32);
     let bitmap = data.start..data.start + words * 4;
     if bitmap.end > data.end {
@@ -230,7 +231,7 @@ fn parse_buckets(
     let mut nonempty = 0_u32;
     for (first_bit, position) in (0_u32..).step_by(32).zip(bitmap.clone().step_by(4)) {
         let word = u32_at(bytes, position);
-        let valid = buckets.get().saturating_sub(first_bit).min(32);
+        let valid = buckets.count().saturating_sub(first_bit).min(32);
         let mask = u32::MAX.checked_shr(32 - valid).unwrap_or(0);
         if word & !mask != 0 {
             return Err(error(
@@ -416,7 +417,7 @@ impl<'a> HashTable<'a> {
 
     /// Return the position in the offset array of non-empty bucket `index`.
     fn rank(&self, index: u32) -> Option<usize> {
-        if index >= self.layout.buckets.get() || self.layout.bitmap.is_empty() {
+        if index >= self.layout.buckets.count() || self.layout.bitmap.is_empty() {
             return None;
         }
         let word_index = (index / 32) as usize;
@@ -447,7 +448,8 @@ impl<'a> HashTable<'a> {
 }
 
 /// One hash record (`HRFile`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HashRecord {
     /// The offset of the symbol record. The file stores this value plus 1.
     pub symbol: SymbolOffset,
@@ -456,7 +458,7 @@ pub struct HashRecord {
 }
 
 /// An iterator over hash records.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HashRecords<'a> {
     /// The remaining 8-byte records.
     chunks: Iter<'a, [u8; RECORD_SIZE]>,
@@ -503,7 +505,8 @@ impl ExactSizeIterator for HashRecords<'_> {}
 impl FusedIterator for HashRecords<'_> {}
 
 /// One non-empty bucket of a hash table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Bucket<'a> {
     /// The bucket index, less than the bucket count.
     pub index: u32,

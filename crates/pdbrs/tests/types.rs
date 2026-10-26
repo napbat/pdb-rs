@@ -8,8 +8,7 @@ use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{ClassOptions, LF_FIELDLIST, LF_STRUCTURE, LF_UNION};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{
-    ForwardRefs, HEADER_SIZE, HashBuffer, TPI_V80, TypeHashes, TypeStream, TypeTable,
-    type_record_hash,
+    ForwardRefs, HEADER_SIZE, TPI_V80, TypeHashes, TypeStream, TypeTable, type_record_hash,
 };
 
 /// The serialized header values that a test can change.
@@ -105,11 +104,8 @@ fn iterates_records_with_their_indices() {
     assert_eq!(header.hash_stream, None);
     assert_eq!(header.hash_aux_stream, None);
     assert_eq!(
-        header.hash_values,
-        HashBuffer {
-            offset: 0,
-            length: u32::MAX
-        }
+        (header.hash_values.offset, header.hash_values.length),
+        (0, u32::MAX)
     );
     assert_eq!(stream.record_bytes(), records.as_slice());
 
@@ -510,7 +506,7 @@ fn resolves_forward_references_with_stored_buckets() {
         hash_bytes.extend_from_slice(&value.to_le_bytes());
     }
     let hashes = TypeHashes::parse(stream.header(), &hash_bytes).unwrap();
-    hashes.verify(&stream).unwrap();
+    hashes.check(&stream).unwrap();
     let table = TypeTable::new(&stream).unwrap();
     check_forward_refs(&ForwardRefs::new(&table, Some(&hashes)).unwrap());
 }

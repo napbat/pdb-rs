@@ -27,7 +27,7 @@ use crate::native::output::no_memory;
 use crate::native::symbols::{
     GlobalSymbolIndex, HashEntry, PublicSymbolIndex, SymbolOffset, ThunkTable,
 };
-use crate::native::types::{HashLayout, TypeHeader, TypeStreamOptions, write_type_stream};
+use crate::native::types::{TypeHeader, TypeStreamOptions, encode_type_stream};
 use crate::{Error, ErrorKind, Result};
 
 /// The module stream offset of the first symbol record: after the signature.
@@ -54,15 +54,8 @@ fn unresolved(context: &'static str) -> Error {
 
 /// Strip the TPI or IPI stream `id`: no records and an empty hash stream.
 fn strip_types(id: StreamId, header: &TypeHeader, changes: &mut Changes) -> Result<()> {
-    let options = TypeStreamOptions {
-        index_begin: header.index_begin,
-        hash_bucket_count: header.hash_bucket_count,
-        hash_stream: header.hash_stream,
-        hash_aux_stream: header.hash_aux_stream,
-        layout: HashLayout::of(header),
-        adjusters: &[],
-    };
-    let written = write_type_stream(&[], &options)?;
+    let options = TypeStreamOptions::from_header(header, &[]);
+    let written = encode_type_stream(&[], &options)?;
     if let (Some(hash), Some(stream)) = (written.hash_stream, header.hash_stream) {
         changes.replace(stream, hash)?;
     }
@@ -202,7 +195,7 @@ fn module_regions<S: ReadAt>(
     let mut offsets = BTreeMap::new();
     for module in context.dbi.modules() {
         let module = module?;
-        let index = u16::try_from(module.index)
+        let index = u16::try_from(module.index.0)
             .map_err(|_| unsupported("PDB has more than 65535 modules"))?;
         let Some(mut list) = targets.remove(&index) else {
             push(&mut regions, None)?;
@@ -325,11 +318,11 @@ pub(super) fn plan<S: ReadAt>(
     }
     if info
         .features()
-        .any(|feature| feature == Feature::NoTypeMerge)
+        .any(|feature| feature == Feature::NO_TYPE_MERGE)
     {
         let features: Vec<Feature> = info
             .features()
-            .filter(|&feature| feature != Feature::NoTypeMerge)
+            .filter(|&feature| feature != Feature::NO_TYPE_MERGE)
             .collect();
         info.set_features(&features)?;
     }
@@ -350,11 +343,13 @@ pub(super) fn plan<S: ReadAt>(
     let mut shared = shared_records(&records, &kept, &modules)?;
     let buckets = pdb.symbol_bucket_count();
     if let Some(id) = header.global_stream {
-        let bytes = GlobalSymbolIndex::build(
+        let mut bytes = Vec::new();
+        GlobalSymbolIndex::encode_parts(
             &shared.bytes,
             &shared.globals,
             buckets,
             context.index_producer,
+            &mut bytes,
         )?;
         changes.replace(id, bytes)?;
     }
@@ -368,13 +363,15 @@ pub(super) fn plan<S: ReadAt>(
             offset: source.thunk_table_offset,
             targets: &targets,
         };
-        let bytes = PublicSymbolIndex::build(
+        let mut bytes = Vec::new();
+        PublicSymbolIndex::encode_parts(
             &shared.bytes,
             &shared.publics,
             buckets,
             context.index_producer,
             thunks,
             &starts,
+            &mut bytes,
         )?;
         changes.replace(id, bytes)?;
     }
@@ -397,15 +394,16 @@ pub(super) fn plan<S: ReadAt>(
             continue;
         };
         let refs = shared.module_refs.remove(&index).unwrap_or_default();
-        let encoded = ModuleStreamParts {
+        let mut bytes = Vec::new();
+        let sizes = ModuleStreamParts {
             symbols: Some(&region),
             c11: &[],
             c13: &[],
             global_refs: &refs,
         }
-        .encode()?;
-        record.symbol_bytes = encoded.sizes.symbol_bytes;
-        changes.replace(stream, encoded.bytes)?;
+        .encode(&mut bytes)?;
+        record.symbol_bytes = sizes.symbol_bytes;
+        changes.replace(stream, bytes)?;
     }
     for contribution in &mut builder.section_contributions {
         zero_crcs(contribution);

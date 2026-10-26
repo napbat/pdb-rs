@@ -18,7 +18,6 @@ use crate::native::codeview::symbol::validate::{
 };
 use crate::native::codeview::{LeafKind, Records, SymbolKind};
 use crate::native::dbi::{ModuleStream, ModuleStreamParts, OwnedModule};
-use crate::native::info::Feature;
 use crate::native::lines::ModuleLines;
 use crate::native::output::no_memory;
 use crate::native::symbols::{
@@ -287,19 +286,20 @@ impl PdbBuilder<'_> {
                 continue;
             };
             let refs = global_refs(module, symbol_offsets)?;
-            let encoded = ModuleStreamParts {
+            let mut bytes = Vec::new();
+            let sizes = ModuleStreamParts {
                 symbols: region.symbols.as_deref(),
                 c11: &[],
                 c13: &region.c13,
                 global_refs: &refs,
             }
-            .encode()
+            .encode(&mut bytes)
             .map_err(|error| error.with_stream(stream, 0))?;
-            record.symbol_bytes = encoded.sizes.symbol_bytes;
-            record.c11_bytes = encoded.sizes.c11_bytes;
-            record.c13_bytes = encoded.sizes.c13_bytes;
-            let parsed = ModuleStream::parse(encoded.bytes, &record.as_module())?;
-            ModuleLines::parse(&parsed)?.validate()?;
+            record.symbol_bytes = sizes.symbol_bytes;
+            record.c11_bytes = sizes.c11_bytes;
+            record.c13_bytes = sizes.c13_bytes;
+            let parsed = ModuleStream::parse(bytes, &record.as_module())?;
+            ModuleLines::parse(&parsed)?.check()?;
             planned.push(PlannedModule {
                 record,
                 bytes: Some(parsed.into_bytes()),
@@ -315,7 +315,7 @@ impl PdbBuilder<'_> {
         offsets: &[SymbolOffset],
         options: &BuildOptions,
     ) -> Result<(Vec<u8>, Vec<u8>)> {
-        let buckets = BucketCount::from_features(self.info.features().map(Feature::code));
+        let buckets = BucketCount::from_features(self.info.features());
         let mut globals = Vec::new();
         let mut publics = Vec::new();
         for (symbol, &offset) in self.symbols.iter().zip(offsets) {
@@ -332,16 +332,25 @@ impl PdbBuilder<'_> {
                 publics.push(HashEntry::new(offset));
             }
         }
-        let globals = GlobalSymbolIndex::build(records, &globals, buckets, options.index_producer)?;
-        let publics = PublicSymbolIndex::build(
+        let mut global_bytes = Vec::new();
+        GlobalSymbolIndex::encode_parts(
+            records,
+            &globals,
+            buckets,
+            options.index_producer,
+            &mut global_bytes,
+        )?;
+        let mut public_bytes = Vec::new();
+        PublicSymbolIndex::encode_parts(
             records,
             &publics,
             buckets,
             options.index_producer,
             self.thunks,
             &self.section_starts,
+            &mut public_bytes,
         )?;
-        Ok((globals, publics))
+        Ok((global_bytes, public_bytes))
     }
 }
 

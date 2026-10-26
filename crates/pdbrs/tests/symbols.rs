@@ -2,10 +2,10 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::hash::hash_string_v1;
+use pdbrs::native::info::Feature;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{
-    BucketCount, GlobalSymbolIndex, MINIMAL_DEBUG_INFO_FEATURE, PublicSymbolIndex, RecordOffsets,
-    SectionStart, SymbolOffset,
+    BucketCount, GlobalSymbolIndex, PublicSymbolIndex, RecordOffsets, SymbolOffset,
 };
 
 /// The stream ID of the synthetic index streams.
@@ -58,7 +58,7 @@ fn symbols(names: &[&[u8]]) -> (Vec<u8>, Vec<u32>) {
 /// `records` holds `(serialized offset, reference count)` pairs.
 /// `buckets` holds `(bucket index, first record index)` pairs in bucket order.
 fn table(records: &[(u32, u32)], buckets: &[(u32, u32)], count: BucketCount) -> Vec<u8> {
-    let words = (count.get() as usize + 1).div_ceil(32);
+    let words = (count.count() as usize + 1).div_ceil(32);
     let mut bitmap = vec![0_u8; words * 4];
     let mut offsets = Vec::new();
     for &(index, first) in buckets {
@@ -130,11 +130,11 @@ fn assert_error(error: &pdbrs::Error, kind: ErrorKind, offset: usize) {
 fn bucket_count_follows_the_minimal_debug_info_feature() {
     assert_eq!(BucketCount::from_features([]), BucketCount::Standard);
     assert_eq!(
-        BucketCount::from_features([20_140_508, MINIMAL_DEBUG_INFO_FEATURE]),
+        BucketCount::from_features([Feature::VC140, Feature::MINIMAL_DEBUG_INFO]),
         BucketCount::Minimal
     );
-    assert_eq!(BucketCount::Standard.get(), 4096);
-    assert_eq!(BucketCount::Minimal.get(), 0x3ffff);
+    assert_eq!(BucketCount::Standard.count(), 4096);
+    assert_eq!(BucketCount::Minimal.count(), 0x3ffff);
     let hash = hash_string_v1(b"main");
     assert_eq!(BucketCount::Standard.bucket_of(b"main"), hash % 4096);
     assert_eq!(BucketCount::Minimal.bucket_of(b"main"), hash % 0x3ffff);
@@ -492,21 +492,13 @@ fn public_index_decodes_all_parts() {
     assert_eq!(index.address_map().next_back(), Some(SymbolOffset(12)));
     let thunks: Vec<_> = index.thunk_map().collect();
     assert_eq!(thunks, [0x1010, 0x2020]);
-    let sections: Vec<_> = index.section_starts().collect();
+    let sections: Vec<_> = index
+        .section_starts()
+        .map(|start| (start.offset, start.section, start.padding))
+        .collect();
     assert_eq!(
         sections,
-        [
-            SectionStart {
-                offset: 0x1000,
-                section: 1,
-                padding: [0xcd, 0xab],
-            },
-            SectionStart {
-                offset: 0x5000,
-                section: 2,
-                padding: [0xcd, 0xab],
-            },
-        ]
+        [(0x1000, 1, [0xcd, 0xab]), (0x5000, 2, [0xcd, 0xab])]
     );
 }
 

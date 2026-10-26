@@ -234,10 +234,10 @@ fn udt_source_line_undone_and_source_link_encode_their_bytes() {
     list.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
     let mut built = Vec::new();
-    UdtSourceLineUndone::encode_indices(list.type_indices(), &mut built).unwrap();
+    UdtSourceLineUndone::encode_parts(list.type_indices(), &mut built).unwrap();
     assert_eq!(built, bytes);
     let mut none = Vec::new();
-    UdtSourceLineUndone::encode_indices([], &mut none).unwrap();
+    UdtSourceLineUndone::encode_parts([], &mut none).unwrap();
     assert_eq!(none, b"");
 
     let json = b"\xef\xbb\xbf {\"documents\":{\"C:\\\\*\":\"https://example.test/*\"}}\r\n";

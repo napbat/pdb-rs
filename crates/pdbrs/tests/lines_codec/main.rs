@@ -6,7 +6,7 @@ mod lines;
 mod module_stream;
 
 use pdbrs::ErrorKind;
-use pdbrs::native::lines::LineSubsection;
+use pdbrs::native::lines::{LineSubsection, SubsectionKind};
 
 /// Serialize `u32` values in little-endian order.
 fn u32s(values: &[u32]) -> Vec<u8> {
@@ -24,7 +24,7 @@ fn error_kind<T: core::fmt::Debug>(result: pdbrs::Result<T>) -> ErrorKind {
 /// Decode `data` as a subsection of `kind`, encode it again and compare.
 ///
 /// Also check the framed form: the header, the data and the zero padding.
-fn round_trip(kind: u32, data: &[u8]) -> LineSubsection<'_> {
+fn round_trip(kind: SubsectionKind, data: &[u8]) -> LineSubsection<'_> {
     let decoded = LineSubsection::decode(kind, data).unwrap();
     assert_eq!(decoded.kind(), kind);
     let mut out = Vec::new();
@@ -32,7 +32,7 @@ fn round_trip(kind: u32, data: &[u8]) -> LineSubsection<'_> {
     assert_eq!(out, data, "kind {kind:#x}");
     let mut framed = Vec::new();
     decoded.encode_framed(&mut framed).unwrap();
-    let mut expected = u32s(&[kind, u32::try_from(data.len()).unwrap()]);
+    let mut expected = u32s(&[kind.0, u32::try_from(data.len()).unwrap()]);
     expected.extend_from_slice(data);
     while !expected.len().is_multiple_of(4) {
         expected.push(0);

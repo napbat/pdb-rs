@@ -8,7 +8,8 @@ pub mod symbols;
 pub mod types;
 
 use pdbrs::io::ReadAt;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{NameOffset, TypeIndex};
+use pdbrs::native::container::ContainerLimits;
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::StringTable;
@@ -19,11 +20,9 @@ use crate::{MAX_STREAM, ok};
 /// Read a native PDB and decode every stream that the streams refer to.
 pub fn pdb(data: &[u8]) {
     let _ = pdbrs::Pdb::parse(data);
-    let options = ReadOptions {
-        max_stream_bytes: MAX_STREAM,
-        msfz: crate::msfz::limits(),
-        ..ReadOptions::default()
-    };
+    let options = ReadOptions::default()
+        .with_max_stream_bytes(MAX_STREAM)
+        .with_limits(ContainerLimits::default().with_msfz(crate::msfz::limits()));
     let Some(pdb) = ok(Pdb::with_options(data, options)) else {
         return;
     };
@@ -85,7 +84,7 @@ fn debug_info<S: ReadAt>(pdb: &Pdb<S>, dbi: &Dbi, names: Option<&StringTable<'_>
     if let Some(frames) = ok(pdb.frame_data(dbi)).flatten() {
         for frame in &frames {
             if let Some(names) = names {
-                let _ = names.get(frame.program);
+                let _ = names.get(NameOffset(frame.program));
             }
         }
     }

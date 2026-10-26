@@ -4,9 +4,7 @@ use pdbrs::ErrorKind;
 use pdbrs::native::codeview::type_record::{ClassOptions, LF_POINTER, LF_STRUCTURE};
 use pdbrs::native::hash::{hash_buffer_v8, hash_string_v1};
 use pdbrs::native::msf::StreamId;
-use pdbrs::native::types::{
-    HEADER_SIZE, HashAdjuster, IndexOffset, TPI_V80, TypeHashes, TypeStream, type_record_hash,
-};
+use pdbrs::native::types::{HEADER_SIZE, TPI_V80, TypeHashes, TypeStream, type_record_hash};
 
 const BUCKETS: u32 = 0x1000;
 const HASH_STREAM: u16 = 7;
@@ -252,7 +250,7 @@ fn hashes_wide_udt_records_by_name() {
 }
 
 #[test]
-fn decodes_and_verifies_hash_buffers() {
+fn decodes_and_checks_hash_buffers() {
     let fixture = Fixture::new();
     let stream = fixture.stream();
     let bytes = fixture.hash_bytes();
@@ -262,26 +260,21 @@ fn decodes_and_verifies_hash_buffers() {
     assert_eq!(hashes.hash_value(0x1001), Some(fixture.values[1]));
     assert_eq!(hashes.hash_value(0x1003), None);
     assert_eq!(
-        hashes.index_offsets().collect::<Vec<_>>(),
-        [
-            IndexOffset {
-                index: 0x1000,
-                offset: 0
-            },
-            IndexOffset {
-                index: 0x1002,
-                offset: fixture.pairs[1].1
-            },
-        ]
+        hashes
+            .index_offsets()
+            .map(|pair| (pair.index, pair.offset))
+            .collect::<Vec<_>>(),
+        [(0x1000, 0), (0x1002, fixture.pairs[1].1)]
     );
     assert_eq!(
-        hashes.adjusters(),
-        [HashAdjuster {
-            name_offset: 5,
-            index: 0x1001
-        }]
+        hashes
+            .adjusters()
+            .iter()
+            .map(|adjuster| (adjuster.name_offset.0, adjuster.index))
+            .collect::<Vec<_>>(),
+        [(5, 0x1001)]
     );
-    hashes.verify(&stream).unwrap();
+    hashes.check(&stream).unwrap();
     for record in stream.records() {
         let record = record.unwrap();
         assert_eq!(hashes.locate(&stream, record.index).unwrap(), record);
@@ -299,21 +292,21 @@ fn accepts_empty_buffers() {
     let hashes = TypeHashes::parse(stream.header(), &[]).unwrap();
     assert_eq!(hashes.hash_values().len(), 0);
     assert_eq!(hashes.adjusters(), []);
-    hashes.verify(&stream).unwrap();
+    hashes.check(&stream).unwrap();
     // Without pairs, `locate` frames from the first record.
     let last = stream.records().last().unwrap().unwrap();
     assert_eq!(hashes.locate(&stream, 0x1002).unwrap(), last);
 }
 
 #[test]
-fn verify_reports_mismatched_values_and_pairs() {
+fn check_reports_mismatched_values_and_pairs() {
     let mut fixture = Fixture::new();
     fixture.values[1] = (fixture.values[1] + 1) % BUCKETS;
     let stream = fixture.stream();
     let bytes = fixture.hash_bytes();
     let error = TypeHashes::parse(stream.header(), &bytes)
         .unwrap()
-        .verify(&stream)
+        .check(&stream)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(
@@ -327,7 +320,7 @@ fn verify_reports_mismatched_values_and_pairs() {
     let bytes = fixture.hash_bytes();
     let error = TypeHashes::parse(stream.header(), &bytes)
         .unwrap()
-        .verify(&stream)
+        .check(&stream)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(
@@ -341,20 +334,20 @@ fn verify_reports_mismatched_values_and_pairs() {
     let bytes = fixture.hash_bytes();
     let hashes = TypeHashes::parse(stream.header(), &bytes).unwrap();
     assert_eq!(
-        hashes.verify(&stream).unwrap_err().kind(),
+        hashes.check(&stream).unwrap_err().kind(),
         ErrorKind::InvalidReference
     );
 }
 
 #[test]
-fn verify_rejects_another_type_stream() {
+fn check_rejects_another_type_stream() {
     let fixture = Fixture::new();
     let bytes = fixture.hash_bytes();
     let stream = fixture.stream();
     let hashes = TypeHashes::parse(stream.header(), &bytes).unwrap();
     let other = type_stream(&fixture.records[..2], [(0, 8), (8, 0), (8, 0)]);
     assert_eq!(
-        hashes.verify(&other).unwrap_err().kind(),
+        hashes.check(&other).unwrap_err().kind(),
         ErrorKind::InvalidReference
     );
 }

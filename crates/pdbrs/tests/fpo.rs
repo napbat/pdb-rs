@@ -176,7 +176,9 @@ fn fpo_records_encode_the_same_bytes() {
     let records: Vec<_> = stream.iter().collect();
     assert_eq!(FpoStream::from_records(&records).unwrap(), stream);
 
-    let mut record = FpoData::new(0x1000, 0x20);
+    let mut record = FpoData::default();
+    record.start = 0x1000;
+    record.size = 0x20;
     assert_eq!(record.frame, FrameKind::Fpo);
     record.saved_registers = 7;
     record.frame = FrameKind::NonFpo;
@@ -200,7 +202,9 @@ fn frame_data_records_encode_the_same_bytes() {
     let mut out = Vec::new();
     stream.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
-    let mut record = FrameData::new(0x1000, 290);
+    let mut record = FrameData::default();
+    record.start = 0x1000;
+    record.size = 290;
     record.locals_size = 52;
     record.program = 0x20;
     record.prolog_size = 16;

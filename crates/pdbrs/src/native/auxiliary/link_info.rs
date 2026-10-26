@@ -41,7 +41,8 @@ pub const LINK_INFO_VERSION_TWO: u32 = 2;
 const HEADER_SIZE: u32 = 24;
 
 /// A decoded `/LinkInfo` record, borrowed from the stream bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LinkInfo<'a> {
     /// The record size `cb`.
     pub size: u32,

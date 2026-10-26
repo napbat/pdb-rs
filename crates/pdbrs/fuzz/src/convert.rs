@@ -121,7 +121,7 @@ pub fn round_trip(data: &[u8]) {
     let report = back
         .msf()
         .expect("the output is MSF 7.0")
-        .check_free_page_map()
+        .validate_free_page_map()
         .expect("a written free page map is valid");
     assert_eq!(report.unreferenced_allocated_count(), 0);
 }

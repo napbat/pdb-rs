@@ -6,12 +6,11 @@ use super::PdbBuilder;
 use super::handle::Resolver;
 use crate::io::{ReadAt, Write};
 use crate::native::Identity;
-use crate::native::hash_table::HashTableProducer;
+use crate::native::Producer;
 use crate::native::info::PeMatch;
 use crate::native::msf::{MsfBuilder, StreamId, WriteOptions, WritePlan};
 use crate::native::output::no_memory;
-use crate::native::symbols::IndexProducer;
-use crate::native::types::{DEFAULT_HASH_BUCKETS, HashLayout};
+use crate::native::types::DEFAULT_HASH_BUCKETS;
 use crate::{Error, ErrorKind, Result};
 
 mod module_types;
@@ -27,14 +26,19 @@ mod types;
 pub struct BuildOptions {
     /// The container options: page size and limits.
     pub msf: WriteOptions,
-    /// The layout of the TPI and IPI hash streams.
-    pub hash_layout: HashLayout,
+    /// The producer whose layout of the TPI and IPI hash streams the writer
+    /// follows (see [`crate::native::types::TypeStreamOptions::with_producer`]).
+    pub hash_layout: Producer,
     /// The hash bucket count of the TPI and IPI streams.
     pub hash_buckets: u32,
-    /// The conventions of the global and public symbol indexes.
-    pub index_producer: IndexProducer,
-    /// The conventions of the named-stream map of the Info stream.
-    pub info_producer: HashTableProducer,
+    /// The producer whose conventions of the global and public symbol indexes
+    /// the writer follows (see
+    /// [`crate::native::symbols::PublicSymbolIndex::encode_parts`]).
+    pub index_producer: Producer,
+    /// The producer whose conventions of the named-stream map of the Info
+    /// stream the writer follows (see
+    /// [`crate::native::hash_table::OwnedHashTable`]).
+    pub info_producer: Producer,
     /// `true` to write the TPI hash stream. Microsoft and LLVM linkers write it.
     pub type_hash_stream: bool,
     /// `true` to write the IPI hash stream.
@@ -45,10 +49,10 @@ impl Default for BuildOptions {
     fn default() -> Self {
         Self {
             msf: WriteOptions::default(),
-            hash_layout: HashLayout::Microsoft,
+            hash_layout: Producer::Microsoft,
             hash_buckets: DEFAULT_HASH_BUCKETS,
-            index_producer: IndexProducer::Microsoft,
-            info_producer: HashTableProducer::Microsoft,
+            index_producer: Producer::Microsoft,
+            info_producer: Producer::Microsoft,
             type_hash_stream: true,
             id_hash_stream: true,
         }

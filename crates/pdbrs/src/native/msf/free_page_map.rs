@@ -27,7 +27,7 @@ use super::{Msf, NIL_STREAM_SIZE, is_reserved_page};
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
-/// The result of [`Msf::check_free_page_map`].
+/// The result of [`Msf::validate_free_page_map`].
 ///
 /// The report keeps one range for each run of allocated pages without a reference. The number
 /// of ranges is at most half the declared page count, rounded up.
@@ -87,7 +87,7 @@ impl<S: ReadAt> Msf<S> {
     /// - [`ErrorKind::InvalidFormat`] if an FPM page is not a declared page.
     /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
     /// - An error from the source if a read fails.
-    pub fn check_free_page_map(&self) -> Result<FreePageMapReport> {
+    pub fn validate_free_page_map(&self) -> Result<FreePageMapReport> {
         let (required, old) = self.sorted_references()?;
         let mut walk = Walk {
             block_size: self.geometry.block_size,

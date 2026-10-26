@@ -5,14 +5,13 @@ use alloc::vec::Vec;
 
 use super::{PdbEditor, named, strip, symbols, types, unsupported};
 use crate::io::{ReadAt, Write};
+use crate::native::Producer;
 use crate::native::container::Stream;
 use crate::native::dbi::{Dbi, DbiBuilder};
-use crate::native::hash_table::HashTableProducer;
 use crate::native::info::{InfoBuilder, PeMatch};
 use crate::native::msf::{MsfBuilder, StreamId, WriteOptions, WritePlan};
 use crate::native::output::no_memory;
-use crate::native::symbols::IndexProducer;
-use crate::native::types::{HashLayout, TypeStream};
+use crate::native::types::TypeStream;
 use crate::{Error, ErrorKind, Result};
 
 /// The new contents of one source stream.
@@ -221,7 +220,7 @@ pub(super) struct Context {
     /// The DBI stream.
     pub(super) dbi: Dbi,
     /// The conventions of the symbol indexes.
-    pub(super) index_producer: IndexProducer,
+    pub(super) index_producer: Producer,
 }
 
 /// Return the error for a stream that an edit needs.
@@ -296,16 +295,13 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
         let dbi = pdb
             .debug_info()?
             .ok_or_else(|| missing("PDB has no DBI stream"))?;
-        let (index_producer, info_producer) = match HashLayout::of(tpi.header()) {
-            HashLayout::Llvm => (IndexProducer::Llvm, HashTableProducer::Llvm),
-            HashLayout::Microsoft => (IndexProducer::Microsoft, HashTableProducer::Microsoft),
-        };
+        let producer = tpi.header().producer();
         let context = Context {
             tpi,
             dbi,
-            index_producer,
+            index_producer: producer,
         };
-        let source_info = InfoBuilder::from_info_with(pdb.info(), info_producer)?;
+        let source_info = InfoBuilder::from_info_with(pdb.info(), producer)?;
         let mut info = source_info.clone();
         let mut dbi_age = context.dbi.header().age;
         let pe_match = info.apply_identity(self.identity, &mut dbi_age)?;

@@ -35,7 +35,8 @@ const HEADER_SIZE: usize = 28;
 const SECTION_OFFSET_SIZE: usize = 8;
 
 /// The decoded fields of a public symbol index header (`PSGSIHDR`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct PublicHeader {
     /// The size of the name hash table in bytes.
     pub hash_size: u32,
@@ -187,8 +188,8 @@ impl PublicSymbolIndex {
     /// `S_PUB32` record. Use [`PublicSymbolIndex::check_address_order`] to
     /// check the order.
     #[must_use]
-    pub fn address_map(&self) -> AddressMap<'_> {
-        AddressMap {
+    pub fn address_map(&self) -> AddressMapIter<'_> {
+        AddressMapIter {
             chunks: self.bytes[self.address_map.clone()].as_chunks().0.iter(),
         }
     }
@@ -284,12 +285,12 @@ fn section_range(start: usize, end: usize, count: u32, stream: StreamId) -> Resu
 
 /// An iterator over the public address map.
 #[derive(Clone, Debug)]
-pub struct AddressMap<'a> {
+pub struct AddressMapIter<'a> {
     /// The remaining 4-byte entries.
     chunks: Iter<'a, [u8; 4]>,
 }
 
-impl Iterator for AddressMap<'_> {
+impl Iterator for AddressMapIter<'_> {
     type Item = SymbolOffset;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -303,7 +304,7 @@ impl Iterator for AddressMap<'_> {
     }
 }
 
-impl DoubleEndedIterator for AddressMap<'_> {
+impl DoubleEndedIterator for AddressMapIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.chunks
             .next_back()
@@ -311,9 +312,9 @@ impl DoubleEndedIterator for AddressMap<'_> {
     }
 }
 
-impl ExactSizeIterator for AddressMap<'_> {}
+impl ExactSizeIterator for AddressMapIter<'_> {}
 
-impl FusedIterator for AddressMap<'_> {}
+impl FusedIterator for AddressMapIter<'_> {}
 
 /// An iterator over the thunk map. Each item is a flat thunk target address.
 #[derive(Clone, Debug)]
@@ -347,7 +348,8 @@ impl ExactSizeIterator for ThunkMap<'_> {}
 impl FusedIterator for ThunkMap<'_> {}
 
 /// One section start entry (`SO`): the flat address where a section starts.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SectionStart {
     /// The flat address where the section starts.
     pub offset: u32,
