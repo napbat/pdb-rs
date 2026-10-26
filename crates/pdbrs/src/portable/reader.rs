@@ -22,23 +22,67 @@ const ASSEMBLY_METADATA: &str =
     "CLI metadata without a #Pdb stream is ordinary assembly metadata, not a Portable PDB";
 
 /// Resource limits for Portable PDB metadata and heap values.
-#[derive(Clone, Copy, Debug)]
+///
+/// The default allows 64 stream headers, 64 MiB for one heap value and 64 MiB for one loaded
+/// stream.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ReadOptions {
-    /// Maximum number of stream headers in the metadata root.
-    pub max_streams: u16,
-    /// Maximum bytes of one heap value: a string, a blob or a user string.
-    pub max_value_bytes: usize,
-    /// Maximum bytes of a stream that [`Pdb::stream_bytes`] loads.
-    pub max_stream_bytes: usize,
+    /// The maximum number of stream headers in the metadata root.
+    streams: u16,
+    /// The maximum bytes of one heap value.
+    value_bytes: usize,
+    /// The maximum bytes of a loaded stream.
+    stream_bytes: usize,
 }
 
 impl Default for ReadOptions {
     fn default() -> Self {
         Self {
-            max_streams: 64,
-            max_value_bytes: 64 * 1024 * 1024,
-            max_stream_bytes: 64 * 1024 * 1024,
+            streams: 64,
+            value_bytes: 64 * 1024 * 1024,
+            stream_bytes: 64 * 1024 * 1024,
         }
+    }
+}
+
+impl ReadOptions {
+    /// Return the maximum number of stream headers in the metadata root.
+    #[must_use]
+    pub const fn max_streams(self) -> u16 {
+        self.streams
+    }
+
+    /// Set the maximum number of stream headers in the metadata root.
+    #[must_use]
+    pub const fn with_max_streams(mut self, max_streams: u16) -> Self {
+        self.streams = max_streams;
+        self
+    }
+
+    /// Return the maximum bytes of one heap value: a string, a blob or a user string.
+    #[must_use]
+    pub const fn max_value_bytes(self) -> usize {
+        self.value_bytes
+    }
+
+    /// Set the maximum bytes of one heap value: a string, a blob or a user string.
+    #[must_use]
+    pub const fn with_max_value_bytes(mut self, max_value_bytes: usize) -> Self {
+        self.value_bytes = max_value_bytes;
+        self
+    }
+
+    /// Return the maximum bytes of a stream that [`Pdb::stream_bytes`] loads.
+    #[must_use]
+    pub const fn max_stream_bytes(self) -> usize {
+        self.stream_bytes
+    }
+
+    /// Set the maximum bytes of a stream that [`Pdb::stream_bytes`] loads.
+    #[must_use]
+    pub const fn with_max_stream_bytes(mut self, max_stream_bytes: usize) -> Self {
+        self.stream_bytes = max_stream_bytes;
+        self
     }
 }
 
@@ -84,7 +128,7 @@ impl<S: ReadAt> Pdb<S> {
     ///   truncated metadata.
     /// - Errors of `source`.
     pub fn with_options(source: S, options: ReadOptions) -> Result<Self> {
-        let root = MetadataRoot::read(&source, options.max_streams)?;
+        let root = MetadataRoot::read(&source, options.max_streams())?;
         let Some(pdb_header) = root.stream(MetadataStream::Pdb) else {
             return Err(Error::new(ErrorKind::MissingStream, None)
                 .with_context(ASSEMBLY_METADATA)
@@ -236,7 +280,7 @@ impl<S: ReadAt> Pdb<S> {
     ///   [`ReadOptions::max_value_bytes`].
     pub fn string(&self, offset: StringOffset) -> Result<Vec<u8>> {
         self.strings
-            .string(&self.source, offset.get(), self.options.max_value_bytes)
+            .string(&self.source, offset.0, self.options.max_value_bytes())
     }
 
     /// Read the blob at `offset` in the `#Blob` heap, without its length prefix.
@@ -250,7 +294,7 @@ impl<S: ReadAt> Pdb<S> {
     ///   [`ReadOptions::max_value_bytes`].
     pub fn blob(&self, offset: BlobOffset) -> Result<Vec<u8>> {
         self.blob
-            .blob(&self.source, offset.get(), self.options.max_value_bytes)
+            .blob(&self.source, offset.0, self.options.max_value_bytes())
     }
 
     /// Read the entry at `offset` in the `#US` heap, without its length prefix.
@@ -262,7 +306,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Returns the same errors as [`Pdb::blob`].
     pub fn user_string(&self, offset: UserStringOffset) -> Result<Vec<u8>> {
         self.user_strings
-            .blob(&self.source, offset.get(), self.options.max_value_bytes)
+            .blob(&self.source, offset.0, self.options.max_value_bytes())
     }
 
     /// Read the GUID at `index` in the `#GUID` heap. Return `None` for the nil index 0.
@@ -272,7 +316,7 @@ impl<S: ReadAt> Pdb<S> {
     /// - [`ErrorKind::InvalidReference`] if the index is after the heap.
     /// - Errors of the source.
     pub fn guid(&self, index: GuidIndex) -> Result<Option<[u8; 16]>> {
-        self.guid.guid(&self.source, index.get())
+        self.guid.guid(&self.source, index.0)
     }
 
     /// Load all bytes of a recognized stream within [`ReadOptions::max_stream_bytes`].
@@ -293,7 +337,7 @@ impl<S: ReadAt> Pdb<S> {
                 .with_context("metadata stream is larger than the limit")
                 .with_portable(stream.location())
         };
-        if size > self.options.max_stream_bytes {
+        if size > self.options.max_stream_bytes() {
             return Err(limit());
         }
         let mut bytes = Vec::new();
@@ -319,6 +363,8 @@ impl<'a> Pdb<&'a [u8]> {
 #[cfg(all(feature = "std", any(unix, windows)))]
 impl Pdb<crate::io::FileReader> {
     /// Open a standalone Portable PDB without loading all file bytes into memory.
+    ///
+    /// Requires the `std` feature and Unix or Windows.
     ///
     /// # Errors
     ///

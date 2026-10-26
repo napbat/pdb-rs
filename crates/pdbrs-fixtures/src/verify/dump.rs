@@ -95,12 +95,12 @@ fn headers<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) {
     });
     out.line(format_args!(
         "pdb id={id} entry-point={:#010x}",
-        header.entry_point_token().get()
+        header.entry_point_token().raw()
     ));
     for (table, rows) in header.external_tables() {
         out.line(format_args!(
             "pdb-rows table={:#04x} rows={rows}",
-            table.number()
+            table.raw()
         ));
     }
 
@@ -139,7 +139,7 @@ fn headers<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) {
         out.line(format_args!(
             "table name={} id={:#04x} rows={rows} row-size={:#x}{location}",
             table.name().unwrap_or_default(),
-            table.number(),
+            table.raw(),
             tables.row_size(table).unwrap_or(0)
         ));
     }
@@ -150,65 +150,50 @@ fn rows<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     table(pdb, out, |row: DocumentRow| {
         format!(
             "name={:#x} hash-algorithm={} hash={:#x} language={}",
-            row.name.get(),
-            row.hash_algorithm.get(),
-            row.hash.get(),
-            row.language.get()
+            row.name.0, row.hash_algorithm.0, row.hash.0, row.language.0
         )
     })?;
     table(pdb, out, |row: MethodDebugInformationRow| {
         format!(
             "document={} sequence-points={:#x}",
-            row.document.get(),
-            row.sequence_points.get()
+            row.document.0, row.sequence_points.0
         )
     })?;
     table(pdb, out, |row: LocalScopeRow| {
         format!(
             "method={} import-scope={} variable-list={} constant-list={} start-offset={:#x} length={:#x}",
-            row.method.get(),
-            row.import_scope.get(),
-            row.variable_list.get(),
-            row.constant_list.get(),
-            row.start_offset.get(),
+            row.method.0,
+            row.import_scope.0,
+            row.variable_list.0,
+            row.constant_list.0,
+            row.start_offset.0,
             row.length
         )
     })?;
     table(pdb, out, |row: LocalVariableRow| {
         format!(
             "attributes={:#06x} index={} name={:#x}",
-            row.attributes,
-            row.index,
-            row.name.get()
+            row.attributes, row.index, row.name.0
         )
     })?;
     table(pdb, out, |row: LocalConstantRow| {
-        format!(
-            "name={:#x} signature={:#x}",
-            row.name.get(),
-            row.signature.get()
-        )
+        format!("name={:#x} signature={:#x}", row.name.0, row.signature.0)
     })?;
     table(pdb, out, |row: ImportScopeRow| {
-        format!(
-            "parent={} imports={:#x}",
-            row.parent.get(),
-            row.imports.get()
-        )
+        format!("parent={} imports={:#x}", row.parent.0, row.imports.0)
     })?;
     table(pdb, out, |row: StateMachineMethodRow| {
         format!(
             "move-next={} kickoff={}",
-            row.move_next_method.get(),
-            row.kickoff_method.get()
+            row.move_next_method.0, row.kickoff_method.0
         )
     })?;
     table(pdb, out, |row: CustomDebugInformationRow| {
         format!(
             "parent={:#010x} kind={} value={:#x}",
-            row.parent.get(),
-            row.kind.get(),
-            row.value.get()
+            row.parent.raw(),
+            row.kind.0,
+            row.value.0
         )
     })
 }

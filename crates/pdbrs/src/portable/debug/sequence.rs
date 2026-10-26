@@ -33,7 +33,8 @@ pub const MAX_COLUMN: u32 = 0x1_0000;
 /// A valid span has lines below [`MAX_LINE`] and not equal to [`HIDDEN_LINE`], and an end
 /// line at or after the start line. If the lines are equal, the end column is after the start
 /// column.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SourceSpan {
     /// The start line.
     pub start_line: u32,
@@ -64,7 +65,10 @@ impl SourceSpan {
 }
 
 /// One sequence point.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+///
+/// The default value is a hidden sequence point at IL offset 0 with the nil document.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SequencePoint {
     /// The IL offset.
     pub il_offset: IlOffset,
@@ -112,11 +116,11 @@ impl<'a> SequencePoints<'a> {
     /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if the initial
     ///   document is nil, the `LocalSignature` field is not a row or a `StandAloneSig` token,
     ///   a header field is not a compressed integer, or the blob has no sequence point.
-    pub fn decode(blob: &'a [u8], document: DocumentId) -> Result<Self> {
+    pub fn parse(blob: &'a [u8], document: DocumentId) -> Result<Self> {
         let mut reader = Reader::new(blob);
         let local_signature = reader.unsigned()?;
         let table = local_signature >> 24;
-        if table != 0 && table != u32::from(TableId::STAND_ALONE_SIG.number()) {
+        if table != 0 && table != u32::from(TableId::STAND_ALONE_SIG.raw()) {
             return Err(invalid(
                 "sequence point LocalSignature is not a row or a StandAloneSig token",
             ));
@@ -143,7 +147,7 @@ impl<'a> SequencePoints<'a> {
     /// Return the `LocalSignature` row of the header. It is nil if the method has no locals.
     #[must_use]
     pub const fn local_signature(&self) -> StandAloneSigId {
-        StandAloneSigId::new(self.local_signature & MAX_ROW)
+        StandAloneSigId(self.local_signature & MAX_ROW)
     }
 
     /// Return the form of the `LocalSignature` field in the header. A nil row has the row
@@ -197,7 +201,7 @@ impl<'a> SequencePoints<'a> {
             Some(self.read_span(delta_lines, delta_columns)?)
         };
         Ok(SequencePoint {
-            il_offset: IlOffset::new(il_offset),
+            il_offset: IlOffset(il_offset),
             document: self.document,
             span,
         })
@@ -239,7 +243,7 @@ fn read_document(reader: &mut Reader<'_>) -> Result<DocumentId> {
     if document == 0 {
         return Err(invalid("sequence point document is nil"));
     }
-    Ok(DocumentId::new(document))
+    Ok(DocumentId(document))
 }
 
 impl Iterator for SequencePoints<'_> {
@@ -259,6 +263,7 @@ impl FusedIterator for SequencePoints<'_> {}
 
 /// The form of the `LocalSignature` field in a sequence point header.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum LocalSignatureForm {
     /// The `StandAloneSig` row, as the specification and Roslyn write it.
     #[default]
@@ -268,8 +273,9 @@ pub enum LocalSignatureForm {
     Token,
 }
 
-/// The result of [`encode_sequence_points`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// The result of [`SequencePoints::encode_parts`].
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct EncodedSequencePoints {
     /// The value of the `Document` column: the single document of all sequence points, or nil
     /// if the method has several documents or no sequence points.
@@ -278,83 +284,92 @@ pub struct EncodedSequencePoints {
     pub blob: Vec<u8>,
 }
 
-/// Encode the sequence points of a method in the form that Roslyn writes.
-///
-/// If all points have the same document, the blob has no document and the result gives the
-/// document for the `Document` column. Otherwise, the header has the initial document and a
-/// document record comes before each point with a different document. `form` selects how the
-/// header stores `local_signature`; use [`SequencePoints::local_signature_form`] to keep the
-/// form of a decoded blob.
-///
-/// # Errors
-///
-/// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if a document is nil, the
-///   IL offsets do not increase or are out of range, or a span is not valid.
-/// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a value does not fit in
-///   a compressed integer.
-pub fn encode_sequence_points(
-    local_signature: StandAloneSigId,
-    form: LocalSignatureForm,
-    points: &[SequencePoint],
-) -> Result<EncodedSequencePoints> {
-    let Some(first) = points.first() else {
-        return Ok(EncodedSequencePoints {
-            document: DocumentId::new(0),
-            blob: Vec::new(),
-        });
-    };
-    let single = points.iter().all(|point| point.document == first.document);
-    let mut writer = Writer::new();
-    let header = match form {
-        LocalSignatureForm::Token if !local_signature.is_nil() => local_signature
-            .token()
-            .ok_or_else(|| invalid("LocalSignature row does not fit in a token"))?
-            .get(),
-        _ => local_signature.get(),
-    };
-    writer.unsigned(header)?;
-    let mut document = if single { Some(first.document) } else { None };
-    let mut previous_offset: Option<u32> = None;
-    let mut previous_start: Option<(u32, u16)> = None;
-    for point in points {
-        if point.document.is_nil() {
-            return Err(invalid("sequence point document is nil"));
-        }
-        if document != Some(point.document) {
-            if document.is_some() {
-                writer.unsigned(0)?;
-            }
-            writer.unsigned(point.document.get())?;
-            document = Some(point.document);
-        }
-        let offset = point.il_offset.get();
-        if offset >= MAX_IL_OFFSET || previous_offset.is_some_and(|previous| offset <= previous) {
-            return Err(invalid(
-                "sequence point IL offsets do not increase or are out of range",
-            ));
-        }
-        writer.unsigned(offset - previous_offset.unwrap_or(0))?;
-        previous_offset = Some(offset);
-        let Some(span) = point.span else {
-            writer.u16(0)?;
-            continue;
+impl SequencePoints<'_> {
+    /// Encode the sequence points of a method in the form that Roslyn writes.
+    ///
+    /// If all points have the same document, the blob has no document and the result gives
+    /// the document for the `Document` column. Otherwise, the header has the initial document
+    /// and a document record comes before each point with a different document. `form`
+    /// selects how the header stores `local_signature`; use
+    /// [`SequencePoints::local_signature_form`] to keep the form of a decoded blob.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if a document is nil,
+    ///   the IL offsets do not increase or are out of range, or a span is not valid.
+    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a value does not
+    ///   fit in a compressed integer.
+    pub fn encode_parts(
+        local_signature: StandAloneSigId,
+        form: LocalSignatureForm,
+        points: &[SequencePoint],
+    ) -> Result<EncodedSequencePoints> {
+        let Some(first) = points.first() else {
+            return Ok(EncodedSequencePoints {
+                document: DocumentId(0),
+                blob: Vec::new(),
+            });
         };
-        span.check()?;
-        write_span(&mut writer, span, previous_start)?;
-        previous_start = Some((span.start_line, span.start_column));
+        let single = points.iter().all(|point| point.document == first.document);
+        let mut blob = Vec::new();
+        let mut writer = Writer::append(&mut blob);
+        let header = match form {
+            LocalSignatureForm::Token if !local_signature.is_nil() => local_signature
+                .token()
+                .ok_or_else(|| invalid("LocalSignature row does not fit in a token"))?
+                .raw(),
+            _ => local_signature.0,
+        };
+        writer.unsigned(header)?;
+        let mut document = if single { Some(first.document) } else { None };
+        let mut previous_offset: Option<u32> = None;
+        let mut previous_start: Option<(u32, u16)> = None;
+        for point in points {
+            if point.document.is_nil() {
+                return Err(invalid("sequence point document is nil"));
+            }
+            if document != Some(point.document) {
+                if document.is_some() {
+                    writer.unsigned(0)?;
+                }
+                writer.unsigned(point.document.0)?;
+                document = Some(point.document);
+            }
+            let offset = point.il_offset.0;
+            if offset >= MAX_IL_OFFSET || previous_offset.is_some_and(|previous| offset <= previous)
+            {
+                return Err(invalid(
+                    "sequence point IL offsets do not increase or are out of range",
+                ));
+            }
+            writer.unsigned(offset - previous_offset.unwrap_or(0))?;
+            previous_offset = Some(offset);
+            let Some(span) = point.span else {
+                writer.u16(0)?;
+                continue;
+            };
+            span.check()?;
+            write_span(&mut writer, span, previous_start)?;
+            previous_start = Some((span.start_line, span.start_column));
+        }
+        writer.finish();
+        Ok(EncodedSequencePoints {
+            document: if single {
+                first.document
+            } else {
+                DocumentId(0)
+            },
+            blob,
+        })
     }
-    Ok(EncodedSequencePoints {
-        document: if single {
-            first.document
-        } else {
-            DocumentId::new(0)
-        },
-        blob: writer.finish(),
-    })
 }
 
 /// Write the line and column deltas of a visible sequence point.
-fn write_span(writer: &mut Writer, span: SourceSpan, previous: Option<(u32, u16)>) -> Result<()> {
+fn write_span(
+    writer: &mut Writer<'_>,
+    span: SourceSpan,
+    previous: Option<(u32, u16)>,
+) -> Result<()> {
     let delta_lines = span.end_line - span.start_line;
     let delta_columns = i32::from(span.end_column) - i32::from(span.start_column);
     writer.unsigned(delta_lines)?;
@@ -379,7 +394,7 @@ fn write_span(writer: &mut Writer, span: SourceSpan, previous: Option<(u32, u16)
 }
 
 /// A typed row of the `MethodDebugInformation` table with its sequence point blob.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MethodDebugInformation {
     id: MethodDebugInformationId,
     row: MethodDebugInformationRow,
@@ -416,12 +431,12 @@ impl MethodDebugInformation {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`SequencePoints::decode`] with the location of the blob.
+    /// Returns the errors of [`SequencePoints::parse`] with the location of the blob.
     pub fn sequence_points(&self) -> Result<Option<SequencePoints<'_>>> {
         if self.sequence_points.is_empty() {
             return Ok(None);
         }
-        SequencePoints::decode(&self.sequence_points, self.row.document)
+        SequencePoints::parse(&self.sequence_points, self.row.document)
             .map(Some)
             .map_err(|error| self.blob_error(error))
     }
@@ -432,7 +447,7 @@ impl MethodDebugInformation {
         in_blob(
             error,
             TableId::METHOD_DEBUG_INFORMATION,
-            self.id.get(),
+            self.id.0,
             "SequencePoints",
             self.row.sequence_points,
         )
@@ -468,7 +483,7 @@ impl<S: ReadAt> Pdb<S> {
         &self,
     ) -> impl ExactSizeIterator<Item = Result<MethodDebugInformation>> + '_ {
         each_row(self, TableId::METHOD_DEBUG_INFORMATION, |pdb, row| {
-            pdb.method_debug_information(MethodDebugInformationId::new(row))
+            pdb.method_debug_information(MethodDebugInformationId(row))
         })
     }
 }

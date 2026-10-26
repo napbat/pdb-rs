@@ -19,9 +19,7 @@ mod widths;
 
 use pdbrs::Error;
 use pdbrs::PortableLocation;
-use pdbrs::portable::metadata::{
-    BlobOffset, CustomDebugInformationRow, DocumentRow, GuidIndex, MetadataToken, TableId,
-};
+use pdbrs::portable::metadata::{CustomDebugInformationRow, DocumentRow, MetadataToken, TableId};
 use pdbrs::portable::write::PdbParts;
 use pdbrs::portable::{IdentityPolicy, Pdb, PdbWritePlan};
 
@@ -73,12 +71,9 @@ pub(crate) fn parts_with_methods(methods: u32) -> PdbParts {
 
 /// Make a document row with a name blob.
 pub(crate) fn document(parts: &mut PdbParts, name: &[u8]) -> DocumentRow {
-    DocumentRow {
-        name: parts.blobs.add(name).unwrap(),
-        hash_algorithm: GuidIndex::default(),
-        hash: BlobOffset::default(),
-        language: GuidIndex::default(),
-    }
+    let mut row = DocumentRow::default();
+    row.name = parts.blobs.add(name).unwrap();
+    row
 }
 
 /// Make a custom debug information row of `parent` with a kind GUID and a value.
@@ -87,9 +82,9 @@ pub(crate) fn information(
     parent: (TableId, u32),
     value: &[u8],
 ) -> CustomDebugInformationRow {
-    CustomDebugInformationRow {
-        parent: MetadataToken::new(parent.0, parent.1).unwrap(),
-        kind: parts.guids.add([7; 16]).unwrap(),
-        value: parts.blobs.add(value).unwrap(),
-    }
+    let mut row = CustomDebugInformationRow::default();
+    row.parent = MetadataToken::new(parent.0, parent.1).unwrap();
+    row.kind = parts.guids.add([7; 16]).unwrap();
+    row.value = parts.blobs.add(value).unwrap();
+    row
 }

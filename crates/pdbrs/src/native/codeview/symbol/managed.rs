@@ -183,7 +183,7 @@ impl<'a> ManagedProcedure<'a> {
         out.u32(self.code_length)?;
         out.u32(self.debug_start)?;
         out.u32(self.debug_end)?;
-        out.u32(self.token.get())?;
+        out.u32(self.token.raw())?;
         self.address.write(out)?;
         out.u8(self.flags.0)?;
         out.u16(self.return_register)?;

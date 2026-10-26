@@ -60,10 +60,10 @@ fn four_byte_heap_indexes_reach_offsets_above_64_kib() {
     );
     let bytes = builder.build();
     let pdb = Pdb::parse(&bytes).unwrap();
-    let document: DocumentRow = pdb.row(DocumentId::new(1)).unwrap();
+    let document: DocumentRow = pdb.row(DocumentId(1)).unwrap();
     assert_eq!(pdb.blob(document.name).unwrap(), b"hi");
-    assert_eq!(document.hash_algorithm.get(), 2);
-    let variable: LocalVariableRow = pdb.row(LocalVariableId::new(1)).unwrap();
+    assert_eq!(document.hash_algorithm.0, 2);
+    let variable: LocalVariableRow = pdb.row(LocalVariableId(1)).unwrap();
     assert_eq!(variable.index, 7);
     assert_eq!(pdb.string(variable.name).unwrap(), b"far");
 }
@@ -99,7 +99,7 @@ fn table_indexes_widen_at_65536_rows() {
             Some(local_scope_size(width))
         );
         let scope: LocalScopeRow = pdb.rows().next().unwrap().unwrap().1;
-        assert_eq!(scope.variable_list, LocalVariableId::new(last));
+        assert_eq!(scope.variable_list, LocalVariableId(last));
     }
 }
 
@@ -126,8 +126,8 @@ fn external_method_counts_widen_method_references() {
             Some(width + 2 + 2 + 2 + 8)
         );
         let machine: StateMachineMethodRow = pdb.rows().next().unwrap().unwrap().1;
-        assert_eq!(machine.move_next_method, MethodDefId::new(methods));
-        assert_eq!(machine.kickoff_method, MethodDefId::new(1));
+        assert_eq!(machine.move_next_method, MethodDefId(methods));
+        assert_eq!(machine.kickoff_method, MethodDefId(1));
     }
 }
 
@@ -183,7 +183,7 @@ fn local_debug_table_counts_widen_the_has_custom_debug_information_index() {
         4
     );
     let information: CustomDebugInformationRow = pdb.rows().next().unwrap().unwrap().1;
-    assert_eq!(information.parent.table(), TableId::DOCUMENT.number());
+    assert_eq!(information.parent.table(), Some(TableId::DOCUMENT));
     assert_eq!(information.parent.row(), documents);
 }
 

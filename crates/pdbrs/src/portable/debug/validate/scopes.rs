@@ -22,7 +22,7 @@ fn scope_error(scope: &LocalScope, context: &'static str, column: &'static str) 
         ErrorKind::InvalidFormat,
         context,
         TableId::LOCAL_SCOPE,
-        scope.id().get(),
+        scope.id().0,
         Some(column),
     )
 }
@@ -59,9 +59,10 @@ pub(super) fn scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> 
             ));
         }
         previous = Some(key);
-        let start = scope.start_offset().get();
+        let start = scope.start_offset().0;
         let end = scope
             .end_offset()
+            .map(|end| end.0)
             .filter(|&end| scope.length() > 0 && end < MAX_SCOPE_END)
             .ok_or_else(|| {
                 scope_error(&scope, "scope is empty or ends after 0x7FFFFFFF", "Length")
@@ -130,9 +131,9 @@ fn check_runs<S: ReadAt>(pdb: &Pdb<S>, table: TableId, column: &'static str) -> 
     };
     let first = first?;
     let start = if table == TableId::LOCAL_VARIABLE {
-        first.row().variable_list.get()
+        first.row().variable_list.0
     } else {
-        first.row().constant_list.get()
+        first.row().constant_list.0
     };
     if start == 1 {
         Ok(())
@@ -160,7 +161,7 @@ pub(super) fn variables<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
                     ErrorKind::InvalidFormat,
                     context,
                     TableId::LOCAL_VARIABLE,
-                    id.get(),
+                    id.0,
                     None,
                 )
             };
@@ -195,7 +196,7 @@ pub(super) fn constants<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
                     ErrorKind::InvalidFormat,
                     "two constants of a scope have the same name",
                     TableId::LOCAL_CONSTANT,
-                    id.get(),
+                    id.0,
                     Some("Name"),
                 ));
             }

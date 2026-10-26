@@ -22,10 +22,10 @@ pub fn custom<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for row in pdb.custom_debug_informations() {
         let row = row?;
         let value = row.decode()?;
-        let id = row.id().get();
+        let id = row.id().0;
         out.line(format_args!(
             "cdi id={id} parent={:#010x} kind={} codec={}",
-            row.parent().get(),
+            row.parent().raw(),
             row.kind(),
             codec(&value)
         ));
@@ -46,11 +46,12 @@ pub fn sources<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
             SourceCheck::Verified => "verified",
             SourceCheck::Mismatch => "mismatch",
             SourceCheck::NotVerified => "not-verified",
+            _ => "other",
         };
         out.line(format_args!(
             "source document={} cdi={} size={:#x} check={check}",
-            document.id().get(),
-            source.custom_debug_information().get(),
+            document.id().0,
+            source.custom_debug_information().0,
             source.content().len()
         ));
     }
@@ -84,20 +85,17 @@ fn details(
     value: &CustomDebugValue<'_>,
     out: &mut Dump,
 ) -> pdbrs::Result<()> {
-    let id = row.id().get();
+    let id = row.id().0;
     match value {
         CustomDebugValue::AsyncMethodSteppingInformation(info) => {
-            let catch = info.catch_handler_offset().map_or_else(
-                || String::from("none"),
-                |offset| format!("{:#x}", offset.get()),
-            );
+            let catch = info
+                .catch_handler_offset()
+                .map_or_else(|| String::from("none"), |offset| format!("{:#x}", offset.0));
             out.line(format_args!("cdi-async id={id} catch-handler={catch}"));
             for step in info {
                 out.line(format_args!(
                     "cdi-async-step id={id} yield={:#x} resume={:#x} method={}",
-                    step.yield_offset.get(),
-                    step.resume_offset.get(),
-                    step.move_next_method.get()
+                    step.yield_offset.0, step.resume_offset.0, step.move_next_method.0
                 ));
             }
         }
@@ -105,8 +103,7 @@ fn details(
             for scope in scopes {
                 out.line(format_args!(
                     "cdi-hoisted-scope id={id} start={:#x} length={:#x}",
-                    scope.start.get(),
-                    scope.length
+                    scope.start.0, scope.length
                 ));
             }
         }
@@ -152,7 +149,7 @@ fn details(
             for document in documents {
                 out.line(format_args!(
                     "cdi-type-document id={id} document={}",
-                    document.get()
+                    document.0
                 ));
             }
         }
@@ -229,6 +226,7 @@ fn embedded_source(id: u32, source: &EmbeddedSource<'_>, out: &mut Dump) -> pdbr
     let format = match source {
         EmbeddedSource::Raw(_) => "raw",
         EmbeddedSource::Deflate { .. } => "deflate",
+        _ => "other",
     };
     let bytes = source.decode(MAX_SOURCE)?;
     let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {

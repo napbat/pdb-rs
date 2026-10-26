@@ -46,7 +46,7 @@ handle!(
 );
 
 /// A source document.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DocumentInfo {
     /// The document name, for example a path. The plan splits it into parts as Roslyn does.
@@ -60,7 +60,7 @@ pub struct DocumentInfo {
 }
 
 /// The sequence points of a method.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MethodInfo {
     /// The local signature of the method, or nil.
@@ -73,7 +73,7 @@ pub struct MethodInfo {
 }
 
 /// A local scope of a method.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LocalScopeInfo {
     /// The method.
@@ -87,7 +87,7 @@ pub struct LocalScopeInfo {
 }
 
 /// A local variable of a local scope.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LocalVariableInfo {
     /// The `LocalVariableAttributes` flags.
@@ -99,13 +99,13 @@ pub struct LocalVariableInfo {
 }
 
 /// A local constant of a local scope.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LocalConstantInfo {
     /// The name.
     pub name: Vec<u8>,
     /// The local constant signature blob. Encode it with
-    /// [`LocalConstantSignature::encode`](crate::portable::debug::LocalConstantSignature::encode).
+    /// [`LocalConstantSignature::encode_parts`](crate::portable::debug::LocalConstantSignature::encode_parts).
     pub signature: Vec<u8>,
 }
 
@@ -178,7 +178,7 @@ pub enum ImportInfo {
 }
 
 /// An import scope.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ImportScopeInfo {
     /// The parent import scope, or nil.
@@ -207,7 +207,7 @@ pub enum CustomDebugParent {
 }
 
 /// A custom debug information record.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CustomDebugInfo {
     /// The parent.

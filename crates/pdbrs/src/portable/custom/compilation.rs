@@ -27,7 +27,8 @@ pub struct CompilationOptions<'a> {
 }
 
 /// One compilation option.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CompilationOption<'a> {
     /// The name, for example `language`.
     pub name: Utf8Bytes<'a>,
@@ -72,8 +73,8 @@ impl<'a> CompilationOptions<'a> {
 
     /// Return an iterator over the options in blob order.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, CompilationOption<'a>> {
-        Entries::new(self.bytes, self.len, 0, read_option)
+    pub const fn iter(&self) -> CompilationOptionsIter<'a> {
+        CompilationOptionsIter(Entries::new(self.bytes, self.len, 0, read_option))
     }
 
     /// Return the value of the option `name`.
@@ -84,7 +85,7 @@ impl<'a> CompilationOptions<'a> {
             .map(|option| option.value)
     }
 
-    /// Encode a compilation options blob.
+    /// Encode a compilation options blob, and append it to `out`.
     ///
     /// # Errors
     ///
@@ -92,12 +93,15 @@ impl<'a> CompilationOptions<'a> {
     ///   name or a value has a NUL byte, or if two options have the same name.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if an
     ///   allocation fails.
-    pub fn encode<'o>(
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts<'o>(
         options: impl IntoIterator<Item = CompilationOption<'o>, IntoIter: Clone>,
-    ) -> Result<Vec<u8>> {
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         let options = options.into_iter();
         unique_names(options.clone())?;
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         for option in options {
             writer.c_string(
                 option.name.as_bytes(),
@@ -108,11 +112,12 @@ impl<'a> CompilationOptions<'a> {
                 "compilation option value has a NUL byte",
             )?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(CompilationOptions => Entries<'a, CompilationOption<'a>>);
+iterable!(CompilationOptions => CompilationOptionsIter, CompilationOption<'a>);
 
 /// Read one compilation option.
 fn read_option<'a>(reader: &mut Reader<'a>, _: i32) -> Result<CompilationOption<'a>> {
@@ -147,7 +152,8 @@ pub struct CompilationMetadataReferences<'a> {
 }
 
 /// One metadata reference of a compilation.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MetadataReference<'a> {
     /// The file name of the reference, with its extension.
     pub file_name: Utf8Bytes<'a>,
@@ -204,11 +210,11 @@ impl<'a> CompilationMetadataReferences<'a> {
 
     /// Return an iterator over the references.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, MetadataReference<'a>> {
-        Entries::new(self.bytes, self.len, 0, read_reference)
+    pub const fn iter(&self) -> CompilationMetadataReferencesIter<'a> {
+        CompilationMetadataReferencesIter(Entries::new(self.bytes, self.len, 0, read_reference))
     }
 
-    /// Encode a compilation metadata references blob.
+    /// Encode a compilation metadata references blob, and append it to `out`.
     ///
     /// # Errors
     ///
@@ -216,10 +222,13 @@ impl<'a> CompilationMetadataReferences<'a> {
     ///   file name or an alias list has a NUL byte.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if an
     ///   allocation fails.
-    pub fn encode<'r>(
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts<'r>(
         references: impl IntoIterator<Item = MetadataReference<'r>>,
-    ) -> Result<Vec<u8>> {
-        let mut writer = Writer::new();
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut writer = Writer::append(out);
         for reference in references {
             writer.c_string(
                 reference.file_name.as_bytes(),
@@ -234,11 +243,12 @@ impl<'a> CompilationMetadataReferences<'a> {
             writer.u32(reference.file_size)?;
             writer.bytes(&reference.mvid)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(CompilationMetadataReferences => Entries<'a, MetadataReference<'a>>);
+iterable!(CompilationMetadataReferences => CompilationMetadataReferencesIter, MetadataReference<'a>);
 
 /// Read one metadata reference.
 fn read_reference<'a>(reader: &mut Reader<'a>, _: i32) -> Result<MetadataReference<'a>> {

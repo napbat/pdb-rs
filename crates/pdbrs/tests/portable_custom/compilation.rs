@@ -6,7 +6,7 @@ use pdbrs::portable::custom::{
     CustomDebugValue, MetadataReference, Utf8Bytes,
 };
 
-use super::{error, round_trip};
+use super::{encoded, error, round_trip};
 
 /// Two compilation options as Roslyn writes them.
 const OPTIONS: &[u8] = b"language\0C#\0compiler-version\x004.14.0\0";
@@ -55,9 +55,11 @@ fn rejects_malformed_compilation_options() {
         error(kind, b"language\0C#\0language\0VB\0"),
         ErrorKind::InvalidFormat
     );
-    let option = |name: &'static [u8], value: &'static [u8]| CompilationOption {
-        name: Utf8Bytes::new(name),
-        value: Utf8Bytes::new(value),
+    let option = |name: &'static [u8], value: &'static [u8]| {
+        let mut option = CompilationOption::default();
+        option.name = Utf8Bytes::new(name);
+        option.value = Utf8Bytes::new(value);
+        option
     };
     for options in [
         vec![option(b"a", b"1"), option(b"a", b"2")],
@@ -65,7 +67,9 @@ fn rejects_malformed_compilation_options() {
         vec![option(b"a", b"1\0")],
     ] {
         assert_eq!(
-            CompilationOptions::encode(options).unwrap_err().kind(),
+            encoded(|out| CompilationOptions::encode_parts(options, out))
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidFormat
         );
     }
@@ -131,27 +135,19 @@ fn rejects_malformed_compilation_metadata_references() {
             "length {length}"
         );
     }
-    let reference = MetadataReference {
-        file_name: Utf8Bytes::new(b"a\0.dll"),
-        aliases: Utf8Bytes::new(b""),
-        flags: 1,
-        time_stamp: 0,
-        file_size: 0,
-        mvid: [0; 16],
-    };
+    let mut reference = MetadataReference::default();
+    reference.file_name = Utf8Bytes::new(b"a\0.dll");
+    reference.flags = 1;
     assert_eq!(
-        CompilationMetadataReferences::encode([reference])
+        encoded(|out| CompilationMetadataReferences::encode_parts([reference], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
     );
-    let reference = MetadataReference {
-        file_name: Utf8Bytes::new(b"a.dll"),
-        aliases: Utf8Bytes::new(b"x\0"),
-        ..reference
-    };
+    reference.file_name = Utf8Bytes::new(b"a.dll");
+    reference.aliases = Utf8Bytes::new(b"x\0");
     assert_eq!(
-        CompilationMetadataReferences::encode([reference])
+        encoded(|out| CompilationMetadataReferences::encode_parts([reference], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat

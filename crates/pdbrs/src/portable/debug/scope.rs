@@ -20,7 +20,7 @@ use crate::{ErrorKind, Result};
 const DEBUGGER_HIDDEN: u16 = 0x0001;
 
 /// A typed row of the `LocalScope` table with its variable and constant runs.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LocalScope {
     id: LocalScopeId,
     row: LocalScopeRow,
@@ -67,23 +67,26 @@ impl LocalScope {
 
     /// Return the IL offset after the scope end, or `None` if it does not fit in 32 bits.
     #[must_use]
-    pub const fn end_offset(&self) -> Option<u32> {
-        self.row.start_offset.get().checked_add(self.row.length)
+    pub const fn end_offset(&self) -> Option<IlOffset> {
+        match self.row.start_offset.0.checked_add(self.row.length) {
+            Some(end) => Some(IlOffset(end)),
+            None => None,
+        }
     }
 
     /// Return the local variables of the scope in row order.
     pub fn variables(&self) -> impl ExactSizeIterator<Item = LocalVariableId> + use<> {
-        self.variables.clone().map(LocalVariableId::new)
+        self.variables.clone().map(LocalVariableId)
     }
 
     /// Return the local constants of the scope in row order.
     pub fn constants(&self) -> impl ExactSizeIterator<Item = LocalConstantId> + use<> {
-        self.constants.clone().map(LocalConstantId::new)
+        self.constants.clone().map(LocalConstantId)
     }
 }
 
 /// A typed row of the `LocalVariable` table with its name.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LocalVariable {
     id: LocalVariableId,
     row: LocalVariableRow,
@@ -177,8 +180,8 @@ impl<S: ReadAt> Pdb<S> {
         let row: LocalScopeRow = self.row(id)?;
         let tables = self.tables();
         let count = tables.row_count(TableId::LOCAL_SCOPE);
-        let next: Option<LocalScopeRow> = if id.get() < count {
-            Some(self.row(LocalScopeId::new(id.get() + 1))?)
+        let next: Option<LocalScopeRow> = if id.0 < count {
+            Some(self.row(LocalScopeId(id.0 + 1))?)
         } else {
             None
         };
@@ -189,7 +192,7 @@ impl<S: ReadAt> Pdb<S> {
                     ErrorKind::InvalidFormat,
                     context,
                     TableId::LOCAL_SCOPE,
-                    id.get(),
+                    id.0,
                     Some(column),
                 )
             };
@@ -211,14 +214,14 @@ impl<S: ReadAt> Pdb<S> {
             row,
             variables: run(
                 TableId::LOCAL_VARIABLE,
-                row.variable_list.get(),
-                next.map(|next| next.variable_list.get()),
+                row.variable_list.0,
+                next.map(|next| next.variable_list.0),
                 "VariableList",
             )?,
             constants: run(
                 TableId::LOCAL_CONSTANT,
-                row.constant_list.get(),
-                next.map(|next| next.constant_list.get()),
+                row.constant_list.0,
+                next.map(|next| next.constant_list.0),
                 "ConstantList",
             )?,
         })
@@ -227,7 +230,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Read all `LocalScope` rows in row order.
     pub fn local_scopes(&self) -> impl ExactSizeIterator<Item = Result<LocalScope>> + '_ {
         each_row(self, TableId::LOCAL_SCOPE, |pdb, row| {
-            pdb.local_scope(LocalScopeId::new(row))
+            pdb.local_scope(LocalScopeId(row))
         })
     }
 
@@ -248,7 +251,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Read all `LocalVariable` rows in row order.
     pub fn local_variables(&self) -> impl ExactSizeIterator<Item = Result<LocalVariable>> + '_ {
         each_row(self, TableId::LOCAL_VARIABLE, |pdb, row| {
-            pdb.local_variable(LocalVariableId::new(row))
+            pdb.local_variable(LocalVariableId(row))
         })
     }
 
@@ -269,7 +272,7 @@ impl<S: ReadAt> Pdb<S> {
         &self,
     ) -> impl ExactSizeIterator<Item = Result<StateMachineMethod>> + '_ {
         each_row(self, TableId::STATE_MACHINE_METHOD, |pdb, row| {
-            pdb.state_machine_method(StateMachineMethodId::new(row))
+            pdb.state_machine_method(StateMachineMethodId(row))
         })
     }
 }

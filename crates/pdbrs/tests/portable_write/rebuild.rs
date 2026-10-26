@@ -56,17 +56,14 @@ fn rebuild_keeps_rows_and_values() {
     let pdb = Pdb::parse(&bytes).unwrap();
     let parts = pdb.to_parts().unwrap();
     // The duplicate blob gets the offset of its first copy.
-    assert_eq!(parts.tables.custom_debug_information[0].value.get(), 1);
+    assert_eq!(parts.tables.custom_debug_information[0].value.0, 1);
     let output = parts
         .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
     let rebuilt = open(&output);
-    assert_eq!(
-        rebuilt.pdb_stream().entry_point(),
-        Some(MethodDefId::new(1))
-    );
+    assert_eq!(rebuilt.pdb_stream().entry_point(), Some(MethodDefId(1)));
     assert_eq!(
         rebuilt.pdb_stream().external_row_count(TableId::METHOD_DEF),
         3
@@ -122,25 +119,25 @@ fn duplicate_parts() -> Builder {
 fn rebuild_rewrites_document_names_and_imports_if_blob_offsets_change() {
     let bytes = duplicate_parts().build();
     let pdb = Pdb::parse(&bytes).unwrap();
-    assert_eq!(pdb.document(DocumentId::new(1)).unwrap().name(), b"x/x");
+    assert_eq!(pdb.document(DocumentId(1)).unwrap().name(), b"x/x");
     let parts = pdb.to_parts().unwrap();
     // The duplicate "x" is gone, so the name and the imports move. The rebuild adds the
     // encoded name ("/", 1, 1) and imports (1, 1) with the new offset of "x".
-    assert_ne!(parts.tables.documents[0].name.get(), 5);
+    assert_ne!(parts.tables.documents[0].name.0, 5);
     let output = parts
         .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
     let rebuilt = open(&output);
-    let document = rebuilt.document(DocumentId::new(1)).unwrap();
+    let document = rebuilt.document(DocumentId(1)).unwrap();
     assert_eq!(document.name(), b"x/x");
-    let scope = rebuilt.import_scope(ImportScopeId::new(1)).unwrap();
+    let scope = rebuilt.import_scope(ImportScopeId(1)).unwrap();
     let imports: Vec<Import> = scope.imports().map(Result::unwrap).collect();
     let [Import::Namespace { namespace }] = imports[..] else {
         panic!("unexpected imports {imports:?}");
     };
-    assert_eq!(namespace.get(), 1);
+    assert_eq!(namespace.0, 1);
     assert_eq!(rebuilt.blob(namespace).unwrap(), b"x");
 }
 

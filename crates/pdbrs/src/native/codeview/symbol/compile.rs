@@ -379,37 +379,37 @@ impl<'a> StringList<'a> {
 
     /// Return an iterator over the strings, without their terminators.
     #[must_use]
-    pub const fn iter(&self) -> Strings<'a> {
-        Strings { bytes: self.bytes }
+    pub const fn iter(&self) -> StringListIter<'a> {
+        StringListIter { bytes: self.bytes }
     }
 }
 
 impl<'a> IntoIterator for StringList<'a> {
     type Item = &'a [u8];
-    type IntoIter = Strings<'a>;
+    type IntoIter = StringListIter<'a>;
 
-    fn into_iter(self) -> Strings<'a> {
+    fn into_iter(self) -> StringListIter<'a> {
         self.iter()
     }
 }
 
 impl<'a> IntoIterator for &StringList<'a> {
     type Item = &'a [u8];
-    type IntoIter = Strings<'a>;
+    type IntoIter = StringListIter<'a>;
 
-    fn into_iter(self) -> Strings<'a> {
+    fn into_iter(self) -> StringListIter<'a> {
         self.iter()
     }
 }
 
 /// An iterator over the strings of a [`StringList`].
 #[derive(Clone, Debug)]
-pub struct Strings<'a> {
+pub struct StringListIter<'a> {
     /// The strings that are not returned yet.
     bytes: &'a [u8],
 }
 
-impl<'a> Iterator for Strings<'a> {
+impl<'a> Iterator for StringListIter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<&'a [u8]> {
@@ -421,4 +421,4 @@ impl<'a> Iterator for Strings<'a> {
     }
 }
 
-impl FusedIterator for Strings<'_> {}
+impl FusedIterator for StringListIter<'_> {}

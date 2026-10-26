@@ -21,6 +21,17 @@ pub fn ok<T>(result: pdbrs::Result<T>) -> Option<T> {
     result.ok()
 }
 
+/// Run an encoder that appends to a buffer, and return the bytes.
+///
+/// # Errors
+///
+/// Returns the error of `encode`.
+pub fn encoded(encode: impl FnOnce(&mut Vec<u8>) -> pdbrs::Result<()>) -> pdbrs::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    encode(&mut out)?;
+    Ok(out)
+}
+
 thread_local! {
     /// A copy of the input of the current run, for the panic hook.
     static INPUT: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };

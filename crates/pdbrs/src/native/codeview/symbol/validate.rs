@@ -265,7 +265,7 @@ impl<'c> ValidationContext<'c> {
 }
 
 /// The result of a validation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ValidationReport {
     /// The stream that the report is for.

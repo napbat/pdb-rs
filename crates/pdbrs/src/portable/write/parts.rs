@@ -16,7 +16,7 @@ pub const PDB_VERSION: &[u8] = b"PDB v1.0";
 ///
 /// The row ID of a row is its index in the vector plus 1. Each row refers to the heaps of its
 /// [`PdbParts`] and to rows of these tables or of the external type-system tables.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DebugTables {
     /// The `Document` table (0x30).
@@ -60,7 +60,7 @@ impl DebugTables {
 ///
 /// The counts set the widths of references to these tables. The `#Pdb` stream lists each
 /// table with a count other than 0.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ExternalRowCounts([u32; 64]);
 
 impl Default for ExternalRowCounts {

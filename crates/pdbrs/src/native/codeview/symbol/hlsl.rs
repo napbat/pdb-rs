@@ -381,12 +381,56 @@ impl<'a> DpcTagMap<'a> {
     }
 
     /// Return an iterator over the entries.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = DpcTag> + 'a {
+    #[must_use]
+    pub fn iter(&self) -> DpcTagMapIter<'a> {
+        DpcTagMapIter {
+            entries: self.entries.iter(),
+        }
+    }
+}
+
+/// An iterator over the entries of a [`DpcTagMap`].
+#[derive(Clone, Debug)]
+pub struct DpcTagMapIter<'a> {
+    /// The 8-byte entries that are not returned yet.
+    entries: core::slice::Iter<'a, [u8; 8]>,
+}
+
+impl Iterator for DpcTagMapIter<'_> {
+    type Item = DpcTag;
+
+    fn next(&mut self) -> Option<DpcTag> {
         self.entries
-            .iter()
+            .next()
             .map(|&[t0, t1, t2, t3, o0, o1, o2, o3]| DpcTag {
                 tag: u32::from_le_bytes([t0, t1, t2, t3]),
                 record_offset: i32::from_le_bytes([o0, o1, o2, o3]),
             })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+
+impl ExactSizeIterator for DpcTagMapIter<'_> {}
+
+impl core::iter::FusedIterator for DpcTagMapIter<'_> {}
+
+impl<'a> IntoIterator for DpcTagMap<'a> {
+    type Item = DpcTag;
+    type IntoIter = DpcTagMapIter<'a>;
+
+    fn into_iter(self) -> DpcTagMapIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &DpcTagMap<'a> {
+    type Item = DpcTag;
+    type IntoIter = DpcTagMapIter<'a>;
+
+    fn into_iter(self) -> DpcTagMapIter<'a> {
+        self.iter()
     }
 }

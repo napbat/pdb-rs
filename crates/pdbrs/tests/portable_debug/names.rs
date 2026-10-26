@@ -5,26 +5,31 @@ use pdbrs::portable::debug::{DocumentName, HashAlgorithm, Language, split_docume
 use pdbrs::portable::metadata::{BlobOffset, DocumentId};
 
 use crate::synthetic::Synthetic;
-use crate::{every_prefix_fails, expect};
+use crate::{encoded, every_prefix_fails, expect};
 
 #[test]
 fn decode_gives_the_separator_and_the_part_offsets() {
     let blob = [b'/', 0x00, 0x05, 0x81, 0x02];
-    let name = DocumentName::decode(&blob).unwrap();
+    let name = DocumentName::parse(&blob).unwrap();
     assert_eq!(name.separator(), Some('/'));
-    let parts: Vec<u32> = name.parts().map(BlobOffset::get).collect();
+    let parts: Vec<u32> = name.parts().map(|offset| offset.0).collect();
     assert_eq!(parts, [0, 5, 0x102]);
 }
 
 #[test]
 fn decode_accepts_the_empty_separator_and_a_multibyte_separator() {
-    let empty = DocumentName::decode(&[0, 3]).unwrap();
+    let empty = DocumentName::parse(&[0, 3]).unwrap();
     assert_eq!(empty.separator(), None);
     let blob = [0xc2, 0xa7, 1, 2];
-    let name = DocumentName::decode(&blob).unwrap();
+    let name = DocumentName::parse(&blob).unwrap();
     assert_eq!(name.separator(), Some('\u{a7}'));
     assert_eq!(
-        DocumentName::encode(Some('\u{a7}'), &[BlobOffset::new(1), BlobOffset::new(2)]).unwrap(),
+        encoded(|out| DocumentName::encode_parts(
+            Some('\u{a7}'),
+            &[BlobOffset(1), BlobOffset(2)],
+            out
+        ))
+        .unwrap(),
         blob
     );
 }
@@ -32,27 +37,27 @@ fn decode_accepts_the_empty_separator_and_a_multibyte_separator() {
 #[test]
 fn decode_rejects_bad_separators_and_missing_parts() {
     expect(
-        &DocumentName::decode(&[]).unwrap_err(),
+        &DocumentName::parse(&[]).unwrap_err(),
         ErrorKind::UnexpectedEof,
         "no separator",
     );
     expect(
-        &DocumentName::decode(b"/").unwrap_err(),
+        &DocumentName::parse(b"/").unwrap_err(),
         ErrorKind::UnexpectedEof,
         "no part",
     );
     expect(
-        &DocumentName::decode(&[0xff, 1]).unwrap_err(),
+        &DocumentName::parse(&[0xff, 1]).unwrap_err(),
         ErrorKind::InvalidFormat,
         "not a UTF-8 character",
     );
     expect(
-        &DocumentName::decode(&[0xc2, 0x41, 1]).unwrap_err(),
+        &DocumentName::parse(&[0xc2, 0x41, 1]).unwrap_err(),
         ErrorKind::InvalidFormat,
         "not a UTF-8 character",
     );
     every_prefix_fails(&[b'\\', 0x81, 0x02], |blob| {
-        DocumentName::decode(blob).map(|_| ())
+        DocumentName::parse(blob).map(|_| ())
     });
 }
 
@@ -75,17 +80,13 @@ fn split_uses_the_more_frequent_separator_like_roslyn() {
 
 #[test]
 fn encode_and_decode_round_trip() {
-    let parts = [
-        BlobOffset::new(0),
-        BlobOffset::new(0x7f),
-        BlobOffset::new(0x4000),
-    ];
-    let blob = DocumentName::encode(Some('/'), &parts).unwrap();
+    let parts = [BlobOffset(0), BlobOffset(0x7f), BlobOffset(0x4000)];
+    let blob = encoded(|out| DocumentName::encode_parts(Some('/'), &parts, out)).unwrap();
     assert_eq!(blob, [b'/', 0x00, 0x7f, 0xc0, 0x00, 0x40, 0x00]);
-    let name = DocumentName::decode(&blob).unwrap();
+    let name = DocumentName::parse(&blob).unwrap();
     assert_eq!(name.parts().collect::<Vec<_>>(), parts);
     expect(
-        &DocumentName::encode(Some('/'), &[]).unwrap_err(),
+        &encoded(|out| DocumentName::encode_parts(Some('/'), &[], out)).unwrap_err(),
         ErrorKind::InvalidFormat,
         "no part",
     );
@@ -101,7 +102,7 @@ fn pdb_joins_the_parts_of_each_document_name() {
         .map(|document| document.unwrap().name().to_vec())
         .collect();
     assert_eq!(names, [b"/src/a.cs".to_vec(), b"/src/b.cs".to_vec()]);
-    let document = pdb.document(DocumentId::new(1)).unwrap();
+    let document = pdb.document(DocumentId(1)).unwrap();
     assert_eq!(document.language(), Some(Language::CSharp));
     assert_eq!(document.hash_algorithm(), Some(HashAlgorithm::Sha256));
     assert_eq!(document.hash().len(), 32);
@@ -114,7 +115,7 @@ fn a_bad_name_blob_has_the_location_of_its_row() {
     synthetic.documents[1][0] = bad;
     let bytes = synthetic.bytes();
     let pdb = pdbrs::portable::Pdb::parse(&bytes).unwrap();
-    let error = pdb.document(DocumentId::new(2)).unwrap_err();
+    let error = pdb.document(DocumentId(2)).unwrap_err();
     expect(&error, ErrorKind::InvalidFormat, "UTF-8");
     let location = error.portable_location().unwrap();
     assert_eq!(location.row(), Some(2));

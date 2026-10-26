@@ -23,6 +23,15 @@ pub(crate) fn expect(error: &Error, kind: ErrorKind, text: &str) {
     assert!(context.contains(text), "context {context:?} of {error}");
 }
 
+/// Run an encoder that appends to a buffer, and return the bytes.
+pub(crate) fn encoded(
+    encode: impl FnOnce(&mut Vec<u8>) -> pdbrs::Result<()>,
+) -> pdbrs::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    encode(&mut out)?;
+    Ok(out)
+}
+
 /// Check that each strict prefix of `blob` gives an error from `decode` and no panic.
 pub(crate) fn every_prefix_fails(blob: &[u8], decode: impl Fn(&[u8]) -> pdbrs::Result<()>) {
     for end in 0..blob.len() {

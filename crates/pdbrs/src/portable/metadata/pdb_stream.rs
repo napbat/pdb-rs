@@ -24,7 +24,7 @@ const FIXED_LEN: u32 = 32;
 const TYPE_SYSTEM_MASK: u64 = (1 << 0x2D) - 1;
 
 /// The decoded `#Pdb` stream.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct PdbStream {
     id: [u8; 20],
     entry_point: MetadataToken,
@@ -92,8 +92,8 @@ impl PdbStream {
     /// Check that the entry point is 0 or a token of an external `MethodDef` row.
     fn check_entry_point(&self, offset: u64) -> Result<()> {
         let token = self.entry_point;
-        let valid = token.get() == 0
-            || (token.table() == TableId::METHOD_DEF.number()
+        let valid = token.raw() == 0
+            || (matches!(token.table(), Some(TableId::METHOD_DEF))
                 && token.row() != 0
                 && token.row() <= self.external_row_count(TableId::METHOD_DEF));
         if valid {
@@ -127,10 +127,10 @@ impl PdbStream {
     /// Return the entry point method, if the stream has one.
     #[must_use]
     pub const fn entry_point(&self) -> Option<MethodDefId> {
-        if self.entry_point.get() == 0 {
+        if self.entry_point.raw() == 0 {
             None
         } else {
-            Some(MethodDefId::new(self.entry_point.row()))
+            Some(MethodDefId(self.entry_point.row()))
         }
     }
 
@@ -150,7 +150,7 @@ impl PdbStream {
     /// Return each referenced table with its row count, in table number order.
     pub fn external_tables(&self) -> impl Iterator<Item = (TableId, u32)> + '_ {
         (0_u8..64)
-            .filter_map(TableId::new)
+            .filter_map(TableId::from_raw)
             .filter(|table| self.referenced_tables & table.bit() != 0)
             .map(|table| (table, self.rows[table.index()]))
     }

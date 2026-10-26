@@ -118,11 +118,11 @@ impl<'a> EncLocalSlotMap<'a> {
 
     /// Return an iterator over the slots.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, LocalSlot> {
-        Entries::new(self.slots, self.len, self.baseline, read_slot)
+    pub const fn iter(&self) -> EncLocalSlotMapIter<'a> {
+        EncLocalSlotMapIter(Entries::new(self.slots, self.len, self.baseline, read_slot))
     }
 
-    /// Encode a local slot map blob as Roslyn does.
+    /// Encode a local slot map blob as Roslyn does, and append it to `out`.
     ///
     /// The encoder stores a baseline only if a syntax offset is smaller than -1.
     ///
@@ -133,7 +133,12 @@ impl<'a> EncLocalSlotMap<'a> {
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a
     ///   relative syntax offset or an ordinal does not fit in a compressed
     ///   integer, or if an allocation fails.
-    pub fn encode(slots: impl IntoIterator<Item = LocalSlot, IntoIter: Clone>) -> Result<Vec<u8>> {
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
+        slots: impl IntoIterator<Item = LocalSlot, IntoIter: Clone>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         let slots = slots.into_iter();
         let baseline = slots
             .clone()
@@ -142,7 +147,7 @@ impl<'a> EncLocalSlotMap<'a> {
                 LocalSlot::Variable { syntax_offset, .. } => Some(syntax_offset),
             })
             .fold(DEFAULT_BASELINE, i32::min);
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         if baseline != DEFAULT_BASELINE {
             writer.u8(BASELINE_MARKER)?;
             write_baseline(&mut writer, baseline)?;
@@ -167,11 +172,12 @@ impl<'a> EncLocalSlotMap<'a> {
                 writer.unsigned(ordinal)?;
             }
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(EncLocalSlotMap => Entries<'a, LocalSlot>);
+iterable!(EncLocalSlotMap => EncLocalSlotMapIter, LocalSlot);
 
 /// Read one slot.
 fn read_slot(reader: &mut Reader<'_>, baseline: i32) -> Result<LocalSlot> {

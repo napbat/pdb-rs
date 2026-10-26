@@ -90,30 +90,32 @@ pub mod validate;
 mod variable;
 
 pub(crate) use annotation::code::{ChunkRange, CodeError, CodeState, separated_chunks};
-pub use annotation::{Annotation, Annotations, BinaryAnnotations};
+pub use annotation::{Annotation, BinaryAnnotations, BinaryAnnotationsIter};
 pub use architecture::{
     Ia64Procedure, MipsProcedure, ProcedureHeader, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,
     S_GPROCMIPS_ID, S_LPROCIA64, S_LPROCIA64_ID, S_LPROCMIPS, S_LPROCMIPS_ID,
 };
 pub use attributed::{
     AttributedFrameRelative, AttributedRegister, AttributedRegisterRelative, ManyRegisters,
-    RegisterList, S_ATTR_FRAMEREL, S_ATTR_MANYREG, S_ATTR_REGISTER, S_ATTR_REGREL, S_GMANDATA,
-    S_LMANDATA, S_LOCALSLOT, S_MANFRAMEREL, S_MANMANYREG, S_MANMANYREG2, S_MANREGISTER,
-    S_MANREGREL, S_MANTYPREF, S_MANYREG, S_MANYREG2, S_PARAMSLOT, Slot, VariableAttributes,
+    RegisterList, RegisterListIter, S_ATTR_FRAMEREL, S_ATTR_MANYREG, S_ATTR_REGISTER,
+    S_ATTR_REGREL, S_GMANDATA, S_LMANDATA, S_LOCALSLOT, S_MANFRAMEREL, S_MANMANYREG, S_MANMANYREG2,
+    S_MANREGISTER, S_MANREGREL, S_MANTYPREF, S_MANYREG, S_MANYREG2, S_PARAMSLOT, Slot,
+    VariableAttributes,
 };
 pub use code::{
-    AnnotationStrings, Association, AssociationKind, HotPatchFunction, HybridRange, S_ANNOTATION,
-    S_ASSOCIATION, S_HOTPATCHFUNC, S_HYBRIDRANGE, S_SEPCODE, S_STATICLOCAL, S_VFTABLE32, S_WITH32,
-    SeparatedCode, SeparatedCodeFlags, StaticLocal, VirtualFunctionTable, With,
+    AnnotationStrings, AnnotationStringsIter, Association, AssociationKind, HotPatchFunction,
+    HybridRange, S_ANNOTATION, S_ASSOCIATION, S_HOTPATCHFUNC, S_HYBRIDRANGE, S_SEPCODE,
+    S_STATICLOCAL, S_VFTABLE32, S_WITH32, SeparatedCode, SeparatedCodeFlags, StaticLocal,
+    VirtualFunctionTable, With,
 };
 pub use compile::{
     Compile2, Compile3, CompileFlags, EnvironmentBlock, ObjectName, SourceLanguage, StringList,
-    Strings,
+    StringListIter,
 };
 pub use cpu::CpuType;
 use defrange::read_global_on_entry;
 pub use defrange::{
-    DefRangeProgram, EntryValues, S_DEFRANGE, S_DEFRANGE_CONSTVAL_ON_ENTRY,
+    DefRangeProgram, EntryValues, EntryValuesIter, S_DEFRANGE, S_DEFRANGE_CONSTVAL_ON_ENTRY,
     S_DEFRANGE_GLOBALSYM_ON_ENTRY, S_DEFRANGE_SUBFIELD,
 };
 pub use frame::{CookieKind, FrameCookie, HeapAllocationSite};
@@ -121,7 +123,7 @@ pub use global::{
     CoffGroup, ProcedureReference, Public, PublicFlags, S_ANNOTATIONREF, S_DATAREF, Section,
 };
 pub use hlsl::{
-    DefRangeHlsl, DpcGroupSharedLocal, DpcTag, DpcTagMap, HlslData, HlslDataEx,
+    DefRangeHlsl, DpcGroupSharedLocal, DpcTag, DpcTagMap, DpcTagMapIter, HlslData, HlslDataEx,
     S_DEFRANGE_DPC_PTR_TAG, S_DEFRANGE_HLSL, S_DPC_SYM_TAG_MAP, S_GDATA_HLSL, S_GDATA_HLSL32,
     S_GDATA_HLSL32_EX, S_LDATA_HLSL, S_LDATA_HLSL32, S_LDATA_HLSL32_EX, S_LOCAL_DPC_GROUPSHARED,
 };

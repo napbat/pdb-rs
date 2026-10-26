@@ -174,9 +174,9 @@ impl StringHeap {
     #[must_use]
     pub fn offset(&self, value: &[u8]) -> Option<StringOffset> {
         if value.is_empty() {
-            return Some(StringOffset::new(0));
+            return Some(StringOffset(0));
         }
-        self.offsets.get(value).copied().map(StringOffset::new)
+        self.offsets.get(value).copied().map(StringOffset)
     }
 
     /// Return the heap bytes without padding.
@@ -196,7 +196,7 @@ impl StringHeap {
     ///
     /// Any offset inside the heap is the start of a string that ends at the next zero byte.
     pub(crate) fn contains(&self, offset: StringOffset) -> bool {
-        offset.get() == 0 || offset.get() < self.size()
+        offset.0 == 0 || offset.0 < self.size()
     }
 
     /// Move the heap bytes out of the heap.
@@ -297,13 +297,13 @@ impl BlobHeap {
     /// [`ErrorKind::LimitExceeded`] if the blob is larger than `0x1FFFFFFF` bytes, the heap
     /// is larger than 4 GiB, or an allocation fails.
     pub fn add(&mut self, value: &[u8]) -> Result<BlobOffset> {
-        self.0.add(value).map(BlobOffset::new)
+        self.0.add(value).map(BlobOffset)
     }
 
     /// Return `true` if `offset` is 0 or the start of a blob.
     #[must_use]
     pub fn contains(&self, offset: BlobOffset) -> bool {
-        self.0.contains(offset.get())
+        self.0.contains(offset.0)
     }
 
     /// Return the heap bytes without padding.
@@ -356,7 +356,7 @@ impl UserStringHeap {
                 .with_context("a #US entry needs UTF-16 code units and a flag byte")
                 .with_portable(MetadataStream::UserStrings.location()));
         }
-        self.0.add(entry).map(UserStringOffset::new)
+        self.0.add(entry).map(UserStringOffset)
     }
 
     /// Return the heap bytes without padding.
@@ -400,7 +400,7 @@ impl GuidHeap {
     /// [`ErrorKind::LimitExceeded`] if the heap is larger than 4 GiB or an allocation fails.
     pub fn add(&mut self, guid: [u8; 16]) -> Result<GuidIndex> {
         if let Some(&index) = self.index.get(&guid) {
-            return Ok(GuidIndex::new(index));
+            return Ok(GuidIndex(index));
         }
         let index = heap_size(&self.bytes, MetadataStream::Guid)? / 16 + 1;
         if u64::from(index) * 16 > u64::from(u32::MAX) {
@@ -408,7 +408,7 @@ impl GuidHeap {
         }
         append(&mut self.bytes, &guid, MetadataStream::Guid)?;
         self.index.insert(guid, index);
-        Ok(GuidIndex::new(index))
+        Ok(GuidIndex(index))
     }
 
     /// Return the number of GUIDs.

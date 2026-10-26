@@ -59,11 +59,11 @@ impl<'a> TypeDefinitionDocuments<'a> {
 
     /// Return an iterator over the documents.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, DocumentId> {
-        Entries::new(self.bytes, self.len, 0, read_document)
+    pub const fn iter(&self) -> TypeDefinitionDocumentsIter<'a> {
+        TypeDefinitionDocumentsIter(Entries::new(self.bytes, self.len, 0, read_document))
     }
 
-    /// Encode a type definition documents blob.
+    /// Encode a type definition documents blob, and append it to `out`.
     ///
     /// # Errors
     ///
@@ -71,23 +71,29 @@ impl<'a> TypeDefinitionDocuments<'a> {
     ///   document is nil.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a
     ///   row ID does not fit in a compressed integer, or if an allocation fails.
-    pub fn encode(documents: impl IntoIterator<Item = DocumentId>) -> Result<Vec<u8>> {
-        let mut writer = Writer::new();
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
+        documents: impl IntoIterator<Item = DocumentId>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut writer = Writer::append(out);
         for document in documents {
             if document.is_nil() {
                 return Err(invalid("type definition document row ID is 0"));
             }
-            writer.unsigned(document.get())?;
+            writer.unsigned(document.0)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(TypeDefinitionDocuments => Entries<'a, DocumentId>);
+iterable!(TypeDefinitionDocuments => TypeDefinitionDocumentsIter, DocumentId);
 
 /// Read one `Document` row ID.
 fn read_document(reader: &mut Reader<'_>, _: i32) -> Result<DocumentId> {
-    let document = DocumentId::new(reader.unsigned()?);
+    let document = DocumentId(reader.unsigned()?);
     if document.is_nil() {
         return Err(invalid("type definition document row ID is 0"));
     }

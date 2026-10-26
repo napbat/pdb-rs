@@ -11,7 +11,7 @@ use super::{
 };
 use crate::PortableLocation;
 use crate::io::ReadAt;
-use crate::portable::custom::{self, CustomDebugValue};
+use crate::portable::custom::CustomDebugValue;
 use crate::portable::debug::Import;
 use crate::portable::metadata::{BlobOffset, DocumentId, ImportScopeId, MetadataStream, TableId};
 use crate::portable::write::{
@@ -93,7 +93,7 @@ impl PdbEditor {
         }
         for (handle, information) in self.builder.custom_debug_informations() {
             let opaque = !matches!(
-                custom::decode(information.kind, &information.value),
+                CustomDebugValue::parse(information.kind, &information.value),
                 Ok(value) if !matches!(value, CustomDebugValue::Unknown { .. })
             );
             if opaque {
@@ -192,11 +192,9 @@ impl<S: ReadAt> Pdb<S> {
             let information = information?;
             let token = information.parent();
             let row = token.row();
-            let parent = match TableId::new(token.table()) {
-                Some(TableId::DOCUMENT) => CustomDebugParent::Document(DocumentId::new(row)),
-                Some(TableId::IMPORT_SCOPE) => {
-                    CustomDebugParent::ImportScope(ImportScopeId::new(row))
-                }
+            let parent = match token.table() {
+                Some(TableId::DOCUMENT) => CustomDebugParent::Document(DocumentId(row)),
+                Some(TableId::IMPORT_SCOPE) => CustomDebugParent::ImportScope(ImportScopeId(row)),
                 Some(TableId::LOCAL_SCOPE) => {
                     CustomDebugParent::LocalScope(LocalScopeHandle(handle(row)))
                 }
@@ -240,7 +238,7 @@ impl<S: ReadAt> Pdb<S> {
                 .collect::<Result<Vec<_>>>()
                 .map_err(|error| information.blob_error(error))?;
             builder.methods.insert(
-                information.id().get(),
+                information.id().0,
                 MethodInfo {
                     local_signature,
                     local_signature_form,
@@ -270,8 +268,8 @@ impl<S: ReadAt> Pdb<S> {
                     }
                 };
                 builder.empty_lists = [
-                    list(TableId::LOCAL_VARIABLE, scope.row().variable_list.get()),
-                    list(TableId::LOCAL_CONSTANT, scope.row().constant_list.get()),
+                    list(TableId::LOCAL_VARIABLE, scope.row().variable_list.0),
+                    list(TableId::LOCAL_CONSTANT, scope.row().constant_list.0),
                 ];
             }
             let handle = builder.add_local_scope(LocalScopeInfo {

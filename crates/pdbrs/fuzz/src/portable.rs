@@ -23,11 +23,10 @@ const MAX_ROWS: usize = 1 << 14;
 /// The read options of the targets: the limits keep one run small.
 #[must_use]
 pub(crate) fn options() -> ReadOptions {
-    ReadOptions {
-        max_streams: 64,
-        max_value_bytes: MAX_STREAM,
-        max_stream_bytes: MAX_STREAM,
-    }
+    ReadOptions::default()
+        .with_max_streams(64)
+        .with_max_value_bytes(MAX_STREAM)
+        .with_max_stream_bytes(MAX_STREAM)
 }
 
 /// Read a Portable PDB or an `MPDB` payload and decode every row, heap value and blob.

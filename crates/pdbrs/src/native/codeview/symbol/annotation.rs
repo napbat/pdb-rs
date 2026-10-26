@@ -206,25 +206,25 @@ impl<'a> BinaryAnnotations<'a> {
 
     /// Return an iterator over the annotations.
     #[must_use]
-    pub const fn iter(&self) -> Annotations<'a> {
-        Annotations { bytes: self.bytes }
+    pub const fn iter(&self) -> BinaryAnnotationsIter<'a> {
+        BinaryAnnotationsIter { bytes: self.bytes }
     }
 }
 
 impl<'a> IntoIterator for BinaryAnnotations<'a> {
     type Item = Annotation;
-    type IntoIter = Annotations<'a>;
+    type IntoIter = BinaryAnnotationsIter<'a>;
 
-    fn into_iter(self) -> Annotations<'a> {
+    fn into_iter(self) -> BinaryAnnotationsIter<'a> {
         self.iter()
     }
 }
 
 impl<'a> IntoIterator for &BinaryAnnotations<'a> {
     type Item = Annotation;
-    type IntoIter = Annotations<'a>;
+    type IntoIter = BinaryAnnotationsIter<'a>;
 
-    fn into_iter(self) -> Annotations<'a> {
+    fn into_iter(self) -> BinaryAnnotationsIter<'a> {
         self.iter()
     }
 }
@@ -234,12 +234,12 @@ impl<'a> IntoIterator for &BinaryAnnotations<'a> {
 /// [`BinaryAnnotations::parse`] validates all bytes, so the iterator does not
 /// return errors.
 #[derive(Clone, Debug)]
-pub struct Annotations<'a> {
+pub struct BinaryAnnotationsIter<'a> {
     /// The annotation bytes that are not decoded yet.
     bytes: &'a [u8],
 }
 
-impl Iterator for Annotations<'_> {
+impl Iterator for BinaryAnnotationsIter<'_> {
     type Item = Annotation;
 
     fn next(&mut self) -> Option<Annotation> {
@@ -248,7 +248,7 @@ impl Iterator for Annotations<'_> {
     }
 }
 
-impl FusedIterator for Annotations<'_> {}
+impl FusedIterator for BinaryAnnotationsIter<'_> {}
 
 /// Decode the annotation at the start of `bytes` and move past it.
 fn decode(bytes: &mut &[u8]) -> Result<Annotation> {

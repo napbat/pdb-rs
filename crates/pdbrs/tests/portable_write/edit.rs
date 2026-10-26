@@ -65,10 +65,10 @@ fn edit_keeps_the_source_heap_entries() {
     let bytes = write(&sample());
     let source = Pdb::parse(&bytes).unwrap();
     let mut editor = source.edit().unwrap();
-    editor.document_mut(DocumentId::new(2)).unwrap().name = b"/src/Renamed.cs".to_vec();
+    editor.document_mut(DocumentId(2)).unwrap().name = b"/src/Renamed.cs".to_vec();
     let last = editor
         .local_scopes()
-        .find(|(_, scope)| scope.method == MethodDefId::new(3))
+        .find(|(_, scope)| scope.method == MethodDefId(3))
         .unwrap()
         .0;
     editor
@@ -102,7 +102,7 @@ fn edit_keeps_the_source_heap_entries() {
         );
     }
     assert_eq!(
-        edited.document(DocumentId::new(2)).unwrap().name(),
+        edited.document(DocumentId(2)).unwrap().name(),
         b"/src/Renamed.cs"
     );
     assert_eq!(
@@ -110,7 +110,7 @@ fn edit_keeps_the_source_heap_entries() {
         [vec![], vec![b"Pi".to_vec()], vec![b"Added".to_vec()]]
     );
     let method = edited
-        .method_debug_information(pdbrs::portable::metadata::MethodDebugInformationId::new(1))
+        .method_debug_information(pdbrs::portable::metadata::MethodDebugInformationId(1))
         .unwrap();
     let points: Vec<_> = method
         .sequence_points()
@@ -190,7 +190,7 @@ fn edit_that_moves_rows_rewrites_known_custom_debug_information_parents() {
             .unwrap()
             .unwrap()
             .parent(),
-        LocalConstantId::new(1).token().unwrap()
+        LocalConstantId(1).token().unwrap()
     );
 
     // A constant in the scope of method 1 moves "Pi" to row 2. The parent follows it.
@@ -206,13 +206,10 @@ fn edit_that_moves_rows_rewrites_known_custom_debug_information_parents() {
         .unwrap();
     let edited = open(&output);
     let row = edited.custom_debug_informations().next().unwrap().unwrap();
-    assert_eq!(row.parent(), LocalConstantId::new(2).token().unwrap());
+    assert_eq!(row.parent(), LocalConstantId(2).token().unwrap());
     assert_eq!(row.value(), [0x01]);
     assert_eq!(
-        edited
-            .local_constant(LocalConstantId::new(2))
-            .unwrap()
-            .name(),
+        edited.local_constant(LocalConstantId(2)).unwrap().name(),
         b"Pi"
     );
 }

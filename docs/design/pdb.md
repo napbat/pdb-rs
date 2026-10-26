@@ -178,7 +178,7 @@ For the embedded fixture, pdbrs reads the `.mpdb` payload and the verifier reads
 Evidence ([#25](https://github.com/napbat/pdbrs/issues/25)): the 15 embedded sources of the five Portable PDB fixtures match their SHA-256 hashes in both dumps.
 Evidence ([#22](https://github.com/napbat/pdbrs/issues/22), [#23](https://github.com/napbat/pdbrs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
 The encoders give the same bytes for every debug table blob of the four standalone fixtures (62, 62, 25 and 45 blobs).
-In 26 F# sequence point blobs, the `LocalSignature` header is a full `StandAloneSig` token, not a row. `SequencePoints::local_signature_form` reports the form, and `encode_sequence_points` takes a `LocalSignatureForm` to keep it.
+In 26 F# sequence point blobs, the `LocalSignature` header is a full `StandAloneSig` token, not a row. `SequencePoints::local_signature_form` reports the form, and `SequencePoints::encode_parts` takes a `LocalSignatureForm` to keep it.
 `cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
 It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
 

@@ -167,13 +167,57 @@ impl<'a> RegisterList<'a> {
     }
 
     /// Return an iterator over the register numbers.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = u16> + 'a {
+    #[must_use]
+    pub fn iter(&self) -> RegisterListIter<'a> {
         let step = if self.wide { 2 } else { 1 };
-        self.bytes.chunks_exact(step).map(|chunk| match *chunk {
+        RegisterListIter {
+            chunks: self.bytes.chunks_exact(step),
+        }
+    }
+}
+
+/// An iterator over the register numbers of a [`RegisterList`].
+#[derive(Clone, Debug)]
+pub struct RegisterListIter<'a> {
+    /// The 1-byte or 2-byte register numbers that are not returned yet.
+    chunks: core::slice::ChunksExact<'a, u8>,
+}
+
+impl Iterator for RegisterListIter<'_> {
+    type Item = u16;
+
+    fn next(&mut self) -> Option<u16> {
+        self.chunks.next().map(|chunk| match *chunk {
             [low, high] => u16::from_le_bytes([low, high]),
             [byte] => u16::from(byte),
             _ => 0,
         })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.chunks.size_hint()
+    }
+}
+
+impl ExactSizeIterator for RegisterListIter<'_> {}
+
+impl core::iter::FusedIterator for RegisterListIter<'_> {}
+
+impl<'a> IntoIterator for RegisterList<'a> {
+    type Item = u16;
+    type IntoIter = RegisterListIter<'a>;
+
+    fn into_iter(self) -> RegisterListIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &RegisterList<'a> {
+    type Item = u16;
+    type IntoIter = RegisterListIter<'a>;
+
+    fn into_iter(self) -> RegisterListIter<'a> {
+        self.iter()
     }
 }
 

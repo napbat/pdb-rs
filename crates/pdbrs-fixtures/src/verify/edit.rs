@@ -227,7 +227,7 @@ fn check(
             .map_err(pdbrs)?;
         let documents = (1..=lines.document_count())
             .filter_map(|row| {
-                let document = lines.document(DocumentId::new(u32::try_from(row).ok()?))?;
+                let document = lines.document(DocumentId(u32::try_from(row).ok()?))?;
                 String::from_utf8(document.name.clone()).ok()
             })
             .collect();
@@ -297,7 +297,7 @@ fn apply(editor: &mut PdbEditor, all: bool) -> pdbrs::Result<()> {
     if !all {
         return Ok(());
     }
-    if let Some(document) = editor.document_mut(DocumentId::new(1)) {
+    if let Some(document) = editor.document_mut(DocumentId(1)) {
         document.name.extend_from_slice(RENAME_SUFFIX);
     }
     let last = editor
@@ -311,13 +311,13 @@ fn apply(editor: &mut PdbEditor, all: bool) -> pdbrs::Result<()> {
         })
         .map(|(handle, _)| handle);
     if let Some(scope) = last {
-        let signature = LocalConstantSignature::encode(
-            &[],
-            &ConstantValue::Primitive(PrimitiveConstant::I4(ADDED_VALUE)),
-        )?;
         let mut constant = LocalConstantInfo::default();
         constant.name = ADDED_CONSTANT.to_vec();
-        constant.signature = signature;
+        LocalConstantSignature::encode_parts(
+            &[],
+            &ConstantValue::Primitive(PrimitiveConstant::I4(ADDED_VALUE)),
+            &mut constant.signature,
+        )?;
         editor.add_local_constant(scope, constant)?;
     }
     let method = MetadataToken::new(TableId::METHOD_DEF, 1).unwrap_or_default();

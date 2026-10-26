@@ -1,6 +1,6 @@
 //! Custom debug information of Portable PDBs.
 //!
-//! A `CustomDebugInformation` row has a kind GUID and a value blob. [`decode`]
+//! A `CustomDebugInformation` row has a kind GUID and a value blob. [`CustomDebugValue::parse`]
 //! selects the codec from the kind and returns a [`CustomDebugValue`]. A kind
 //! that this module does not know gives [`CustomDebugValue::Unknown`] with the
 //! raw bytes. The decoder does not drop or interpret such a value.
@@ -53,13 +53,47 @@
 //! the row, the blob offset and the kind GUID. A blob that ends inside a field
 //! gives [`ErrorKind::UnexpectedEof`](crate::ErrorKind::UnexpectedEof).
 
-/// Implement `IntoIterator` for a codec type and its reference through its
-/// `iter` method.
+/// Define an iterator type over the entries of a blob that its codec checked.
+macro_rules! entry_iter {
+    ($(#[$doc:meta])* $iter:ident => $item:ty) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug)]
+        pub struct $iter<'a>($crate::portable::custom::Entries<'a, $item>);
+
+        impl<'a> Iterator for $iter<'a> {
+            type Item = $item;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                self.0.next()
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl ExactSizeIterator for $iter<'_> {}
+
+        impl core::iter::FusedIterator for $iter<'_> {}
+    };
+}
+
+/// Define the iterator type `$iter` of a codec type, and implement `IntoIterator` for the
+/// codec type and its reference through its `iter` method. The `@into` form only implements
+/// `IntoIterator` for an iterator type that the codec module defines.
 macro_rules! iterable {
-    ($list:ident => $iter:ty) => {
+    ($list:ident => $iter:ident, $item:ty) => {
+        entry_iter!(
+            #[doc = concat!("An iterator over the entries of a [`", stringify!($list), "`].")]
+            $iter => $item
+        );
+
+        iterable!(@into $list => $iter, $item);
+    };
+    (@into $list:ident => $iter:ident, $item:ty) => {
         impl<'a> IntoIterator for $list<'a> {
-            type Item = <$iter as Iterator>::Item;
-            type IntoIter = $iter;
+            type Item = $item;
+            type IntoIter = $iter<'a>;
 
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
@@ -67,8 +101,8 @@ macro_rules! iterable {
         }
 
         impl<'a> IntoIterator for &$list<'a> {
-            type Item = <$iter as Iterator>::Item;
-            type IntoIter = $iter;
+            type Item = $item;
+            type IntoIter = $iter<'a>;
 
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
@@ -90,17 +124,22 @@ use core::fmt;
 use core::iter::FusedIterator;
 
 pub use compilation::{
-    CompilationMetadataReferences, CompilationOption, CompilationOptions, MetadataReference,
+    CompilationMetadataReferences, CompilationMetadataReferencesIter, CompilationOption,
+    CompilationOptions, CompilationOptionsIter, MetadataReference,
 };
-pub use documents::TypeDefinitionDocuments;
+pub use documents::{TypeDefinitionDocuments, TypeDefinitionDocumentsIter};
 pub use enc::{
-    EncLambdaAndClosureMap, EncLocalSlotMap, EncStateMachineStateMap, Lambda, LambdaClosure,
+    Closures, EncLambdaAndClosureMap, EncLocalSlotMap, EncLocalSlotMapIter,
+    EncStateMachineStateMap, EncStateMachineStateMapIter, Lambda, LambdaClosure, Lambdas,
     LocalSlot, MAX_LOCAL_SLOT_KIND, StateMachineState,
 };
-pub use locals::{DynamicFlagIter, DynamicLocalVariables, TupleElementNames};
+pub use locals::{
+    DynamicLocalVariables, DynamicLocalVariablesIter, TupleElementNames, TupleElementNamesIter,
+};
 pub use rows::{CustomDebugInformation, CustomDebugInformationIter};
 pub use state_machine::{
-    AsyncMethodSteppingInformation, AsyncStep, HoistedLocalScope, HoistedLocalScopes,
+    AsyncMethodSteppingInformation, AsyncMethodSteppingInformationIter, AsyncStep,
+    HoistedLocalScope, HoistedLocalScopes, HoistedLocalScopesIter,
 };
 
 use self::blob::{Reader, Writer, invalid};
@@ -294,9 +333,10 @@ impl<'a> Utf8Bytes<'a> {
 /// Edit and Continue map; the other codecs ignore it.
 type Read<'a, T> = fn(&mut Reader<'a>, i32) -> Result<T>;
 
-/// An iterator over the entries of a blob that its codec checked.
+/// An iterator over the entries of a blob that its codec checked. The public iterator type of
+/// each codec wraps it.
 #[derive(Clone, Debug)]
-pub struct Entries<'a, T> {
+struct Entries<'a, T> {
     /// The remaining entries.
     reader: Reader<'a>,
     /// The number of remaining entries.
@@ -399,64 +439,66 @@ pub enum CustomDebugValue<'a> {
     },
 }
 
-/// Decode the blob of a custom debug information value of `kind`.
-///
-/// # Errors
-///
-/// Return the error of the codec of `kind` if the blob is not valid. An
-/// unknown kind does not give an error.
-pub fn decode(kind: CustomDebugKind, blob: &[u8]) -> Result<CustomDebugValue<'_>> {
-    Ok(match kind {
-        CustomDebugKind::ASYNC_METHOD_STEPPING_INFORMATION => {
-            CustomDebugValue::AsyncMethodSteppingInformation(AsyncMethodSteppingInformation::parse(
-                blob,
-            )?)
-        }
-        CustomDebugKind::STATE_MACHINE_HOISTED_LOCAL_SCOPES => {
-            CustomDebugValue::StateMachineHoistedLocalScopes(HoistedLocalScopes::parse(blob)?)
-        }
-        CustomDebugKind::DYNAMIC_LOCAL_VARIABLES => {
-            CustomDebugValue::DynamicLocalVariables(DynamicLocalVariables::new(blob))
-        }
-        CustomDebugKind::TUPLE_ELEMENT_NAMES => {
-            CustomDebugValue::TupleElementNames(TupleElementNames::parse(blob)?)
-        }
-        CustomDebugKind::DEFAULT_NAMESPACE => CustomDebugValue::DefaultNamespace(Utf8Bytes(blob)),
-        CustomDebugKind::ENC_LOCAL_SLOT_MAP => {
-            CustomDebugValue::EncLocalSlotMap(EncLocalSlotMap::parse(blob)?)
-        }
-        CustomDebugKind::ENC_LAMBDA_AND_CLOSURE_MAP => {
-            CustomDebugValue::EncLambdaAndClosureMap(EncLambdaAndClosureMap::parse(blob)?)
-        }
-        CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP => {
-            CustomDebugValue::EncStateMachineStateMap(EncStateMachineStateMap::parse(blob)?)
-        }
-        CustomDebugKind::SOURCE_LINK => CustomDebugValue::SourceLink(Utf8Bytes(blob)),
-        CustomDebugKind::EMBEDDED_SOURCE => {
-            CustomDebugValue::EmbeddedSource(EmbeddedSource::parse(blob)?)
-        }
-        CustomDebugKind::COMPILATION_METADATA_REFERENCES => {
-            CustomDebugValue::CompilationMetadataReferences(CompilationMetadataReferences::parse(
-                blob,
-            )?)
-        }
-        CustomDebugKind::COMPILATION_OPTIONS => {
-            CustomDebugValue::CompilationOptions(CompilationOptions::parse(blob)?)
-        }
-        CustomDebugKind::TYPE_DEFINITION_DOCUMENTS => {
-            CustomDebugValue::TypeDefinitionDocuments(TypeDefinitionDocuments::parse(blob)?)
-        }
-        CustomDebugKind::PRIMARY_CONSTRUCTOR_INFORMATION => {
-            if !blob.is_empty() {
-                return Err(invalid("primary constructor information is not empty"));
+impl<'a> CustomDebugValue<'a> {
+    /// Decode the blob of a custom debug information value of `kind`.
+    ///
+    /// # Errors
+    ///
+    /// Return the error of the codec of `kind` if the blob is not valid. An
+    /// unknown kind does not give an error.
+    pub fn parse(kind: CustomDebugKind, blob: &'a [u8]) -> Result<Self> {
+        Ok(match kind {
+            CustomDebugKind::ASYNC_METHOD_STEPPING_INFORMATION => {
+                CustomDebugValue::AsyncMethodSteppingInformation(
+                    AsyncMethodSteppingInformation::parse(blob)?,
+                )
             }
-            CustomDebugValue::PrimaryConstructorInformation
-        }
-        _ => CustomDebugValue::Unknown { kind, value: blob },
-    })
-}
+            CustomDebugKind::STATE_MACHINE_HOISTED_LOCAL_SCOPES => {
+                CustomDebugValue::StateMachineHoistedLocalScopes(HoistedLocalScopes::parse(blob)?)
+            }
+            CustomDebugKind::DYNAMIC_LOCAL_VARIABLES => {
+                CustomDebugValue::DynamicLocalVariables(DynamicLocalVariables::parse(blob))
+            }
+            CustomDebugKind::TUPLE_ELEMENT_NAMES => {
+                CustomDebugValue::TupleElementNames(TupleElementNames::parse(blob)?)
+            }
+            CustomDebugKind::DEFAULT_NAMESPACE => {
+                CustomDebugValue::DefaultNamespace(Utf8Bytes(blob))
+            }
+            CustomDebugKind::ENC_LOCAL_SLOT_MAP => {
+                CustomDebugValue::EncLocalSlotMap(EncLocalSlotMap::parse(blob)?)
+            }
+            CustomDebugKind::ENC_LAMBDA_AND_CLOSURE_MAP => {
+                CustomDebugValue::EncLambdaAndClosureMap(EncLambdaAndClosureMap::parse(blob)?)
+            }
+            CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP => {
+                CustomDebugValue::EncStateMachineStateMap(EncStateMachineStateMap::parse(blob)?)
+            }
+            CustomDebugKind::SOURCE_LINK => CustomDebugValue::SourceLink(Utf8Bytes(blob)),
+            CustomDebugKind::EMBEDDED_SOURCE => {
+                CustomDebugValue::EmbeddedSource(EmbeddedSource::parse(blob)?)
+            }
+            CustomDebugKind::COMPILATION_METADATA_REFERENCES => {
+                CustomDebugValue::CompilationMetadataReferences(
+                    CompilationMetadataReferences::parse(blob)?,
+                )
+            }
+            CustomDebugKind::COMPILATION_OPTIONS => {
+                CustomDebugValue::CompilationOptions(CompilationOptions::parse(blob)?)
+            }
+            CustomDebugKind::TYPE_DEFINITION_DOCUMENTS => {
+                CustomDebugValue::TypeDefinitionDocuments(TypeDefinitionDocuments::parse(blob)?)
+            }
+            CustomDebugKind::PRIMARY_CONSTRUCTOR_INFORMATION => {
+                if !blob.is_empty() {
+                    return Err(invalid("primary constructor information is not empty"));
+                }
+                CustomDebugValue::PrimaryConstructorInformation
+            }
+            _ => CustomDebugValue::Unknown { kind, value: blob },
+        })
+    }
 
-impl CustomDebugValue<'_> {
     /// Return the kind GUID of the value.
     #[must_use]
     pub const fn kind(&self) -> CustomDebugKind {
@@ -485,59 +527,67 @@ impl CustomDebugValue<'_> {
         }
     }
 
-    /// Encode the value again from its decoded entries.
+    /// Encode the value again from its decoded entries, and append it to `out`.
     ///
     /// The result has the form that Roslyn writes. An unknown value, text and
-    /// an embedded source give their bytes without change.
+    /// an embedded source give their bytes without change. The encoders drop
+    /// the bytes that a decoder keeps but does not interpret, for example
+    /// [`EncStateMachineStateMap::trailing`].
     ///
     /// # Errors
     ///
     /// Return [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if
-    /// an allocation fails. A decoded value always has an encoding.
-    pub fn encode(&self) -> Result<Vec<u8>> {
+    /// an allocation fails. A decoded value always has an encoding. On error,
+    /// `out` does not change.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         match self {
             Self::AsyncMethodSteppingInformation(info) => {
-                AsyncMethodSteppingInformation::encode(info.catch_handler_offset(), info.iter())
+                AsyncMethodSteppingInformation::encode_parts(
+                    info.catch_handler_offset(),
+                    info.iter(),
+                    out,
+                )
             }
             Self::StateMachineHoistedLocalScopes(scopes) => {
-                HoistedLocalScopes::encode(scopes.iter())
+                HoistedLocalScopes::encode_parts(scopes.iter(), out)
             }
-            Self::DynamicLocalVariables(flags) => DynamicLocalVariables::encode(flags.iter()),
+            Self::DynamicLocalVariables(flags) => {
+                DynamicLocalVariables::encode_parts(flags.iter(), out)
+            }
             Self::TupleElementNames(names) => {
-                TupleElementNames::encode(names.iter().map(|name| name.as_bytes()))
+                TupleElementNames::encode_parts(names.iter().map(|name| name.as_bytes()), out)
             }
-            Self::EncLocalSlotMap(map) => EncLocalSlotMap::encode(map.iter()),
-            Self::EncLambdaAndClosureMap(map) => {
-                EncLambdaAndClosureMap::encode(map.method_ordinal(), map.closures(), map.lambdas())
+            Self::EncLocalSlotMap(map) => EncLocalSlotMap::encode_parts(map.iter(), out),
+            Self::EncLambdaAndClosureMap(map) => EncLambdaAndClosureMap::encode_parts(
+                map.method_ordinal(),
+                map.closures(),
+                map.lambdas(),
+                out,
+            ),
+            Self::EncStateMachineStateMap(map) => {
+                EncStateMachineStateMap::encode_parts(map.iter(), out)
             }
-            Self::EncStateMachineStateMap(map) => EncStateMachineStateMap::encode(map.iter()),
-            Self::DefaultNamespace(text) | Self::SourceLink(text) => copy(text.as_bytes()),
-            Self::EmbeddedSource(source) => {
-                let (format, data) = match *source {
-                    EmbeddedSource::Raw(data) => (0, data),
-                    EmbeddedSource::Deflate { size, data } => (size, data),
-                };
-                let mut writer = Writer::new();
-                writer.u32(format)?;
-                writer.bytes(data)?;
-                Ok(writer.finish())
-            }
+            Self::DefaultNamespace(text) | Self::SourceLink(text) => copy(text.as_bytes(), out),
+            Self::EmbeddedSource(source) => source.encode(out),
             Self::CompilationMetadataReferences(references) => {
-                CompilationMetadataReferences::encode(references.iter())
+                CompilationMetadataReferences::encode_parts(references.iter(), out)
             }
-            Self::CompilationOptions(options) => CompilationOptions::encode(options.iter()),
+            Self::CompilationOptions(options) => {
+                CompilationOptions::encode_parts(options.iter(), out)
+            }
             Self::TypeDefinitionDocuments(documents) => {
-                TypeDefinitionDocuments::encode(documents.iter())
+                TypeDefinitionDocuments::encode_parts(documents.iter(), out)
             }
-            Self::PrimaryConstructorInformation => Ok(Vec::new()),
-            Self::Unknown { value, .. } => copy(value),
+            Self::PrimaryConstructorInformation => Ok(()),
+            Self::Unknown { value, .. } => copy(value, out),
         }
     }
 }
 
-/// Copy `bytes` into a new blob.
-fn copy(bytes: &[u8]) -> Result<Vec<u8>> {
-    let mut writer = Writer::new();
+/// Append `bytes` to `out`.
+fn copy(bytes: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    let mut writer = Writer::append(out);
     writer.bytes(bytes)?;
-    Ok(writer.finish())
+    writer.finish();
+    Ok(())
 }

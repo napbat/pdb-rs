@@ -94,7 +94,7 @@ impl CodedIndex {
         let tag = self
             .tables()
             .iter()
-            .position(|table| table.number() == token.table())?;
+            .position(|&table| Some(table) == token.table())?;
         let row = token.row().checked_mul(1 << self.tag_bits())?;
         Some(row | u32::try_from(tag).ok()?)
     }

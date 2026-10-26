@@ -5,9 +5,9 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
-use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue, decode};
+use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue};
 
-use crate::ok;
+use crate::{encoded, ok};
 
 /// The most items that one walk visits, to bound the time of one run.
 const MAX_ITEMS: usize = 1 << 14;
@@ -48,17 +48,18 @@ pub fn value(data: &[u8]) {
 
 /// Decode `blob` as a value of `kind`, and check that encode and decode agree.
 fn round_trip(kind: CustomDebugKind, blob: &[u8]) {
-    let Some(value) = ok(decode(kind, blob)) else {
+    let Some(value) = ok(CustomDebugValue::parse(kind, blob)) else {
         return;
     };
     assert_eq!(value.kind(), kind);
     visit(&value);
-    let Some(encoded) = ok(value.encode()) else {
+    let Some(encoded) = ok(encoded(|out| value.encode(out))) else {
         return;
     };
-    let again = decode(kind, &encoded).expect("an encoded value decodes");
+    let again = CustomDebugValue::parse(kind, &encoded).expect("an encoded value decodes");
     assert_eq!(again.kind(), kind);
-    let twice = again.encode().expect("a decoded value encodes");
+    let mut twice = Vec::new();
+    again.encode(&mut twice).expect("a decoded value encodes");
     assert_eq!(twice, encoded, "the encoding of {kind} is not stable");
 }
 
@@ -90,7 +91,7 @@ fn visit(value: &CustomDebugValue<'_>) {
             let _ = (map.closures().count(), map.lambdas().count());
         }
         CustomDebugValue::EncStateMachineStateMap(map) => {
-            let _ = (map.syntax_offset_baseline(), map.padding());
+            let _ = (map.syntax_offset_baseline(), map.trailing());
             assert_eq!(map.iter().count(), map.len());
         }
         CustomDebugValue::CompilationMetadataReferences(references) => {

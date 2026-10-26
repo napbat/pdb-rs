@@ -24,9 +24,13 @@ use crate::Result;
 const DEFAULT_BASELINE: i32 = -1;
 
 /// The closure of a lambda.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+///
+/// The default value is [`LambdaClosure::ThisOnly`], the value of the stored
+/// ordinal 0.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum LambdaClosure {
     /// The lambda captures only `this`.
+    #[default]
     ThisOnly,
     /// The lambda captures nothing.
     Static,
@@ -35,13 +39,25 @@ pub enum LambdaClosure {
 }
 
 /// One lambda of an Edit and Continue lambda and closure map.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Lambda {
     /// The syntax offset of the lambda.
     pub syntax_offset: i32,
     /// The closure of the lambda.
     pub closure: LambdaClosure,
 }
+
+entry_iter!(
+    /// An iterator over the syntax offsets of the closures of an
+    /// [`EncLambdaAndClosureMap`].
+    Closures => i32
+);
+
+entry_iter!(
+    /// An iterator over the lambdas of an [`EncLambdaAndClosureMap`].
+    Lambdas => Lambda
+);
 
 /// An Edit and Continue lambda and closure map.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -130,22 +146,28 @@ impl<'a> EncLambdaAndClosureMap<'a> {
 
     /// Return an iterator over the syntax offsets of the closures.
     #[must_use]
-    pub const fn closures(&self) -> Entries<'a, i32> {
-        Entries::new(
+    pub const fn closures(&self) -> Closures<'a> {
+        Closures(Entries::new(
             self.closures,
             self.closure_count,
             self.baseline,
             read_closure,
-        )
+        ))
     }
 
     /// Return an iterator over the lambdas.
     #[must_use]
-    pub const fn lambdas(&self) -> Entries<'a, Lambda> {
-        Entries::new(self.lambdas, self.lambda_count, self.baseline, read_lambda)
+    pub const fn lambdas(&self) -> Lambdas<'a> {
+        Lambdas(Entries::new(
+            self.lambdas,
+            self.lambda_count,
+            self.baseline,
+            read_lambda,
+        ))
     }
 
-    /// Encode a lambda and closure map blob as Roslyn does.
+    /// Encode a lambda and closure map blob as Roslyn does, and append it to
+    /// `out`.
     ///
     /// The baseline is the smallest of -1 and all syntax offsets.
     ///
@@ -156,11 +178,14 @@ impl<'a> EncLambdaAndClosureMap<'a> {
     ///   lambda is not smaller than the closure count.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a
     ///   value does not fit in a compressed integer, or if an allocation fails.
-    pub fn encode(
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
         method_ordinal: i32,
         closures: impl IntoIterator<Item = i32, IntoIter: Clone>,
         lambdas: impl IntoIterator<Item = Lambda, IntoIter: Clone>,
-    ) -> Result<Vec<u8>> {
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         if method_ordinal < -1 {
             return Err(invalid("lambda map method ordinal is below -1"));
         }
@@ -172,7 +197,7 @@ impl<'a> EncLambdaAndClosureMap<'a> {
             .fold(DEFAULT_BASELINE, i32::min);
         let count = u32::try_from(closures.clone().count())
             .map_err(|_| too_large("lambda map has too many closures"))?;
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         writer.unsigned_wide(i64::from(method_ordinal) + 1)?;
         write_baseline(&mut writer, baseline)?;
         writer.unsigned(count)?;
@@ -193,7 +218,8 @@ impl<'a> EncLambdaAndClosureMap<'a> {
             write_syntax_offset(&mut writer, lambda.syntax_offset, baseline)?;
             writer.unsigned(ordinal)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 

@@ -157,18 +157,18 @@ impl PdbBuilder {
     pub fn add_document(&mut self, document: DocumentInfo) -> Result<DocumentId> {
         let id = next(self.documents.len(), TableId::DOCUMENT)? + 1;
         self.documents.push(document);
-        Ok(DocumentId::new(id))
+        Ok(DocumentId(id))
     }
 
     /// Return a document.
     #[must_use]
     pub fn document(&self, id: DocumentId) -> Option<&DocumentInfo> {
-        self.documents.get(index(id.get())?)
+        self.documents.get(index(id.0)?)
     }
 
     /// Return a document for a change.
     pub fn document_mut(&mut self, id: DocumentId) -> Option<&mut DocumentInfo> {
-        self.documents.get_mut(index(id.get())?)
+        self.documents.get_mut(index(id.0)?)
     }
 
     /// Return the number of documents.
@@ -182,37 +182,37 @@ impl PdbBuilder {
     /// The plan writes a `MethodDebugInformation` row for each external `MethodDef` row if a
     /// method has sequence points.
     pub fn set_method(&mut self, method: MethodDefId, info: MethodInfo) -> Option<MethodInfo> {
-        self.methods.insert(method.get(), info)
+        self.methods.insert(method.0, info)
     }
 
     /// Remove the sequence points of a method and return them.
     pub fn remove_method(&mut self, method: MethodDefId) -> Option<MethodInfo> {
-        self.methods.remove(&method.get())
+        self.methods.remove(&method.0)
     }
 
     /// Return the sequence points of a method.
     #[must_use]
     pub fn method(&self, method: MethodDefId) -> Option<&MethodInfo> {
-        self.methods.get(&method.get())
+        self.methods.get(&method.0)
     }
 
     /// Return the sequence points of a method for a change.
     pub fn method_mut(&mut self, method: MethodDefId) -> Option<&mut MethodInfo> {
-        self.methods.get_mut(&method.get())
+        self.methods.get_mut(&method.0)
     }
 
     /// Return the methods with sequence points, in `MethodDef` order.
     pub fn methods(&self) -> impl Iterator<Item = (MethodDefId, &MethodInfo)> {
         self.methods
             .iter()
-            .map(|(&method, info)| (MethodDefId::new(method), info))
+            .map(|(&method, info)| (MethodDefId(method), info))
     }
 
     /// Return the methods with sequence points for a change, in `MethodDef` order.
     pub fn methods_mut(&mut self) -> impl Iterator<Item = (MethodDefId, &mut MethodInfo)> {
         self.methods
             .iter_mut()
-            .map(|(&method, info)| (MethodDefId::new(method), info))
+            .map(|(&method, info)| (MethodDefId(method), info))
     }
 
     /// Add a local scope and return its handle.
@@ -324,18 +324,18 @@ impl PdbBuilder {
     pub fn add_import_scope(&mut self, scope: ImportScopeInfo) -> Result<ImportScopeId> {
         let id = next(self.import_scopes.len(), TableId::IMPORT_SCOPE)? + 1;
         self.import_scopes.push(scope);
-        Ok(ImportScopeId::new(id))
+        Ok(ImportScopeId(id))
     }
 
     /// Return an import scope.
     #[must_use]
     pub fn import_scope(&self, id: ImportScopeId) -> Option<&ImportScopeInfo> {
-        self.import_scopes.get(index(id.get())?)
+        self.import_scopes.get(index(id.0)?)
     }
 
     /// Return an import scope for a change.
     pub fn import_scope_mut(&mut self, id: ImportScopeId) -> Option<&mut ImportScopeInfo> {
-        self.import_scopes.get_mut(index(id.get())?)
+        self.import_scopes.get_mut(index(id.0)?)
     }
 
     /// Add a state machine method: the `MoveNext` method and the kickoff method.
@@ -420,7 +420,7 @@ impl PdbBuilder {
     ///   point document that the builder does not have, or a custom debug information parent
     ///   that is not a row of a `HasCustomDebugInformation` table.
     /// - [`ErrorKind::InvalidFormat`] if a sequence point list, a name or an import does not
-    ///   encode (see [`encode_sequence_points`](crate::portable::debug::encode_sequence_points)).
+    ///   encode (see [`SequencePoints::encode_parts`](crate::portable::debug::SequencePoints::encode_parts)).
     /// - The errors of [`PdbParts::plan`].
     ///
     /// The errors have a portable location.

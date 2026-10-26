@@ -31,7 +31,7 @@ use crate::{Error, ErrorKind, Result};
 ///
 /// The report keeps one range for each run of allocated pages without a reference. The number
 /// of ranges is at most half the declared page count, rounded up.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FreePageMapReport {
     active: u32,
     old_directory_free: u32,

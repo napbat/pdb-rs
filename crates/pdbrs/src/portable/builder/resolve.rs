@@ -6,7 +6,7 @@ use core::cmp::Reverse;
 
 use super::{CustomDebugParent, ImportInfo, PdbBuilder};
 use crate::PortableLocation;
-use crate::portable::debug::{DocumentName, Import, encode_imports, encode_sequence_points};
+use crate::portable::debug::{DocumentName, Import, Imports, SequencePoints};
 use crate::portable::metadata::{
     BlobOffset, CodedIndex, CustomDebugInformationRow, DocumentId, DocumentRow, GuidIndex,
     LocalConstantId, LocalConstantRow, LocalScopeRow, LocalVariableId, LocalVariableRow,
@@ -81,7 +81,7 @@ impl Heaps {
 
     /// Add an optional GUID.
     fn guid(&mut self, guid: Option<[u8; 16]>) -> Result<GuidIndex> {
-        guid.map_or(Ok(GuidIndex::new(0)), |guid| self.guids.add(guid))
+        guid.map_or(Ok(GuidIndex(0)), |guid| self.guids.add(guid))
     }
 }
 
@@ -158,6 +158,7 @@ pub(super) fn resolve(builder: &PdbBuilder, base: Option<Base>) -> Result<Resolv
 /// Make the `Document` rows.
 fn documents(builder: &PdbBuilder, heaps: &mut Heaps) -> Result<Vec<DocumentRow>> {
     let mut rows = Vec::with_capacity(builder.documents.len());
+    let mut name = Vec::new();
     for (row, document) in builder.documents.iter().enumerate() {
         let location = cell(TableId::DOCUMENT, row, "Name");
         let split = crate::portable::debug::split_document_name(&document.name);
@@ -165,7 +166,8 @@ fn documents(builder: &PdbBuilder, heaps: &mut Heaps) -> Result<Vec<DocumentRow>
         let parts = split
             .map(|part| heaps.blobs.add(part))
             .collect::<Result<Vec<_>>>()?;
-        let name = DocumentName::encode(Some(separator), &parts)
+        name.clear();
+        DocumentName::encode_parts(Some(separator), &parts, &mut name)
             .map_err(|error| error.with_portable(location))?;
         rows.push(DocumentRow {
             name: heaps.blobs.add(&name)?,
@@ -200,13 +202,13 @@ fn methods(builder: &PdbBuilder, heaps: &mut Heaps) -> Result<Vec<MethodDebugInf
         let row = usize::try_from(method - 1).unwrap_or(usize::MAX);
         let Some(info) = builder.methods.get(&method) else {
             rows.push(MethodDebugInformationRow {
-                document: DocumentId::new(0),
-                sequence_points: BlobOffset::new(0),
+                document: DocumentId(0),
+                sequence_points: BlobOffset(0),
             });
             continue;
         };
         let unknown = info.sequence_points.iter().any(|point| {
-            usize::try_from(point.document.get()).map_or(true, |document| document > documents)
+            usize::try_from(point.document.0).map_or(true, |document| document > documents)
         });
         if unknown {
             return Err(reference(
@@ -216,7 +218,7 @@ fn methods(builder: &PdbBuilder, heaps: &mut Heaps) -> Result<Vec<MethodDebugInf
                 "a sequence point document is not a document of the builder",
             ));
         }
-        let encoded = encode_sequence_points(
+        let encoded = SequencePoints::encode_parts(
             info.local_signature,
             info.local_signature_form,
             &info.sequence_points,
@@ -293,8 +295,8 @@ fn scopes(builder: &PdbBuilder, heaps: &mut Heaps, tables: &mut DebugTables) -> 
         tables.local_scopes.push(LocalScopeRow {
             method: scope.method,
             import_scope: scope.import_scope,
-            variable_list: LocalVariableId::new(variable_list),
-            constant_list: LocalConstantId::new(constant_list),
+            variable_list: LocalVariableId(variable_list),
+            constant_list: LocalConstantId(constant_list),
             start_offset: scope.start_offset,
             length: scope.length,
         });
@@ -317,13 +319,15 @@ fn missing_scope(table: TableId, index: usize) -> Error {
 /// Make the `ImportScope` rows.
 fn import_scopes(builder: &PdbBuilder, heaps: &mut Heaps) -> Result<Vec<ImportScopeRow>> {
     let mut rows = Vec::with_capacity(builder.import_scopes.len());
+    let mut blob = Vec::new();
     for (row, scope) in builder.import_scopes.iter().enumerate() {
         let imports = scope
             .imports
             .iter()
             .map(|import| encode_import(import, &mut heaps.blobs))
             .collect::<Result<Vec<_>>>()?;
-        let blob = encode_imports(&imports)
+        blob.clear();
+        Imports::encode_parts(&imports, &mut blob)
             .map_err(|error| error.with_portable(cell(TableId::IMPORT_SCOPE, row, "Imports")))?;
         rows.push(ImportScopeRow {
             parent: scope.parent,
@@ -395,22 +399,22 @@ impl Rows<'_> {
         let local = |rows: &[u32], index: usize| rows.get(index).copied();
         let (table, row) = match parent {
             CustomDebugParent::Metadata(token) => {
-                let table = TableId::new(token.table()).filter(|table| table.is_type_system())?;
+                let table = token.table().filter(|table| table.is_type_system())?;
                 (table, Some(token.row()))
             }
             CustomDebugParent::Document(id) => (
                 TableId::DOCUMENT,
-                usize::try_from(id.get())
+                usize::try_from(id.0)
                     .ok()
                     .filter(|&row| row <= self.documents)
-                    .map(|_| id.get()),
+                    .map(|_| id.0),
             ),
             CustomDebugParent::ImportScope(id) => (
                 TableId::IMPORT_SCOPE,
-                usize::try_from(id.get())
+                usize::try_from(id.0)
                     .ok()
                     .filter(|&row| row <= self.import_scopes)
-                    .map(|_| id.get()),
+                    .map(|_| id.0),
             ),
             CustomDebugParent::LocalScope(handle) => {
                 (TableId::LOCAL_SCOPE, local(self.scopes, handle.index()))

@@ -305,15 +305,69 @@ impl<'a> AnnotationStrings<'a> {
     }
 
     /// Return an iterator over the strings, without their terminators.
-    pub fn iter(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
+    #[must_use]
+    pub fn iter(&self) -> AnnotationStringsIter<'a> {
         let strings = self.strings;
-        strings
-            .strip_suffix(&[0])
-            .unwrap_or(strings)
-            .split(|&byte| byte == 0)
-            .take(usize::from(self.count))
+        AnnotationStringsIter {
+            rest: Some(strings.strip_suffix(&[0]).unwrap_or(strings)),
+            left: usize::from(self.count),
+        }
     }
 }
+
+impl<'a> IntoIterator for AnnotationStrings<'a> {
+    type Item = &'a [u8];
+    type IntoIter = AnnotationStringsIter<'a>;
+
+    fn into_iter(self) -> AnnotationStringsIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &AnnotationStrings<'a> {
+    type Item = &'a [u8];
+    type IntoIter = AnnotationStringsIter<'a>;
+
+    fn into_iter(self) -> AnnotationStringsIter<'a> {
+        self.iter()
+    }
+}
+
+/// An iterator over the strings of an [`AnnotationStrings`] record, without their terminators.
+///
+/// The strings are separated by NUL bytes. The iterator gives at most the count of the record.
+#[derive(Clone, Debug)]
+pub struct AnnotationStringsIter<'a> {
+    /// The bytes after the last returned separator, or `None` after the last string.
+    rest: Option<&'a [u8]>,
+    /// The number of strings that the iterator can still return.
+    left: usize,
+}
+
+impl<'a> Iterator for AnnotationStringsIter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        if self.left == 0 {
+            return None;
+        }
+        let rest = self.rest?;
+        self.left -= 1;
+        if let Some(end) = rest.iter().position(|&byte| byte == 0) {
+            self.rest = Some(&rest[end + 1..]);
+            Some(&rest[..end])
+        } else {
+            self.rest = None;
+            Some(rest)
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(if self.rest.is_some() { self.left } else { 0 }))
+    }
+}
+
+impl core::iter::FusedIterator for AnnotationStringsIter<'_> {}
 
 /// A hot-patch function record ([`S_HOTPATCHFUNC`]).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]

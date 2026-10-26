@@ -25,8 +25,8 @@ fn default_metadata_opens_with_its_headers() {
     }
     let header = pdb.pdb_stream();
     assert_eq!(header.id()[0], 1);
-    assert_eq!(header.entry_point(), Some(MethodDefId::new(1)));
-    assert_eq!(header.entry_point_token().get(), 0x0600_0001);
+    assert_eq!(header.entry_point(), Some(MethodDefId(1)));
+    assert_eq!(header.entry_point_token().raw(), 0x0600_0001);
     let external: Vec<(TableId, u32)> = header.external_tables().collect();
     assert_eq!(external, [(TableId::MODULE, 1), (TableId::METHOD_DEF, 3)]);
     assert_eq!(pdb.identity().guid()[0], 1);
@@ -156,10 +156,8 @@ fn streams_after_the_input_and_long_names_are_rejected() {
 #[test]
 fn the_stream_count_has_a_limit() {
     let bytes = Builder::default().build();
-    let options = ReadOptions {
-        max_streams: 5,
-        ..ReadOptions::default()
-    };
+    let options = ReadOptions::default().with_max_streams(5);
+    assert_eq!(options.max_streams(), 5);
     let error = Pdb::with_options(bytes.as_slice(), options).unwrap_err();
     expect(&error, ErrorKind::LimitExceeded, MetadataStream::Root);
 }

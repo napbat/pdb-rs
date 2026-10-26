@@ -7,10 +7,18 @@ use pdbrs::portable::debug::{
 };
 use pdbrs::portable::metadata::{MetadataToken, TableId};
 
-use crate::{every_prefix_fails, expect};
+use crate::{encoded, every_prefix_fails, expect};
 
 fn token(table: TableId, row: u32) -> MetadataToken {
     MetadataToken::new(table, row).unwrap()
+}
+
+/// Return a custom modifier.
+fn modifier(required: bool, modifier: MetadataToken) -> CustomModifier {
+    let mut custom = CustomModifier::default();
+    custom.required = required;
+    custom.modifier = modifier;
+    custom
 }
 
 /// Decode `blob`, check the value, encode it again and compare the bytes.
@@ -18,17 +26,15 @@ fn token(table: TableId, row: u32) -> MetadataToken {
 /// For a fixed-size value, each strict prefix of the blob is truncated. An enum or general
 /// value has optional trailing parts, so a prefix can be a valid signature.
 fn round_trip(blob: &[u8], value: ConstantValue<'_>) {
-    let signature = LocalConstantSignature::decode(blob).unwrap();
+    let signature = LocalConstantSignature::parse(blob).unwrap();
     assert_eq!(signature.value(), value, "{blob:02x?}");
     let modifiers: Vec<_> = signature.modifiers().collect();
     assert_eq!(
-        LocalConstantSignature::encode(&modifiers, &value).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&modifiers, &value, out)).unwrap(),
         blob
     );
     if matches!(value, ConstantValue::Primitive(_) | ConstantValue::Object) {
-        every_prefix_fails(blob, |blob| {
-            LocalConstantSignature::decode(blob).map(|_| ())
-        });
+        every_prefix_fails(blob, |blob| LocalConstantSignature::parse(blob).map(|_| ()));
     }
 }
 
@@ -64,32 +70,32 @@ fn every_primitive_type_code_round_trips() {
 
 #[test]
 fn strings_round_trip_with_null_and_empty_values() {
-    let null = LocalConstantSignature::decode(&[0x0e, 0xff]).unwrap();
+    let null = LocalConstantSignature::parse(&[0x0e, 0xff]).unwrap();
     assert_eq!(
         null.value(),
         ConstantValue::Primitive(PrimitiveConstant::String(None))
     );
     let blob = [0x0e, b'h', 0, b'i', 0];
-    let text = LocalConstantSignature::decode(&blob).unwrap();
+    let text = LocalConstantSignature::parse(&blob).unwrap();
     assert_eq!(
         text.value(),
         ConstantValue::Primitive(PrimitiveConstant::String(Some(&blob[1..])))
     );
     assert_eq!(
-        LocalConstantSignature::encode(&[], &text.value()).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&[], &text.value(), out)).unwrap(),
         blob
     );
-    let empty = LocalConstantSignature::decode(&[0x0e]).unwrap();
+    let empty = LocalConstantSignature::parse(&[0x0e]).unwrap();
     assert_eq!(
         empty.value(),
         ConstantValue::Primitive(PrimitiveConstant::String(Some(&[])))
     );
     assert_eq!(
-        LocalConstantSignature::encode(&[], &null.value()).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&[], &null.value(), out)).unwrap(),
         [0x0e, 0xff]
     );
     expect(
-        &LocalConstantSignature::decode(&[0x0e, b'h', 0, b'i']).unwrap_err(),
+        &LocalConstantSignature::parse(&[0x0e, b'h', 0, b'i']).unwrap_err(),
         ErrorKind::InvalidFormat,
         "odd size",
     );
@@ -115,7 +121,7 @@ fn enum_constants_have_an_external_type() {
     );
     // R8 and STRING cannot be enum types.
     expect(
-        &LocalConstantSignature::decode(&[0x0c, 0, 0, 0x80, 0x3f, 0x1d]).unwrap_err(),
+        &LocalConstantSignature::parse(&[0x0c, 0, 0, 0x80, 0x3f, 0x1d]).unwrap_err(),
         ErrorKind::InvalidFormat,
         "after the value",
     );
@@ -124,7 +130,7 @@ fn enum_constants_have_an_external_type() {
         enum_type: token(TableId::TYPE_REF, 1),
     };
     expect(
-        &LocalConstantSignature::encode(&[], &value).unwrap_err(),
+        &encoded(|out| LocalConstantSignature::encode_parts(&[], &value, out)).unwrap_err(),
         ErrorKind::InvalidFormat,
         "R4",
     );
@@ -154,29 +160,27 @@ fn general_constants_decode_by_value_size() {
     );
     // VALUETYPE TypeRef 3 with the Decimal -12.75 (sign bit, scale 2, 1275).
     let blob = [0x11, 0x0d, 0x82, 0xfb, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut decimal = Decimal::default();
+    decimal.negative = true;
+    decimal.scale = 2;
+    decimal.low = 1275;
     round_trip(
         &blob,
         ConstantValue::General {
             value_type: true,
             constant_type: token(TableId::TYPE_REF, 3),
-            value: GeneralValue::Decimal(Decimal {
-                negative: true,
-                scale: 2,
-                low: 1275,
-                mid: 0,
-                high: 0,
-            }),
+            value: GeneralValue::Decimal(decimal),
         },
     );
     let mut scale = blob;
     scale[2] = 29;
     expect(
-        &LocalConstantSignature::decode(&scale).unwrap_err(),
+        &LocalConstantSignature::parse(&scale).unwrap_err(),
         ErrorKind::InvalidFormat,
         "scale",
     );
     expect(
-        &LocalConstantSignature::decode(&[0x12, 0x09, 0x01, 0x02]).unwrap_err(),
+        &LocalConstantSignature::parse(&[0x12, 0x09, 0x01, 0x02]).unwrap_err(),
         ErrorKind::InvalidFormat,
         "general value",
     );
@@ -187,19 +191,13 @@ fn general_constants_decode_by_value_size() {
 fn custom_modifiers_come_before_the_value() {
     // CMOD_REQD TypeRef 1, CMOD_OPT TypeDef 2, then I2 7.
     let blob = [0x1f, 0x05, 0x20, 0x08, 0x06, 0x07, 0x00];
-    let signature = LocalConstantSignature::decode(&blob).unwrap();
+    let signature = LocalConstantSignature::parse(&blob).unwrap();
     let modifiers: Vec<_> = signature.modifiers().collect();
     assert_eq!(
         modifiers,
         [
-            CustomModifier {
-                required: true,
-                modifier: token(TableId::TYPE_REF, 1),
-            },
-            CustomModifier {
-                required: false,
-                modifier: token(TableId::TYPE_DEF, 2),
-            },
+            modifier(true, token(TableId::TYPE_REF, 1)),
+            modifier(false, token(TableId::TYPE_DEF, 2)),
         ]
     );
     round_trip(&blob, ConstantValue::Primitive(PrimitiveConstant::I2(7)));
@@ -228,17 +226,17 @@ fn invalid_signatures_give_errors() {
         (&[0x08, 0x05, 0x00], ErrorKind::UnexpectedEof, "truncated"),
     ] {
         expect(
-            &LocalConstantSignature::decode(blob).unwrap_err(),
+            &LocalConstantSignature::parse(blob).unwrap_err(),
             kind,
             text,
         );
     }
-    let modifier = [CustomModifier {
-        required: true,
-        modifier: token(TableId::METHOD_DEF, 1),
-    }];
+    let modifier = [modifier(true, token(TableId::METHOD_DEF, 1))];
     expect(
-        &LocalConstantSignature::encode(&modifier, &ConstantValue::Object).unwrap_err(),
+        &encoded(|out| {
+            LocalConstantSignature::encode_parts(&modifier, &ConstantValue::Object, out)
+        })
+        .unwrap_err(),
         ErrorKind::InvalidFormat,
         "TypeDef, TypeRef or TypeSpec",
     );

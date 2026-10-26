@@ -150,15 +150,17 @@ fn decodes_the_fixture_md2_attribute() {
         panic!("expected a state machine state map");
     };
     assert_eq!(states.as_bytes(), unhex("0300002b02530478"));
-    let state = |state_number, syntax_offset| StateMachineState {
-        state_number,
-        syntax_offset,
+    let state = |state_number, syntax_offset| {
+        let mut state = StateMachineState::default();
+        state.state_number = state_number;
+        state.syntax_offset = syntax_offset;
+        state
     };
     assert_eq!(
         states.iter().collect::<Vec<_>>(),
         [state(0, 43), state(1, 83), state(2, 120)]
     );
-    assert_eq!(states.padding(), []);
+    assert_eq!(states.trailing(), []);
 }
 
 #[test]
@@ -176,9 +178,9 @@ fn decodes_the_fixture_async_method_info() {
         .iter()
         .map(|step| {
             (
-                step.yield_offset.get(),
-                step.resume_method.get(),
-                step.resume_offset.get(),
+                step.yield_offset.0,
+                step.resume_method.raw(),
+                step.resume_offset.0,
             )
         })
         .collect();
@@ -424,7 +426,7 @@ fn decodes_hoisted_local_scopes() {
         };
         let scopes: Vec<_> = scopes
             .iter()
-            .map(|scope| (scope.start.get(), scope.end.get()))
+            .map(|scope| (scope.start.0, scope.end.0))
             .collect();
         assert_eq!(scopes, [(0, 0), (5, 9)]);
     });
@@ -544,7 +546,7 @@ fn decodes_tuple_element_names() {
         assert_eq!(entries[1].slot, -1);
         assert_eq!(
             (entries[1].scope_start, entries[1].scope_end),
-            (IlOffset::new(2), IlOffset::new(10))
+            (IlOffset(2), IlOffset(10))
         );
         assert_eq!(entries[1].name, b"c");
     });
@@ -592,13 +594,10 @@ fn decodes_edit_and_continue_records_through_the_shared_codecs() {
         };
         assert_eq!(map.method_ordinal(), 2);
         assert_eq!(map.closures().collect::<Vec<_>>(), [10]);
-        assert_eq!(
-            map.lambdas().collect::<Vec<_>>(),
-            [Lambda {
-                syntax_offset: 20,
-                closure: LambdaClosure::Closure(0)
-            }]
-        );
+        let mut lambda = Lambda::default();
+        lambda.syntax_offset = 20;
+        lambda.closure = LambdaClosure::Closure(0);
+        assert_eq!(map.lambdas().collect::<Vec<_>>(), [lambda]);
     });
     // The shared codecs report their errors through the native record.
     assert_eq!(decode_error(6, &[0x01]), ErrorKind::UnexpectedEof);
@@ -627,13 +626,13 @@ fn async_info(catch: u32, steps: &[[u32; 3]]) -> Vec<u8> {
 fn decodes_async_method_info() {
     let value = async_info(0x298, &[[0x19a, 0x0600_004f, 0x1b8]]);
     let info = AsyncMethodInfo::parse(&value).unwrap();
-    assert_eq!(info.catch_handler_offset, Some(IlOffset::new(0x298)));
+    assert_eq!(info.catch_handler_offset, Some(IlOffset(0x298)));
     let step = info.steps.iter().next().unwrap();
     assert_eq!(
         (
-            step.yield_offset.get(),
-            step.resume_method.get(),
-            step.resume_offset.get()
+            step.yield_offset.0,
+            step.resume_method.raw(),
+            step.resume_offset.0
         ),
         (0x19a, 0x0600_004f, 0x1b8)
     );

@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use crate::Result;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::metadata::{MetadataToken, TableId};
+use crate::portable::metadata::MetadataToken;
 
 /// The options of [`Pdb::validate_debug`].
 ///
@@ -109,6 +109,7 @@ pub enum Outcome {
 
 /// One rule and its result.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct RuleReport {
     /// The rule.
     pub rule: Rule,
@@ -117,7 +118,7 @@ pub struct RuleReport {
 }
 
 /// The report of a successful [`Pdb::validate_debug`].
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct ValidationReport {
     rules: Vec<RuleReport>,
 }
@@ -194,7 +195,7 @@ impl<S: ReadAt> Pdb<S> {
 /// Return `true` if the row of an external token exists: it is not nil and at most the row
 /// count of its table in the `#Pdb` stream.
 fn external_exists<S: ReadAt>(pdb: &Pdb<S>, token: MetadataToken) -> bool {
-    TableId::new(token.table()).is_some_and(|table| {
+    token.table().is_some_and(|table| {
         token.row() != 0 && token.row() <= pdb.pdb_stream().external_row_count(table)
     })
 }

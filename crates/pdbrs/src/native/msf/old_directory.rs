@@ -121,7 +121,7 @@ impl<'a> OldDirectory<'a> {
 }
 
 /// One stream of a previous stream directory.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OldStream<'a> {
     size: u32,
     pages: &'a [u8],

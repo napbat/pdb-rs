@@ -2,12 +2,12 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{
-    self, CustomDebugKind, CustomDebugValue, EncLambdaAndClosureMap, EncLocalSlotMap,
+    CustomDebugKind, CustomDebugValue, EncLambdaAndClosureMap, EncLocalSlotMap,
     EncStateMachineStateMap, Lambda, LambdaClosure, LocalSlot, MAX_LOCAL_SLOT_KIND,
     StateMachineState,
 };
 
-use super::{error, round_trip};
+use super::{encoded, error, round_trip};
 
 /// Return a variable slot.
 const fn variable(kind: u8, syntax_offset: i32, ordinal: Option<u32>) -> LocalSlot {
@@ -61,14 +61,14 @@ fn decodes_local_slot_maps() {
 #[test]
 fn encodes_local_slot_maps_as_roslyn() {
     // A baseline that is not necessary decodes, and encodes without it.
-    let value = custom::decode(
+    let value = CustomDebugValue::parse(
         CustomDebugKind::ENC_LOCAL_SLOT_MAP,
         &[0xff, 0x01, 0x01, 0x00],
     )
     .unwrap();
-    assert_eq!(value.encode().unwrap(), [0x01, 0x00]);
+    assert_eq!(encoded(|out| value.encode(out)).unwrap(), [0x01, 0x00]);
     assert_eq!(
-        EncLocalSlotMap::encode([variable(0, -1, None)]).unwrap(),
+        encoded(|out| EncLocalSlotMap::encode_parts([variable(0, -1, None)], out)).unwrap(),
         [0x01, 0x00]
     );
     for (slot, expected) in [
@@ -81,7 +81,9 @@ fn encodes_local_slot_maps_as_roslyn() {
         (variable(0, 0, Some(0x2000_0000)), ErrorKind::LimitExceeded),
     ] {
         assert_eq!(
-            EncLocalSlotMap::encode([slot]).unwrap_err().kind(),
+            encoded(|out| EncLocalSlotMap::encode_parts([slot], out))
+                .unwrap_err()
+                .kind(),
             expected,
             "{slot:?}"
         );
@@ -119,9 +121,11 @@ fn decodes_lambda_and_closure_maps() {
     assert_eq!(map.method_ordinal(), -1);
     assert_eq!(map.syntax_offset_baseline(), -1);
     assert_eq!(map.closures().collect::<Vec<_>>(), [10, 11]);
-    let lambda = |syntax_offset, closure| Lambda {
-        syntax_offset,
-        closure,
+    let lambda = |syntax_offset, closure| {
+        let mut lambda = Lambda::default();
+        lambda.syntax_offset = syntax_offset;
+        lambda.closure = closure;
+        lambda
     };
     assert_eq!(
         map.lambdas().collect::<Vec<_>>(),
@@ -132,8 +136,15 @@ fn decodes_lambda_and_closure_maps() {
         ]
     );
     // Negative syntax offsets give a smaller baseline.
-    let blob =
-        EncLambdaAndClosureMap::encode(0, [-10], [lambda(-20, LambdaClosure::Closure(0))]).unwrap();
+    let blob = encoded(|out| {
+        EncLambdaAndClosureMap::encode_parts(
+            0,
+            [-10],
+            [lambda(-20, LambdaClosure::Closure(0))],
+            out,
+        )
+    })
+    .unwrap();
     assert_eq!(blob, [1, 20, 1, 10, 0, 2]);
     let map = EncLambdaAndClosureMap::parse(&blob).unwrap();
     assert_eq!(map.syntax_offset_baseline(), -20);
@@ -141,7 +152,7 @@ fn decodes_lambda_and_closure_maps() {
     assert_eq!(map.lambdas().next().unwrap().syntax_offset, -20);
     // No closures and no lambdas.
     assert_eq!(
-        EncLambdaAndClosureMap::encode(5, [], []).unwrap(),
+        encoded(|out| EncLambdaAndClosureMap::encode_parts(5, [], [], out)).unwrap(),
         [6, 1, 0]
     );
 }
@@ -170,24 +181,22 @@ fn rejects_malformed_lambda_and_closure_maps() {
     assert_eq!(error(kind, &[1, 1, 0, 0x0b, 2]), ErrorKind::InvalidFormat);
     assert_eq!(error(kind, &[0xe0]), ErrorKind::InvalidFormat);
 
-    let lambda = Lambda {
-        syntax_offset: 0,
-        closure: LambdaClosure::Closure(1),
-    };
+    let mut lambda = Lambda::default();
+    lambda.closure = LambdaClosure::Closure(1);
     assert_eq!(
-        EncLambdaAndClosureMap::encode(0, [0], [lambda])
+        encoded(|out| EncLambdaAndClosureMap::encode_parts(0, [0], [lambda], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        EncLambdaAndClosureMap::encode(-2, [], [])
+        encoded(|out| EncLambdaAndClosureMap::encode_parts(-2, [], [], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        EncLambdaAndClosureMap::encode(0x1fff_ffff, [], [])
+        encoded(|out| EncLambdaAndClosureMap::encode_parts(0x1fff_ffff, [], [], out))
             .unwrap_err()
             .kind(),
         ErrorKind::LimitExceeded
@@ -198,11 +207,11 @@ fn rejects_malformed_lambda_and_closure_maps() {
 const STATE_MAP: [u8; 8] = [0x03, 0x00, 0x00, 0x2b, 0x02, 0x53, 0x04, 0x78];
 
 /// Return a state.
-const fn state(state_number: i32, syntax_offset: i32) -> StateMachineState {
-    StateMachineState {
-        state_number,
-        syntax_offset,
-    }
+fn state(state_number: i32, syntax_offset: i32) -> StateMachineState {
+    let mut state = StateMachineState::default();
+    state.state_number = state_number;
+    state.syntax_offset = syntax_offset;
+    state
 }
 
 #[test]
@@ -219,11 +228,11 @@ fn decodes_state_machine_state_maps() {
         map.iter().collect::<Vec<_>>(),
         [state(0, 43), state(1, 83), state(2, 120)]
     );
-    assert_eq!(map.padding(), []);
+    assert_eq!(map.trailing(), []);
 
     // Negative state numbers and syntax offsets, and equal syntax offsets.
     let states = [state(-3, -4), state(-4, -4), state(0x0fff_ffff, 7)];
-    let blob = EncStateMachineStateMap::encode(states).unwrap();
+    let blob = encoded(|out| EncStateMachineStateMap::encode_parts(states, out)).unwrap();
     let map = EncStateMachineStateMap::parse(&blob).unwrap();
     assert_eq!(map.syntax_offset_baseline(), -4);
     assert_eq!(map.iter().collect::<Vec<_>>(), states);
@@ -231,7 +240,10 @@ fn decodes_state_machine_state_maps() {
 
     let empty = EncStateMachineStateMap::parse(&[0]).unwrap();
     assert!(empty.is_empty());
-    assert_eq!(EncStateMachineStateMap::encode([]).unwrap(), [0]);
+    assert_eq!(
+        encoded(|out| EncStateMachineStateMap::encode_parts([], out)).unwrap(),
+        [0]
+    );
 }
 
 #[test]
@@ -240,12 +252,13 @@ fn accepts_pdb2pdb_padding_after_states() {
         let mut blob = STATE_MAP.to_vec();
         blob.resize(STATE_MAP.len() + pad, 0);
         let map = EncStateMachineStateMap::parse(&blob).unwrap();
-        assert_eq!(map.padding().len(), pad);
+        assert_eq!(map.trailing().len(), pad);
         assert_eq!(map.as_bytes(), blob);
         assert_eq!(map.len(), 3);
-        let value = custom::decode(CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP, &blob).unwrap();
-        // The encoder writes the form without padding.
-        assert_eq!(value.encode().unwrap(), STATE_MAP);
+        let value =
+            CustomDebugValue::parse(CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP, &blob).unwrap();
+        // The encoder writes the form without the trailing bytes.
+        assert_eq!(encoded(|out| value.encode(out)).unwrap(), STATE_MAP);
     }
 }
 
@@ -271,7 +284,7 @@ fn rejects_malformed_state_machine_state_maps() {
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        EncStateMachineStateMap::encode([state(0, 10), state(1, 5)])
+        encoded(|out| EncStateMachineStateMap::encode_parts([state(0, 10), state(1, 5)], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
@@ -281,10 +294,10 @@ fn rejects_malformed_state_machine_state_maps() {
 #[test]
 fn limits_states_with_the_same_syntax_offset() {
     let states = |count| vec![state(0, 1); count];
-    let blob = EncStateMachineStateMap::encode(states(256)).unwrap();
+    let blob = encoded(|out| EncStateMachineStateMap::encode_parts(states(256), out)).unwrap();
     assert_eq!(EncStateMachineStateMap::parse(&blob).unwrap().len(), 256);
     assert_eq!(
-        EncStateMachineStateMap::encode(states(257))
+        encoded(|out| EncStateMachineStateMap::encode_parts(states(257), out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat

@@ -79,7 +79,7 @@ impl MetadataStream {
 }
 
 /// One stream header of the metadata root.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct StreamHeader {
     name: [u8; MAX_NAME_LEN],
     name_len: usize,
@@ -123,7 +123,7 @@ impl StreamHeader {
 ///
 /// The root checks the signature, the version, the version string, each stream header, the
 /// 4-byte alignment and range of each stream, overlaps and duplicate names.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MetadataRoot {
     major: u16,
     minor: u16,

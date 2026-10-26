@@ -142,6 +142,7 @@ pub fn encode_embedded(pdb: &[u8]) -> Result<Vec<u8>> {
 
 /// The storage format of an embedded source.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum EmbeddedFormat {
     /// The source bytes without compression.
     Raw,
@@ -154,6 +155,7 @@ pub enum EmbeddedFormat {
 /// [`EmbeddedSource::parse`] reads only the format field. Call
 /// [`EmbeddedSource::decode`] to get the source bytes.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum EmbeddedSource<'a> {
     /// The format field is 0. The value is the source bytes.
     Raw(&'a [u8]),
@@ -242,39 +244,59 @@ impl<'a> EmbeddedSource<'a> {
             }
         }
     }
+
+    /// Encode the blob again from its format field and its data, and append it
+    /// to `out`. The DEFLATE form keeps its stream without change.
+    ///
+    /// # Errors
+    ///
+    /// Return [`ErrorKind::LimitExceeded`] if an allocation fails. On error,
+    /// `out` does not change.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        match *self {
+            Self::Raw(data) => append_blob(0, data, out),
+            Self::Deflate { size, data } => append_blob(size, data, out),
+        }
+    }
+
+    /// Encode `source` as an embedded-source blob in `format`, and append it to
+    /// `out`.
+    ///
+    /// The caller selects the format. An empty source always gives the raw form,
+    /// because the format 0 marks the raw form. The DEFLATE form uses the default
+    /// compression level.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::LimitExceeded`] if `source` is larger than `i32::MAX` bytes
+    ///   for the DEFLATE form, or if an allocation fails.
+    /// - [`ErrorKind::InvalidFormat`] if the DEFLATE encoder does not finish the stream.
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(source: &[u8], format: EmbeddedFormat, out: &mut Vec<u8>) -> Result<()> {
+        match format {
+            EmbeddedFormat::Raw => append_blob(0, source, out),
+            EmbeddedFormat::Deflate if source.is_empty() => append_blob(0, source, out),
+            EmbeddedFormat::Deflate => {
+                let size = i32::try_from(source.len()).map_err(|_| {
+                    Error::new(ErrorKind::LimitExceeded, None)
+                        .with_context("embedded source is larger than i32::MAX bytes")
+                })?;
+                append_blob(size.cast_unsigned(), &deflate::encode(source)?, out)
+            }
+        }
+    }
 }
 
-/// Encode `source` as an embedded-source blob in `format`.
-///
-/// The caller selects the format. An empty source always gives the raw form,
-/// because the format 0 marks the raw form. The DEFLATE form uses the default
-/// compression level.
-///
-/// # Errors
-///
-/// - [`ErrorKind::LimitExceeded`] if `source` is larger than `i32::MAX` bytes
-///   for the DEFLATE form, or if an allocation fails.
-/// - [`ErrorKind::InvalidFormat`] if the DEFLATE encoder does not finish the stream.
-pub fn encode(source: &[u8], format: EmbeddedFormat) -> Result<Vec<u8>> {
+/// Append an embedded-source blob with the format field `format` and `body` to `out`.
+fn append_blob(format: u32, body: &[u8], out: &mut Vec<u8>) -> Result<()> {
     let limit = || {
         Error::new(ErrorKind::LimitExceeded, None)
             .with_context("embedded source blob allocation failed")
     };
-    let (size, body) = match format {
-        EmbeddedFormat::Raw => (0, Cow::Borrowed(source)),
-        EmbeddedFormat::Deflate if source.is_empty() => (0, Cow::Borrowed(source)),
-        EmbeddedFormat::Deflate => {
-            let size = i32::try_from(source.len()).map_err(|_| {
-                Error::new(ErrorKind::LimitExceeded, None)
-                    .with_context("embedded source is larger than i32::MAX bytes")
-            })?;
-            (size, Cow::Owned(deflate::encode(source)?))
-        }
-    };
     let total = body.len().checked_add(FORMAT_FIELD).ok_or_else(limit)?;
-    let mut blob = Vec::new();
-    blob.try_reserve_exact(total).map_err(|_| limit())?;
-    blob.extend_from_slice(&i32::to_le_bytes(size));
-    blob.extend_from_slice(&body);
-    Ok(blob)
+    out.try_reserve_exact(total).map_err(|_| limit())?;
+    out.extend_from_slice(&format.to_le_bytes());
+    out.extend_from_slice(body);
+    Ok(())
 }

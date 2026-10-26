@@ -135,7 +135,9 @@ impl<S: ReadAt> Reader<'_, S> {
             if matches!(value, CustomDebugValue::Unknown { .. }) {
                 self.counts.add("custom debug values of unknown kinds", 1);
             }
-            if value.encode()? == row.value() {
+            let mut encoded = Vec::new();
+            value.encode(&mut encoded)?;
+            if encoded == row.value() {
                 self.counts
                     .add("custom debug values encoded to the same bytes", 1);
             } else {
@@ -227,7 +229,7 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     });
     println!(
         "pdb id {id} entry point {:#010x}",
-        header.entry_point_token().get()
+        header.entry_point_token().raw()
     );
     for (table, rows) in header.external_tables() {
         println!("external table {table}: {rows} rows");

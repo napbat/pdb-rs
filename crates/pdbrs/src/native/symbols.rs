@@ -205,8 +205,11 @@ impl RecordOffsets {
     }
 
     /// Return the record start offsets in increasing order.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = SymbolOffset> + '_ {
-        self.offsets.iter().map(|&offset| SymbolOffset(offset))
+    #[must_use]
+    pub fn iter(&self) -> RecordOffsetsIter<'_> {
+        RecordOffsetsIter {
+            offsets: self.offsets.iter(),
+        }
     }
 
     /// Make sure that a record starts at `offset`.
@@ -225,6 +228,38 @@ impl RecordOffsets {
         Err(Error::new(ErrorKind::InvalidReference, None)
             .with_context(context)
             .with_stream(stream, logical(location)))
+    }
+}
+
+/// An iterator over the record start offsets of a [`RecordOffsets`] value.
+#[derive(Clone, Debug)]
+pub struct RecordOffsetsIter<'a> {
+    /// The offsets that are not returned yet.
+    offsets: core::slice::Iter<'a, u32>,
+}
+
+impl Iterator for RecordOffsetsIter<'_> {
+    type Item = SymbolOffset;
+
+    fn next(&mut self) -> Option<SymbolOffset> {
+        self.offsets.next().map(|&offset| SymbolOffset(offset))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.offsets.size_hint()
+    }
+}
+
+impl ExactSizeIterator for RecordOffsetsIter<'_> {}
+
+impl core::iter::FusedIterator for RecordOffsetsIter<'_> {}
+
+impl<'a> IntoIterator for &'a RecordOffsets {
+    type Item = SymbolOffset;
+    type IntoIter = RecordOffsetsIter<'a>;
+
+    fn into_iter(self) -> RecordOffsetsIter<'a> {
+        self.iter()
     }
 }
 

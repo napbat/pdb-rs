@@ -51,7 +51,7 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
     for method in pdb.method_debug_informations() {
         let method = method?;
         let mut prefix = vec![1];
-        prefix.extend_from_slice(&method.document().get().to_le_bytes());
+        prefix.extend_from_slice(&method.document().0.to_le_bytes());
         corpus.add_parts(
             "portable_blobs",
             &prefix,

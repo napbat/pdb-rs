@@ -222,7 +222,7 @@ build, each crash input in `artifacts/` runs without a finding.
 
 1. `portable_blobs`, `portable_pdb` and `portable_rebuild`: the sequence point round trip
    failed for the header `0x11000000`, a `StandAloneSig` token with the nil row.
-   `SequencePoints::local_signature_form` gave the token form, but `encode_sequence_points`
+   `SequencePoints::local_signature_form` gave the token form, but `SequencePoints::encode_parts`
    writes a nil row as 0 in both forms, so the output decoded with the row form. The fix gives
    the row form for each nil row, as the documentation says. Regression test:
    `a_nil_local_signature_token_has_the_row_form` in `crates/pdbrs/tests/portable_debug/sequence.rs`.

@@ -38,26 +38,28 @@ fn sequence_point(input: &mut Input<'_>, documents: &[DocumentId]) -> SequencePo
     let document = documents
         .get(usize::from(input.u8()) % documents.len().max(1))
         .copied()
-        .unwrap_or(DocumentId::new(1));
-    let il_offset = IlOffset::new(input.u32() % 0x1000);
-    let span = (input.u8() & 1 == 0).then(|| SourceSpan {
-        start_line: input.u32(),
-        start_column: input.u16(),
-        end_line: input.u32(),
-        end_column: input.u16(),
+        .unwrap_or(DocumentId(1));
+    let il_offset = IlOffset(input.u32() % 0x1000);
+    let span = (input.u8() & 1 == 0).then(|| {
+        let mut span = SourceSpan::default();
+        span.start_line = input.u32();
+        span.start_column = input.u16();
+        span.end_line = input.u32();
+        span.end_column = input.u16();
+        span
     });
-    SequencePoint {
-        il_offset,
-        document,
-        span,
-    }
+    let mut point = SequencePoint::default();
+    point.il_offset = il_offset;
+    point.document = document;
+    point.span = span;
+    point
 }
 
 /// Read an import with names from the input.
 fn import(input: &mut Input<'_>) -> ImportInfo {
     let selector = input.u8();
     let name = text(input).to_vec();
-    let assembly = AssemblyRefId::new(u32::from(input.u8()) % (EXTERNAL_ROWS + 1));
+    let assembly = AssemblyRefId(u32::from(input.u8()) % (EXTERNAL_ROWS + 1));
     let target_type = MetadataToken::from_raw(input.u32());
     match selector % 9 {
         0 => ImportInfo::Namespace { namespace: name },
@@ -115,7 +117,7 @@ impl Build {
                 ok(self.builder.add_document(document)).map(|id| self.documents.push(id))
             }
             1 => {
-                let method = MethodDefId::new(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
+                let method = MethodDefId(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
                 let count = usize::from(input.u8() % 8);
                 let points: Vec<SequencePoint> = (0..count)
                     .map(|_| sequence_point(input, &self.documents))
@@ -126,7 +128,7 @@ impl Build {
                     LocalSignatureForm::Token
                 };
                 let mut info = MethodInfo::default();
-                info.local_signature = StandAloneSigId::new(u32::from(input.u8() % 2));
+                info.local_signature = StandAloneSigId(u32::from(input.u8() % 2));
                 info.local_signature_form = form;
                 info.sequence_points = points.clone();
                 self.builder.set_method(method, info);
@@ -136,9 +138,9 @@ impl Build {
             }
             2 => {
                 let mut scope = LocalScopeInfo::default();
-                scope.method = MethodDefId::new(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
+                scope.method = MethodDefId(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
                 scope.import_scope = self.imports.first().copied().unwrap_or_default();
-                scope.start_offset = IlOffset::new(u32::from(input.u16()));
+                scope.start_offset = IlOffset(u32::from(input.u16()));
                 scope.length = u32::from(input.u16());
                 ok(self.builder.add_local_scope(scope)).map(|handle| self.scopes.push(handle))
             }
@@ -233,7 +235,7 @@ pub fn build(data: &[u8]) {
         assert_eq!(document.hash(), expected.hash);
     }
     for (method, points) in &build.methods {
-        let id = pdbrs::portable::metadata::MethodDebugInformationId::new(method.get());
+        let id = pdbrs::portable::metadata::MethodDebugInformationId(method.0);
         let info = pdb
             .method_debug_information(id)
             .expect("a built method reads");

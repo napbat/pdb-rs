@@ -17,9 +17,9 @@ use super::parts::{DebugTables, ExternalRowCounts, PdbParts};
 use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::debug::{DocumentName, Import, Imports, encode_imports};
+use crate::portable::debug::{DocumentName, Import, Imports};
 use crate::portable::metadata::{
-    BlobOffset, GuidIndex, MetadataStream, StringOffset, TableId, TableRow, UserStringOffset,
+    BlobOffset, GuidIndex, MetadataStream, StringOffset, TableId, TableRow,
 };
 use crate::{Error, ErrorKind, Result};
 
@@ -36,8 +36,8 @@ impl BlobMap {
         column: &'static str,
     ) -> Result<BlobOffset> {
         self.0
-            .get(&offset.get())
-            .map(|&new| BlobOffset::new(new))
+            .get(&offset.0)
+            .map(|&new| BlobOffset(new))
             .ok_or_else(|| {
                 cell_error(table, row, column)
                     .with_context("blob offset is not the start of a #Blob entry")
@@ -154,7 +154,7 @@ impl<S: ReadAt> Pdb<S> {
     ///   length-prefixed entries, or a `#US` entry has an even length.
     /// - [`ErrorKind::InvalidReference`] if a row or a document name or imports blob refers
     ///   to a blob offset that is not the start of an entry.
-    /// - The errors of [`DocumentName::decode`], [`Imports`] and the encoders, if a `#Blob`
+    /// - The errors of [`DocumentName::parse`], [`Imports`] and the encoders, if a `#Blob`
     ///   offset changes and a document name or an imports blob does not decode.
     /// - [`ErrorKind::LimitExceeded`] if a heap is larger than
     ///   [`ReadOptions::max_stream_bytes`](crate::portable::ReadOptions::max_stream_bytes)
@@ -175,7 +175,7 @@ impl<S: ReadAt> Pdb<S> {
         let mut blobs = BlobHeap::new();
         let source = self.stream_bytes(MetadataStream::Blob)?.unwrap_or_default();
         let blob_map = BlobMap(walk_prefixed(&source, MetadataStream::Blob, |entry| {
-            blobs.add(entry).map(BlobOffset::get)
+            blobs.add(entry).map(|offset| offset.0)
         })?);
         drop(source);
         let containers = if blob_map.is_stable(blobs.size()) {
@@ -198,7 +198,7 @@ impl<S: ReadAt> Pdb<S> {
             .stream_bytes(MetadataStream::UserStrings)?
             .unwrap_or_default();
         walk_prefixed(&source, MetadataStream::UserStrings, |entry| {
-            user_strings.add(entry).map(UserStringOffset::get)
+            user_strings.add(entry).map(|offset| offset.0)
         })?;
         drop(source);
 
@@ -206,15 +206,15 @@ impl<S: ReadAt> Pdb<S> {
         let mut guid_map = Vec::from([0]);
         let source = self.stream_bytes(MetadataStream::Guid)?.unwrap_or_default();
         for guid in source.as_chunks::<16>().0 {
-            guid_map.push(guids.add(*guid)?.get());
+            guid_map.push(guids.add(*guid)?.0);
         }
         drop(source);
         // The reader checks each GUID index of a row against the heap.
         let guid = |index: GuidIndex| {
-            let new = usize::try_from(index.get())
+            let new = usize::try_from(index.0)
                 .ok()
                 .and_then(|index| guid_map.get(index));
-            GuidIndex::new(new.copied().unwrap_or(0))
+            GuidIndex(new.copied().unwrap_or(0))
         };
         for row in &mut tables.documents {
             row.hash_algorithm = guid(row.hash_algorithm);
@@ -247,8 +247,7 @@ impl<S: ReadAt> Pdb<S> {
             .map(|row| row.name)
             .chain(tables.local_constants.iter().map(|row| row.name));
         for offset in offsets {
-            if let alloc::collections::btree_map::Entry::Vacant(entry) = values.entry(offset.get())
-            {
+            if let alloc::collections::btree_map::Entry::Vacant(entry) = values.entry(offset.0) {
                 let value = self.string(offset)?;
                 builder.add(&value)?;
                 entry.insert(value);
@@ -258,7 +257,7 @@ impl<S: ReadAt> Pdb<S> {
         // The builder has each value, so each lookup succeeds.
         let new = |offset: StringOffset| {
             values
-                .get(&offset.get())
+                .get(&offset.0)
                 .and_then(|value| heap.offset(value))
                 .unwrap_or_default()
         };
@@ -280,16 +279,18 @@ impl<S: ReadAt> Pdb<S> {
         blobs: &mut BlobHeap,
     ) -> Result<(Vec<BlobOffset>, Vec<BlobOffset>)> {
         let mut names = Vec::with_capacity(tables.documents.len());
+        let mut encoded = Vec::new();
         for (row, document) in tables.documents.iter().enumerate() {
             let (table, column) = (TableId::DOCUMENT, "Name");
             let blob = self.blob(document.name)?;
-            let name = DocumentName::decode(&blob)
+            let name = DocumentName::parse(&blob)
                 .map_err(|error| error.with_portable(cell(table, row, column)))?;
             let parts = name
                 .parts()
                 .map(|part| map.get(part, table, row, column))
                 .collect::<Result<Vec<_>>>()?;
-            let encoded = DocumentName::encode(name.separator(), &parts)
+            encoded.clear();
+            DocumentName::encode_parts(name.separator(), &parts, &mut encoded)
                 .map_err(|error| error.with_portable(cell(table, row, column)))?;
             names.push(blobs.add(&encoded)?);
         }
@@ -297,11 +298,12 @@ impl<S: ReadAt> Pdb<S> {
         for (row, scope) in tables.import_scopes.iter().enumerate() {
             let (table, column) = (TableId::IMPORT_SCOPE, "Imports");
             let blob = self.blob(scope.imports)?;
-            let mapped = Imports::decode(&blob)
+            let mapped = Imports::parse(&blob)
                 .map(|import| map_import(import?, |offset| map.get(offset, table, row, column)))
                 .collect::<Result<Vec<_>>>()
                 .map_err(|error| error.with_portable(cell(table, row, column)))?;
-            let encoded = encode_imports(&mapped)
+            encoded.clear();
+            Imports::encode_parts(&mapped, &mut encoded)
                 .map_err(|error| error.with_portable(cell(table, row, column)))?;
             imports.push(blobs.add(&encoded)?);
         }

@@ -10,21 +10,28 @@ mod sources;
 mod state_machine;
 
 use pdbrs::ErrorKind;
-use pdbrs::portable::custom::{self, CustomDebugKind, CustomDebugValue, TypeDefinitionDocuments};
+use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue, TypeDefinitionDocuments};
 use pdbrs::portable::embedded::EmbeddedSource;
 use pdbrs::portable::metadata::DocumentId;
 
+/// Run an encoder that appends to a buffer, and return the bytes.
+fn encoded(encode: impl FnOnce(&mut Vec<u8>) -> pdbrs::Result<()>) -> pdbrs::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    encode(&mut out)?;
+    Ok(out)
+}
+
 /// Decode `blob` as `kind` and check that the value encodes to `blob` again.
 fn round_trip(kind: CustomDebugKind, blob: &[u8]) -> CustomDebugValue<'_> {
-    let value = custom::decode(kind, blob).unwrap();
+    let value = CustomDebugValue::parse(kind, blob).unwrap();
     assert_eq!(value.kind(), kind);
-    assert_eq!(value.encode().unwrap(), blob, "{kind}");
+    assert_eq!(encoded(|out| value.encode(out)).unwrap(), blob, "{kind}");
     value
 }
 
 /// Return the error kind of decoding `blob` as `kind`.
 fn error(kind: CustomDebugKind, blob: &[u8]) -> ErrorKind {
-    custom::decode(kind, blob).unwrap_err().kind()
+    CustomDebugValue::parse(kind, blob).unwrap_err().kind()
 }
 
 #[test]
@@ -183,7 +190,7 @@ fn decodes_type_definition_documents() {
     };
     assert_eq!(documents.len(), 3);
     assert_eq!(
-        documents.iter().map(DocumentId::get).collect::<Vec<_>>(),
+        documents.iter().map(|id| id.0).collect::<Vec<_>>(),
         [1, 128, 0x4000]
     );
     assert_eq!(documents.as_bytes(), blob);
@@ -196,21 +203,38 @@ fn decodes_type_definition_documents() {
     assert_eq!(error(kind, &[0xe0]), ErrorKind::InvalidFormat);
 
     assert_eq!(
-        TypeDefinitionDocuments::encode([DocumentId::new(0x1fff_ffff)]).unwrap(),
+        encoded(|out| TypeDefinitionDocuments::encode_parts([DocumentId(0x1fff_ffff)], out))
+            .unwrap(),
         [0xdf, 0xff, 0xff, 0xff]
     );
     assert_eq!(
-        TypeDefinitionDocuments::encode([DocumentId::new(0x2000_0000)])
+        encoded(|out| TypeDefinitionDocuments::encode_parts([DocumentId(0x2000_0000)], out))
             .unwrap_err()
             .kind(),
         ErrorKind::LimitExceeded
     );
     assert_eq!(
-        TypeDefinitionDocuments::encode([DocumentId::new(1), DocumentId::default()])
-            .unwrap_err()
-            .kind(),
+        encoded(|out| TypeDefinitionDocuments::encode_parts(
+            [DocumentId(1), DocumentId::default()],
+            out
+        ))
+        .unwrap_err()
+        .kind(),
         ErrorKind::InvalidFormat
     );
+}
+
+#[test]
+fn encoders_append_and_leave_the_buffer_unchanged_on_error() {
+    let mut out = vec![0xaa];
+    TypeDefinitionDocuments::encode_parts([DocumentId(1)], &mut out).unwrap();
+    assert_eq!(out, [0xaa, 0x01]);
+    // The second document is nil, after the first document is written.
+    let error =
+        TypeDefinitionDocuments::encode_parts([DocumentId(2), DocumentId::default()], &mut out)
+            .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    assert_eq!(out, [0xaa, 0x01]);
 }
 
 #[test]
@@ -219,7 +243,7 @@ fn reads_values_through_into_iterator() {
     let documents = TypeDefinitionDocuments::parse(&blob).unwrap();
     let mut rows = Vec::new();
     for row in &documents {
-        rows.push(row.get());
+        rows.push(row.0);
     }
     assert_eq!(rows, [1, 2]);
     let mut iter = documents.into_iter();

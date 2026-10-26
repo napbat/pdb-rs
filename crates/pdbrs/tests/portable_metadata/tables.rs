@@ -70,7 +70,7 @@ fn tables_outside_the_debug_schema_cannot_have_rows() {
         let builder = Builder::default().table(table, 1, vec![0; 4]);
         let error = open_error(&builder.build());
         expect(&error, ErrorKind::InvalidFormat, MetadataStream::Tables);
-        assert_eq!(location(&error).table(), TableId::new(table));
+        assert_eq!(location(&error).table(), TableId::from_raw(table));
         assert!(error.context().unwrap().contains("row width is unknown"));
     }
     let empty = Builder::default().table(0x02, 0, Vec::new());
@@ -106,9 +106,9 @@ fn rows_and_heap_values_are_read_with_checks() {
     assert!(pdb.tables().table_offset(TableId::LOCAL_SCOPE).is_some());
     assert_eq!(pdb.tables().table_offset(TableId::METHOD_DEF), None);
 
-    let first: DocumentRow = pdb.row(DocumentId::new(1)).unwrap();
-    assert_eq!(first.name, BlobOffset::new(1));
-    assert_eq!(first.hash_algorithm, GuidIndex::new(1));
+    let first: DocumentRow = pdb.row(DocumentId(1)).unwrap();
+    assert_eq!(first.name, BlobOffset(1));
+    assert_eq!(first.hash_algorithm, GuidIndex(1));
     assert_eq!(pdb.blob(first.name).unwrap(), b"abc");
     assert_eq!(pdb.blob(first.hash).unwrap(), b"");
     assert_eq!(
@@ -116,19 +116,19 @@ fn rows_and_heap_values_are_read_with_checks() {
         Some(core::array::from_fn(|i| u8::try_from(i).unwrap() + 1))
     );
     assert_eq!(pdb.guid(first.language).unwrap().unwrap()[0], 17);
-    assert_eq!(pdb.guid(GuidIndex::new(0)).unwrap(), None);
+    assert_eq!(pdb.guid(GuidIndex(0)).unwrap(), None);
 
     let ids: Vec<u32> = pdb
         .rows::<DocumentRow>()
-        .map(|row| row.unwrap().0.get())
+        .map(|row| row.unwrap().0.0)
         .collect();
     assert_eq!(ids, [1, 2]);
     assert_eq!(pdb.rows::<LocalScopeRow>().len(), 0);
     let method: MethodDebugInformationRow = pdb.rows().next().unwrap().unwrap().1;
-    assert_eq!(method.document, DocumentId::new(2));
+    assert_eq!(method.document, DocumentId(2));
 
     for id in [0, 3] {
-        let error = pdb.row::<DocumentRow>(DocumentId::new(id)).unwrap_err();
+        let error = pdb.row::<DocumentRow>(DocumentId(id)).unwrap_err();
         expect(&error, ErrorKind::InvalidReference, MetadataStream::Tables);
         assert_eq!(location(&error).row(), Some(id));
     }
@@ -145,7 +145,7 @@ fn row_columns_outside_their_heap_or_table_are_invalid_references() {
         let builder = Builder::default().table(0x30, 1, bytes);
         let bytes = builder.build();
         let pdb = Pdb::parse(&bytes).unwrap();
-        let error = pdb.row::<DocumentRow>(DocumentId::new(1)).unwrap_err();
+        let error = pdb.row::<DocumentRow>(DocumentId(1)).unwrap_err();
         expect(&error, ErrorKind::InvalidReference, MetadataStream::Tables);
         let location = location(&error);
         assert_eq!(location.table(), Some(TableId::DOCUMENT));
@@ -185,11 +185,11 @@ fn list_columns_may_end_one_after_the_last_row() {
     let bytes = builder.build();
     let pdb = Pdb::parse(&bytes).unwrap();
     let rows: Vec<LocalScopeRow> = pdb.rows().map(|row| row.unwrap().1).collect();
-    assert_eq!(rows[0].method, MethodDefId::new(3));
-    assert_eq!(rows[0].import_scope, ImportScopeId::new(0));
-    assert_eq!(rows[1].variable_list, LocalVariableId::new(2));
-    assert_eq!(rows[0].constant_list, LocalConstantId::new(0));
-    assert_eq!(rows[1].start_offset.get(), 0x10);
+    assert_eq!(rows[0].method, MethodDefId(3));
+    assert_eq!(rows[0].import_scope, ImportScopeId(0));
+    assert_eq!(rows[1].variable_list, LocalVariableId(2));
+    assert_eq!(rows[0].constant_list, LocalConstantId(0));
+    assert_eq!(rows[1].start_offset.0, 0x10);
     assert_eq!(rows[1].length, 0x20);
 
     for (bytes, column) in [
@@ -218,9 +218,9 @@ fn custom_debug_information_parents_are_checked_tokens() {
     let bytes = builder.build();
     let pdb = Pdb::parse(&bytes).unwrap();
     let row: CustomDebugInformationRow = pdb.rows().next().unwrap().unwrap().1;
-    assert_eq!(row.parent.get(), 0x0000_0001);
-    assert_eq!(row.kind, GuidIndex::new(1));
-    assert_eq!(row.value, BlobOffset::new(1));
+    assert_eq!(row.parent.raw(), 0x0000_0001);
+    assert_eq!(row.kind, GuidIndex(1));
+    assert_eq!(row.value, BlobOffset(1));
 
     // Tag 27 is not in the list; Module (tag 7) has one row; TypeDef (tag 3) has no rows.
     for parent in [27, (2 << 5) | 7, (1 << 5) | 3] {
@@ -247,58 +247,49 @@ fn heap_values_check_termination_lengths_and_limits() {
     };
     let bytes = builder.build();
     let pdb = Pdb::parse(&bytes).unwrap();
-    assert_eq!(pdb.string(StringOffset::new(0)).unwrap(), b"");
-    let error = pdb.string(StringOffset::new(1)).unwrap_err();
+    assert_eq!(pdb.string(StringOffset(0)).unwrap(), b"");
+    let error = pdb.string(StringOffset(1)).unwrap_err();
     expect(&error, ErrorKind::InvalidFormat, MetadataStream::Strings);
     assert_eq!(location(&error).heap_offset(), Some(1));
     expect(
-        &pdb.string(StringOffset::new(4)).unwrap_err(),
+        &pdb.string(StringOffset(4)).unwrap_err(),
         ErrorKind::InvalidReference,
         MetadataStream::Strings,
     );
 
-    let error = pdb.blob(BlobOffset::new(1)).unwrap_err();
+    let error = pdb.blob(BlobOffset(1)).unwrap_err();
     expect(&error, ErrorKind::InvalidFormat, MetadataStream::Blob);
     assert_eq!(error.context(), Some("blob ends after the heap"));
-    let error = pdb.blob(BlobOffset::new(6)).unwrap_err();
+    let error = pdb.blob(BlobOffset(6)).unwrap_err();
     assert_eq!(
         error.context(),
         Some("blob length prefix is not a compressed integer")
     );
-    let error = pdb.blob(BlobOffset::new(7)).unwrap_err();
+    let error = pdb.blob(BlobOffset(7)).unwrap_err();
     assert_eq!(
         error.context(),
         Some("blob length prefix ends after the heap")
     );
-    assert_eq!(
-        pdb.user_string(UserStringOffset::new(1)).unwrap(),
-        [b'a', 0, 1]
-    );
+    assert_eq!(pdb.user_string(UserStringOffset(1)).unwrap(), [b'a', 0, 1]);
     expect(
-        &pdb.guid(GuidIndex::new(3)).unwrap_err(),
+        &pdb.guid(GuidIndex(3)).unwrap_err(),
         ErrorKind::InvalidReference,
         MetadataStream::Guid,
     );
 
     let bytes = Builder::default().build();
-    let options = ReadOptions {
-        max_value_bytes: 2,
-        ..ReadOptions::default()
-    };
+    let options = ReadOptions::default().with_max_value_bytes(2);
     let pdb = Pdb::with_options(bytes.as_slice(), options).unwrap();
     assert_eq!(
-        pdb.blob(BlobOffset::new(1)).unwrap_err().kind(),
+        pdb.blob(BlobOffset(1)).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
     assert_eq!(
-        pdb.string(StringOffset::new(1)).unwrap_err().kind(),
+        pdb.string(StringOffset(1)).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
 
-    let options = ReadOptions {
-        max_stream_bytes: 4,
-        ..ReadOptions::default()
-    };
+    let options = ReadOptions::default().with_max_stream_bytes(4);
     let pdb = Pdb::with_options(bytes.as_slice(), options).unwrap();
     assert_eq!(
         pdb.stream_bytes(MetadataStream::Pdb).unwrap_err().kind(),
@@ -317,6 +308,6 @@ fn long_strings_are_read_across_chunks() {
     };
     let bytes = builder.build();
     let pdb = Pdb::parse(&bytes).unwrap();
-    assert_eq!(pdb.string(StringOffset::new(1)).unwrap(), vec![b's'; 200]);
-    assert_eq!(pdb.string(StringOffset::new(150)).unwrap(), vec![b's'; 51]);
+    assert_eq!(pdb.string(StringOffset(1)).unwrap(), vec![b's'; 200]);
+    assert_eq!(pdb.string(StringOffset(150)).unwrap(), vec![b's'; 51]);
 }

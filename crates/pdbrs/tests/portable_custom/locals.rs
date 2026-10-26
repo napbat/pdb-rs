@@ -2,10 +2,10 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{
-    self, CustomDebugKind, CustomDebugValue, DynamicLocalVariables, TupleElementNames,
+    CustomDebugKind, CustomDebugValue, DynamicLocalVariables, TupleElementNames,
 };
 
-use super::{error, round_trip};
+use super::{encoded, error, round_trip};
 
 #[test]
 fn decodes_dynamic_local_variables() {
@@ -28,24 +28,33 @@ fn decodes_dynamic_local_variables() {
     assert_eq!(set, [0, 2, 15]);
     assert_eq!(flags.iter().next_back(), Some(true));
     assert_eq!(flags.iter().len(), 16);
-    assert!(DynamicLocalVariables::new(&[]).is_empty());
+    assert!(DynamicLocalVariables::parse(&[]).is_empty());
 }
 
 #[test]
 fn encodes_dynamic_local_variables_without_trailing_zero_bytes() {
     assert_eq!(
-        DynamicLocalVariables::encode([true, false, true]).unwrap(),
+        encoded(|out| DynamicLocalVariables::encode_parts([true, false, true], out)).unwrap(),
         [0b101]
     );
     let mut flags = [false; 17];
     flags[0] = true;
-    assert_eq!(DynamicLocalVariables::encode(flags).unwrap(), [1]);
+    assert_eq!(
+        encoded(|out| DynamicLocalVariables::encode_parts(flags, out)).unwrap(),
+        [1]
+    );
     flags[16] = true;
-    assert_eq!(DynamicLocalVariables::encode(flags).unwrap(), [1, 0, 1]);
-    assert_eq!(DynamicLocalVariables::encode([false; 9]).unwrap(), []);
+    assert_eq!(
+        encoded(|out| DynamicLocalVariables::encode_parts(flags, out)).unwrap(),
+        [1, 0, 1]
+    );
+    assert_eq!(
+        encoded(|out| DynamicLocalVariables::encode_parts([false; 9], out)).unwrap(),
+        []
+    );
     // A blob with a trailing zero byte decodes, and encodes without it.
-    let value = custom::decode(CustomDebugKind::DYNAMIC_LOCAL_VARIABLES, &[1, 0]).unwrap();
-    assert_eq!(value.encode().unwrap(), [1]);
+    let value = CustomDebugValue::parse(CustomDebugKind::DYNAMIC_LOCAL_VARIABLES, &[1, 0]).unwrap();
+    assert_eq!(encoded(|out| value.encode(out)).unwrap(), [1]);
 }
 
 #[test]
@@ -70,13 +79,13 @@ fn rejects_malformed_tuple_element_names() {
     assert_eq!(error(kind, b"a"), ErrorKind::UnexpectedEof);
     assert_eq!(error(kind, b"a\0b"), ErrorKind::UnexpectedEof);
     assert_eq!(
-        TupleElementNames::encode([&b"a\0b"[..]])
+        encoded(|out| TupleElementNames::encode_parts([&b"a\0b"[..]], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        TupleElementNames::encode([&b"x"[..], b""]).unwrap(),
+        encoded(|out| TupleElementNames::encode_parts([&b"x"[..], b""], out)).unwrap(),
         b"x\0\0"
     );
 }

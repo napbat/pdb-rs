@@ -10,12 +10,12 @@ use pdbrs::portable::Pdb;
 use pdbrs::portable::compressed::{decode_signed, decode_unsigned, encode_signed, encode_unsigned};
 use pdbrs::portable::debug::{
     DocumentName, Imports, LocalConstantSignature, SequencePoint, SequencePoints, ValidateOptions,
-    encode_imports, encode_sequence_points, split_document_name,
+    split_document_name,
 };
 use pdbrs::portable::metadata::{BlobOffset, DocumentId};
 
 use crate::input::Input;
-use crate::{MAX_STREAM, ok};
+use crate::{MAX_STREAM, encoded, ok};
 
 /// The most items that one walk visits, to bound the time of one run.
 const MAX_ITEMS: usize = 1 << 14;
@@ -26,7 +26,7 @@ pub fn blob(data: &[u8]) {
     match input.u8() % 6 {
         0 => document_name(input.rest()),
         1 => {
-            let document = DocumentId::new(input.u32());
+            let document = DocumentId(input.u32());
             sequence_points(input.rest(), document);
         }
         2 => constant(input.rest()),
@@ -42,21 +42,23 @@ pub fn blob(data: &[u8]) {
 
 /// Round-trip a document name blob.
 fn document_name(blob: &[u8]) {
-    let Some(name) = ok(DocumentName::decode(blob)) else {
+    let Some(name) = ok(DocumentName::parse(blob)) else {
         return;
     };
     let parts: Vec<BlobOffset> = name.parts().take(MAX_ITEMS).collect();
-    let Some(encoded) = ok(DocumentName::encode(name.separator(), &parts)) else {
+    let Some(encoded) = ok(encoded(|out| {
+        DocumentName::encode_parts(name.separator(), &parts, out)
+    })) else {
         return;
     };
-    let again = DocumentName::decode(&encoded).expect("an encoded document name decodes");
+    let again = DocumentName::parse(&encoded).expect("an encoded document name decodes");
     assert_eq!(again.separator(), name.separator());
     assert!(again.parts().eq(parts.iter().copied()));
 }
 
 /// Round-trip a sequence point blob.
 fn sequence_points(blob: &[u8], document: DocumentId) {
-    let Some(decoded) = ok(SequencePoints::decode(blob, document)) else {
+    let Some(decoded) = ok(SequencePoints::parse(blob, document)) else {
         return;
     };
     let signature = decoded.local_signature();
@@ -70,13 +72,13 @@ fn sequence_points(blob: &[u8], document: DocumentId) {
         return;
     };
     let _ = points.iter().filter(|point| point.is_hidden()).count();
-    let Some(encoded) = ok(encode_sequence_points(signature, form, &points)) else {
+    let Some(encoded) = ok(SequencePoints::encode_parts(signature, form, &points)) else {
         return;
     };
     if points.is_empty() {
         return;
     }
-    let again = SequencePoints::decode(&encoded.blob, encoded.document)
+    let again = SequencePoints::parse(&encoded.blob, encoded.document)
         .expect("encoded sequence points decode");
     assert_eq!(again.local_signature(), signature);
     assert_eq!(again.local_signature_form(), form);
@@ -88,26 +90,26 @@ fn sequence_points(blob: &[u8], document: DocumentId) {
 
 /// Round-trip a local constant signature blob.
 fn constant(blob: &[u8]) {
-    let Some(signature) = ok(LocalConstantSignature::decode(blob)) else {
+    let Some(signature) = ok(LocalConstantSignature::parse(blob)) else {
         return;
     };
     let modifiers: Vec<_> = signature.modifiers().take(MAX_ITEMS).collect();
-    let Some(encoded) = ok(LocalConstantSignature::encode(
-        &modifiers,
-        &signature.value(),
-    )) else {
+    let Some(encoded) = ok(encoded(|out| {
+        LocalConstantSignature::encode_parts(&modifiers, &signature.value(), out)
+    })) else {
         return;
     };
-    let again = LocalConstantSignature::decode(&encoded).expect("an encoded constant decodes");
+    let again = LocalConstantSignature::parse(&encoded).expect("an encoded constant decodes");
     assert!(again.modifiers().eq(modifiers.iter().copied()));
-    let twice = LocalConstantSignature::encode(&modifiers, &again.value())
+    let mut twice = Vec::new();
+    LocalConstantSignature::encode_parts(&modifiers, &again.value(), &mut twice)
         .expect("a decoded constant encodes");
     assert_eq!(twice, encoded);
 }
 
 /// Round-trip an imports blob.
 fn imports(blob: &[u8]) {
-    let Some(imports) = Imports::decode(blob)
+    let Some(imports) = Imports::parse(blob)
         .take(MAX_ITEMS)
         .collect::<pdbrs::Result<Vec<_>>>()
         .ok()
@@ -118,10 +120,10 @@ fn imports(blob: &[u8]) {
         let _ = (import.kind(), import.alias(), import.assembly());
         let _ = (import.namespace(), import.target_type());
     }
-    let Some(encoded) = ok(encode_imports(&imports)) else {
+    let Some(encoded) = ok(encoded(|out| Imports::encode_parts(&imports, out))) else {
         return;
     };
-    let again: Vec<_> = Imports::decode(&encoded)
+    let again: Vec<_> = Imports::parse(&encoded)
         .collect::<pdbrs::Result<_>>()
         .expect("encoded imports decode");
     assert_eq!(again, imports);

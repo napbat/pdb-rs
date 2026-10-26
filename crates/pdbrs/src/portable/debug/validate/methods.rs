@@ -21,7 +21,7 @@ pub(super) fn documents<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
         if document.hash_algorithm().is_some() {
             hashes += 1;
         }
-        let id = document.id().get();
+        let id = document.id().0;
         if !names.insert(document.name().to_vec()) {
             return Err(row_error(
                 ErrorKind::InvalidFormat,
@@ -44,7 +44,7 @@ pub(super) fn method_count<S: ReadAt>(
     report: &mut ValidationReport,
 ) -> Result<()> {
     let header = pdb.pdb_stream();
-    let referenced = header.referenced_tables() & (1 << TableId::METHOD_DEF.number()) != 0;
+    let referenced = header.referenced_tables() & (1 << TableId::METHOD_DEF.raw()) != 0;
     let expected = options
         .method_def_count()
         .or_else(|| referenced.then(|| header.external_row_count(TableId::METHOD_DEF)));
@@ -84,7 +84,7 @@ pub(super) fn sequence_points<S: ReadAt>(
                     ErrorKind::InvalidFormat,
                     "method without sequence points has a document",
                     TableId::METHOD_DEBUG_INFORMATION,
-                    method.id().get(),
+                    method.id().0,
                     Some("Document"),
                 ));
             }
@@ -102,7 +102,7 @@ pub(super) fn sequence_points<S: ReadAt>(
         }
         for point in decoded {
             let point = point.map_err(|error| method.blob_error(error))?;
-            if point.document.get() > documents {
+            if point.document.0 > documents {
                 return Err(method.blob_error(reference("sequence point document does not exist")));
             }
             points += 1;

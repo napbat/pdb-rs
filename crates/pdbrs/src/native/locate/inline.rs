@@ -43,7 +43,7 @@ use super::CodeChunk;
 use crate::native::address::Rva;
 use crate::native::codeview::index::ChecksumOffset;
 use crate::native::codeview::symbol::{
-    Annotation, Annotations, BinaryAnnotations, ChunkRange, CodeError, CodeState,
+    Annotation, BinaryAnnotations, BinaryAnnotationsIter, ChunkRange, CodeError, CodeState,
 };
 use crate::{Error, ErrorKind, Result};
 
@@ -142,7 +142,7 @@ struct LineState {
 #[derive(Clone, Debug)]
 pub struct InlineRanges<'a> {
     /// The annotations that are not run yet.
-    annotations: Annotations<'a>,
+    annotations: BinaryAnnotationsIter<'a>,
     /// The code offset, the code chunk and the open code range.
     code: CodeState,
     /// The file checksum offset.

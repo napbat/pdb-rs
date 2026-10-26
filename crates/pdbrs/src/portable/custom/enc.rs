@@ -23,9 +23,9 @@ mod lambdas;
 mod slots;
 mod states;
 
-pub use lambdas::{EncLambdaAndClosureMap, Lambda, LambdaClosure};
-pub use slots::{EncLocalSlotMap, LocalSlot, MAX_LOCAL_SLOT_KIND};
-pub use states::{EncStateMachineStateMap, StateMachineState};
+pub use lambdas::{Closures, EncLambdaAndClosureMap, Lambda, LambdaClosure, Lambdas};
+pub use slots::{EncLocalSlotMap, EncLocalSlotMapIter, LocalSlot, MAX_LOCAL_SLOT_KIND};
+pub use states::{EncStateMachineStateMap, EncStateMachineStateMapIter, StateMachineState};
 
 use super::blob::{Reader, Writer};
 use crate::Result;
@@ -44,11 +44,11 @@ fn read_syntax_offset(reader: &mut Reader<'_>, baseline: i32) -> Result<i32> {
 }
 
 /// Write the negated `baseline`.
-fn write_baseline(writer: &mut Writer, baseline: i32) -> Result<()> {
+fn write_baseline(writer: &mut Writer<'_>, baseline: i32) -> Result<()> {
     writer.unsigned_wide(-i64::from(baseline))
 }
 
 /// Write `syntax_offset` relative to `baseline`.
-fn write_syntax_offset(writer: &mut Writer, syntax_offset: i32, baseline: i32) -> Result<()> {
+fn write_syntax_offset(writer: &mut Writer<'_>, syntax_offset: i32, baseline: i32) -> Result<()> {
     writer.unsigned_wide(i64::from(syntax_offset) - i64::from(baseline))
 }

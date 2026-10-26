@@ -443,7 +443,7 @@ chunk_iter!(
     8,
     HoistedLocalScope,
     |scope: &[u8; 8]| HoistedLocalScope {
-        start: IlOffset::new(u32::from_le_bytes([scope[0], scope[1], scope[2], scope[3]])),
-        end: IlOffset::new(u32::from_le_bytes([scope[4], scope[5], scope[6], scope[7]])),
+        start: IlOffset(u32::from_le_bytes([scope[0], scope[1], scope[2], scope[3]])),
+        end: IlOffset(u32::from_le_bytes([scope[4], scope[5], scope[6], scope[7]])),
     }
 );

@@ -3,7 +3,14 @@
 use std::borrow::Cow;
 
 use pdbrs::ErrorKind;
-use pdbrs::portable::embedded::{EmbeddedFormat, EmbeddedSource, encode};
+use pdbrs::portable::embedded::{EmbeddedFormat, EmbeddedSource};
+
+/// Encode `source` in `format` into a new buffer.
+fn encode(source: &[u8], format: EmbeddedFormat) -> pdbrs::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    EmbeddedSource::encode_parts(source, format, &mut out)?;
+    Ok(out)
+}
 
 /// `abc` as a raw DEFLATE stream with one stored block.
 const STORED_ABC: [u8; 8] = [0x01, 0x03, 0x00, 0xfc, 0xff, b'a', b'b', b'c'];
@@ -159,6 +166,11 @@ fn encodes_raw_and_deflate_blobs() {
     let parsed = EmbeddedSource::parse(&bytes).unwrap();
     assert_eq!(parsed.format(), EmbeddedFormat::Deflate);
     assert_eq!(&*parsed.decode(source.len()).unwrap(), source);
+    // A parsed blob encodes to the same bytes, after the bytes that `out` holds.
+    let mut out = vec![0xaa];
+    parsed.encode(&mut out).unwrap();
+    assert_eq!(out[0], 0xaa);
+    assert_eq!(out[1..], bytes);
 }
 
 #[test]

@@ -109,17 +109,29 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// A growing blob.
-#[derive(Debug, Default)]
-pub(in crate::portable) struct Writer {
-    /// The bytes written so far.
-    bytes: Vec<u8>,
+/// A blob that grows at the end of a caller buffer.
+///
+/// If the writer drops before [`Writer::finish`], it removes the bytes that it appended, so a
+/// failed encoder leaves the buffer unchanged.
+#[derive(Debug)]
+pub(in crate::portable) struct Writer<'o> {
+    /// The buffer.
+    bytes: &'o mut Vec<u8>,
+    /// The length of the buffer before the first append.
+    start: usize,
+    /// `true` after [`Writer::finish`].
+    finished: bool,
 }
 
-impl Writer {
-    /// Start an empty blob.
-    pub(in crate::portable) const fn new() -> Self {
-        Self { bytes: Vec::new() }
+impl<'o> Writer<'o> {
+    /// Start to append to `out`.
+    pub(in crate::portable) fn append(out: &'o mut Vec<u8>) -> Self {
+        let start = out.len();
+        Self {
+            bytes: out,
+            start,
+            finished: false,
+        }
     }
 
     /// Append `bytes`.
@@ -184,8 +196,16 @@ impl Writer {
         self.u8(0)
     }
 
-    /// Return the blob.
-    pub(in crate::portable) fn finish(self) -> Vec<u8> {
-        self.bytes
+    /// Keep the appended bytes.
+    pub(in crate::portable) fn finish(mut self) {
+        self.finished = true;
+    }
+}
+
+impl Drop for Writer<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.bytes.truncate(self.start);
+        }
     }
 }

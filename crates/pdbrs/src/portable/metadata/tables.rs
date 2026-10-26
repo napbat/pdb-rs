@@ -29,7 +29,7 @@ const LARGE_TABLE: u32 = 1 << 16;
 ///
 /// The layout uses the local row counts of the debug tables and the external row counts of
 /// the `#Pdb` stream for the type-system tables.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TableStream {
     major: u8,
     minor: u8,
@@ -88,7 +88,7 @@ impl TableStream {
 
         let mut local_rows = [0; 64];
         let mut position = FIXED_LEN;
-        for table in (0_u8..64).filter_map(TableId::new) {
+        for table in (0_u8..64).filter_map(TableId::from_raw) {
             if valid & table.bit() == 0 {
                 continue;
             }
@@ -278,7 +278,7 @@ impl TableStream {
 fn debug_slot(table: TableId) -> Option<usize> {
     table
         .is_debug()
-        .then(|| usize::from(table.number() - TableId::DOCUMENT.number()))
+        .then(|| usize::from(table.raw() - TableId::DOCUMENT.raw()))
 }
 
 /// Return the heap index width for a `HeapSizes` flag.

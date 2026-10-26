@@ -34,7 +34,8 @@ pub struct AsyncMethodSteppingInformation<'a> {
 }
 
 /// One `await` of an async method.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AsyncStep {
     /// The IL offset of the yield point in the `MoveNext` method.
     pub yield_offset: IlOffset,
@@ -59,7 +60,7 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
         let steps = reader.rest();
         let len = count_to_end(steps, 0, read_step)?;
         Ok(Self {
-            catch_handler_offset: catch.checked_sub(1).map(IlOffset::new),
+            catch_handler_offset: catch.checked_sub(1).map(IlOffset),
             steps,
             len,
         })
@@ -85,11 +86,11 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
 
     /// Return an iterator over the steps.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, AsyncStep> {
-        Entries::new(self.steps, self.len, 0, read_step)
+    pub const fn iter(&self) -> AsyncMethodSteppingInformationIter<'a> {
+        AsyncMethodSteppingInformationIter(Entries::new(self.steps, self.len, 0, read_step))
     }
 
-    /// Encode an async method stepping information blob.
+    /// Encode an async method stepping information blob, and append it to `out`.
     ///
     /// # Errors
     ///
@@ -98,39 +99,43 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
     ///   in a compressed integer, or if an allocation fails.
     /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if a
     ///   method is nil.
-    pub fn encode(
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
         catch_handler_offset: Option<IlOffset>,
         steps: impl IntoIterator<Item = AsyncStep>,
-    ) -> Result<Vec<u8>> {
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         let catch = match catch_handler_offset {
             None => 0,
             Some(offset) => offset
-                .get()
+                .0
                 .checked_add(1)
                 .ok_or_else(|| too_large("async stepping catch handler offset is too large"))?,
         };
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         writer.u32(catch)?;
         for step in steps {
             if step.move_next_method.is_nil() {
                 return Err(invalid("async stepping method row ID is 0"));
             }
-            writer.u32(step.yield_offset.get())?;
-            writer.u32(step.resume_offset.get())?;
-            writer.unsigned(step.move_next_method.get())?;
+            writer.u32(step.yield_offset.0)?;
+            writer.u32(step.resume_offset.0)?;
+            writer.unsigned(step.move_next_method.0)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(AsyncMethodSteppingInformation => Entries<'a, AsyncStep>);
+iterable!(AsyncMethodSteppingInformation => AsyncMethodSteppingInformationIter, AsyncStep);
 
 /// Read one async step.
 fn read_step(reader: &mut Reader<'_>, _: i32) -> Result<AsyncStep> {
     const SHORT: &str = "async stepping step is truncated";
-    let yield_offset = IlOffset::new(reader.u32(SHORT)?);
-    let resume_offset = IlOffset::new(reader.u32(SHORT)?);
-    let move_next_method = MethodDefId::new(reader.unsigned()?);
+    let yield_offset = IlOffset(reader.u32(SHORT)?);
+    let resume_offset = IlOffset(reader.u32(SHORT)?);
+    let move_next_method = MethodDefId(reader.unsigned()?);
     if move_next_method.is_nil() {
         return Err(invalid("async stepping method row ID is 0"));
     }
@@ -154,6 +159,7 @@ pub struct HoistedLocalScopes<'a> {
 /// Roslyn writes `(0, 0)` for a slot without a scope, for example a
 /// synthesized variable.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HoistedLocalScope {
     /// The first IL offset of the scope, smaller than `0x80000000`.
     pub start: IlOffset,
@@ -198,11 +204,11 @@ impl<'a> HoistedLocalScopes<'a> {
 
     /// Return an iterator over the scopes.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, HoistedLocalScope> {
-        Entries::new(self.bytes, self.len(), 0, read_scope)
+    pub const fn iter(&self) -> HoistedLocalScopesIter<'a> {
+        HoistedLocalScopesIter(Entries::new(self.bytes, self.len(), 0, read_scope))
     }
 
-    /// Encode a hoisted local scopes blob.
+    /// Encode a hoisted local scopes blob, and append it to `out`.
     ///
     /// # Errors
     ///
@@ -210,24 +216,30 @@ impl<'a> HoistedLocalScopes<'a> {
     ///   start offset or a length is `0x80000000` or more.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if an
     ///   allocation fails.
-    pub fn encode(scopes: impl IntoIterator<Item = HoistedLocalScope>) -> Result<Vec<u8>> {
-        let mut writer = Writer::new();
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
+        scopes: impl IntoIterator<Item = HoistedLocalScope>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut writer = Writer::append(out);
         for scope in scopes {
             check_scope(scope)?;
-            writer.u32(scope.start.get())?;
+            writer.u32(scope.start.0)?;
             writer.u32(scope.length)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(HoistedLocalScopes => Entries<'a, HoistedLocalScope>);
+iterable!(HoistedLocalScopes => HoistedLocalScopesIter, HoistedLocalScope);
 
 /// Read one hoisted local scope.
 fn read_scope(reader: &mut Reader<'_>, _: i32) -> Result<HoistedLocalScope> {
     const SHORT: &str = "hoisted local scope is truncated";
     let scope = HoistedLocalScope {
-        start: IlOffset::new(reader.u32(SHORT)?),
+        start: IlOffset(reader.u32(SHORT)?),
         length: reader.u32(SHORT)?,
     };
     check_scope(scope)?;
@@ -236,7 +248,7 @@ fn read_scope(reader: &mut Reader<'_>, _: i32) -> Result<HoistedLocalScope> {
 
 /// Check the ranges of a hoisted local scope.
 fn check_scope(scope: HoistedLocalScope) -> Result<()> {
-    if scope.start.get() >= SCOPE_LIMIT || scope.length >= SCOPE_LIMIT {
+    if scope.start.0 >= SCOPE_LIMIT || scope.length >= SCOPE_LIMIT {
         return Err(invalid("hoisted local scope offset or length is too large"));
     }
     Ok(())

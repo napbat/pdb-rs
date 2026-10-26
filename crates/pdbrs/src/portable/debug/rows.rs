@@ -20,7 +20,7 @@ pub(super) fn in_blob(
             .with_table(table)
             .with_row(row)
             .with_column(column)
-            .with_heap_offset(offset.get()),
+            .with_heap_offset(offset.0),
     )
 }
 

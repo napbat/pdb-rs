@@ -28,7 +28,7 @@ pub(super) fn import_scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationRepo
     let mut imports = 0;
     for scope in pdb.import_scopes() {
         let scope = scope?;
-        parents.push(scope.parent().get());
+        parents.push(scope.parent().0);
         imports += check_imports(pdb, &scope)?;
     }
     check_cycles(&parents)?;
@@ -82,7 +82,7 @@ fn check_imports<S: ReadAt>(pdb: &Pdb<S>, scope: &ImportScope) -> Result<u64> {
         let import = import.map_err(|error| scope.blob_error(error))?;
         if import
             .assembly()
-            .is_some_and(|assembly| assembly.get() > assemblies)
+            .is_some_and(|assembly| assembly.0 > assemblies)
         {
             return Err(scope.blob_error(reference("import AssemblyRef row does not exist")));
         }

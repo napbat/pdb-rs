@@ -1,10 +1,8 @@
 //! The `MPDB` envelope and the embedded-source blob codec.
 
-use pdbrs::portable::embedded::{
-    EmbeddedFormat, EmbeddedSource, decode_embedded, encode, encode_embedded,
-};
+use pdbrs::portable::embedded::{EmbeddedFormat, EmbeddedSource, decode_embedded, encode_embedded};
 
-use crate::{MAX_STREAM, ok};
+use crate::{MAX_STREAM, encoded, ok};
 
 /// The decode limit of the round trips. It is small, so that a run stays fast.
 const LIMIT: usize = 1 << 20;
@@ -61,7 +59,9 @@ pub fn source(data: &[u8]) {
 /// An empty source always gives the raw form.
 fn round_trip(content: &[u8]) {
     for format in [EmbeddedFormat::Raw, EmbeddedFormat::Deflate] {
-        let Some(blob) = ok(encode(content, format)) else {
+        let Some(blob) = ok(encoded(|out| {
+            EmbeddedSource::encode_parts(content, format, out)
+        })) else {
             continue;
         };
         let parsed = EmbeddedSource::parse(&blob).expect("an encoded blob parses");

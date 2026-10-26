@@ -27,10 +27,10 @@
 //! - [`LocalConstantSignature`]: the custom modifiers and the value of a local constant.
 //! - [`Imports`]: a lazy iterator over the imports of an import scope.
 //!
-//! Each codec also has an encoder: [`DocumentName::encode`], [`encode_sequence_points`],
-//! [`LocalConstantSignature::encode`] and [`encode_imports`]. The encoders take resolved heap
-//! offsets and row IDs. They do not add heap entries. [`split_document_name`] gives the name
-//! parts that need `#Blob` entries.
+//! Each codec also has an encoder: [`DocumentName::encode_parts`],
+//! [`SequencePoints::encode_parts`], [`LocalConstantSignature::encode_parts`] and
+//! [`Imports::encode_parts`]. The encoders take resolved heap offsets and row IDs. They do not
+//! add heap entries. [`split_document_name`] gives the name parts that need `#Blob` entries.
 //!
 //! The codec errors have no location. The `Pdb` accessors add the table, the row, the column
 //! and the heap offset. [`Pdb::validate_debug`](super::Pdb::validate_debug) checks the
@@ -53,10 +53,10 @@ pub use document::{
     Document, DocumentName, DocumentNameParts, HashAlgorithm, Language, SplitDocumentName,
     split_document_name,
 };
-pub use imports::{Import, ImportScope, Imports, encode_imports};
+pub use imports::{Import, ImportScope, Imports};
 pub use scope::{LocalScope, LocalVariable, StateMachineMethod};
 pub use sequence::{
     EncodedSequencePoints, HIDDEN_LINE, LocalSignatureForm, MAX_COLUMN, MAX_IL_OFFSET, MAX_LINE,
-    MethodDebugInformation, SequencePoint, SequencePoints, SourceSpan, encode_sequence_points,
+    MethodDebugInformation, SequencePoint, SequencePoints, SourceSpan,
 };
 pub use validate::{Outcome, Rule, RuleReport, ValidateOptions, ValidationReport};

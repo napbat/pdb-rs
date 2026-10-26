@@ -32,10 +32,10 @@ pub(super) fn read(reader: &mut Reader<'_>) -> Result<MetadataToken> {
 /// Return [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if the token is not a
 /// non-nil `TypeDef`, `TypeRef` or `TypeSpec` token, and
 /// [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the row does not fit.
-pub(super) fn write(writer: &mut Writer, token: MetadataToken) -> Result<()> {
+pub(super) fn write(writer: &mut Writer<'_>, token: MetadataToken) -> Result<()> {
     let tag = TABLES
         .iter()
-        .position(|table| table.number() == token.table())
+        .position(|&table| Some(table) == token.table())
         .ok_or_else(|| invalid("type handle is not a TypeDef, TypeRef or TypeSpec token"))?;
     if token.row() == 0 {
         return Err(invalid("type handle has the nil row"));

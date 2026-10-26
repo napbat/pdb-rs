@@ -10,9 +10,8 @@ use std::collections::BTreeMap;
 use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
-    Document, DocumentName, Import, LocalConstantSignature, LocalSignatureForm,
-    Outcome as RuleOutcome, ValidateOptions, encode_imports, encode_sequence_points,
-    split_document_name,
+    Document, DocumentName, Import, Imports, LocalConstantSignature, LocalSignatureForm,
+    Outcome as RuleOutcome, SequencePoints, ValidateOptions, split_document_name,
 };
 use pdbrs::portable::embedded::{EmbeddedFormat, SourceCheck};
 use pdbrs::portable::metadata::BlobOffset;
@@ -69,7 +68,7 @@ fn documents(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
         }
         embedded_source(pdb, &document, counts)?;
         let blob = pdb.blob(document.row().name)?;
-        let name = DocumentName::decode(&blob)?;
+        let name = DocumentName::parse(&blob)?;
         let parts: Vec<BlobOffset> = name.parts().collect();
         let mut texts = BTreeMap::new();
         for &part in &parts {
@@ -78,7 +77,7 @@ fn documents(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
         let split = split_document_name(document.name());
         let separator = split.separator();
         let split: Vec<&[u8]> = split.collect();
-        let what = format!("Document row {}", document.id().get());
+        let what = format!("Document row {}", document.id().0);
         let same_split = name.separator() == Some(separator)
             && split.len() == parts.len()
             && split
@@ -86,7 +85,8 @@ fn documents(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
                 .zip(&parts)
                 .all(|(text, part)| texts.get(*text) == Some(part));
         if same_split {
-            let encoded = DocumentName::encode(Some(separator), &parts)?;
+            let mut encoded = Vec::new();
+            DocumentName::encode_parts(Some(separator), &parts, &mut encoded)?;
             compare(counts, &what, &encoded, &blob, "compressed part offsets");
         } else {
             compare(
@@ -110,6 +110,7 @@ fn embedded_source(pdb: &Pdb<impl ReadAt>, document: &Document, counts: &mut Cou
         match source.format() {
             EmbeddedFormat::Raw => "embedded sources (raw)",
             EmbeddedFormat::Deflate => "embedded sources (DEFLATE)",
+            _ => "embedded sources (other format)",
         },
         1,
     );
@@ -122,10 +123,11 @@ fn embedded_source(pdb: &Pdb<impl ReadAt>, document: &Document, counts: &mut Cou
         SourceCheck::Mismatch => {
             return Err(format!(
                 "the embedded source of Document row {} does not match its SHA-256 hash",
-                document.id().get()
+                document.id().0
             )
             .into());
         }
+        _ => counts.add("embedded sources with another check result", 1),
     }
     Ok(())
 }
@@ -159,8 +161,8 @@ fn sequence_points(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
             .count();
         counts.add("sequence point document changes", changes);
         // Keep the header form of the decoded blob, so an F# blob also gives the same bytes.
-        let encoded = encode_sequence_points(signature, form, &points)?;
-        let what = format!("MethodDebugInformation row {}", method.id().get());
+        let encoded = SequencePoints::encode_parts(signature, form, &points)?;
+        let what = format!("MethodDebugInformation row {}", method.id().0);
         let original = method.sequence_points_blob();
         if encoded.document == method.document() {
             compare(
@@ -198,8 +200,9 @@ fn scopes(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
             counts.add("local constants", 1);
             let modifiers: Vec<_> = signature.modifiers().collect();
             counts.add("local constant custom modifiers", modifiers.len());
-            let encoded = LocalConstantSignature::encode(&modifiers, &signature.value())?;
-            let what = format!("LocalConstant row {}", id.get());
+            let mut encoded = Vec::new();
+            LocalConstantSignature::encode_parts(&modifiers, &signature.value(), &mut encoded)?;
+            let what = format!("LocalConstant row {}", id.0);
             compare(
                 counts,
                 &what,
@@ -227,8 +230,9 @@ fn imports(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
             }
             counts.add(import_kind(import), 1);
         }
-        let encoded = encode_imports(&imports)?;
-        let what = format!("ImportScope row {}", scope.id().get());
+        let mut encoded = Vec::new();
+        Imports::encode_parts(&imports, &mut encoded)?;
+        let what = format!("ImportScope row {}", scope.id().0);
         compare(
             counts,
             &what,
@@ -252,5 +256,6 @@ fn import_kind(import: &Import) -> &'static str {
         Import::AliasNamespace { .. } => "imports of kind 7 (alias namespace)",
         Import::AliasAssemblyNamespace { .. } => "imports of kind 8 (alias assembly namespace)",
         Import::AliasType { .. } => "imports of kind 9 (alias type)",
+        _ => "imports of another kind",
     }
 }

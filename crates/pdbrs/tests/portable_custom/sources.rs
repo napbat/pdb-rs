@@ -154,7 +154,7 @@ fn decodes_and_checks_embedded_sources() {
     ];
     for (index, expected) in expected.into_iter().enumerate() {
         let row = u32::try_from(index + 1).unwrap();
-        let document = pdb.document(DocumentId::new(row)).unwrap();
+        let document = pdb.document(DocumentId(row)).unwrap();
         let source = pdb.document_source(&document, SOURCE.len()).unwrap();
         let actual = source
             .as_ref()
@@ -163,7 +163,7 @@ fn decodes_and_checks_embedded_sources() {
         if let Some(source) = source {
             assert_eq!(
                 source.custom_debug_information(),
-                CustomDebugInformationId::new(row)
+                CustomDebugInformationId(row)
             );
             assert_eq!(document.verify_source(source.content()), source.check());
             assert_eq!(source.into_content().len(), 3);
@@ -175,12 +175,12 @@ fn decodes_and_checks_embedded_sources() {
 fn checks_sources_from_other_places() {
     let bytes = sources().bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
-    let sha256 = pdb.document(DocumentId::new(1)).unwrap();
+    let sha256 = pdb.document(DocumentId(1)).unwrap();
     assert_eq!(sha256.verify_source(SOURCE), SourceCheck::Verified);
     assert_eq!(sha256.verify_source(b""), SourceCheck::Mismatch);
-    let sha1 = pdb.document(DocumentId::new(4)).unwrap();
+    let sha1 = pdb.document(DocumentId(4)).unwrap();
     assert_eq!(sha1.verify_source(SOURCE), SourceCheck::NotVerified);
-    let none = pdb.document(DocumentId::new(5)).unwrap();
+    let none = pdb.document(DocumentId(5)).unwrap();
     assert_eq!(none.verify_source(SOURCE), SourceCheck::NotVerified);
 }
 
@@ -189,7 +189,7 @@ fn applies_the_limit_to_raw_and_deflate_sources() {
     let bytes = sources().bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
     for row in [1, 2] {
-        let document = pdb.document(DocumentId::new(row)).unwrap();
+        let document = pdb.document(DocumentId(row)).unwrap();
         let error = pdb.document_source(&document, 2).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded, "document {row}");
         let location = error.portable_location().unwrap();
@@ -213,7 +213,7 @@ fn rejects_bad_embedded_sources() {
     let bytes = pdb.bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
     for (row, kind) in [(1, ErrorKind::InvalidFormat), (2, ErrorKind::UnexpectedEof)] {
-        let document = pdb.document(DocumentId::new(row)).unwrap();
+        let document = pdb.document(DocumentId(row)).unwrap();
         let error = pdb.document_source(&document, 1024).unwrap_err();
         assert_eq!(error.kind(), kind, "document {row}");
         assert_eq!(error.portable_location().unwrap().row(), Some(row));
@@ -228,7 +228,7 @@ fn rejects_two_embedded_sources_for_one_document() {
     pdb.custom(document, KIND_EMBEDDED_SOURCE, &blob(0, SOURCE));
     let bytes = pdb.bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
-    let document = pdb.document(DocumentId::new(1)).unwrap();
+    let document = pdb.document(DocumentId(1)).unwrap();
     let error = pdb.document_source(&document, 1024).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.portable_location().unwrap().row(), Some(2));

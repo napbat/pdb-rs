@@ -24,8 +24,8 @@ pub fn debug<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
         let method = method?;
         out.line(format_args!(
             "state-machine move-next={} kickoff={}",
-            method.move_next_method().get(),
-            method.kickoff_method().get()
+            method.move_next_method().0,
+            method.kickoff_method().0
         ));
     }
     Ok(())
@@ -37,7 +37,7 @@ fn documents<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
         let document = document?;
         out.line(format_args!(
             "document id={} name={} language={} hash-algorithm={} hash={}",
-            document.id().get(),
+            document.id().0,
             text(document.name()),
             guid(document.language_guid()),
             guid(document.hash_algorithm_guid()),
@@ -58,18 +58,17 @@ fn sequence_points<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()>
         let points = decoded
             .collect::<pdbrs::Result<Vec<_>>>()
             .map_err(|error| method.blob_error(error))?;
-        let id = method.id().get();
+        let id = method.id().0;
         out.line(format_args!(
             "method-debug id={id} document={} local-signature={} points={}",
-            method.document().get(),
-            signature.get(),
+            method.document().0,
+            signature.0,
             points.len()
         ));
         for point in points {
             let prefix = format!(
                 "sequence-point method={id} il={:#x} document={}",
-                point.il_offset.get(),
-                point.document.get()
+                point.il_offset.0, point.document.0
             );
             match point.span {
                 None => out.line(format_args!("{prefix} hidden")),
@@ -87,13 +86,13 @@ fn sequence_points<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()>
 fn scopes<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for scope in pdb.local_scopes() {
         let scope = scope?;
-        let id = scope.id().get();
+        let id = scope.id().0;
         out.line(format_args!(
             "scope id={id} method={} import-scope={} start={:#x} end={:#x} variables={} constants={}",
-            scope.method().get(),
-            scope.import_scope().get(),
-            scope.start_offset().get(),
-            u64::from(scope.start_offset().get()) + u64::from(scope.length()),
+            scope.method().0,
+            scope.import_scope().0,
+            scope.start_offset().0,
+            u64::from(scope.start_offset().0) + u64::from(scope.length()),
             scope.variables().len(),
             scope.constants().len()
         ));
@@ -101,7 +100,7 @@ fn scopes<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
             let variable = pdb.local_variable(variable)?;
             out.line(format_args!(
                 "scope-variable scope={id} id={} index={} attributes={:#06x} name={}",
-                variable.id().get(),
+                variable.id().0,
                 variable.index(),
                 variable.attributes(),
                 text(variable.name())
@@ -111,7 +110,7 @@ fn scopes<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
             let constant = pdb.local_constant(constant)?;
             out.line(format_args!(
                 "scope-constant scope={id} id={} name={} {}",
-                constant.id().get(),
+                constant.id().0,
                 text(constant.name()),
                 signature(&constant.signature()?)
             ));
@@ -129,12 +128,12 @@ fn signature(signature: &LocalConstantSignature<'_>) -> String {
         } else {
             "optional"
         };
-        let _ = write!(text, "modifier={kind}:{:#010x} ", modifier.modifier.get());
+        let _ = write!(text, "modifier={kind}:{:#010x} ", modifier.modifier.raw());
     }
     match signature.value() {
         ConstantValue::Primitive(value) => text.push_str(&primitive(value)),
         ConstantValue::Enum { value, enum_type } => {
-            let _ = write!(text, "{} enum={:#010x}", primitive(value), enum_type.get());
+            let _ = write!(text, "{} enum={:#010x}", primitive(value), enum_type.raw());
         }
         ConstantValue::General {
             value_type,
@@ -142,7 +141,7 @@ fn signature(signature: &LocalConstantSignature<'_>) -> String {
             value,
         } => {
             let kind = if value_type { "valuetype" } else { "class" };
-            let _ = write!(text, "{kind}={:#010x} ", constant_type.get());
+            let _ = write!(text, "{kind}={:#010x} ", constant_type.raw());
             match value {
                 GeneralValue::Default => text.push_str("default"),
                 GeneralValue::DateTime(ticks) => {
@@ -201,14 +200,14 @@ fn primitive(value: PrimitiveConstant<'_>) -> String {
 fn imports<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for scope in pdb.import_scopes() {
         let scope = scope?;
-        let id = scope.id().get();
+        let id = scope.id().0;
         let imports = scope
             .imports()
             .collect::<pdbrs::Result<Vec<Import>>>()
             .map_err(|error| scope.blob_error(error))?;
         out.line(format_args!(
             "import-scope id={id} parent={} imports={}",
-            scope.parent().get(),
+            scope.parent().0,
             imports.len()
         ));
         for import in imports {
@@ -217,13 +216,13 @@ fn imports<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
                 let _ = write!(line, " alias={}", quote(&pdb.blob(alias)?));
             }
             if let Some(assembly) = import.assembly() {
-                let _ = write!(line, " assembly={}", assembly.get());
+                let _ = write!(line, " assembly={}", assembly.0);
             }
             if let Some(namespace) = import.namespace() {
                 let _ = write!(line, " namespace={}", quote(&pdb.blob(namespace)?));
             }
             if let Some(target) = import.target_type() {
-                let _ = write!(line, " type={:#010x}", target.get());
+                let _ = write!(line, " type={:#010x}", target.raw());
             }
             out.line(format_args!("{line}"));
         }

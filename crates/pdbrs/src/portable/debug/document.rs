@@ -162,7 +162,7 @@ impl<'a> DocumentName<'a> {
     ///   part offset.
     /// - [`ErrorKind::InvalidFormat`] if the separator is not one UTF-8 character or a part
     ///   offset is not a compressed integer.
-    pub fn decode(blob: &'a [u8]) -> Result<Self> {
+    pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let first = *blob
             .first()
             .ok_or_else(|| truncated("document name blob has no separator"))?;
@@ -207,17 +207,24 @@ impl<'a> DocumentName<'a> {
         }
     }
 
-    /// Encode a document name blob from a separator and the `#Blob` offsets of the parts.
+    /// Encode a document name blob from a separator and the `#Blob` offsets of the parts, and
+    /// append it to `out`.
     ///
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`] if `parts` is empty or the separator is U+0000.
     /// - [`ErrorKind::LimitExceeded`] if an offset does not fit in a compressed integer.
-    pub fn encode(separator: Option<char>, parts: &[BlobOffset]) -> Result<Vec<u8>> {
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
+        separator: Option<char>,
+        parts: &[BlobOffset],
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         if parts.is_empty() {
             return Err(invalid("document name has no part"));
         }
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         match separator {
             None => writer.u8(0)?,
             Some('\0') => return Err(invalid("document name separator is U+0000")),
@@ -227,9 +234,10 @@ impl<'a> DocumentName<'a> {
             }
         }
         for part in parts {
-            writer.unsigned(part.get())?;
+            writer.unsigned(part.0)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
@@ -243,11 +251,11 @@ impl Iterator for DocumentNameParts<'_> {
     type Item = BlobOffset;
 
     fn next(&mut self) -> Option<BlobOffset> {
-        // `DocumentName::decode` checked all part offsets.
+        // `DocumentName::parse` checked all part offsets.
         if self.reader.is_empty() {
             return None;
         }
-        self.reader.unsigned().ok().map(BlobOffset::new)
+        self.reader.unsigned().ok().map(BlobOffset)
     }
 }
 
@@ -257,7 +265,7 @@ impl FusedIterator for DocumentNameParts<'_> {}
 ///
 /// Roslyn uses `/` if the name has at least as many `/` as `\`, else `\`. It splits the name
 /// at each separator. Each part needs a `#Blob` entry; the writer assigns the offsets and calls
-/// [`DocumentName::encode`].
+/// [`DocumentName::encode_parts`].
 #[must_use]
 pub fn split_document_name(name: &[u8]) -> SplitDocumentName<'_> {
     let count = |byte| {
@@ -308,7 +316,7 @@ impl<'a> Iterator for SplitDocumentName<'a> {
 impl FusedIterator for SplitDocumentName<'_> {}
 
 /// A typed row of the `Document` table with its heap values.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Document {
     id: DocumentId,
     row: DocumentRow,
@@ -384,7 +392,7 @@ impl<S: ReadAt> Pdb<S> {
         let row: DocumentRow = self.row(id)?;
         let name = self
             .document_name(row.name)
-            .map_err(|error| in_blob(error, TableId::DOCUMENT, id.get(), "Name", row.name))?;
+            .map_err(|error| in_blob(error, TableId::DOCUMENT, id.0, "Name", row.name))?;
         Ok(Document {
             id,
             row,
@@ -398,7 +406,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Read all `Document` rows in row order.
     pub fn documents(&self) -> impl ExactSizeIterator<Item = Result<Document>> + '_ {
         each_row(self, TableId::DOCUMENT, |pdb, row| {
-            pdb.document(DocumentId::new(row))
+            pdb.document(DocumentId(row))
         })
     }
 
@@ -406,18 +414,18 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// # Errors
     ///
-    /// - The errors of [`DocumentName::decode`].
+    /// - The errors of [`DocumentName::parse`].
     /// - The errors of [`Pdb::blob`] for the name blob and each part.
     /// - [`ErrorKind::LimitExceeded`] if the name is longer than
     ///   [`ReadOptions::max_value_bytes`](crate::portable::ReadOptions::max_value_bytes).
     pub fn document_name(&self, offset: BlobOffset) -> Result<Vec<u8>> {
         let blob = self.blob(offset)?;
-        let name = DocumentName::decode(&blob)?;
+        let name = DocumentName::parse(&blob)?;
         let mut buffer = [0; 4];
         let separator = name.separator().map_or(&[][..], |separator| {
             separator.encode_utf8(&mut buffer).as_bytes()
         });
-        let limit = self.options().max_value_bytes;
+        let limit = self.options().max_value_bytes();
         let mut text = Vec::new();
         for (index, part) in name.parts().enumerate() {
             let part = self.blob(part)?;
@@ -443,7 +451,7 @@ pub(super) fn check_hash(document: &Document) -> Result<()> {
             ErrorKind::InvalidFormat,
             "document hash size does not match its hash algorithm",
             TableId::DOCUMENT,
-            document.id.get(),
+            document.id.0,
             Some("Hash"),
         )),
         _ => Ok(()),

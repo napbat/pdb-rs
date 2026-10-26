@@ -83,12 +83,11 @@ impl<'a> TypeIndexList<'a> {
     }
 
     /// Return an iterator over the type indices.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = TypeIndex> + 'a {
-        self.indices
-            .as_chunks::<INDEX_SIZE>()
-            .0
-            .iter()
-            .map(|chunk| TypeIndex(u32::from_le_bytes(*chunk)))
+    #[must_use]
+    pub fn iter(&self) -> TypeIndexListIter<'a> {
+        TypeIndexListIter {
+            indices: self.indices.as_chunks::<INDEX_SIZE>().0.iter(),
+        }
     }
 
     /// Return the number of indices as a `u32` count field.
@@ -156,8 +155,90 @@ impl<'a> ArgumentList<'a> {
     }
 
     /// Return an iterator over the argument types.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = TypeIndex> + 'a {
-        self.list.iter()
+    #[must_use]
+    pub fn iter(&self) -> ArgumentListIter<'a> {
+        ArgumentListIter(self.list.iter())
+    }
+}
+
+/// An iterator over the type indices of a [`TypeIndexList`].
+#[derive(Clone, Debug)]
+pub struct TypeIndexListIter<'a> {
+    /// The 4-byte indices that are not returned yet.
+    indices: core::slice::Iter<'a, [u8; INDEX_SIZE]>,
+}
+
+impl Iterator for TypeIndexListIter<'_> {
+    type Item = TypeIndex;
+
+    fn next(&mut self) -> Option<TypeIndex> {
+        self.indices
+            .next()
+            .map(|chunk| TypeIndex(u32::from_le_bytes(*chunk)))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.indices.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TypeIndexListIter<'_> {}
+
+impl core::iter::FusedIterator for TypeIndexListIter<'_> {}
+
+/// An iterator over the argument types of an [`ArgumentList`].
+#[derive(Clone, Debug)]
+pub struct ArgumentListIter<'a>(TypeIndexListIter<'a>);
+
+impl Iterator for ArgumentListIter<'_> {
+    type Item = TypeIndex;
+
+    fn next(&mut self) -> Option<TypeIndex> {
+        self.0.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ArgumentListIter<'_> {}
+
+impl core::iter::FusedIterator for ArgumentListIter<'_> {}
+
+impl<'a> IntoIterator for TypeIndexList<'a> {
+    type Item = TypeIndex;
+    type IntoIter = TypeIndexListIter<'a>;
+
+    fn into_iter(self) -> TypeIndexListIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &TypeIndexList<'a> {
+    type Item = TypeIndex;
+    type IntoIter = TypeIndexListIter<'a>;
+
+    fn into_iter(self) -> TypeIndexListIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for ArgumentList<'a> {
+    type Item = TypeIndex;
+    type IntoIter = ArgumentListIter<'a>;
+
+    fn into_iter(self) -> ArgumentListIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &ArgumentList<'a> {
+    type Item = TypeIndex;
+    type IntoIter = ArgumentListIter<'a>;
+
+    fn into_iter(self) -> ArgumentListIter<'a> {
+        self.iter()
     }
 }
 

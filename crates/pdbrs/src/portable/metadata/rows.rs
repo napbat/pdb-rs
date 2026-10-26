@@ -119,7 +119,7 @@ impl<'a> RowReader<'a> {
             Some(offset),
             "string offset is after the #Strings heap",
         )?;
-        Ok(StringOffset::new(offset))
+        Ok(StringOffset(offset))
     }
 
     /// Read a `#Blob` offset and check it.
@@ -131,7 +131,7 @@ impl<'a> RowReader<'a> {
             Some(offset),
             "blob offset is after the #Blob heap",
         )?;
-        Ok(BlobOffset::new(offset))
+        Ok(BlobOffset(offset))
     }
 
     /// Read a `#GUID` index and check it.
@@ -143,7 +143,7 @@ impl<'a> RowReader<'a> {
             Some(index),
             "GUID index is after the #GUID heap",
         )?;
-        Ok(GuidIndex::new(index))
+        Ok(GuidIndex(index))
     }
 
     /// Read a simple index into `table` and check that it is at most the row count.
@@ -177,7 +177,8 @@ impl<'a> RowReader<'a> {
         let value = self.value(self.tables.coded_index_width(index));
         let token = index.decode(value);
         let valid = token.is_some_and(|token| {
-            TableId::new(token.table())
+            token
+                .table()
                 .is_some_and(|table| token.row() <= self.tables.width_row_count(table))
         });
         self.check(
@@ -222,18 +223,19 @@ macro_rules! table_row {
             const TABLE: TableId = $id::TABLE;
 
             fn row_id(row: u32) -> $id {
-                $id::new(row)
+                $id(row)
             }
 
             fn row_number(id: $id) -> u32 {
-                id.get()
+                id.0
             }
         }
     };
 }
 
 /// A row of the `Document` table (0x30).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DocumentRow {
     /// `Name`: the document name blob.
     pub name: BlobOffset,
@@ -259,7 +261,8 @@ impl sealed::Sealed for DocumentRow {
 }
 
 /// A row of the `MethodDebugInformation` table (0x31).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MethodDebugInformationRow {
     /// `Document`: the single document of all sequence points, or nil.
     pub document: DocumentId,
@@ -272,14 +275,15 @@ table_row!(MethodDebugInformationRow, MethodDebugInformationId);
 impl sealed::Sealed for MethodDebugInformationRow {
     fn decode(reader: &mut RowReader<'_>) -> Result<Self> {
         Ok(Self {
-            document: DocumentId::new(reader.index("Document", TableId::DOCUMENT)?),
+            document: DocumentId(reader.index("Document", TableId::DOCUMENT)?),
             sequence_points: reader.blob("SequencePoints")?,
         })
     }
 }
 
 /// A row of the `LocalScope` table (0x32).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LocalScopeRow {
     /// `Method`: the external `MethodDef` row.
     pub method: MethodDefId,
@@ -300,22 +304,19 @@ table_row!(LocalScopeRow, LocalScopeId);
 impl sealed::Sealed for LocalScopeRow {
     fn decode(reader: &mut RowReader<'_>) -> Result<Self> {
         Ok(Self {
-            method: MethodDefId::new(reader.index("Method", TableId::METHOD_DEF)?),
-            import_scope: ImportScopeId::new(reader.index("ImportScope", TableId::IMPORT_SCOPE)?),
-            variable_list: LocalVariableId::new(
-                reader.list("VariableList", TableId::LOCAL_VARIABLE)?,
-            ),
-            constant_list: LocalConstantId::new(
-                reader.list("ConstantList", TableId::LOCAL_CONSTANT)?,
-            ),
-            start_offset: IlOffset::new(reader.u32()),
+            method: MethodDefId(reader.index("Method", TableId::METHOD_DEF)?),
+            import_scope: ImportScopeId(reader.index("ImportScope", TableId::IMPORT_SCOPE)?),
+            variable_list: LocalVariableId(reader.list("VariableList", TableId::LOCAL_VARIABLE)?),
+            constant_list: LocalConstantId(reader.list("ConstantList", TableId::LOCAL_CONSTANT)?),
+            start_offset: IlOffset(reader.u32()),
             length: reader.u32(),
         })
     }
 }
 
 /// A row of the `LocalVariable` table (0x33).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LocalVariableRow {
     /// `Attributes`: the `LocalVariableAttributes` flags (0x0001 is `DebuggerHidden`).
     pub attributes: u16,
@@ -338,7 +339,8 @@ impl sealed::Sealed for LocalVariableRow {
 }
 
 /// A row of the `LocalConstant` table (0x34).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct LocalConstantRow {
     /// `Name`: the constant name.
     pub name: StringOffset,
@@ -358,7 +360,8 @@ impl sealed::Sealed for LocalConstantRow {
 }
 
 /// A row of the `ImportScope` table (0x35).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ImportScopeRow {
     /// `Parent`: the parent import scope, or nil.
     pub parent: ImportScopeId,
@@ -371,14 +374,15 @@ table_row!(ImportScopeRow, ImportScopeId);
 impl sealed::Sealed for ImportScopeRow {
     fn decode(reader: &mut RowReader<'_>) -> Result<Self> {
         Ok(Self {
-            parent: ImportScopeId::new(reader.index("Parent", TableId::IMPORT_SCOPE)?),
+            parent: ImportScopeId(reader.index("Parent", TableId::IMPORT_SCOPE)?),
             imports: reader.blob("Imports")?,
         })
     }
 }
 
 /// A row of the `StateMachineMethod` table (0x36).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StateMachineMethodRow {
     /// `MoveNextMethod`: the `MoveNext` method of the state machine.
     pub move_next_method: MethodDefId,
@@ -391,16 +395,15 @@ table_row!(StateMachineMethodRow, StateMachineMethodId);
 impl sealed::Sealed for StateMachineMethodRow {
     fn decode(reader: &mut RowReader<'_>) -> Result<Self> {
         Ok(Self {
-            move_next_method: MethodDefId::new(
-                reader.index("MoveNextMethod", TableId::METHOD_DEF)?,
-            ),
-            kickoff_method: MethodDefId::new(reader.index("KickoffMethod", TableId::METHOD_DEF)?),
+            move_next_method: MethodDefId(reader.index("MoveNextMethod", TableId::METHOD_DEF)?),
+            kickoff_method: MethodDefId(reader.index("KickoffMethod", TableId::METHOD_DEF)?),
         })
     }
 }
 
 /// A row of the `CustomDebugInformation` table (0x37).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CustomDebugInformationRow {
     /// `Parent`: the `HasCustomDebugInformation` coded index as a metadata token.
     pub parent: MetadataToken,

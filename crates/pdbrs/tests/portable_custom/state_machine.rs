@@ -7,15 +7,23 @@ use pdbrs::portable::custom::{
 };
 use pdbrs::portable::metadata::{IlOffset, MethodDefId};
 
-use super::{error, round_trip};
+use super::{encoded, error, round_trip};
 
 /// Return a step.
-const fn step(yield_offset: u32, resume_offset: u32, move_next_method: u32) -> AsyncStep {
-    AsyncStep {
-        yield_offset: IlOffset::new(yield_offset),
-        resume_offset: IlOffset::new(resume_offset),
-        move_next_method: MethodDefId::new(move_next_method),
-    }
+fn step(yield_offset: u32, resume_offset: u32, move_next_method: u32) -> AsyncStep {
+    let mut step = AsyncStep::default();
+    step.yield_offset = IlOffset(yield_offset);
+    step.resume_offset = IlOffset(resume_offset);
+    step.move_next_method = MethodDefId(move_next_method);
+    step
+}
+
+/// Return a hoisted local scope.
+fn scope(start: u32, length: u32) -> HoistedLocalScope {
+    let mut scope = HoistedLocalScope::default();
+    scope.start = IlOffset(start);
+    scope.length = length;
+    scope
 }
 
 /// Return the blob of an async method stepping information.
@@ -40,7 +48,7 @@ fn decodes_async_method_stepping_information() {
     else {
         panic!("expected async stepping information");
     };
-    assert_eq!(info.catch_handler_offset(), Some(IlOffset::new(0x298)));
+    assert_eq!(info.catch_handler_offset(), Some(IlOffset(0x298)));
     assert_eq!(info.len(), 2);
     assert_eq!(
         info.iter().collect::<Vec<_>>(),
@@ -53,10 +61,7 @@ fn decodes_async_method_stepping_information() {
     assert!(info.is_empty());
     // The largest stored value is `u32::MAX`.
     let info = AsyncMethodSteppingInformation::parse(&[0xff; 4]).unwrap();
-    assert_eq!(
-        info.catch_handler_offset(),
-        Some(IlOffset::new(u32::MAX - 1))
-    );
+    assert_eq!(info.catch_handler_offset(), Some(IlOffset(u32::MAX - 1)));
 }
 
 #[test]
@@ -83,23 +88,20 @@ fn rejects_malformed_async_method_stepping_information() {
 #[test]
 fn encodes_async_method_stepping_information() {
     assert_eq!(
-        AsyncMethodSteppingInformation::encode(None, []).unwrap(),
+        encoded(|out| AsyncMethodSteppingInformation::encode_parts(None, [], out)).unwrap(),
         [0; 4]
     );
     assert_eq!(
-        AsyncMethodSteppingInformation::encode(
-            Some(IlOffset::new(u32::MAX - 1)),
-            [step(1, 2, 0x1fff_ffff)]
-        )
+        encoded(|out| AsyncMethodSteppingInformation::encode_parts(
+            Some(IlOffset(u32::MAX - 1)),
+            [step(1, 2, 0x1fff_ffff)],
+            out
+        ))
         .unwrap(),
         stepping(u32::MAX, &[(1, 2, &[0xdf, 0xff, 0xff, 0xff])])
     );
     for (catch, steps, expected) in [
-        (
-            Some(IlOffset::new(u32::MAX)),
-            vec![],
-            ErrorKind::LimitExceeded,
-        ),
+        (Some(IlOffset(u32::MAX)), vec![], ErrorKind::LimitExceeded),
         (None, vec![step(1, 2, 0)], ErrorKind::InvalidFormat),
         (
             None,
@@ -108,7 +110,7 @@ fn encodes_async_method_stepping_information() {
         ),
     ] {
         assert_eq!(
-            AsyncMethodSteppingInformation::encode(catch, steps)
+            encoded(|out| AsyncMethodSteppingInformation::encode_parts(catch, steps, out))
                 .unwrap_err()
                 .kind(),
             expected
@@ -139,15 +141,9 @@ fn decodes_hoisted_local_scopes() {
     assert_eq!(
         scopes.iter().collect::<Vec<_>>(),
         [
-            HoistedLocalScope {
-                start: IlOffset::new(0x10),
-                length: 0x20
-            },
+            scope(0x10, 0x20),
             HoistedLocalScope::default(),
-            HoistedLocalScope {
-                start: IlOffset::new(0x7fff_ffff),
-                length: 0x7fff_ffff
-            },
+            scope(0x7fff_ffff, 0x7fff_ffff),
         ]
     );
     assert!(HoistedLocalScopes::parse(&[]).unwrap().is_empty());
@@ -164,17 +160,15 @@ fn rejects_malformed_hoisted_local_scopes() {
             "length {length}"
         );
     }
-    for scope in [(0x8000_0000, 1), (1, 0x8000_0000)] {
+    for (start, length) in [(0x8000_0000, 1), (1, 0x8000_0000)] {
         assert_eq!(
-            error(kind, &scopes_blob(&[scope])),
+            error(kind, &scopes_blob(&[(start, length)])),
             ErrorKind::InvalidFormat
         );
-        let scope = HoistedLocalScope {
-            start: IlOffset::new(scope.0),
-            length: scope.1,
-        };
         assert_eq!(
-            HoistedLocalScopes::encode([scope]).unwrap_err().kind(),
+            encoded(|out| HoistedLocalScopes::encode_parts([scope(start, length)], out))
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidFormat
         );
     }

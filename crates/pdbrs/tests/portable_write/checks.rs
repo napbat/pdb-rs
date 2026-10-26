@@ -2,9 +2,9 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::metadata::{
-    BlobOffset, GuidIndex, ImportScopeId, ImportScopeRow, LocalConstantRow, LocalScopeRow,
-    MetadataStream, MethodDebugInformationRow, MethodDefId, StateMachineMethodRow, StringOffset,
-    TableId,
+    BlobOffset, GuidIndex, IlOffset, ImportScopeId, ImportScopeRow, LocalConstantId,
+    LocalConstantRow, LocalScopeRow, LocalVariableId, MetadataStream, MethodDebugInformationRow,
+    MethodDefId, StateMachineMethodRow, StringOffset, TableId,
 };
 use pdbrs::portable::write::PdbParts;
 
@@ -23,14 +23,29 @@ fn expect(parts: PdbParts, kind: ErrorKind, table: TableId, row: u32, column: &s
 
 /// Make a local scope row.
 fn scope(method: u32, start: u32, length: u32) -> LocalScopeRow {
-    LocalScopeRow {
-        method: MethodDefId::new(method),
-        import_scope: ImportScopeId::new(0),
-        variable_list: pdbrs::portable::metadata::LocalVariableId::new(1),
-        constant_list: pdbrs::portable::metadata::LocalConstantId::new(1),
-        start_offset: pdbrs::portable::metadata::IlOffset::new(start),
-        length,
-    }
+    let mut row = LocalScopeRow::default();
+    row.method = MethodDefId(method);
+    row.variable_list = LocalVariableId(1);
+    row.constant_list = LocalConstantId(1);
+    row.start_offset = IlOffset(start);
+    row.length = length;
+    row
+}
+
+/// Make a state machine method row.
+fn state_machine(move_next: u32, kickoff: u32) -> StateMachineMethodRow {
+    let mut row = StateMachineMethodRow::default();
+    row.move_next_method = MethodDefId(move_next);
+    row.kickoff_method = MethodDefId(kickoff);
+    row
+}
+
+/// Make a local constant row.
+fn constant(name: u32, signature: u32) -> LocalConstantRow {
+    let mut row = LocalConstantRow::default();
+    row.name = StringOffset(name);
+    row.signature = BlobOffset(signature);
+    row
 }
 
 #[test]
@@ -65,7 +80,7 @@ fn local_scopes_need_method_start_and_longest_first_order() {
 fn variable_lists_cannot_decrease() {
     let mut parts = parts_with_methods(2);
     let mut second = scope(2, 0, 5);
-    second.variable_list = pdbrs::portable::metadata::LocalVariableId::new(0);
+    second.variable_list = LocalVariableId(0);
     parts.tables.local_scopes = vec![scope(1, 0, 5), second];
     expect(
         parts,
@@ -91,10 +106,7 @@ fn local_scope_method_must_be_an_external_row() {
 
 #[test]
 fn state_machine_methods_need_unique_sorted_methods() {
-    let row = |move_next, kickoff| StateMachineMethodRow {
-        move_next_method: MethodDefId::new(move_next),
-        kickoff_method: MethodDefId::new(kickoff),
-    };
+    let row = state_machine;
     let mut parts = parts_with_methods(4);
     parts.tables.state_machine_methods = vec![row(2, 1), row(2, 3)];
     let table = TableId::STATE_MACHINE_METHOD;
@@ -117,10 +129,7 @@ fn custom_debug_information_needs_sorted_parents() {
 #[test]
 fn custom_debug_information_parent_must_be_in_the_coded_index() {
     let mut parts = parts_with_methods(2);
-    parts.tables.state_machine_methods = vec![StateMachineMethodRow {
-        move_next_method: MethodDefId::new(2),
-        kickoff_method: MethodDefId::new(1),
-    }];
+    parts.tables.state_machine_methods = vec![state_machine(2, 1)];
     let row = information(&mut parts, (TableId::STATE_MACHINE_METHOD, 1), b"a");
     parts.tables.custom_debug_information = vec![row];
     let table = TableId::CUSTOM_DEBUG_INFORMATION;
@@ -136,24 +145,18 @@ fn custom_debug_information_parent_must_be_in_the_coded_index() {
 fn heap_references_must_identify_entries() {
     let mut parts = parts_with_methods(1);
     parts.blobs.add(b"abc").unwrap();
-    parts.tables.local_constants = vec![LocalConstantRow {
-        name: StringOffset::new(0),
-        // Offset 2 is inside the blob at offset 1.
-        signature: BlobOffset::new(2),
-    }];
+    // Offset 2 is inside the blob at offset 1.
+    parts.tables.local_constants = vec![constant(0, 2)];
     let table = TableId::LOCAL_CONSTANT;
     expect(parts, ErrorKind::InvalidReference, table, 1, "Signature");
 
     let mut parts = parts_with_methods(1);
-    parts.tables.local_constants = vec![LocalConstantRow {
-        name: StringOffset::new(1),
-        signature: BlobOffset::new(0),
-    }];
+    parts.tables.local_constants = vec![constant(1, 0)];
     expect(parts, ErrorKind::InvalidReference, table, 1, "Name");
 
     let mut parts = parts_with_methods(1);
     let mut row = information(&mut parts, (TableId::METHOD_DEF, 1), b"a");
-    row.kind = GuidIndex::new(2);
+    row.kind = GuidIndex(2);
     parts.tables.custom_debug_information = vec![row];
     let table = TableId::CUSTOM_DEBUG_INFORMATION;
     expect(parts, ErrorKind::InvalidReference, table, 1, "Kind");
@@ -163,7 +166,7 @@ fn heap_references_must_identify_entries() {
 fn document_names_are_not_nil() {
     let mut parts = parts_with_methods(1);
     let mut row = document(&mut parts, b"/a");
-    row.name = BlobOffset::new(0);
+    row.name = BlobOffset(0);
     parts.tables.documents = vec![row];
     expect(
         parts,
@@ -176,10 +179,7 @@ fn document_names_are_not_nil() {
 
 #[test]
 fn method_debug_information_has_a_row_for_each_method() {
-    let row = MethodDebugInformationRow {
-        document: pdbrs::portable::metadata::DocumentId::new(0),
-        sequence_points: BlobOffset::new(0),
-    };
+    let row = MethodDebugInformationRow::default();
     let mut parts = parts_with_methods(2);
     parts.tables.method_debug_information = vec![row];
     let error = plan_error(parts);
@@ -194,9 +194,10 @@ fn method_debug_information_has_a_row_for_each_method() {
 
 #[test]
 fn import_scope_parents_cannot_form_a_cycle() {
-    let row = |parent| ImportScopeRow {
-        parent: ImportScopeId::new(parent),
-        imports: BlobOffset::new(0),
+    let row = |parent| {
+        let mut row = ImportScopeRow::default();
+        row.parent = ImportScopeId(parent);
+        row
     };
     let mut parts = parts_with_methods(1);
     parts.tables.import_scopes = vec![row(0), row(1), row(4), row(3)];
@@ -211,7 +212,7 @@ fn import_scope_parents_cannot_form_a_cycle() {
 #[test]
 fn pdb_stream_fields_are_checked() {
     let mut parts = parts_with_methods(2);
-    parts.entry_point = Some(MethodDefId::new(3));
+    parts.entry_point = Some(MethodDefId(3));
     let error = plan_error(parts);
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(location(&error).stream(), Some(MetadataStream::Pdb));

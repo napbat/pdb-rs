@@ -188,8 +188,8 @@ impl<'a> TupleElementNamesEntry<'a> {
         }
         let bytes = &start[..start.len() - fields.rest().len()];
         let slot = fields.i32()?;
-        let scope_start = IlOffset::new(fields.u32()?);
-        let scope_end = IlOffset::new(fields.u32()?);
+        let scope_start = IlOffset(fields.u32()?);
+        let scope_end = IlOffset(fields.u32()?);
         let name = fields.name()?;
         Ok(Self {
             element_names: Utf8Names { bytes, len },

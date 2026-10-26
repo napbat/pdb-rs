@@ -128,7 +128,7 @@ impl<'a> AsyncMethodInfo<'a> {
         let kickoff_method = MetadataToken::from_raw(fields.u32()?);
         let catch_handler_offset = Some(fields.u32()?)
             .filter(|&offset| offset != u32::MAX)
-            .map(IlOffset::new);
+            .map(IlOffset);
         let len = count(fields.u32()?)?;
         let size = len
             .checked_mul(STEP_SIZE)
@@ -192,9 +192,9 @@ chunk_iter!(
     |step: &[u8; STEP_SIZE]| {
         let word = |at: usize| u32::from_le_bytes([step[at], step[at + 1], step[at + 2], step[at + 3]]);
         AsyncStep {
-            yield_offset: IlOffset::new(word(0)),
+            yield_offset: IlOffset(word(0)),
             resume_method: MetadataToken::from_raw(word(4)),
-            resume_offset: IlOffset::new(word(8)),
+            resume_offset: IlOffset(word(8)),
         }
     }
 );

@@ -154,7 +154,7 @@ impl StringHeap {
     /// Record that the string `value` is at `offset`, if the heap has no offset for it.
     pub(crate) fn register(&mut self, value: &[u8], offset: StringOffset) {
         if !value.is_empty() && !self.offsets.contains_key(value) {
-            self.offsets.insert(value.to_vec(), offset.get());
+            self.offsets.insert(value.to_vec(), offset.0);
         }
     }
 }

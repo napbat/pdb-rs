@@ -238,6 +238,7 @@ fn injected_source(
         match embedded.format() {
             EmbeddedFormat::Raw => ".NET embedded sources (raw)",
             EmbeddedFormat::Deflate => ".NET embedded sources (DEFLATE)",
+            _ => ".NET embedded sources (other format)",
         },
         1,
     );

@@ -13,7 +13,7 @@ pub use native::native_pdb;
 pub use portable::portable_pdb;
 
 use pdbrs::native::msf::{Msf, MsfBuilder, MsfWriteOptions};
-use pdbrs::portable::embedded::{EmbeddedFormat, encode};
+use pdbrs::portable::embedded::{EmbeddedFormat, EmbeddedSource};
 
 use crate::{Corpus, Outcome};
 
@@ -22,7 +22,9 @@ pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
     msfz::extra_seeds(corpus)?;
     let text = b"class C { static void Main() { } }\n".repeat(4);
     for format in [EmbeddedFormat::Raw, EmbeddedFormat::Deflate] {
-        corpus.add("embedded_source", &encode(&text, format)?)?;
+        let mut blob = Vec::new();
+        EmbeddedSource::encode_parts(&text, format, &mut blob)?;
+        corpus.add("embedded_source", &blob)?;
     }
     corpus.add("mpdb", &pdbrs::portable::embedded::encode_embedded(&text)?)?;
     // A container with three streams, one of them nil, at two page sizes.

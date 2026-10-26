@@ -69,7 +69,8 @@ const DATE_TIME_LEN: usize = 8;
 const MAX_DECIMAL_SCALE: u8 = 28;
 
 /// A custom modifier (ECMA-335 II.23.2.7).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CustomModifier {
     /// `true` for `CMOD_REQD`, `false` for `CMOD_OPT`.
     pub required: bool,
@@ -87,7 +88,7 @@ impl Iterator for CustomModifiers<'_> {
     type Item = CustomModifier;
 
     fn next(&mut self) -> Option<CustomModifier> {
-        // `LocalConstantSignature::decode` checked all modifiers.
+        // `LocalConstantSignature::parse` checked all modifiers.
         if self.reader.is_empty() {
             return None;
         }
@@ -158,7 +159,8 @@ impl PrimitiveConstant<'_> {
 }
 
 /// A `System.Decimal` value: sign, scale and a 96-bit integer.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Decimal {
     /// `true` for a negative value.
     pub negative: bool,
@@ -226,7 +228,7 @@ impl<'a> LocalConstantSignature<'a> {
     ///   code, a type handle with tag 3 or row 0, a `BOOLEAN` value other than 0 and 1, an odd
     ///   string size, a general value of another size than 0, 8 or 13 bytes, a `Decimal`
     ///   scale above 28, or bytes after the value.
-    pub fn decode(blob: &'a [u8]) -> Result<Self> {
+    pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let mut reader = Reader::new(blob);
         let start = reader.rest();
         while read_modifier(&mut reader)?.is_some() {}
@@ -281,7 +283,8 @@ impl<'a> LocalConstantSignature<'a> {
         self.value
     }
 
-    /// Encode a local constant signature in the form that Roslyn writes.
+    /// Encode a local constant signature in the form that Roslyn writes, and append it to
+    /// `out`.
     ///
     /// # Errors
     ///
@@ -290,8 +293,14 @@ impl<'a> LocalConstantSignature<'a> {
     ///   `R8` or `STRING`, an odd string size, or a `Decimal` scale above 28.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a type row does not
     ///   fit.
-    pub fn encode(modifiers: &[CustomModifier], value: &ConstantValue<'_>) -> Result<Vec<u8>> {
-        let mut writer = Writer::new();
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
+        modifiers: &[CustomModifier],
+        value: &ConstantValue<'_>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut writer = Writer::append(out);
         for modifier in modifiers {
             writer.u8(if modifier.required {
                 CMOD_REQD
@@ -320,7 +329,8 @@ impl<'a> LocalConstantSignature<'a> {
             }
             ConstantValue::Object => writer.u8(OBJECT)?,
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
@@ -411,7 +421,7 @@ fn read_general(bytes: &[u8]) -> Result<GeneralValue> {
 }
 
 /// Write a type code and a primitive value.
-fn write_primitive(writer: &mut Writer, value: &PrimitiveConstant<'_>) -> Result<()> {
+fn write_primitive(writer: &mut Writer<'_>, value: &PrimitiveConstant<'_>) -> Result<()> {
     writer.u8(value.type_code())?;
     match *value {
         PrimitiveConstant::Boolean(value) => writer.u8(u8::from(value)),
@@ -436,7 +446,7 @@ fn write_primitive(writer: &mut Writer, value: &PrimitiveConstant<'_>) -> Result
 }
 
 /// Write a general value.
-fn write_general(writer: &mut Writer, value: &GeneralValue) -> Result<()> {
+fn write_general(writer: &mut Writer<'_>, value: &GeneralValue) -> Result<()> {
     match value {
         GeneralValue::Default => Ok(()),
         GeneralValue::DateTime(ticks) => writer.u64(ticks.cast_unsigned()),
@@ -453,7 +463,7 @@ fn write_general(writer: &mut Writer, value: &GeneralValue) -> Result<()> {
 }
 
 /// A typed row of the `LocalConstant` table with its name and signature blob.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LocalConstant {
     id: LocalConstantId,
     row: LocalConstantRow,
@@ -490,9 +500,9 @@ impl LocalConstant {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`LocalConstantSignature::decode`] with the location of the blob.
+    /// Returns the errors of [`LocalConstantSignature::parse`] with the location of the blob.
     pub fn signature(&self) -> Result<LocalConstantSignature<'_>> {
-        LocalConstantSignature::decode(&self.signature).map_err(|error| self.blob_error(error))
+        LocalConstantSignature::parse(&self.signature).map_err(|error| self.blob_error(error))
     }
 
     /// Add the location of the signature blob to a codec error.
@@ -501,7 +511,7 @@ impl LocalConstant {
         in_blob(
             error,
             TableId::LOCAL_CONSTANT,
-            self.id.get(),
+            self.id.0,
             "Signature",
             self.row.signature,
         )
@@ -533,7 +543,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Read all `LocalConstant` rows in row order.
     pub fn local_constants(&self) -> impl ExactSizeIterator<Item = Result<LocalConstant>> + '_ {
         each_row(self, TableId::LOCAL_CONSTANT, |pdb, row| {
-            pdb.local_constant(LocalConstantId::new(row))
+            pdb.local_constant(LocalConstantId(row))
         })
     }
 }

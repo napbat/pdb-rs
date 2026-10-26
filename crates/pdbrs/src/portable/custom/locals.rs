@@ -26,9 +26,9 @@ pub struct DynamicLocalVariables<'a> {
 }
 
 impl<'a> DynamicLocalVariables<'a> {
-    /// Wrap a dynamic local variables blob. All byte sequences are valid.
+    /// Decode a dynamic local variables blob. All byte sequences are valid.
     #[must_use]
-    pub const fn new(blob: &'a [u8]) -> Self {
+    pub const fn parse(blob: &'a [u8]) -> Self {
         Self { bytes: blob }
     }
 
@@ -60,47 +60,48 @@ impl<'a> DynamicLocalVariables<'a> {
 
     /// Return an iterator over the stored flags.
     #[must_use]
-    pub const fn iter(&self) -> DynamicFlagIter<'a> {
-        DynamicFlagIter {
+    pub const fn iter(&self) -> DynamicLocalVariablesIter<'a> {
+        DynamicLocalVariablesIter {
             flags: *self,
             front: 0,
             back: self.len(),
         }
     }
 
-    /// Encode a dynamic local variables blob as Roslyn does: the encoder
-    /// omits trailing zero bytes.
+    /// Encode a dynamic local variables blob as Roslyn does, and append it to
+    /// `out`. The encoder omits trailing zero bytes.
     ///
     /// # Errors
     ///
     /// Return [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if
-    /// an allocation fails.
-    pub fn encode(flags: impl IntoIterator<Item = bool>) -> Result<Vec<u8>> {
-        let mut bytes = Vec::new();
-        let mut used = 0;
+    /// an allocation fails. On error, `out` does not change.
+    pub fn encode_parts(flags: impl IntoIterator<Item = bool>, out: &mut Vec<u8>) -> Result<()> {
+        let start = out.len();
+        let mut used = start;
         for (index, flag) in flags.into_iter().enumerate() {
-            let at = index / 8;
-            if at == bytes.len() {
-                bytes
-                    .try_reserve(1)
-                    .map_err(|_| too_large("custom debug information blob allocation failed"))?;
-                bytes.push(0);
+            let at = start + index / 8;
+            if at == out.len() {
+                if out.try_reserve(1).is_err() {
+                    out.truncate(start);
+                    return Err(too_large("custom debug information blob allocation failed"));
+                }
+                out.push(0);
             }
             if flag {
-                bytes[at] |= 1 << (index % 8);
+                out[at] |= 1 << (index % 8);
                 used = at + 1;
             }
         }
-        bytes.truncate(used);
-        Ok(bytes)
+        out.truncate(used);
+        Ok(())
     }
 }
 
-iterable!(DynamicLocalVariables => DynamicFlagIter<'a>);
+iterable!(@into DynamicLocalVariables => DynamicLocalVariablesIter, bool);
 
 /// An iterator over [`DynamicLocalVariables`].
 #[derive(Clone, Debug)]
-pub struct DynamicFlagIter<'a> {
+pub struct DynamicLocalVariablesIter<'a> {
     /// The flags.
     flags: DynamicLocalVariables<'a>,
     /// The index of the next flag from the front.
@@ -109,7 +110,7 @@ pub struct DynamicFlagIter<'a> {
     back: usize,
 }
 
-impl Iterator for DynamicFlagIter<'_> {
+impl Iterator for DynamicLocalVariablesIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
@@ -126,7 +127,7 @@ impl Iterator for DynamicFlagIter<'_> {
     }
 }
 
-impl DoubleEndedIterator for DynamicFlagIter<'_> {
+impl DoubleEndedIterator for DynamicLocalVariablesIter<'_> {
     fn next_back(&mut self) -> Option<bool> {
         if self.front == self.back {
             return None;
@@ -136,9 +137,9 @@ impl DoubleEndedIterator for DynamicFlagIter<'_> {
     }
 }
 
-impl ExactSizeIterator for DynamicFlagIter<'_> {}
+impl ExactSizeIterator for DynamicLocalVariablesIter<'_> {}
 
-impl FusedIterator for DynamicFlagIter<'_> {}
+impl FusedIterator for DynamicLocalVariablesIter<'_> {}
 
 /// The tuple element names of a local variable or constant.
 ///
@@ -184,12 +185,12 @@ impl<'a> TupleElementNames<'a> {
 
     /// Return an iterator over the names, without their NUL terminators.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, Utf8Bytes<'a>> {
-        Entries::new(self.bytes, self.len, 0, read_name)
+    pub const fn iter(&self) -> TupleElementNamesIter<'a> {
+        TupleElementNamesIter(Entries::new(self.bytes, self.len, 0, read_name))
     }
 
-    /// Encode a tuple element names blob. Use an empty name for an element
-    /// without a name.
+    /// Encode a tuple element names blob, and append it to `out`. Use an empty
+    /// name for an element without a name.
     ///
     /// # Errors
     ///
@@ -197,16 +198,22 @@ impl<'a> TupleElementNames<'a> {
     ///   name has a NUL byte.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if an
     ///   allocation fails.
-    pub fn encode<'n>(names: impl IntoIterator<Item = &'n [u8]>) -> Result<Vec<u8>> {
-        let mut writer = Writer::new();
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts<'n>(
+        names: impl IntoIterator<Item = &'n [u8]>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut writer = Writer::append(out);
         for name in names {
             writer.c_string(name, "tuple element name has a NUL byte")?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(TupleElementNames => Entries<'a, Utf8Bytes<'a>>);
+iterable!(TupleElementNames => TupleElementNamesIter, Utf8Bytes<'a>);
 
 /// Read one tuple element name.
 fn read_name<'a>(reader: &mut Reader<'a>, _: i32) -> Result<Utf8Bytes<'a>> {

@@ -24,7 +24,7 @@ pub(super) fn state_machine_methods<S: ReadAt>(
                 ErrorKind::InvalidFormat,
                 context,
                 TableId::STATE_MACHINE_METHOD,
-                method.id().get(),
+                method.id().0,
                 Some(column),
             )
         };
@@ -68,7 +68,7 @@ pub(super) fn custom_debug_information<S: ReadAt>(
                 ErrorKind::InvalidFormat,
                 context,
                 TableId::CUSTOM_DEBUG_INFORMATION,
-                id.get(),
+                id.0,
                 Some("Parent"),
             )
         };

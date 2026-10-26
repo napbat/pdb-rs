@@ -20,6 +20,7 @@ use crate::{Error, Result};
 
 /// One import of an import scope.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum Import {
     /// Kind 1: import the members of a namespace.
     Namespace {
@@ -149,7 +150,7 @@ impl Import {
     /// Read one import.
     fn read(reader: &mut Reader<'_>) -> Result<Self> {
         let kind = reader.unsigned()?;
-        let blob = |reader: &mut Reader<'_>| reader.unsigned().map(BlobOffset::new);
+        let blob = |reader: &mut Reader<'_>| reader.unsigned().map(BlobOffset);
         Ok(match kind {
             1 => Self::Namespace {
                 namespace: blob(reader)?,
@@ -190,19 +191,19 @@ impl Import {
     }
 
     /// Write one import.
-    fn write(&self, writer: &mut Writer) -> Result<()> {
+    fn write(&self, writer: &mut Writer<'_>) -> Result<()> {
         writer.unsigned(self.kind())?;
         if let Some(alias) = self.alias() {
-            writer.unsigned(alias.get())?;
+            writer.unsigned(alias.0)?;
         }
         if let Some(assembly) = self.assembly() {
             if assembly.is_nil() {
                 return Err(invalid("import target assembly is nil"));
             }
-            writer.unsigned(assembly.get())?;
+            writer.unsigned(assembly.0)?;
         }
         if let Some(namespace) = self.namespace() {
-            writer.unsigned(namespace.get())?;
+            writer.unsigned(namespace.0)?;
         }
         if let Some(target_type) = self.target_type() {
             type_handle::write(writer, target_type)?;
@@ -217,7 +218,7 @@ fn read_assembly(reader: &mut Reader<'_>) -> Result<AssemblyRefId> {
     if row == 0 {
         return Err(invalid("import target assembly is nil"));
     }
-    Ok(AssemblyRefId::new(row))
+    Ok(AssemblyRefId(row))
 }
 
 /// A lazy, checked iterator over the imports of a blob.
@@ -233,11 +234,31 @@ pub struct Imports<'a> {
 impl<'a> Imports<'a> {
     /// Start to decode an imports blob. An empty blob has no imports.
     #[must_use]
-    pub const fn decode(blob: &'a [u8]) -> Self {
+    pub const fn parse(blob: &'a [u8]) -> Self {
         Self {
             reader: Reader::new(blob),
             failed: false,
         }
+    }
+
+    /// Encode an imports blob, and append it to `out`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) for a nil target
+    ///   assembly or a target type that is not a non-nil `TypeDef`, `TypeRef` or `TypeSpec`
+    ///   token.
+    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a value does not fit
+    ///   in a compressed integer.
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(imports: &[Import], out: &mut Vec<u8>) -> Result<()> {
+        let mut writer = Writer::append(out);
+        for import in imports {
+            import.write(&mut writer)?;
+        }
+        writer.finish();
+        Ok(())
     }
 }
 
@@ -256,24 +277,8 @@ impl Iterator for Imports<'_> {
 
 impl FusedIterator for Imports<'_> {}
 
-/// Encode an imports blob.
-///
-/// # Errors
-///
-/// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) for a nil target assembly
-///   or a target type that is not a non-nil `TypeDef`, `TypeRef` or `TypeSpec` token.
-/// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a value does not fit in
-///   a compressed integer.
-pub fn encode_imports(imports: &[Import]) -> Result<Vec<u8>> {
-    let mut writer = Writer::new();
-    for import in imports {
-        import.write(&mut writer)?;
-    }
-    Ok(writer.finish())
-}
-
 /// A typed row of the `ImportScope` table with its imports blob.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ImportScope {
     id: ImportScopeId,
     row: ImportScopeRow,
@@ -309,7 +314,7 @@ impl ImportScope {
     /// [`ImportScope::blob_error`].
     #[must_use]
     pub fn imports(&self) -> Imports<'_> {
-        Imports::decode(&self.imports)
+        Imports::parse(&self.imports)
     }
 
     /// Add the location of the imports blob to a codec error.
@@ -318,7 +323,7 @@ impl ImportScope {
         in_blob(
             error,
             TableId::IMPORT_SCOPE,
-            self.id.get(),
+            self.id.0,
             "Imports",
             self.row.imports,
         )
@@ -343,7 +348,7 @@ impl<S: ReadAt> Pdb<S> {
     /// Read all `ImportScope` rows in row order.
     pub fn import_scopes(&self) -> impl ExactSizeIterator<Item = Result<ImportScope>> + '_ {
         each_row(self, TableId::IMPORT_SCOPE, |pdb, row| {
-            pdb.import_scope(ImportScopeId::new(row))
+            pdb.import_scope(ImportScopeId(row))
         })
     }
 }

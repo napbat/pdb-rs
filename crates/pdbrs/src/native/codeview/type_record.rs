@@ -49,8 +49,8 @@ pub use attributes::{
 pub use basic::{Array, Bitfield, MemberFunction, Modifier, Procedure};
 pub use hlsl::{Hlsl, Matrix, ModifierEx, NumericList, Vector};
 pub use list::{
-    ArgumentList, MethodList, MethodListEntry, MethodListIter, TypeIndexList, VirtualFunctionTable,
-    VtableShape,
+    ArgumentList, ArgumentListIter, MethodList, MethodListEntry, MethodListIter, TypeIndexList,
+    TypeIndexListIter, VirtualFunctionTable, VtableShape,
 };
 pub use oem::{Cobol0, Oem, Oem2, Skip};
 pub use pointer::{BasedPointer, MemberPointer, Pointer};

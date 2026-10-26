@@ -171,44 +171,44 @@ fn encode_rows(tables: &DebugTables, widths: &Widths, bytes: &mut Vec<u8>) -> Re
     let index = |table| widths.index(table);
     for row in &tables.documents {
         Row(bytes)
-            .value(blob, row.name.get())
-            .value(guid, row.hash_algorithm.get())
-            .value(blob, row.hash.get())
-            .value(guid, row.language.get());
+            .value(blob, row.name.0)
+            .value(guid, row.hash_algorithm.0)
+            .value(blob, row.hash.0)
+            .value(guid, row.language.0);
     }
     for row in &tables.method_debug_information {
         Row(bytes)
-            .value(index(TableId::DOCUMENT), row.document.get())
-            .value(blob, row.sequence_points.get());
+            .value(index(TableId::DOCUMENT), row.document.0)
+            .value(blob, row.sequence_points.0);
     }
     for row in &tables.local_scopes {
         Row(bytes)
-            .value(index(TableId::METHOD_DEF), row.method.get())
-            .value(index(TableId::IMPORT_SCOPE), row.import_scope.get())
-            .value(index(TableId::LOCAL_VARIABLE), row.variable_list.get())
-            .value(index(TableId::LOCAL_CONSTANT), row.constant_list.get())
-            .value(4, row.start_offset.get())
+            .value(index(TableId::METHOD_DEF), row.method.0)
+            .value(index(TableId::IMPORT_SCOPE), row.import_scope.0)
+            .value(index(TableId::LOCAL_VARIABLE), row.variable_list.0)
+            .value(index(TableId::LOCAL_CONSTANT), row.constant_list.0)
+            .value(4, row.start_offset.0)
             .value(4, row.length);
     }
     for row in &tables.local_variables {
         bytes.extend_from_slice(&row.attributes.to_le_bytes());
         bytes.extend_from_slice(&row.index.to_le_bytes());
-        Row(bytes).value(string, row.name.get());
+        Row(bytes).value(string, row.name.0);
     }
     for row in &tables.local_constants {
         Row(bytes)
-            .value(string, row.name.get())
-            .value(blob, row.signature.get());
+            .value(string, row.name.0)
+            .value(blob, row.signature.0);
     }
     for row in &tables.import_scopes {
         Row(bytes)
-            .value(index(TableId::IMPORT_SCOPE), row.parent.get())
-            .value(blob, row.imports.get());
+            .value(index(TableId::IMPORT_SCOPE), row.parent.0)
+            .value(blob, row.imports.0);
     }
     for row in &tables.state_machine_methods {
         Row(bytes)
-            .value(index(TableId::METHOD_DEF), row.move_next_method.get())
-            .value(index(TableId::METHOD_DEF), row.kickoff_method.get());
+            .value(index(TableId::METHOD_DEF), row.move_next_method.0)
+            .value(index(TableId::METHOD_DEF), row.kickoff_method.0);
     }
     for row in &tables.custom_debug_information {
         // The checks make sure that the parent has a coded value.
@@ -223,8 +223,8 @@ fn encode_rows(tables: &DebugTables, widths: &Widths, bytes: &mut Vec<u8>) -> Re
             })?;
         Row(bytes)
             .value(widths.coded(), parent)
-            .value(guid, row.kind.get())
-            .value(blob, row.value.get());
+            .value(guid, row.kind.0)
+            .value(blob, row.value.0);
     }
     Ok(())
 }
@@ -235,7 +235,7 @@ pub(super) fn pdb_stream(
     external: &ExternalRowCounts,
 ) -> Vec<u8> {
     let tables: Vec<(TableId, u32)> = (0_u8..64)
-        .filter_map(TableId::new)
+        .filter_map(TableId::from_raw)
         .map(|table| (table, external.get(table)))
         .filter(|&(_, count)| count > 0)
         .collect();
@@ -243,7 +243,7 @@ pub(super) fn pdb_stream(
     bytes.extend_from_slice(&[0; 20]);
     let token = entry_point
         .and_then(MethodDefId::token)
-        .map_or(0, MetadataToken::get);
+        .map_or(0, MetadataToken::raw);
     bytes.extend_from_slice(&token.to_le_bytes());
     let mask = tables
         .iter()

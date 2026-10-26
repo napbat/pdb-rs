@@ -25,13 +25,14 @@ use super::{read_baseline, read_syntax_offset, write_baseline, write_syntax_offs
 use crate::Result;
 
 /// The largest number of zero bytes after the states.
-const MAX_PADDING: usize = 3;
+const MAX_TRAILING: usize = 3;
 
 /// The largest number of states with the same syntax offset.
 const MAX_SAME_OFFSET: usize = 256;
 
 /// One state of a state machine.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StateMachineState {
     /// The state number. Suspension points have numbers from 0 up, and
     /// finally states have negative numbers.
@@ -52,7 +53,7 @@ pub struct EncStateMachineStateMap<'a> {
     /// The syntax offset baseline.
     baseline: i32,
     /// The zero bytes after the states.
-    padding: &'a [u8],
+    trailing: &'a [u8],
 }
 
 impl<'a> EncStateMachineStateMap<'a> {
@@ -81,16 +82,16 @@ impl<'a> EncStateMachineStateMap<'a> {
             order.check(read_state(&mut reader, baseline)?.syntax_offset)?;
             len += 1;
         }
-        let padding = reader.rest();
-        if padding.len() > MAX_PADDING || padding.iter().any(|&byte| byte != 0) {
+        let trailing = reader.rest();
+        if trailing.len() > MAX_TRAILING || trailing.iter().any(|&byte| byte != 0) {
             return Err(invalid("bytes follow the state machine states"));
         }
         Ok(Self {
             bytes: blob,
-            states: &start[..start.len() - padding.len()],
+            states: &start[..start.len() - trailing.len()],
             len,
             baseline,
-            padding,
+            trailing,
         })
     }
 
@@ -108,8 +109,8 @@ impl<'a> EncStateMachineStateMap<'a> {
 
     /// Return the zero bytes after the states (at most three).
     #[must_use]
-    pub const fn padding(&self) -> &'a [u8] {
-        self.padding
+    pub const fn trailing(&self) -> &'a [u8] {
+        self.trailing
     }
 
     /// Return the number of states.
@@ -126,11 +127,17 @@ impl<'a> EncStateMachineStateMap<'a> {
 
     /// Return an iterator over the states.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, StateMachineState> {
-        Entries::new(self.states, self.len, self.baseline, read_state)
+    pub const fn iter(&self) -> EncStateMachineStateMapIter<'a> {
+        EncStateMachineStateMapIter(Entries::new(
+            self.states,
+            self.len,
+            self.baseline,
+            read_state,
+        ))
     }
 
-    /// Encode a state machine state map blob as Roslyn does, without padding.
+    /// Encode a state machine state map blob as Roslyn does, and append it to
+    /// `out`. The encoder does not write [`EncStateMachineStateMap::trailing`].
     ///
     /// The baseline is the smallest of 0 and all syntax offsets.
     ///
@@ -141,16 +148,20 @@ impl<'a> EncStateMachineStateMap<'a> {
     ///   syntax offset.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a
     ///   value does not fit in a compressed integer, or if an allocation fails.
-    pub fn encode(
+    ///
+    /// On error, `out` does not change.
+    pub fn encode_parts(
         states: impl IntoIterator<Item = StateMachineState, IntoIter: Clone>,
-    ) -> Result<Vec<u8>> {
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         let states = states.into_iter();
         let count = u32::try_from(states.clone().count())
             .map_err(|_| too_large("state machine state map has too many states"))?;
-        let mut writer = Writer::new();
+        let mut writer = Writer::append(out);
         writer.unsigned(count)?;
         if count == 0 {
-            return Ok(writer.finish());
+            writer.finish();
+            return Ok(());
         }
         let baseline = states
             .clone()
@@ -163,11 +174,12 @@ impl<'a> EncStateMachineStateMap<'a> {
             writer.signed(state.state_number)?;
             write_syntax_offset(&mut writer, state.syntax_offset, baseline)?;
         }
-        Ok(writer.finish())
+        writer.finish();
+        Ok(())
     }
 }
 
-iterable!(EncStateMachineStateMap => Entries<'a, StateMachineState>);
+iterable!(EncStateMachineStateMap => EncStateMachineStateMapIter, StateMachineState);
 
 /// The order check of the syntax offsets.
 #[derive(Default)]

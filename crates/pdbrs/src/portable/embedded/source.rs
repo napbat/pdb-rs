@@ -21,6 +21,7 @@ use crate::{Error, ErrorKind, Result};
 
 /// The result of a check of a source against the hash of its document.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum SourceCheck {
     /// The hash algorithm is SHA-256, and the SHA-256 digest of the source is equal to the
     /// document hash.
@@ -98,7 +99,7 @@ const fn value_location(id: CustomDebugInformationId) -> PortableLocation {
     PortableLocation::new()
         .with_stream(MetadataStream::Tables)
         .with_table(TableId::CUSTOM_DEBUG_INFORMATION)
-        .with_row(id.get())
+        .with_row(id.0)
         .with_column("Value")
 }
 
@@ -161,8 +162,7 @@ impl<S: ReadAt> Pdb<S> {
         let Some((id, offset)) = self.embedded_source_row(document)? else {
             return Ok(None);
         };
-        let at =
-            |error: Error| error.with_portable(value_location(id).with_heap_offset(offset.get()));
+        let at = |error: Error| error.with_portable(value_location(id).with_heap_offset(offset.0));
         let blob = self.blob(offset).map_err(at)?;
         let source = EmbeddedSource::parse(&blob).map_err(at)?;
         let format = source.format();

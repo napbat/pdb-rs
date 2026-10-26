@@ -116,8 +116,52 @@ impl<'a> EntryValues<'a> {
     }
 
     /// Return an iterator over the words.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = u32> + 'a {
-        self.words.iter().map(|word| u32::from_le_bytes(*word))
+    #[must_use]
+    pub fn iter(&self) -> EntryValuesIter<'a> {
+        EntryValuesIter {
+            words: self.words.iter(),
+        }
+    }
+}
+
+/// An iterator over the words of an [`EntryValues`] record.
+#[derive(Clone, Debug)]
+pub struct EntryValuesIter<'a> {
+    /// The 4-byte words that are not returned yet.
+    words: core::slice::Iter<'a, [u8; 4]>,
+}
+
+impl Iterator for EntryValuesIter<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        self.words.next().map(|word| u32::from_le_bytes(*word))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.words.size_hint()
+    }
+}
+
+impl ExactSizeIterator for EntryValuesIter<'_> {}
+
+impl core::iter::FusedIterator for EntryValuesIter<'_> {}
+
+impl<'a> IntoIterator for EntryValues<'a> {
+    type Item = u32;
+    type IntoIter = EntryValuesIter<'a>;
+
+    fn into_iter(self) -> EntryValuesIter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &EntryValues<'a> {
+    type Item = u32;
+    type IntoIter = EntryValuesIter<'a>;
+
+    fn into_iter(self) -> EntryValuesIter<'a> {
+        self.iter()
     }
 }
 

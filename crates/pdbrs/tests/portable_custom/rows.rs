@@ -50,14 +50,14 @@ fn reads_and_decodes_custom_debug_information_rows() {
     let rows: Vec<_> = rows.collect();
 
     let first = rows[0].as_ref().unwrap();
-    assert_eq!(first.id(), CustomDebugInformationId::new(1));
+    assert_eq!(first.id(), CustomDebugInformationId(1));
     assert_eq!(
         first.parent(),
         MetadataToken::new(TableId::METHOD_DEF, 1).unwrap()
     );
     assert_eq!(first.kind(), CustomDebugKind::DEFAULT_NAMESPACE);
-    assert_eq!(first.kind_index().get(), 1);
-    assert_eq!(first.value_offset().get(), 1);
+    assert_eq!(first.kind_index().0, 1);
+    assert_eq!(first.value_offset().0, 1);
     assert_eq!(first.value(), b"abc");
     let CustomDebugValue::DefaultNamespace(name) = first.decode().unwrap() else {
         panic!("expected a default namespace");
@@ -104,7 +104,7 @@ fn reports_row_errors_with_their_column() {
     let bytes = pdb_bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
     let error = pdb
-        .custom_debug_information(CustomDebugInformationId::new(5))
+        .custom_debug_information(CustomDebugInformationId(5))
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 

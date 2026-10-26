@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{CustomDebugKind, CustomDebugValue, decode};
+use super::{CustomDebugKind, CustomDebugValue};
 use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
@@ -78,9 +78,9 @@ impl CustomDebugInformation {
     /// as its location. [`CustomDebugInformation::kind`] gives the kind of the codec. An
     /// unknown kind does not give an error.
     pub fn decode(&self) -> Result<CustomDebugValue<'_>> {
-        decode(self.kind, &self.value).map_err(|error| {
+        CustomDebugValue::parse(self.kind, &self.value).map_err(|error| {
             error.with_portable(
-                column_location(self.id, "Value").with_heap_offset(self.value_offset.get()),
+                column_location(self.id, "Value").with_heap_offset(self.value_offset.0),
             )
         })
     }
@@ -91,7 +91,7 @@ const fn column_location(id: CustomDebugInformationId, column: &'static str) -> 
     PortableLocation::new()
         .with_stream(MetadataStream::Tables)
         .with_table(TableId::CUSTOM_DEBUG_INFORMATION)
-        .with_row(id.get())
+        .with_row(id.0)
         .with_column(column)
 }
 
@@ -151,7 +151,7 @@ impl<S: ReadAt> Iterator for CustomDebugInformationIter<'_, S> {
         if self.remaining == 0 {
             return None;
         }
-        let id = CustomDebugInformationId::new(self.next);
+        let id = CustomDebugInformationId(self.next);
         self.remaining -= 1;
         self.next = self.next.saturating_add(1);
         Some(self.pdb.custom_debug_information(id))

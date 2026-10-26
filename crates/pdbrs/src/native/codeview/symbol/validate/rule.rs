@@ -178,7 +178,7 @@ impl Rule {
 }
 
 /// One broken rule at one record.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Violation {
     /// The broken rule.

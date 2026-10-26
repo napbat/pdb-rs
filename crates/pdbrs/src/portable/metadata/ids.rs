@@ -148,19 +148,15 @@ impl TableId {
         Self::CUSTOM_DEBUG_INFORMATION,
     ];
 
-    /// Make a table number. Return `None` if `number` is larger than 0x3F.
+    /// Make a table number from its raw value. Return `None` if `raw` is larger than 0x3F.
     #[must_use]
-    pub const fn new(number: u8) -> Option<Self> {
-        if number < 64 {
-            Some(Self(number))
-        } else {
-            None
-        }
+    pub const fn from_raw(raw: u8) -> Option<Self> {
+        if raw < 64 { Some(Self(raw)) } else { None }
     }
 
-    /// Return the table number.
+    /// Return the raw table number.
     #[must_use]
-    pub const fn number(self) -> u8 {
+    pub const fn raw(self) -> u8 {
         self.0
     }
 
@@ -235,14 +231,15 @@ impl MetadataToken {
 
     /// Return the serialized 32-bit value.
     #[must_use]
-    pub const fn get(self) -> u32 {
+    pub const fn raw(self) -> u32 {
         self.0
     }
 
-    /// Return the table number in the high byte.
+    /// Return the table of the high byte, or `None` if the high byte is larger than 0x3F and so
+    /// is not a table number.
     #[must_use]
-    pub const fn table(self) -> u8 {
-        self.0.to_be_bytes()[0]
+    pub const fn table(self) -> Option<TableId> {
+        TableId::from_raw(self.0.to_be_bytes()[0])
     }
 
     /// Return the row number in the low 24 bits. The value 0 is the nil row.
@@ -257,25 +254,13 @@ macro_rules! row_id {
     ($(#[$doc:meta])* $name:ident, $table:expr) => {
         $(#[$doc])*
         ///
-        /// The value is 1-based. The raw value 0 is the nil row.
+        /// The value is the 1-based row number. The raw value 0 is the nil row.
         #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(u32);
+        pub struct $name(pub u32);
 
         impl $name {
             /// The table of this row ID.
             pub const TABLE: TableId = $table;
-
-            /// Make a row ID from its 1-based row number, or 0 for nil.
-            #[must_use]
-            pub const fn new(row: u32) -> Self {
-                Self(row)
-            }
-
-            /// Return the 1-based row number, or 0 for nil.
-            #[must_use]
-            pub const fn get(self) -> u32 {
-                self.0
-            }
 
             /// Return `true` for the nil row (0).
             #[must_use]
@@ -356,21 +341,7 @@ macro_rules! heap_handle {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
         #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(u32);
-
-        impl $name {
-            /// Make a handle from its serialized value.
-            #[must_use]
-            pub const fn new(value: u32) -> Self {
-                Self(value)
-            }
-
-            /// Return the serialized value.
-            #[must_use]
-            pub const fn get(self) -> u32 {
-                self.0
-            }
-        }
+        pub struct $name(pub u32);
     };
 }
 

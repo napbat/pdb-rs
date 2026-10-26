@@ -68,7 +68,7 @@ pub(super) fn counts(parts: &PdbParts) -> Result<Counts> {
             .with_portable(MetadataStream::Root.location()));
     }
     let mut counts = *parts.external.as_array();
-    for table in (0_u8..64).filter_map(TableId::new) {
+    for table in (0_u8..64).filter_map(TableId::from_raw) {
         let count = counts[table.index()];
         if count > 0 && !table.is_type_system() {
             return Err(pdb_error(
@@ -102,7 +102,7 @@ pub(super) fn counts(parts: &PdbParts) -> Result<Counts> {
     }
     let counts = Counts(counts);
     if let Some(method) = parts.entry_point
-        && (method.is_nil() || method.get() > counts.get(TableId::METHOD_DEF))
+        && (method.is_nil() || method.0 > counts.get(TableId::METHOD_DEF))
     {
         return Err(pdb_error(
             ErrorKind::InvalidReference,
@@ -149,7 +149,7 @@ impl Rows<'_> {
 
     /// Check a `#GUID` index.
     fn guid(&self, row: usize, column: &'static str, index: GuidIndex) -> Result<()> {
-        if index.get() <= self.parts.guids.count() {
+        if index.0 <= self.parts.guids.count() {
             return Ok(());
         }
         Err(self.reference(row, column, "GUID index is after the #GUID heap"))
@@ -217,13 +217,7 @@ pub(super) fn rows(parts: &PdbParts, counts: &Counts) -> Result<()> {
     documents(&table(TableId::DOCUMENT))?;
     let check = table(TableId::METHOD_DEBUG_INFORMATION);
     for (row, info) in parts.tables.method_debug_information.iter().enumerate() {
-        check.row(
-            row,
-            "Document",
-            TableId::DOCUMENT,
-            info.document.get(),
-            true,
-        )?;
+        check.row(row, "Document", TableId::DOCUMENT, info.document.0, true)?;
         check.blob(row, "SequencePoints", info.sequence_points)?;
     }
     local_scopes(&table(TableId::LOCAL_SCOPE))?;
@@ -244,7 +238,7 @@ pub(super) fn rows(parts: &PdbParts, counts: &Counts) -> Result<()> {
 /// Check the `Document` rows. The name must not be nil.
 fn documents(check: &Rows<'_>) -> Result<()> {
     for (row, document) in check.parts.tables.documents.iter().enumerate() {
-        if document.name.get() == 0 {
+        if document.name.0 == 0 {
             return Err(check.reference(row, "Name", "document name is nil"));
         }
         check.blob(row, "Name", document.name)?;
@@ -259,18 +253,12 @@ fn documents(check: &Rows<'_>) -> Result<()> {
 fn local_scopes(check: &Rows<'_>) -> Result<()> {
     let scopes = &check.parts.tables.local_scopes;
     for (row, scope) in scopes.iter().enumerate() {
-        check.row(
-            row,
-            "Method",
-            TableId::METHOD_DEF,
-            scope.method.get(),
-            false,
-        )?;
-        let import = scope.import_scope.get();
+        check.row(row, "Method", TableId::METHOD_DEF, scope.method.0, false)?;
+        let import = scope.import_scope.0;
         check.row(row, "ImportScope", TableId::IMPORT_SCOPE, import, true)?;
-        let variables = scope.variable_list.get();
+        let variables = scope.variable_list.0;
         check.list(row, "VariableList", TableId::LOCAL_VARIABLE, variables)?;
-        let constants = scope.constant_list.get();
+        let constants = scope.constant_list.0;
         check.list(row, "ConstantList", TableId::LOCAL_CONSTANT, constants)?;
         let Some(previous) = row.checked_sub(1).map(|index| scopes[index]) else {
             continue;
@@ -289,10 +277,10 @@ fn local_scopes(check: &Rows<'_>) -> Result<()> {
                 "LocalScope is not sorted by method, start offset and length (longest first)",
             ));
         }
-        if variables < previous.variable_list.get() {
+        if variables < previous.variable_list.0 {
             return Err(check.order(row, "VariableList", "VariableList decreases"));
         }
-        if constants < previous.constant_list.get() {
+        if constants < previous.constant_list.0 {
             return Err(check.order(row, "ConstantList", "ConstantList decreases"));
         }
     }
@@ -303,13 +291,7 @@ fn local_scopes(check: &Rows<'_>) -> Result<()> {
 fn import_scopes(check: &Rows<'_>) -> Result<()> {
     let scopes = &check.parts.tables.import_scopes;
     for (row, scope) in scopes.iter().enumerate() {
-        check.row(
-            row,
-            "Parent",
-            TableId::IMPORT_SCOPE,
-            scope.parent.get(),
-            true,
-        )?;
+        check.row(row, "Parent", TableId::IMPORT_SCOPE, scope.parent.0, true)?;
         check.blob(row, "Imports", scope.imports)?;
     }
     // 0: not visited, 1: on the current chain, 2: the chain ends at nil.
@@ -326,7 +308,7 @@ fn import_scopes(check: &Rows<'_>) -> Result<()> {
             state[current] = 1;
             chain.push(current);
             // The parent is checked above, so it is nil or a row index plus 1.
-            match usize::try_from(scopes[current].parent.get())
+            match usize::try_from(scopes[current].parent.0)
                 .ok()
                 .and_then(|parent| parent.checked_sub(1))
             {
@@ -334,7 +316,7 @@ fn import_scopes(check: &Rows<'_>) -> Result<()> {
                 None => break,
             }
         }
-        if state[current] == 1 && scopes[current].parent.get() != 0 {
+        if state[current] == 1 && scopes[current].parent.0 != 0 {
             return Err(check.reference(current, "Parent", "import scope parents form a cycle"));
         }
         for &row in &chain {
@@ -351,11 +333,11 @@ fn state_machine_methods(check: &Rows<'_>) -> Result<()> {
     let methods = &check.parts.tables.state_machine_methods;
     let mut kickoffs = BTreeSet::new();
     for (row, method) in methods.iter().enumerate() {
-        let move_next = method.move_next_method.get();
+        let move_next = method.move_next_method.0;
         check.row(row, "MoveNextMethod", TableId::METHOD_DEF, move_next, false)?;
-        let kickoff = method.kickoff_method.get();
+        let kickoff = method.kickoff_method.0;
         check.row(row, "KickoffMethod", TableId::METHOD_DEF, kickoff, false)?;
-        if row > 0 && methods[row - 1].move_next_method.get() >= move_next {
+        if row > 0 && methods[row - 1].move_next_method.0 >= move_next {
             return Err(check.order(
                 row,
                 "MoveNextMethod",
@@ -391,7 +373,7 @@ fn custom_debug_information(check: &Rows<'_>) -> Result<()> {
 
 /// Check a `HasCustomDebugInformation` parent and return its coded value.
 fn coded_parent(check: &Rows<'_>, row: usize, parent: MetadataToken) -> Result<u32> {
-    let table = TableId::new(parent.table());
+    let table = parent.table();
     let valid =
         table.is_some_and(|table| parent.row() != 0 && parent.row() <= check.counts.get(table));
     let coded = CodedIndex::HasCustomDebugInformation.encode(parent);

@@ -99,6 +99,8 @@ impl<'a> Pdb<&'a [u8]> {
 impl Pdb<crate::io::FileReader> {
     /// Open a file and detect its format from the contents.
     ///
+    /// Requires the `std` feature and Unix or Windows.
+    ///
     /// # Errors
     ///
     /// Returns file I/O errors and the errors of [`Pdb::read`].
