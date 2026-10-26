@@ -1,12 +1,31 @@
 //! PDB Info stream and named stream directory.
+//!
+//! The Info stream (stream 1) has this layout (LLVM `PdbStream.md`, LLVM
+//! `NamedStreamMap.cpp`, Microsoft `PDB/include/nmtni.h`):
+//!
+//! 1. The version, the signature, the age and the GUID.
+//! 2. The named-stream string buffer: a byte count and NUL-terminated names.
+//! 3. A [`HashTable`] from a name offset in the string buffer to a stream index.
+//! 4. `niMac`, the next name index of the `NMTNI` name table.
+//! 5. Feature codes until the end of the stream.
+//!
+//! The hash of a name is `hash_string_v1(name)` truncated to 16 bits (`NMTNI::hash`).
+//! [`Info::parse`] checks that a linear-probing lookup finds each name.
 
 use alloc::vec::Vec;
 use core::ops::Range;
 
 use super::Identity;
+use super::hash::hash_string_v1;
+use super::hash_table::{Cursor, HashTable};
 use super::msf::StreamId;
-use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
+
+/// The Info stream version that this reader decodes (`PdbImplVC70`).
+const VERSION_VC70: u32 = 20_000_404;
+
+/// The stream ID of the Info stream.
+const INFO_STREAM: StreamId = StreamId(1);
 
 /// A named stream entry, with its name preserved as bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +50,8 @@ pub struct Info {
     signature: u32,
     identity: Identity,
     entries: Vec<Entry>,
+    capacity: u32,
+    next_name_index: u32,
     features: Range<usize>,
 }
 
@@ -43,72 +64,40 @@ impl Info {
     /// # Errors
     ///
     /// Returns an error for an unsupported version, malformed table or string,
-    /// truncated input, arithmetic overflow or failed allocation.
+    /// a name outside its probe sequence, truncated input, arithmetic overflow or
+    /// failed allocation. Errors have stream 1 and a logical offset.
     pub fn parse(bytes: Vec<u8>) -> Result<Self> {
         let input = bytes.as_slice();
-        let mut reader = Reader {
-            bytes: input,
-            position: 0,
-        };
-        let version = reader.u32()?;
-        if version != 20_000_404 {
+        let mut cursor = Cursor::new(input, INFO_STREAM, "PDB Info");
+        let version = cursor.u32()?;
+        if version != VERSION_VC70 {
             return Err(invalid(ErrorKind::UnsupportedVersion, 0));
         }
-        let signature = reader.u32()?;
-        let age = reader.u32()?;
-        let mut guid = [0; 16];
-        guid.copy_from_slice(reader.take(16)?);
-        let string_size = usize::try_from(reader.u32()?)
-            .map_err(|_| invalid(ErrorKind::LimitExceeded, reader.position))?;
-        let string_start = reader.position;
-        let strings = reader.take(string_size)?;
-        let size = reader.u32()?;
-        let capacity = reader.u32()?;
-        if size > capacity {
-            return Err(invalid(ErrorKind::InvalidFormat, reader.position - 8));
-        }
-        let present = reader.bit_vector(capacity)?;
-        let deleted = reader.bit_vector(capacity)?;
-        let mut population = 0_u64;
-        for (index, word) in present.as_chunks::<4>().0.iter().enumerate() {
-            let value = u32::from_le_bytes(*word);
-            population += u64::from(value.count_ones());
-            if let Some(other) = deleted.get(index * 4..index * 4 + 4) {
-                let tombstones = u32::from_le_bytes([other[0], other[1], other[2], other[3]]);
-                if value & tombstones != 0 {
-                    return Err(invalid(ErrorKind::InvalidFormat, reader.position));
-                }
-            }
-        }
-        if population != u64::from(size) {
-            return Err(invalid(ErrorKind::InvalidFormat, reader.position));
-        }
-        let count = usize::try_from(size)
-            .map_err(|_| invalid(ErrorKind::LimitExceeded, reader.position))?;
-        if count > (input.len() - reader.position) / 8 {
-            return Err(invalid(ErrorKind::UnexpectedEof, reader.position));
-        }
+        let signature = cursor.u32()?;
+        let age = cursor.u32()?;
+        let guid = cursor.array::<16>()?;
+        let string_size = usize::try_from(cursor.u32()?)
+            .map_err(|_| invalid(ErrorKind::LimitExceeded, cursor.position()))?;
+        let string_start = cursor.position();
+        let strings = cursor.take(string_size)?;
+        let table = HashTable::<u32>::read(&mut cursor)?;
         let mut entries = Vec::new();
         entries
-            .try_reserve_exact(count)
-            .map_err(|_| invalid(ErrorKind::LimitExceeded, reader.position))?;
-        for _ in 0..count {
-            let name_offset = usize::try_from(reader.u32()?)
-                .map_err(|_| invalid(ErrorKind::InvalidReference, reader.position))?;
-            let stream = StreamId(reader.u32()?);
-            let suffix = strings
-                .get(name_offset..)
-                .ok_or_else(|| invalid(ErrorKind::InvalidReference, reader.position - 8))?;
-            let length = suffix
-                .iter()
-                .position(|byte| *byte == 0)
-                .ok_or_else(|| invalid(ErrorKind::InvalidFormat, string_start + name_offset))?;
-            let start = string_start + name_offset;
+            .try_reserve_exact(table.len())
+            .map_err(|_| invalid(ErrorKind::LimitExceeded, cursor.position()))?;
+        for entry in table.entries() {
+            let length = name_length(strings, entry.key, string_start)?;
+            let start = string_start + to_usize(entry.key);
             entries.push(Entry {
                 name: start..start + length,
-                stream,
+                stream: StreamId(entry.value),
             });
         }
+        table.check_placement(|entry| {
+            let start = to_usize(entry.key);
+            let end = start + name_length(strings, entry.key, string_start)?;
+            Ok(hash_string_v1(&strings[start..end]) & 0xffff)
+        })?;
         entries.sort_unstable_by(|left, right| {
             input[left.name.clone()].cmp(&input[right.name.clone()])
         });
@@ -118,7 +107,9 @@ impl Info {
         {
             return Err(invalid(ErrorKind::InvalidFormat, string_start));
         }
-        let features = reader.position..input.len();
+        let capacity = table.capacity();
+        let next_name_index = cursor.u32()?;
+        let features = cursor.position()..input.len();
         if features.len() % 4 != 0 {
             return Err(invalid(ErrorKind::InvalidFormat, features.start));
         }
@@ -128,6 +119,8 @@ impl Info {
             signature,
             identity: Identity::Modern { guid, age },
             entries,
+            capacity,
+            next_name_index,
             features,
         })
     }
@@ -167,6 +160,20 @@ impl Info {
             .map(|index| self.entries[index].stream)
     }
 
+    /// Return the bucket count of the named-stream hash table.
+    #[must_use]
+    pub const fn named_stream_capacity(&self) -> u32 {
+        self.capacity
+    }
+
+    /// Return `niMac`, the next name index of the named-stream name table.
+    ///
+    /// Microsoft `NMTNI` stores this value after the hash table. LLVM writes zero.
+    #[must_use]
+    pub const fn next_name_index(&self) -> u32 {
+        self.next_name_index
+    }
+
     /// Return feature codes, including codes unknown to this reader.
     pub fn features(&self) -> impl ExactSizeIterator<Item = u32> + '_ {
         self.bytes[self.features.clone()]
@@ -177,56 +184,25 @@ impl Info {
     }
 }
 
+/// Return the length of the NUL-terminated name at `offset` in the string buffer.
+fn name_length(strings: &[u8], offset: u32, string_start: usize) -> Result<usize> {
+    let start = to_usize(offset);
+    let suffix = strings
+        .get(start..)
+        .ok_or_else(|| invalid(ErrorKind::InvalidReference, string_start))?;
+    suffix
+        .iter()
+        .position(|byte| *byte == 0)
+        .ok_or_else(|| invalid(ErrorKind::InvalidFormat, string_start + start))
+}
+
+/// Convert a name offset to `usize`. An offset that does not fit is out of range.
+fn to_usize(value: u32) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
 fn invalid(kind: ErrorKind, offset: usize) -> Error {
     Error::new(kind, None)
         .with_context("PDB Info")
-        .with_stream(1, offset as u64)
-}
-
-struct Reader<'a> {
-    bytes: &'a [u8],
-    position: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, count: usize) -> Result<&'a [u8]> {
-        let end = self
-            .position
-            .checked_add(count)
-            .ok_or_else(|| invalid(ErrorKind::OffsetOverflow, self.position))?;
-        let result = self
-            .bytes
-            .get(self.position..end)
-            .ok_or_else(|| invalid(ErrorKind::UnexpectedEof, self.position))?;
-        self.position = end;
-        Ok(result)
-    }
-
-    fn u32(&mut self) -> Result<u32> {
-        let position = self.position;
-        self.position = self
-            .position
-            .checked_add(4)
-            .ok_or_else(|| invalid(ErrorKind::OffsetOverflow, position))?;
-        self.bytes
-            .read_u32_at(position as u64)
-            .map_err(|_| invalid(ErrorKind::UnexpectedEof, position))
-    }
-
-    fn bit_vector(&mut self, capacity: u32) -> Result<&'a [u8]> {
-        let count = self.u32()?;
-        if count > capacity.div_ceil(32) {
-            return Err(invalid(ErrorKind::InvalidFormat, self.position - 4));
-        }
-        let length = usize::try_from(u64::from(count) * 4)
-            .map_err(|_| invalid(ErrorKind::LimitExceeded, self.position))?;
-        let words = self.take(length)?;
-        if count != 0 && count == capacity.div_ceil(32) && !capacity.is_multiple_of(32) {
-            let last = words.read_u32_at(u64::from(count - 1) * 4)?;
-            if last >> (capacity % 32) != 0 {
-                return Err(invalid(ErrorKind::InvalidFormat, self.position - 4));
-            }
-        }
-        Ok(words)
-    }
+        .with_stream(INFO_STREAM.0, u64::try_from(offset).unwrap_or(u64::MAX))
 }

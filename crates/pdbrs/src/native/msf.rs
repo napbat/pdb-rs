@@ -17,10 +17,12 @@
 //!   interval are free page map pages.
 //! - No page occurs more than once in the page map, the stream directory and all stream pages.
 //!
-//! The reader does not read the free page maps. It does not check that the free page map agrees
-//! with the stream directory. It does not check unused bytes after the end of a structure.
+//! Opening does not read the free page maps. [`Msf::check_free_page_map`] reads the active
+//! free page map and compares it with the page references. The reader does not check unused
+//! bytes after the end of a structure.
 //!
-//! Stream 0 holds the previous stream directory. The reader does not interpret its contents.
+//! Stream 0 holds the previous stream directory. Opening does not interpret its contents.
+//! [`OldDirectory`] decodes the contents as a snapshot and does not follow its pages.
 //!
 //! The legacy small MSF 2.00 container is recognized and rejected with
 //! [`ErrorKind::UnsupportedVersion`].
@@ -38,6 +40,11 @@ use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
 mod directory;
+mod free_page_map;
+mod old_directory;
+
+pub use free_page_map::FreePageMapReport;
+pub use old_directory::{OldDirectory, OldStream, OldStreams};
 
 /// The file offset of the page size field.
 const PAGE_SIZE_OFFSET: u64 = 32;
@@ -151,6 +158,9 @@ struct Entry {
 pub struct Msf<S> {
     source: S,
     geometry: Geometry,
+    active_fpm: u32,
+    map_pages: Vec<u32>,
+    directory_pages: Vec<u32>,
     streams: Vec<Entry>,
     pages: Vec<u32>,
 }
@@ -222,6 +232,9 @@ impl<S: ReadAt> Msf<S> {
         Ok(Self {
             source,
             geometry,
+            active_fpm,
+            map_pages: directory.maps,
+            directory_pages: directory.dirs,
             streams: directory.streams,
             pages: directory.pages,
         })
@@ -281,6 +294,18 @@ impl<S> Msf<S> {
     #[must_use]
     pub const fn block_size(&self) -> u32 {
         self.geometry.block_size
+    }
+
+    /// Return the number of pages that the header declares.
+    #[must_use]
+    pub const fn page_count(&self) -> u32 {
+        self.geometry.page_count
+    }
+
+    /// Return the active free page map, 1 or 2.
+    #[must_use]
+    pub const fn active_free_page_map(&self) -> u32 {
+        self.active_fpm
     }
 }
 

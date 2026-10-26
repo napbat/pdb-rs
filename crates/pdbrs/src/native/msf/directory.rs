@@ -23,6 +23,10 @@ const MIN_DIRECTORY_SIZE: u32 = 2 * WORD;
 
 /// The decoded stream directory.
 pub(super) struct Directory {
+    /// The page numbers of the page map, from the header.
+    pub(super) maps: Vec<u32>,
+    /// The page numbers of the stream directory, from the page map.
+    pub(super) dirs: Vec<u32>,
     /// The entry of each stream, in stream ID order.
     pub(super) streams: Vec<Entry>,
     /// The concatenated page lists of all streams.
@@ -128,7 +132,12 @@ pub(super) fn read<S: ReadAt>(
         keys.push(key(page, base + index));
     }
     check_unique(&mut keys, &layout)?;
-    Ok(Directory { streams, pages })
+    Ok(Directory {
+        maps,
+        dirs,
+        streams,
+        pages,
+    })
 }
 
 /// Read the stream count and the stream sizes.

@@ -146,6 +146,29 @@ impl Fixture {
                 self.bytes[start..start + chunk.len()].copy_from_slice(chunk);
             }
         }
+        self.write_free_page_maps();
+    }
+
+    /// Write the active free page map 1 and fill the inactive map 2 with free bits.
+    ///
+    /// The active map marks the stream 0 pages and the bits after the declared pages as free.
+    /// Every other declared page is allocated. The reader must ignore the inactive map.
+    fn write_free_page_maps(&mut self) {
+        let page_len = to_usize(self.block_size);
+        let bitmap_len = to_usize(self.page_count.div_ceil(8));
+        let old_pages = self.stream_pages.first().cloned().unwrap_or_default();
+        for page in old_pages
+            .into_iter()
+            .chain(self.page_count..to_u32(bitmap_len * 8))
+        {
+            let byte = to_usize(page / 8);
+            let fpm_page = 1 + to_usize(self.block_size) * (byte / page_len);
+            self.bytes[fpm_page * page_len + byte % page_len] |= 1 << (page % 8);
+        }
+        for chunk in 0..bitmap_len.div_ceil(page_len) {
+            let start = (2 + chunk * page_len) * page_len;
+            self.bytes[start..start + page_len].fill(0xff);
+        }
     }
 
     fn word_offset(&self, pages: &[u32], index: usize) -> usize {
@@ -814,4 +837,27 @@ fn source_errors_keep_the_physical_offset_and_add_the_stream_location() {
     let result = stream.read_exact_at(500, &mut bytes);
     let error = expect_error(result, ErrorKind::Io, Some(failing), "failed page");
     assert_eq!(error.stream_location(), Some((1, 512)));
+}
+
+#[test]
+fn free_page_maps_of_all_fixtures_agree_with_the_directory() {
+    let mut fixtures: Vec<Fixture> = PAGE_SIZES.into_iter().map(two_stream_fixture).collect();
+    fixtures.push(small_fixture());
+    fixtures.push(wide_fixture(Order::Ascending));
+    fixtures.push(wide_fixture(Order::Interleaved));
+    for fixture in &fixtures {
+        let msf = fixture.open();
+        assert_eq!(msf.page_count(), fixture.page_count);
+        assert_eq!(msf.active_free_page_map(), 1);
+        let report = msf.check_free_page_map().unwrap();
+        assert_eq!(report.active(), 1);
+        assert_eq!(
+            report.unreferenced_allocated(),
+            &[] as &[core::ops::Range<u32>]
+        );
+        assert_eq!(report.unreferenced_allocated_count(), 0);
+        let old_pages = to_u32(fixture.stream_pages[0].len());
+        assert_eq!(report.old_directory_free_pages(), old_pages);
+        assert_eq!(report.old_directory_allocated_pages(), 0);
+    }
 }
