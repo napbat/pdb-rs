@@ -27,10 +27,14 @@
 
 extern crate alloc;
 
+mod compression;
+mod crypto;
 pub mod error;
 pub mod format;
 pub mod io;
 pub mod native;
 pub mod portable;
+#[cfg(test)]
+mod test_support;
 
 pub use error::{Error, ErrorKind, Result};

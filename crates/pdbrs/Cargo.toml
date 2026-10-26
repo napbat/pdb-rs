@@ -9,7 +9,10 @@ default = ["std"]
 std = ["nostdio/std"]
 
 [dependencies]
+miniz_oxide.workspace = true
 nostdio.workspace = true
+ruzstd.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

@@ -378,8 +378,10 @@ Apply independent size checks to that blob. Do not confuse it with the embedded 
 Use portable `no_std + alloc` crates: `miniz_oxide` for raw DEFLATE, `ruzstd` for zstd and `sha2` for SHA-2 digests.
 Another crate can replace one of them later without a change to the public API.
 Only `compression.rs` names `miniz_oxide` and `ruzstd`, and only `crypto.rs` names `sha2`. Keep both modules crate-private.
-Do not expose their types, traits or errors in the public API. Map their failures to `Error` with a location.
-Decode into a buffer of the declared size. Fail on short output, extra output or unused input.
+Do not expose their types, traits or errors in the public API. Map their failures to `Error` with a context.
+The caller adds the location of the compressed data.
+Check the declared size against a limit before allocation. Decode into a buffer of the declared size.
+Fail on short output, extra output, unused input or a corrupt stream.
 Report checksums in other algorithms, such as SHA-1 or MD5, as not verified. Do not report them as errors.
 Add another digest only when a fixture needs it, and only inside `crypto.rs`.
 GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.

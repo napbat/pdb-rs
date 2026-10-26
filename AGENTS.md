@@ -42,6 +42,12 @@ Run it on real PDBs after reader changes, and compare decoded fields with `llvm-
 - For a new dependency, choose a portable crate that supports `no_std + alloc`. Use it in only
   one crate-private module, and do not expose its types, traits or errors in the public API.
   Record the choice in the issue. A later change can replace the crate.
+- Only `compression.rs` and its child modules name `miniz_oxide` and `ruzstd`. Only
+  `crypto.rs` and its child modules name `sha2` and `digest`.
+- Keep the `compression` and `crypto` modules crate-private. Do not put their dependency types,
+  traits or errors in the public API.
+- Check the declared decoded size against a limit before you allocate. Then decode into a buffer
+  of the declared size.
 - Compare reader and writer output with the independent consumers of #21 (`pdbtool`, DIA2Dump)
   as well as `llvm-pdbutil`.
 
