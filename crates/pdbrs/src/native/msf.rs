@@ -4,6 +4,9 @@
 //! the file header and the stream directory. It does not read stream payloads.
 //! [`Stream`] reads stream bytes on demand through [`ReadAt`].
 //!
+//! [`copy_exact`], [`Msf::repack`] and [`MsfBuilder`] write containers. The documentation of
+//! [`WritePlan`] gives the layout and the guarantee of each operation.
+//!
 //! # Validation
 //!
 //! [`Msf::open`] and [`Msf::with_limits`] check these structural rules:
@@ -42,9 +45,13 @@ use crate::{Error, ErrorKind, Result};
 mod directory;
 mod free_page_map;
 mod old_directory;
+mod write;
 
 pub use free_page_map::FreePageMapReport;
 pub use old_directory::{OldDirectory, OldStream, OldStreams};
+#[cfg(feature = "std")]
+pub use write::copy_exact_file;
+pub use write::{MsfBuilder, OldDirectoryPolicy, WriteOptions, WritePlan, copy_exact};
 
 /// The file offset of the page size field.
 const PAGE_SIZE_OFFSET: u64 = 32;
@@ -134,12 +141,24 @@ impl Geometry {
             return Err(Error::new(ErrorKind::InvalidReference, Some(at))
                 .with_context("page number is outside the declared pages"));
         }
-        if page == 0 || matches!(page % self.block_size, 1 | 2) {
+        if is_reserved_page(page, self.block_size) {
             return Err(Error::new(ErrorKind::InvalidReference, Some(at))
                 .with_context("page number is the header page or a free page map page"));
         }
         Ok(())
     }
+}
+
+/// Return `true` if `size` is a power of two from 512 to 65536.
+const fn is_valid_page_size(size: u32) -> bool {
+    size.is_power_of_two() && size >= MIN_PAGE_SIZE && size <= MAX_PAGE_SIZE
+}
+
+/// Return `true` if `page` is the header page or a free page map page.
+///
+/// Each interval has `block_size` pages. Pages 1 and 2 of each interval hold FPM1 and FPM2.
+const fn is_reserved_page(page: u32, block_size: u32) -> bool {
+    page == 0 || matches!(page % block_size, 1 | 2)
 }
 
 /// The directory entry of one stream.
@@ -207,7 +226,7 @@ impl<S: ReadAt> Msf<S> {
         }
         let length = source.len()?;
         let block_size = source.read_u32_at(PAGE_SIZE_OFFSET)?;
-        if !block_size.is_power_of_two() || !(MIN_PAGE_SIZE..=MAX_PAGE_SIZE).contains(&block_size) {
+        if !is_valid_page_size(block_size) {
             return Err(Error::new(ErrorKind::InvalidFormat, Some(PAGE_SIZE_OFFSET))
                 .with_context("page size is not a power of two from 512 to 65536"));
         }

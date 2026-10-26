@@ -23,7 +23,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use super::{Msf, NIL_STREAM_SIZE};
+use super::{Msf, NIL_STREAM_SIZE, is_reserved_page};
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
@@ -183,7 +183,7 @@ struct Walk<R: Iterator<Item = u32>, O: Iterator<Item = u32>> {
 impl<R: Iterator<Item = u32>, O: Iterator<Item = u32>> Walk<R, O> {
     /// Check the state of `page`. `at` is the file offset of its bitmap byte.
     fn visit(&mut self, page: u32, free: bool, at: u64) -> Result<()> {
-        let reserved = page == 0 || matches!(page % self.block_size, 1 | 2);
+        let reserved = is_reserved_page(page, self.block_size);
         if reserved || self.required.next_if_eq(&page).is_some() {
             if free {
                 let context = if reserved {

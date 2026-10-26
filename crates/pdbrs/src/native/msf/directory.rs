@@ -10,13 +10,13 @@ use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
 /// The file offset of the stream directory size field.
-const DIRECTORY_SIZE_OFFSET: u64 = 44;
+pub(super) const DIRECTORY_SIZE_OFFSET: u64 = 44;
 
 /// The file offset of the page map array in the header.
-const PAGE_MAP_OFFSET: u32 = 52;
+pub(super) const PAGE_MAP_OFFSET: u32 = 52;
 
 /// The size of one directory word in bytes.
-const WORD: u32 = 4;
+pub(super) const WORD: u32 = 4;
 
 /// The smallest directory: the stream count and the size of stream 0.
 const MIN_DIRECTORY_SIZE: u32 = 2 * WORD;

@@ -3,7 +3,10 @@
 //! The API reads MSF 7.0 containers, native PDB metadata and framed debug
 //! records. It decodes common data, public and procedure symbols. Other record
 //! kinds remain available as raw bytes. Full semantic decoding is not complete.
-//! Portable PDB parsing and PDB writing are not implemented.
+//!
+//! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
+//! repacks and new layouts of arbitrary streams. PDB semantic building and
+//! editing and Portable PDB parsing are not implemented.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification

@@ -1,14 +1,16 @@
 # pdbrs
 
 pdbrs is a Rust library for Program Database (PDB) files. It reads native Windows PDB files
-(MSF 7.0) and identifies Portable .NET PDB files. The library supports `std` and `no_std + alloc`.
+(MSF 7.0), writes MSF 7.0 containers and identifies Portable .NET PDB files. The library
+supports `std` and `no_std + alloc`.
 
 ## Status
 
 | Area | Status |
 | --- | --- |
 | Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
-| Native PDB writing and editing | Not implemented. The container writer is [#15](https://github.com/napbat/pdbrs/issues/15). |
+| Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 65536 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer makes no PDB semantic claim about the streams. |
+| Native PDB semantic building and editing | Not implemented. |
 | Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
 | Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
@@ -86,8 +88,19 @@ cargo run -p pdbrs --example inspect -- path/to/file
 cargo run -p pdbrs --example streams --no-default-features
 ```
 
+```sh
+# Copy a native PDB byte for byte, or repack its streams into a new MSF layout.
+cargo run -p pdbrs --example msf -- copy input.pdb copy.pdb
+cargo run -p pdbrs --example msf -- repack --page-size 8192 input.pdb repacked.pdb
+
+# Compare the streams of two containers and check the free page map of the second.
+cargo run -p pdbrs --example msf -- compare input.pdb repacked.pdb
+```
+
 The `native` example fails if a record kind, a subsection kind or a stream has no typed decoder.
-It also reports producer defects that do not stop reading.
+It also reports producer defects that do not stop reading. The `msf` example writes through a
+temporary file and does not change the destination if an error occurs. Do not give the input
+file as the output.
 
 ## Test fixtures
 

@@ -2,7 +2,7 @@
 name = "pdbrs"
 version.workspace = true
 edition.workspace = true
-description = "Native PDB reading and shared I/O primitives for native and Portable PDBs"
+description = "Native PDB reading, MSF 7.0 writing and shared I/O primitives for native and Portable PDBs"
 
 [features]
 default = ["std"]
@@ -23,4 +23,8 @@ required-features = ["std"]
 
 [[example]]
 name = "native"
+required-features = ["std"]
+
+[[example]]
+name = "msf"
 required-features = ["std"]

@@ -1,7 +1,8 @@
 # PDB reader and writer design
 
 Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
-Formats and record kinds outside those samples remain incomplete. Portable PDB parsing and PDB writing are not implemented.
+Formats and record kinds outside those samples remain incomplete. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
+Portable PDB parsing and PDB semantic building and editing are not implemented.
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
@@ -41,7 +42,7 @@ cargo run -p pdbrs --example streams
 cargo run -p pdbrs --example streams --no-default-features
 ```
 
-The examples report their validation scope. Editors, builders and embedded compression are not exposed as placeholder APIs.
+The examples report their validation scope. Semantic editors, PDB builders and embedded compression are not exposed as placeholder APIs.
 
 ## Implemented native reading
 
@@ -56,7 +57,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
-| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot | Writing and repacking |
+| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot. Writing: exact copies, stream-preserving repacks and new layouts for page sizes 512 to 65536 (see [MSF writing](#implemented-msf-writing)) | Edits in place and incremental commits (not planned) |
 | PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, `/TMCache` and its type map streams, `/UDTSRCLINEUNDONE`, `/src/headerblock`, verified uncompressed injected sources, .NET document records (compression byte 101) with CRC, size and SHA-256 checks through the shared `portable::embedded` codec, and `sourcelink` JSON bytes | `/LinkInfo` version 1 and run-length, Huffman or LZ injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map, EC names, and FPO and new-FPO (frame data) streams | Non-empty type server maps |
@@ -88,6 +89,59 @@ It reports a decoded stream that no other stream names, with the reason, and doe
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
 GitHub issues #2 to #10 record the implementation and the evidence for each area.
+
+## Implemented MSF writing
+
+The `native::msf` module writes Big MSF 7.0 containers through three operations ([#15](https://github.com/napbat/pdbrs/issues/15)):
+
+| Operation | API | Guarantee |
+| --- | --- | --- |
+| Exact copy | `copy_exact`, `copy_exact_file` | Every source byte. The copy does not validate the source |
+| Stream-preserving repack | `Msf::repack` | Stream IDs, nil and empty streams, sizes and all stream bytes. `OldDirectoryPolicy` selects stream 0 |
+| New layout | `MsfBuilder::plan` | A consistent container with the given streams, without a PDB semantic claim |
+
+`Msf::repack` and `MsfBuilder::plan` return a `WritePlan`. The plan computes and checks the full layout before output.
+A planning error writes nothing. `WritePlan::write_to` writes to a `nostdio` writer in page order, and `WritePlan::to_vec` writes to memory.
+Both work with `no_std + alloc`. The writer reads stream payloads one page at a time.
+`copy_exact` copies through one buffer of at most 64 KiB.
+
+Under `std`, `WritePlan::write_file` and `copy_exact_file` write a temporary file in the destination directory and rename it.
+On error, they delete the temporary file and do not change the destination. Writing over the source file is not supported.
+After an error, `write_to` and `copy_exact` can leave a partial output in the writer.
+
+The layout is deterministic:
+
+1. Page 0 is the header. Pages 1 and 2 of each interval of `page_size` pages are FPM1 and FPM2.
+   If the last page is the first page of an interval, the plan adds the FPM pages of that interval.
+2. The stream pages (in stream ID order), the directory pages and the page map pages have ascending page numbers.
+3. The active free page map is FPM1. It marks the stream 0 pages and the bits after the last page as free.
+   It marks all other pages as allocated. FPM2 has `0xFF` in all bytes.
+4. The unused bytes of the header page and of the last page of each stream, the directory and the page map are zero.
+
+The default page size is 4096. The plan accepts every power of two from 512 to 65536.
+`link.exe` 14.51 writes 4096 to 32768 with `/PDBPAGESIZE`. LLVM and DIA reject 65536-byte pages.
+LLVM also rejects a directory that needs more than one page map page.
+
+The plan returns `LimitExceeded` for a stream of `0xFFFFFFFF` bytes or more, a directory larger than `MsfLimits::max_directory_bytes`
+or than `u32`, a page map array that does not fit in the header page, or a page count that does not fit in `u32`.
+
+The default stream 0 policy is `OldDirectoryPolicy::Empty`, as LLD and `ms-pdb-msf` write it.
+`OldDirectoryPolicy::Preserve` copies stream 0. If stream 0 has bytes, it needs the page size of the source.
+
+Copy or repack a native PDB, and compare the result with its source:
+
+```sh
+cargo run -p pdbrs --example msf -- copy input.pdb copy.pdb
+cargo run -p pdbrs --example msf -- repack --page-size 8192 --old-directory empty input.pdb repacked.pdb
+cargo run -p pdbrs --example msf -- compare input.pdb repacked.pdb
+```
+
+`compare` compares the presence, size and bytes of each stream and checks the free page map of the written file.
+
+Evidence ([#15](https://github.com/napbat/pdbrs/issues/15)): exact copies of the 17 native producer fixtures are byte-identical.
+Their repacks with 512, 4096, 8192 and 16384-byte pages and both stream 0 policies pass `pdbtool check` and `pdbtool compare`.
+DIA2Dump gives the same output as for the source. `llvm-pdbutil dump --all` gives the same result as for the source.
+Its output differs only in block numbers, block counts and the stream 0 size.
 
 ## Required formats and scope
 
@@ -301,9 +355,9 @@ Validate free-page allocation consistency in full validation. Emit consistent ma
 Preserve stream numbers and absent slots during repacking.
 Do not compact stream IDs implicitly.
 
-Initially support 512, 1024, 2048 and 4096-byte MSF 7.0 blocks, with 4096 as the writer default.
-Microsoft's newer MSF documentation also describes larger Big MSF page sizes.
-Treat recognized but unimplemented sizes as unsupported, not necessarily malformed.
+The reader and the writer support MSF 7.0 page sizes that are powers of two from 512 to 65536, with 4096 as the writer default.
+The FPM interval has `page_size` pages for each size (LLVM `getFpmIntervalLength`, `ms-pdb-msf` `interval_to_page`).
+Consumers accept fewer sizes: `link.exe` 14.51 writes 4096 to 32768, and LLVM and DIA reject 65536.
 Test each supported size independently and enforce that variant's limits.
 Reject layouts beyond implemented limits instead of truncating block-directory metadata.
 Cross-check historical documentation against Microsoft and LLVM implementations before encoding limits.
@@ -396,6 +450,9 @@ GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 | Stream-preserving repack (native only) | Preserve stream IDs, absent slots, lengths and all logical stream bytes | Original block positions, free-space bytes or physical padding |
 | Semantic build or edit | Emit coherent supported records and all affected indexes | Byte-identical encoding or arbitrary unknown-reference relocation |
 
+Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (see [MSF writing](#implemented-msf-writing)).
+Semantic builds and edits are not implemented.
+
 Keep these operations explicit. Do not silently fall back from preservation to normalization.
 An exact copy is a copy operation, not proof that the source is a valid PDB.
 A repack proves container consistency, not semantic validity of opaque streams.
@@ -443,7 +500,8 @@ A plan borrows immutable inputs or owns them. Edits cannot change a live plan.
 A planning error leaves the source and destination untouched.
 An output I/O error may leave a partial destination; document this contract.
 Do not support writing over the source file or incremental in-place commits in this design.
-A later filesystem helper can handle temporary files and platform-specific replacement semantics separately.
+The MSF file helpers (`WritePlan::write_file`, `copy_exact_file`) write a temporary sibling file and rename it.
+On error, they delete the temporary file, so the destination does not change.
 
 Native dependencies include:
 
