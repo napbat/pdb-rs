@@ -12,8 +12,8 @@
 
 use super::super::Fields;
 use super::super::index::{IdIndex, TypeIndex};
-use super::super::writer::FieldWriter;
 use super::SectionOffset;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a virtual function table path (`S_VFTABLE32`).
@@ -35,7 +35,6 @@ pub const S_HYBRIDRANGE: u16 = 0x117d;
 
 /// A `with` block start record ([`S_WITH32`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct With<'a> {
     /// The module stream offset of the enclosing scope record.
     pub parent: u32,
@@ -67,12 +66,12 @@ impl<'a> With<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
-        out.name(self.expression)
+        out.c_string(self.expression)
     }
 }
 
@@ -91,7 +90,6 @@ flags! {
 /// The compiler moves a part of a procedure to a different place, for
 /// example cold code after profile-guided optimization.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct SeparatedCode {
     /// The module stream offset of the enclosing scope record.
     pub parent: u32,
@@ -126,7 +124,7 @@ impl SeparatedCode {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.u32(self.code_length)?;
@@ -152,7 +150,7 @@ fn read_address_pair(fields: &mut Fields<'_>) -> Result<(SectionOffset, SectionO
 
 /// Write two offsets and then two section numbers.
 fn write_address_pair(
-    out: &mut FieldWriter<'_>,
+    out: &mut Output<'_>,
     first: SectionOffset,
     second: SectionOffset,
 ) -> Result<()> {
@@ -164,7 +162,6 @@ fn write_address_pair(
 
 /// The location of a static local variable ([`S_STATICLOCAL`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct StaticLocal {
     /// The address of the variable (`off` and `sect`).
     pub address: SectionOffset,
@@ -183,14 +180,13 @@ impl StaticLocal {
     }
 
     /// Write the fields.
-    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(self, out: &mut Output<'_>) -> Result<()> {
         write_address_pair(out, self.address, self.parent_address)
     }
 }
 
 /// A virtual function table path record ([`S_VFTABLE32`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct VirtualFunctionTable {
     /// The type index of the root of the path.
     pub root: TypeIndex,
@@ -214,7 +210,7 @@ impl VirtualFunctionTable {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.root)?;
         out.type_index(self.path)?;
         self.address.write(out)
@@ -286,7 +282,7 @@ impl<'a> AnnotationStrings<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u16(self.count)?;
         out.bytes(self.strings)
@@ -317,7 +313,6 @@ impl<'a> AnnotationStrings<'a> {
 
 /// A hot-patch function record ([`S_HOTPATCHFUNC`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HotPatchFunction<'a> {
     /// The ID index of the function in the IPI stream.
     pub function: IdIndex,
@@ -334,9 +329,9 @@ impl<'a> HotPatchFunction<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.id_index(self.function)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -352,7 +347,6 @@ values! {
 
 /// An association with another symbol ([`S_ASSOCIATION`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Association {
     /// The kind of the association.
     pub kind: AssociationKind,
@@ -369,7 +363,7 @@ impl Association {
     }
 
     /// Write the fields.
-    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.kind.0)?;
         self.address.write(out)
     }
@@ -377,7 +371,6 @@ impl Association {
 
 /// A code range of one architecture in a hybrid image ([`S_HYBRIDRANGE`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HybridRange {
     /// The length of the range in bytes.
     pub length: u32,
@@ -401,7 +394,7 @@ impl HybridRange {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.length)?;
         self.address.write(out)?;
         out.u16(self.architecture)

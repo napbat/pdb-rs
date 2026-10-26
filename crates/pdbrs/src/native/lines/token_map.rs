@@ -11,9 +11,10 @@
 
 use alloc::vec::Vec;
 
-use super::{entry_list, invalid, put_u32, read_u32, to_u32, truncated};
+use super::{entry_list, invalid, read_u32, to_u32, truncated};
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
+use crate::native::output::Output;
 
 /// The size of the entry count.
 const COUNT_SIZE: usize = 4;
@@ -58,7 +59,6 @@ impl TokenMapValue {
 
 /// One entry of a [`TokenMap`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct TokenMapEntry {
     /// The key. In a `DEBUG_S_TYPE_MDTOKEN_MAP` subsection it is a type
     /// index ([`TokenMapEntry::type_index`]).
@@ -103,8 +103,8 @@ impl TokenMapEntry {
             .value
             .raw()
             .ok_or_else(|| invalid("token map value does not fit in 31 bits"))?;
-        put_u32(out, self.key)?;
-        put_u32(out, value)
+        Output::new(out).u32(self.key)?;
+        Output::new(out).u32(value)
     }
 }
 
@@ -188,10 +188,10 @@ fn write_map(
     entries: impl ExactSizeIterator<Item = TokenMapEntry>,
     out: &mut Vec<u8>,
 ) -> Result<()> {
-    put_u32(
-        out,
-        to_u32(entries.len(), "token map count does not fit in 32 bits")?,
-    )?;
+    Output::new(out).u32(to_u32(
+        entries.len(),
+        "token map count does not fit in 32 bits",
+    )?)?;
     for entry in entries {
         entry.encode(out)?;
     }

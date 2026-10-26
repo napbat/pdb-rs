@@ -10,7 +10,7 @@ use core::iter::FusedIterator;
 use super::{TypeIndexList, fields};
 use crate::native::codeview::index::{PrimitiveMode, TypeIndex};
 use crate::native::codeview::numeric::{Integer, Numeric};
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// An `LF_DIMARRAY` record: an array with a dimension record.
@@ -39,10 +39,10 @@ impl<'a> DimensionedArray<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.type_index(self.dimensions)?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 
@@ -133,7 +133,7 @@ impl<'a> ConstantDimensions<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.index_type)?;
         writer.u16(self.rank)?;
         writer.bytes(self.bounds)
@@ -251,7 +251,7 @@ impl<'a> VariableDimensions<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         if self.bounds.count()? != Self::bound_count(self.lower_bounds, self.rank)? {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("variable dimension bounds do not match the rank"));
@@ -293,11 +293,11 @@ impl<'a> StridedArray<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.type_index(self.index_type)?;
         writer.u32(self.stride)?;
         self.size.encode(writer.out())?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }

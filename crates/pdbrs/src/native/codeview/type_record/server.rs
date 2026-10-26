@@ -10,7 +10,7 @@
 use super::fields;
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 
 /// An `LF_TYPESERVER` record: the types are in another PDB.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -37,10 +37,10 @@ impl<'a> TypeServer<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u32(self.signature)?;
         writer.u32(self.age)?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 
@@ -69,10 +69,10 @@ impl<'a> TypeServer2<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.bytes(&self.guid)?;
         writer.u32(self.age)?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 
@@ -104,11 +104,11 @@ impl<'a> Precompiled<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.start_index)?;
         writer.u32(self.count)?;
         writer.u32(self.signature)?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 

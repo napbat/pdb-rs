@@ -11,8 +11,9 @@
 
 use alloc::vec::Vec;
 
-use super::{entry_list, invalid, put_u32};
+use super::{entry_list, invalid};
 use crate::Result;
+use crate::native::output::Output;
 
 /// The size of one entry.
 const RVA_SIZE: usize = 4;
@@ -70,7 +71,7 @@ pub fn encode_coff_symbol_rvas(rvas: &[u32], out: &mut Vec<u8>) -> Result<()> {
 /// Append each RVA of `rvas` to `out`.
 fn write_rvas(rvas: impl Iterator<Item = u32>, out: &mut Vec<u8>) -> Result<()> {
     for rva in rvas {
-        put_u32(out, rva)?;
+        Output::new(out).u32(rva)?;
     }
     Ok(())
 }

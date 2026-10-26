@@ -9,8 +9,9 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{invalid, put};
+use super::invalid;
 use crate::Result;
+use crate::native::output::Output;
 
 /// A decoded `DEBUG_S_STRINGTABLE` subsection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -96,8 +97,8 @@ impl<'a> StringTableSubsection<'a> {
         if string.contains(&0) {
             return Err(invalid("string table string contains a NUL byte"));
         }
-        put(out, string)?;
-        put(out, &[0])
+        Output::new(out).bytes(string)?;
+        Output::new(out).bytes(&[0])
     }
 }
 

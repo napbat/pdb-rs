@@ -86,8 +86,8 @@ pub use custom_debug_info::{
 use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Numeric;
-use super::super::writer::FieldWriter;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an OEM-defined record (`S_OEM`).
@@ -116,7 +116,6 @@ pub const MANAGED_ATTRIBUTE_OEM_ID: [u8; 16] = [
 
 /// A managed procedure start record (`S_GMANPROC` and `S_LMANPROC`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ManagedProcedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
     pub parent: u32,
@@ -173,7 +172,7 @@ impl<'a> ManagedProcedure<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.u32(self.next)?;
@@ -184,13 +183,12 @@ impl<'a> ManagedProcedure<'a> {
         self.address.write(out)?;
         out.u8(self.flags.0)?;
         out.u16(self.return_register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A managed local variable in an IL slot (`S_MANSLOT`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ManagedSlot<'a> {
     /// The index of the local variable slot in the method body.
     pub slot: u32,
@@ -224,18 +222,17 @@ impl<'a> ManagedSlot<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.slot)?;
         out.u32(self.type_or_token)?;
         self.address.write(out)?;
         out.u16(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A managed constant record (`S_MANCONSTANT`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ManagedConstant<'a> {
     /// A type index or a metadata token. Roslyn writes the token of the
     /// constant signature (`StandAloneSig`, table `0x11`).
@@ -261,16 +258,15 @@ impl<'a> ManagedConstant<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.type_or_token)?;
         self.value.encode(out.out())?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// An OEM-defined record (`S_OEM`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Oem<'a> {
     /// The OEM ID: GUID bytes in serialized order, for example
     /// [`MANAGED_ATTRIBUTE_OEM_ID`].
@@ -310,7 +306,7 @@ impl<'a> Oem<'a> {
     }
 
     /// Write the fields and the raw data.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.bytes(&self.id)?;
         out.type_index(self.type_index)?;
         out.bytes(self.data)

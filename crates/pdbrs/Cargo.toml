@@ -36,3 +36,11 @@ required-features = ["std"]
 [[example]]
 name = "locate"
 required-features = ["std"]
+
+[[example]]
+name = "native_rebuild"
+required-features = ["std"]
+
+[[example]]
+name = "native_synthetic"
+required-features = ["std"]

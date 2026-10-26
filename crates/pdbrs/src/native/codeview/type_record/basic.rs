@@ -5,7 +5,7 @@ use super::{CallingConvention, FunctionOptions, ModifierOptions, fields};
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 
 /// An `LF_MODIFIER` record: a type with `const`, `volatile` or `__unaligned`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -29,7 +29,7 @@ impl Modifier {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.modified_type)?;
         writer.u16(self.options.0)
     }
@@ -66,7 +66,7 @@ impl Procedure {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.return_type)?;
         writer.u8(self.calling_convention.raw())?;
         writer.u8(self.options.0)?;
@@ -115,7 +115,7 @@ impl MemberFunction {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.return_type)?;
         writer.type_index(self.class_type)?;
         writer.type_index(self.this_type)?;
@@ -152,7 +152,7 @@ impl Bitfield {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.underlying_type)?;
         writer.u8(self.bit_size)?;
         writer.u8(self.bit_offset)
@@ -187,10 +187,10 @@ impl<'a> Array<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.type_index(self.index_type)?;
         self.size.encode(writer.out())?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }

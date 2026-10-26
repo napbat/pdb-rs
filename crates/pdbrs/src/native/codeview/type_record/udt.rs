@@ -14,7 +14,7 @@ use crate::Result;
 use crate::native::codeview::Fields;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 
 /// The options and the names of a user-defined type.
 ///
@@ -50,7 +50,7 @@ fn names<'a>(
 /// The unique name must be present exactly if the options have the
 /// unique-name flag.
 fn encode_names(
-    writer: &mut FieldWriter<'_>,
+    writer: &mut Output<'_>,
     options: ClassOptions,
     name: &[u8],
     unique_name: Option<&[u8]>,
@@ -59,9 +59,9 @@ fn encode_names(
         return Err(crate::Error::new(crate::ErrorKind::InvalidFormat, None)
             .with_context("unique name does not match the unique-name flag"));
     }
-    writer.name(name)?;
+    writer.c_string(name)?;
     match unique_name {
-        Some(unique_name) => writer.name(unique_name),
+        Some(unique_name) => writer.c_string(unique_name),
         None => Ok(()),
     }
 }
@@ -131,7 +131,7 @@ impl<'a> Class<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.field_list)?;
@@ -200,7 +200,7 @@ impl<'a> WideClass<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u32(self.options)?;
         writer.type_index(self.field_list)?;
         writer.type_index(self.derivation_list)?;
@@ -263,7 +263,7 @@ impl<'a> Union<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.field_list)?;
@@ -319,7 +319,7 @@ impl<'a> WideUnion<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u32(self.options)?;
         writer.type_index(self.field_list)?;
         self.member_count.encode(writer.out())?;
@@ -380,7 +380,7 @@ impl<'a> Enum<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.underlying_type)?;

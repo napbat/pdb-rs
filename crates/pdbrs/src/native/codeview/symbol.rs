@@ -20,9 +20,9 @@
 //! decoded record encodes to its original bytes.
 
 use super::index::{IdIndex, TypeIndex};
-use super::writer::FieldWriter;
 use super::{Fields, Record};
 use crate::native::address::SectionOffset;
+use crate::native::output::Output;
 use crate::{ErrorKind, Result};
 
 /// Define a newtype for a bit set with named bits.
@@ -274,7 +274,7 @@ impl SectionOffset {
     }
 
     /// Write the `u32` offset and then the `u16` section number.
-    fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    fn write(self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.offset)?;
         out.u16(self.section)
     }

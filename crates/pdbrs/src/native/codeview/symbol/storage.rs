@@ -14,9 +14,9 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::writer::FieldWriter;
 use super::LocalFlags;
 use crate::Result;
+use crate::native::output::Output;
 
 /// The kind of an indirect frame-relative variable (`S_BPREL32_INDIR`).
 pub const S_BPREL32_INDIR: u16 = 0x1170;
@@ -37,7 +37,6 @@ pub const S_REGREL32_INDIR_ENCTMP: u16 = 0x117b;
 /// x86 producers write this record for locals and parameters relative to
 /// `EBP`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct BasePointerRelative<'a> {
     /// The offset from the frame pointer. `cvinfo.h` gives a signed
     /// `CV_off32_t`.
@@ -62,16 +61,15 @@ impl<'a> BasePointerRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.i32(self.offset)?;
         out.type_index(self.type_index)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A variable in a register (`S_REGISTER`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct RegisterVariable<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -95,10 +93,10 @@ impl<'a> RegisterVariable<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u16(self.register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -106,7 +104,6 @@ impl<'a> RegisterVariable<'a> {
 ///
 /// The def-range records that follow give the location of the variable.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FileStatic<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -134,11 +131,11 @@ impl<'a> FileStatic<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u32(self.module_name_offset)?;
         out.u16(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -147,7 +144,6 @@ impl<'a> FileStatic<'a> {
 ///
 /// The variable is at `*(frame + offset) + offset_in_udt`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct BasePointerRelativeIndirect<'a> {
     /// The offset of the pointer from the frame pointer (`off`, a `long`).
     pub offset: i32,
@@ -175,11 +171,11 @@ impl<'a> BasePointerRelativeIndirect<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.i32(self.offset)?;
         out.type_index(self.type_index)?;
         out.i32(self.offset_in_udt)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -188,7 +184,6 @@ impl<'a> BasePointerRelativeIndirect<'a> {
 ///
 /// The variable is at `*(register + offset) + offset_in_udt`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct RegisterRelativeIndirect<'a> {
     /// The offset of the pointer from the register.
     pub offset: u32,
@@ -220,11 +215,11 @@ impl<'a> RegisterRelativeIndirect<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.offset)?;
         out.type_index(self.type_index)?;
         out.u32(self.offset_in_udt)?;
         out.u16(self.register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }

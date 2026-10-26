@@ -16,9 +16,10 @@
 
 use alloc::vec::Vec;
 
-use super::{entry_list, invalid, put, put_u32};
+use super::{entry_list, invalid};
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
+use crate::native::output::Output;
 
 /// The size of one `DEBUG_S_XFGHASH_TYPE` entry.
 const TYPE_ENTRY_SIZE: usize = 12;
@@ -28,7 +29,6 @@ const VIRTUAL_ENTRY_SIZE: usize = 16;
 
 /// One entry of a `DEBUG_S_XFGHASH_TYPE` subsection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct XfgTypeHash {
     /// The XFG hash.
     pub hash: u64,
@@ -62,14 +62,13 @@ impl XfgTypeHash {
     /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
     /// if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        put(out, &self.hash.to_le_bytes())?;
-        put_u32(out, self.function_type.0)
+        Output::new(out).bytes(&self.hash.to_le_bytes())?;
+        Output::new(out).u32(self.function_type.0)
     }
 }
 
 /// One entry of a `DEBUG_S_XFGHASH_VIRTUAL` subsection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct XfgVirtualHash {
     /// The XFG hash.
     pub hash: u64,
@@ -124,9 +123,9 @@ impl XfgVirtualHash {
     /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
     /// if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        put(out, &self.hash.to_le_bytes())?;
-        put_u32(out, self.class.0)?;
-        put_u32(out, self.offset)
+        Output::new(out).bytes(&self.hash.to_le_bytes())?;
+        Output::new(out).u32(self.class.0)?;
+        Output::new(out).u32(self.offset)
     }
 }
 

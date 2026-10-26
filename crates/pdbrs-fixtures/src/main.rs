@@ -12,8 +12,10 @@
 //! The `verify-portable` command compares the pdbrs and verifier dumps of the Portable PDB
 //! fixtures. The `verify-rebuild` command rebuilds them with the pdbrs writer and compares the
 //! result with the original. The `verify-edit` command edits and builds them with the pdbrs
-//! editor and checks the result with the verifier and the fixture programs. The `detect`
-//! command opens each fixture output with the format facade of pdbrs.
+//! editor and checks the result with the verifier and the fixture programs. The
+//! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs builder and
+//! compares each result with the original through the consumer tools. The `detect` command
+//! opens each fixture output with the format facade of pdbrs.
 
 mod args;
 mod classify;
@@ -22,6 +24,7 @@ mod json;
 mod manifest;
 mod matrix;
 mod plan;
+mod sha256;
 mod step;
 mod toolchain;
 mod tools;
@@ -70,6 +73,11 @@ fn main() -> ExitCode {
             let workspace = workspace_root();
             let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
             exit_code(verify::verify_edit(&workspace, &fixtures))
+        }
+        Ok(Action::VerifyNativeBuild(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_native_build(&workspace, &fixtures))
         }
         Ok(Action::Detect(fixtures)) => {
             let fixtures =
@@ -255,14 +263,14 @@ fn check_outputs(plan: &Plan, out: &Path) -> Result<(Vec<Output>, Vec<String>), 
                 kind.name()
             ));
         }
-        outputs.push(output(kind, path, &bytes));
+        outputs.push(Output::new(kind, path, &bytes));
         if kind == Kind::EmbeddedInImage
             && let Some(payload) = embedded_pdb_payload(&bytes)
         {
             let payload_path = expected.path.with_extension("mpdb");
             fs::write(&payload_path, payload)
                 .map_err(|error| format!("cannot write {}: {error}", payload_path.display()))?;
-            outputs.push(output(
+            outputs.push(Output::new(
                 Kind::EmbeddedPdbPayload,
                 relative_path(out, &payload_path),
                 payload,
@@ -270,13 +278,4 @@ fn check_outputs(plan: &Plan, out: &Path) -> Result<(Vec<Output>, Vec<String>), 
         }
     }
     Ok((outputs, notes))
-}
-
-/// Make the record of one output file.
-fn output(kind: Kind, path: String, bytes: &[u8]) -> Output {
-    Output {
-        kind,
-        path,
-        size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-    }
 }

@@ -24,6 +24,7 @@ use super::{
 use crate::native::codeview::Records;
 use crate::native::codeview::index::FIRST_RECORD_INDEX;
 use crate::native::msf::StreamId;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The hash bucket count of Microsoft and LLVM writers (`0x3ffff`).
@@ -137,11 +138,6 @@ fn no_memory() -> Error {
     Error::new(ErrorKind::LimitExceeded, None).with_context("type stream cannot be allocated")
 }
 
-/// Append a little-endian `u32`. The caller reserved the space.
-fn put(out: &mut Vec<u8>, value: u32) {
-    out.extend_from_slice(&value.to_le_bytes());
-}
-
 /// Return the index offset pairs of records with `sizes` under `layout`.
 fn index_offsets(sizes: &[u32], index_begin: u32, layout: HashLayout) -> Result<Vec<IndexOffset>> {
     let mut pairs: Vec<IndexOffset> = Vec::new();
@@ -212,9 +208,9 @@ pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
     let to_u32 = |value: usize| {
         u32::try_from(value).map_err(|_| too_large("hash adjuster map is too large"))
     };
-    put(&mut out, to_u32(count)?);
-    put(&mut out, to_u32(slots.len())?);
-    put(&mut out, to_u32(words)?);
+    Output::new(&mut out).u32(to_u32(count)?)?;
+    Output::new(&mut out).u32(to_u32(slots.len())?)?;
+    Output::new(&mut out).u32(to_u32(words)?)?;
     for word in 0..words {
         let bits = slots
             .iter()
@@ -223,12 +219,12 @@ pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
             .enumerate()
             .filter(|(_, slot)| slot.is_some())
             .fold(0_u32, |bits, (bit, _)| bits | 1 << bit);
-        put(&mut out, bits);
+        Output::new(&mut out).u32(bits)?;
     }
-    put(&mut out, 0);
+    Output::new(&mut out).u32(0)?;
     for entry in slots.iter().flatten() {
-        put(&mut out, entry.name_offset);
-        put(&mut out, entry.index);
+        Output::new(&mut out).u32(entry.name_offset)?;
+        Output::new(&mut out).u32(entry.index)?;
     }
     Ok(out)
 }
@@ -342,15 +338,15 @@ pub fn write_type_stream(
         index_end,
         record_bytes,
     ] {
-        put(&mut stream, value);
+        Output::new(&mut stream).u32(value)?;
     }
     stream.extend_from_slice(&stream_id(options.hash_stream)?.to_le_bytes());
     stream.extend_from_slice(&stream_id(options.hash_aux_stream)?.to_le_bytes());
-    put(&mut stream, HASH_KEY_SIZE);
-    put(&mut stream, options.hash_bucket_count);
+    Output::new(&mut stream).u32(HASH_KEY_SIZE)?;
+    Output::new(&mut stream).u32(options.hash_bucket_count)?;
     for buffer in buffers {
         stream.extend_from_slice(&buffer.offset.to_le_bytes());
-        put(&mut stream, buffer.length);
+        Output::new(&mut stream).u32(buffer.length)?;
     }
     stream.extend_from_slice(records);
     Ok(TypeStreamBytes {
@@ -418,11 +414,11 @@ fn hash_stream(
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(total).map_err(|_| no_memory())?;
     for &hash in hashes {
-        put(&mut bytes, hash);
+        Output::new(&mut bytes).u32(hash)?;
     }
     for pair in &pairs {
-        put(&mut bytes, pair.index);
-        put(&mut bytes, pair.offset);
+        Output::new(&mut bytes).u32(pair.index)?;
+        Output::new(&mut bytes).u32(pair.offset)?;
     }
     bytes.extend_from_slice(&adjusters);
     Ok((bytes, [values, index_offsets, hash_adjustments]))

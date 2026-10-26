@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 
 use super::super::Fields;
-use super::super::writer::{FieldWriter, Padding};
+use super::super::writer::Padding;
 use super::{
     ProcedureType, S_ANNOTATION, S_ANNOTATIONREF, S_ARMSWITCHTABLE, S_ASSOCIATION, S_ATTR_FRAMEREL,
     S_ATTR_MANYREG, S_ATTR_REGISTER, S_ATTR_REGREL, S_BLOCK32, S_BPREL32, S_BPREL32_ENCTMP,
@@ -33,6 +33,7 @@ use super::{
     S_SECTION, S_SEPCODE, S_SKIP, S_SOURCELINK, S_STATICLOCAL, S_THUNK32, S_TOKENREF, S_TRAMPOLINE,
     S_UDT, S_UNAMESPACE, S_VFTABLE32, S_WITH32, SHORT_PAYLOAD, Symbol, SymbolData, decode_data,
 };
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 impl SymbolData<'_> {
@@ -56,7 +57,7 @@ impl SymbolData<'_> {
 
     /// Append the record of `kind` with these fields and `padding` to `out`.
     fn encode_with(&self, kind: u16, padding: Padding, out: &mut Vec<u8>) -> Result<()> {
-        let mut writer = FieldWriter::new(out);
+        let mut writer = Output::new(out);
         let start = writer.begin_record(kind)?;
         let written =
             self.write_variable(kind, &mut writer)? || self.write_fields(kind, &mut writer)?;
@@ -69,7 +70,7 @@ impl SymbolData<'_> {
 
     /// Write the fields of a kind that is not a variable, data or def-range
     /// kind. Return `false` if the variant does not belong to `kind`.
-    fn write_fields(&self, kind: u16, out: &mut FieldWriter<'_>) -> Result<bool> {
+    fn write_fields(&self, kind: u16, out: &mut Output<'_>) -> Result<bool> {
         let id = matches!(
             kind,
             S_GPROC32_ID
@@ -96,7 +97,7 @@ impl SymbolData<'_> {
                 out.id_index(*index)?;
             }
             (S_ENVBLOCK, Self::EnvironmentBlock(value)) => value.write(out)?,
-            (S_UNAMESPACE, Self::UsingNamespace(name)) => out.name(name)?,
+            (S_UNAMESPACE, Self::UsingNamespace(name)) => out.c_string(name)?,
             (
                 S_GPROC32 | S_LPROC32 | S_LPROC32_DPC | S_GPROC32_ID | S_LPROC32_ID
                 | S_LPROC32_DPC_ID | S_GPROC32EX | S_LPROC32EX | S_GPROC32EX_ID | S_LPROC32EX_ID,
@@ -169,7 +170,7 @@ impl SymbolData<'_> {
     /// Write the fields of a variable, data or def-range kind. Return
     /// `false` for other kinds and for a variant that does not belong to
     /// `kind`.
-    fn write_variable(&self, kind: u16, out: &mut FieldWriter<'_>) -> Result<bool> {
+    fn write_variable(&self, kind: u16, out: &mut Output<'_>) -> Result<bool> {
         let attributed = !matches!(kind, S_MANYREG | S_MANYREG2);
         let wide = matches!(kind, S_MANYREG2 | S_MANMANYREG2 | S_ATTR_MANYREG);
         match (kind, self) {

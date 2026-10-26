@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::auxiliary::{
     LinkInfo, NamedStreamKind, SourceLink, SourceServer, TmCache, TypeMapKind, TypeMapStream,
     UdtSourceLineUndone,
@@ -32,7 +32,7 @@ const MAX_EMBEDDED_SOURCE: usize = 64 << 20;
 /// order with the rules of Microsoft `NMTNI` and `NMT`; the report counts the rebuilds that give
 /// other bytes, for example the `/names` bucket layout of LLVM, without failing.
 pub(crate) fn info_and_names(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     names: &StringTable<'_>,
     report: &mut Report,
 ) -> Outcome {
@@ -87,7 +87,7 @@ pub(crate) fn info_and_names(
 
 /// Decode every named stream and verify the injected sources.
 pub(crate) fn named_streams(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     names: &StringTable<'_>,
     tpi: &TypeStream,
     ipi: &TypeStream,
@@ -245,7 +245,7 @@ fn injected_source(
 ///
 /// `ends` holds the TPI and IPI index ends.
 fn type_maps(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     cache: &TmCache<'_>,
     ends: [u32; 2],
     report: &mut Report,

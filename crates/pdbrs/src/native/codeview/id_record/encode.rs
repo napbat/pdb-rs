@@ -7,7 +7,8 @@ use super::{
     LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE,
 };
 use crate::native::codeview::index::IdIndex;
-use crate::native::codeview::writer::{FieldWriter, Padding};
+use crate::native::codeview::writer::Padding;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// Return the error for a list that is longer than its count field allows.
@@ -70,13 +71,13 @@ impl IdRecord<'_> {
     ///   than its count field allows.
     /// - [`ErrorKind::InvalidFormat`] if a name contains a NUL byte.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let mut writer = FieldWriter::new(out);
+        let mut writer = Output::new(out);
         let start = writer.begin_record(self.kind())?;
         let padding = match self {
             Self::Function(value) => {
                 writer.id_index(value.scope.unwrap_or(IdIndex::NONE))?;
                 writer.type_index(value.function_type)?;
-                writer.name(value.name)?;
+                writer.c_string(value.name)?;
                 if let Some(hash) = value.decorated_name_hash {
                     writer.u64(hash)?;
                 }
@@ -85,7 +86,7 @@ impl IdRecord<'_> {
             Self::MemberFunction(value) => {
                 writer.type_index(value.parent_type)?;
                 writer.type_index(value.function_type)?;
-                writer.name(value.name)?;
+                writer.c_string(value.name)?;
                 if let Some(hash) = value.decorated_name_hash {
                     writer.u64(hash)?;
                 }
@@ -103,7 +104,7 @@ impl IdRecord<'_> {
             }
             Self::String(value) => {
                 writer.id_index(value.substrings.unwrap_or(IdIndex::NONE))?;
-                writer.name(value.string)?;
+                writer.c_string(value.string)?;
                 Padding::Type
             }
             Self::UdtSourceLine(value) => {

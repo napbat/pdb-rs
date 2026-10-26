@@ -3,7 +3,8 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{entry_list, invalid, put_u16, put_u32, read_u32, to_u32, too_large, truncated};
+use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The line number that tells a debugger to always step into the code
@@ -44,7 +45,6 @@ const STATEMENT_BIT: u32 = 0x8000_0000;
 
 /// The header of a `DEBUG_S_LINES` subsection (`CV_DebugSLinesHeader_t`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct LinesHeader {
     /// The section offset of the code contribution.
     pub code_offset: u32,
@@ -85,10 +85,10 @@ impl LinesHeader {
         if self.flags & !HAVE_COLUMNS != 0 {
             return Err(invalid("line subsection header has unknown flags"));
         }
-        put_u32(out, self.code_offset)?;
-        put_u16(out, self.segment)?;
-        put_u16(out, self.flags)?;
-        put_u32(out, self.code_size)
+        Output::new(out).u32(self.code_offset)?;
+        Output::new(out).u16(self.segment)?;
+        Output::new(out).u16(self.flags)?;
+        Output::new(out).u32(self.code_size)
     }
 }
 
@@ -214,7 +214,6 @@ impl<'a> LinesSubsection<'a> {
 
 /// The lines of one source file in a `DEBUG_S_LINES` subsection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct LineBlock<'a> {
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
     /// subsection of the same module.
@@ -292,15 +291,9 @@ fn write_block(
         .checked_mul(entry_size)
         .and_then(|size| size.checked_add(BLOCK_HEADER_SIZE))
         .ok_or_else(|| too_large("line block size does not fit in 32 bits"))?;
-    put_u32(out, checksum_offset)?;
-    put_u32(
-        out,
-        to_u32(count, "line block count does not fit in 32 bits")?,
-    )?;
-    put_u32(
-        out,
-        to_u32(size, "line block size does not fit in 32 bits")?,
-    )?;
+    Output::new(out).u32(checksum_offset)?;
+    Output::new(out).u32(to_u32(count, "line block count does not fit in 32 bits")?)?;
+    Output::new(out).u32(to_u32(size, "line block size does not fit in 32 bits")?)?;
     for line in lines {
         line.encode(out)?;
     }
@@ -312,7 +305,6 @@ fn write_block(
 
 /// One line entry (`CV_Line_t`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct LineEntry {
     /// The code offset relative to [`LinesHeader::code_offset`].
     pub offset: u32,
@@ -369,17 +361,13 @@ impl LineEntry {
             return Err(invalid("line end delta does not fit in 7 bits"));
         }
         let statement = if self.is_statement { STATEMENT_BIT } else { 0 };
-        put_u32(out, self.offset)?;
-        put_u32(
-            out,
-            self.line_start | end_delta << END_DELTA_SHIFT | statement,
-        )
+        Output::new(out).u32(self.offset)?;
+        Output::new(out).u32(self.line_start | end_delta << END_DELTA_SHIFT | statement)
     }
 }
 
 /// One column entry (`CV_Column_t`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ColumnEntry {
     /// The first column.
     pub start: u16,
@@ -409,8 +397,8 @@ impl ColumnEntry {
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        put_u16(out, self.start)?;
-        put_u16(out, self.end)
+        Output::new(out).u16(self.start)?;
+        Output::new(out).u16(self.end)
     }
 }
 

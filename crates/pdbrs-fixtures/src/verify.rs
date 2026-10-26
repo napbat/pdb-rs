@@ -1,4 +1,4 @@
-//! The `verify-portable` and `detect` commands.
+//! The `verify-portable` and `detect` commands, and the parent of the other `verify-*` commands.
 //!
 //! `verify-portable` prints the canonical dump of each Portable PDB of the fixture manifest
 //! twice: with pdbrs and with the .NET verifier (`System.Reflection.Metadata`). It writes both
@@ -12,12 +12,17 @@
 //!
 //! `verify-rebuild` (see [`rebuild`]) rebuilds each Portable PDB with the pdbrs writer and
 //! compares the bytes, the ID and the verifier dump with the original.
+//!
+//! `verify-native-build` (see [`native`]) rebuilds each native PDB with the pdbrs builder and
+//! compares the original and the rebuilt PDB through the consumer tools.
 
 mod dump;
 mod edit;
+mod native;
 mod rebuild;
 
 pub use edit::verify_edit;
+pub use native::build::verify_native_build;
 pub use rebuild::verify_rebuild;
 
 use std::fs;

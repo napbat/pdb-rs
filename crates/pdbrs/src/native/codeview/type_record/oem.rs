@@ -10,7 +10,7 @@
 use super::{TypeIndexList, fields};
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 
 /// An `LF_OEM` record: a type that an OEM defines.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -41,7 +41,7 @@ impl<'a> Oem<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.oem)?;
         writer.u16(self.record)?;
         self.indices.encode_counted(writer)?;
@@ -74,7 +74,7 @@ impl<'a> Oem2<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.bytes(&self.oem)?;
         self.indices.encode_counted(writer)?;
         writer.bytes(self.data)
@@ -101,7 +101,7 @@ impl<'a> Cobol0<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.parent_type)?;
         writer.bytes(self.data)
     }
@@ -130,7 +130,7 @@ impl<'a> Skip<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.next_index)?;
         writer.bytes(self.data)
     }

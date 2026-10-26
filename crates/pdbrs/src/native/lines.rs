@@ -55,6 +55,7 @@
 
 use alloc::vec::Vec;
 
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 mod assembly_input;
@@ -387,7 +388,9 @@ impl<'a> LineSubsection<'a> {
             Self::CoffSymbolRvas(value) => value.encode(out),
             Self::XfgTypeHashes(value) => value.encode(out),
             Self::XfgVirtualHashes(value) => value.encode(out),
-            Self::Ignored { data, .. } | Self::Unsupported { data, .. } => put(out, data),
+            Self::Ignored { data, .. } | Self::Unsupported { data, .. } => {
+                Output::new(out).bytes(data)
+            }
         }
     }
 
@@ -404,8 +407,8 @@ impl<'a> LineSubsection<'a> {
     /// 32 bits.
     pub fn encode_framed(&self, out: &mut Vec<u8>) -> Result<()> {
         let start = out.len();
-        put_u32(out, self.kind())?;
-        put_u32(out, 0)?;
+        Output::new(out).u32(self.kind())?;
+        Output::new(out).u32(0)?;
         self.encode(out)?;
         // The header is 8 bytes, so `start + 8` is inside `out`.
         let size = out.len() - start - 8;
@@ -541,30 +544,12 @@ fn too_large(context: &'static str) -> Error {
     Error::new(ErrorKind::LimitExceeded, None).with_context(context)
 }
 
-/// Append `bytes` to `out` with a checked allocation.
-fn put(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
-    out.try_reserve(bytes.len())
-        .map_err(|_| too_large("C13 subsection output cannot be allocated"))?;
-    out.extend_from_slice(bytes);
-    Ok(())
-}
-
-/// Append a little-endian `u16` to `out`.
-fn put_u16(out: &mut Vec<u8>, value: u16) -> Result<()> {
-    put(out, &value.to_le_bytes())
-}
-
-/// Append a little-endian `u32` to `out`.
-fn put_u32(out: &mut Vec<u8>, value: u32) -> Result<()> {
-    put(out, &value.to_le_bytes())
-}
-
 /// Append zero bytes to `out` after `size` bytes of an item that starts at
 /// a 4-byte boundary, so that the next item also starts at a 4-byte
 /// boundary.
 fn pad4(out: &mut Vec<u8>, size: usize) -> Result<()> {
     let padding = (4 - size % 4) % 4;
-    put(out, &[0; 3][..padding])
+    Output::new(out).zeros(padding)
 }
 
 /// Convert a count or a size to the `u32` of its field.

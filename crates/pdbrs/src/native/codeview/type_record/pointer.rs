@@ -13,8 +13,8 @@
 
 use super::{MemberPointerRepresentation, PointerAttributes, PointerKind, fields};
 use crate::native::codeview::index::TypeIndex;
-use crate::native::codeview::writer::FieldWriter;
 use crate::native::codeview::{Fields, Record, Records};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The containing class of a pointer to member.
@@ -101,7 +101,7 @@ impl<'a> BasedPointer<'a> {
     }
 
     /// Append the base data.
-    fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         match self {
             Self::Segment(segment) => writer.u16(*segment),
             Self::Symbol(bytes) => {
@@ -115,7 +115,7 @@ impl<'a> BasedPointer<'a> {
             }
             Self::Type { base_type, name } => {
                 writer.type_index(*base_type)?;
-                writer.name(name)
+                writer.c_string(name)
             }
             Self::SelfBased => Ok(()),
         }
@@ -166,7 +166,7 @@ impl<'a> Pointer<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         let member_mode = self.attributes.mode().is_member_pointer();
         let based_kind = !member_mode && self.attributes.kind().is_based();
         let valid = member_mode == self.member.is_some()

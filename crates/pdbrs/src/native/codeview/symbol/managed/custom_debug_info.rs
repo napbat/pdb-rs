@@ -145,7 +145,6 @@ impl<'a> CustomDebugInfo<'a> {
 
 /// One framed custom debug information record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct CustomDebugInfoRecord<'a> {
     /// The record version. [`CustomDebugInfoRecord::decode`] supports version 4.
     pub version: u8,
@@ -388,7 +387,6 @@ chunk_iter!(
 /// Both IL offsets are inclusive. The scope `[0, 0]` marks a synthesized
 /// variable (Roslyn `DecodeStateMachineHoistedLocalScopesRecord`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HoistedLocalScope {
     /// The first IL offset.
     pub start: u32,

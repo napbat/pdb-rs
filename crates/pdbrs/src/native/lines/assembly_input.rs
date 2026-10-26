@@ -15,8 +15,9 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{invalid, pad4, put, put_u16, put_u32, truncated};
+use super::{invalid, pad4, truncated};
 use crate::Result;
+use crate::native::output::Output;
 
 /// The size of the time stamp and the index.
 const FIXED_SIZE: usize = 8;
@@ -32,7 +33,6 @@ const ALIGNMENT: usize = 4;
 
 /// One input assembly of a merged assembly.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AssemblyInput<'a> {
     /// The time stamp.
     pub timestamp: u32,
@@ -108,12 +108,12 @@ impl<'a> AssemblyInput<'a> {
             return Err(invalid("merged assembly input name contains a NUL byte"));
         }
         let flag = if self.has_pdb { PDB_BIT } else { 0 };
-        put_u32(out, self.timestamp)?;
-        put_u32(out, self.index | flag)?;
-        put_u16(out, version_size)?;
-        put(out, self.version)?;
-        put(out, self.name)?;
-        put(out, &[0])?;
+        Output::new(out).u32(self.timestamp)?;
+        Output::new(out).u32(self.index | flag)?;
+        Output::new(out).u16(version_size)?;
+        Output::new(out).bytes(self.version)?;
+        Output::new(out).bytes(self.name)?;
+        Output::new(out).bytes(&[0])?;
         Ok(FIXED_SIZE + usize::from(version_size) + self.name.len() + 1)
     }
 }
@@ -193,7 +193,7 @@ impl<'a> MergedAssemblyInput<'a> {
         while !rest.is_empty() {
             let (entry, padding, next) = split_entry(rest)?;
             entry.encode(out)?;
-            put(out, &[0; ALIGNMENT - 1][..padding])?;
+            Output::new(out).bytes(&[0; ALIGNMENT - 1][..padding])?;
             rest = next;
         }
         Ok(())

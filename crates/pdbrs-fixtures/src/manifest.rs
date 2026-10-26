@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::classify::Kind;
 use crate::json::{self, Value};
 use crate::matrix::{FIXTURES, Fixture};
+use crate::sha256;
 use crate::step::Step;
 use crate::toolchain::capture;
 
@@ -43,6 +44,20 @@ pub struct Output {
     pub path: String,
     /// The size in bytes.
     pub size: u64,
+    /// The SHA-256 digest of the contents, as 64 lowercase hexadecimal digits.
+    pub sha256: String,
+}
+
+impl Output {
+    /// Make the record of an output file with the contents `bytes`.
+    pub fn new(kind: Kind, path: String, bytes: &[u8]) -> Self {
+        Self {
+            kind,
+            path,
+            size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            sha256: sha256::hex_digest(bytes),
+        }
+    }
 }
 
 /// The record of one fixture.
@@ -90,6 +105,7 @@ impl Record {
                     ("kind", Value::string(output.kind.name())),
                     ("path", Value::string(&output.path)),
                     ("size", Value::Number(output.size)),
+                    ("sha256", Value::string(&output.sha256)),
                 ])
             })
             .collect();
@@ -250,10 +266,39 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Header, Record, Status, fixture_entries, relative_path, render};
+    use super::{Header, Output, Record, Status, fixture_entries, relative_path, render};
+    use crate::classify::Kind;
     use crate::json::{self, Value};
     use crate::matrix::FIXTURES;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn an_output_records_its_size_and_sha256_digest() {
+        let mut built = record(0, Status::Built);
+        built.outputs.push(Output::new(
+            Kind::NativePdb,
+            "demo/demo.pdb".to_owned(),
+            b"abc",
+        ));
+        let value = json::parse(&built.to_value().render()).unwrap();
+        let Some(Value::Array(outputs)) = value.get("outputs") else {
+            panic!("the record has no outputs");
+        };
+        assert_eq!(
+            outputs.as_slice(),
+            [Value::object([
+                ("kind", Value::string("native-pdb")),
+                ("path", Value::string("demo/demo.pdb")),
+                ("size", Value::Number(3)),
+                (
+                    "sha256",
+                    Value::string(
+                        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                    )
+                ),
+            ])]
+        );
+    }
 
     fn record(index: usize, status: Status) -> Record {
         Record {

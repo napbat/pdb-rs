@@ -66,7 +66,6 @@ iterable!(DynamicLocals, DynamicLocalIter);
 
 /// The `dynamic` flags of one local variable or constant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DynamicLocal<'a> {
     /// The flag bytes: one byte for each type in the signature, nonzero for
     /// `dynamic`. The slice has [`DynamicLocal::flag_count`] bytes, at most 64.
@@ -163,7 +162,6 @@ iterable!(TupleElementNames, TupleElementNamesIter);
 
 /// The tuple element names of one local variable or constant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct TupleElementNamesEntry<'a> {
     /// The element names. An empty name means that the element has no name.
     pub element_names: Utf8Names<'a>,

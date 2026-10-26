@@ -8,7 +8,7 @@
 use super::fields;
 use crate::Result;
 use crate::native::codeview::index::TypeIndex;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 
 /// An `LF_ALIAS` record: a `typedef` name.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -32,9 +32,9 @@ impl<'a> Alias<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.underlying_type)?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 
@@ -60,9 +60,9 @@ impl<'a> DefaultArgument<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.argument_type)?;
-        writer.name(self.expression)
+        writer.c_string(self.expression)
     }
 }
 

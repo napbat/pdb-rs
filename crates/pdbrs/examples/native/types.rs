@@ -4,7 +4,7 @@
 //! hash stream, and compares the bytes with the input. It fails if a byte
 //! differs.
 
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::codeview::field_list::{LLVM_FIELD_LIST_LIMIT, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
@@ -26,7 +26,7 @@ const MSVC_FIELD_LIST_LIMIT: usize = 0xfb00;
 
 /// Load the hash stream of a type stream, if the header names one.
 pub(crate) fn hash_stream_bytes(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     types: &TypeStream,
     report: &mut Report,
 ) -> Outcome<Option<Vec<u8>>> {

@@ -4,7 +4,7 @@ Status: the full reader/writer design remains proposed. The library reads every 
 Formats and record kinds outside those samples remain incomplete. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
 The library reads the metadata of standalone Portable PDBs and the raw rows of their eight debug tables (see [Implemented Portable PDB reading](#implemented-portable-pdb-reading)).
 The library writes Portable PDBs: exact copies, new layouts from raw rows and heaps, semantic builds and edits (see [Implemented Portable PDB writing](#implemented-portable-pdb-writing)).
-Portable PDB blob decoding is partial, and native PDB semantic building and editing are not implemented.
+Portable PDB blob decoding is partial. The library builds new native PDBs from semantic records (see [Implemented native building](#implemented-native-building)). Native semantic editing is not implemented.
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
@@ -249,6 +249,34 @@ Evidence ([#15](https://github.com/napbat/pdbrs/issues/15)): exact copies of the
 Their repacks with 512, 4096, 8192 and 16384-byte pages and both stream 0 policies pass `pdbtool check` and `pdbtool compare`.
 DIA2Dump gives the same output as for the source. `llvm-pdbutil dump --all` gives the same result as for the source.
 Its output differs only in block numbers, block counts and the stream 0 size.
+
+## Implemented native building
+
+`native::write::PdbBuilder` builds a new native PDB from semantic records ([#33](https://github.com/napbat/pdbrs/issues/33)).
+It reuses the encoders of each record family. The module documentation of `native::write` describes the handles and the plan.
+
+- The caller gives the identity (signature, GUID and age). `PdbBuilder::apply_identity` applies an `IdentityPolicy`.
+  `PdbWritePlan::pe_match` returns the GUID and the DBI age for the `RSDS` entry of the image.
+- `TypeHandle`, `IdHandle`, `ModuleHandle`, `ModuleSymbolHandle`, `SymbolHandle` and `StreamHandle` exist before on-disk values.
+  A deferred record gets a `Resolver` when the plan encodes it. `reserve_type` and `reserve_id` give a handle before its record.
+- `PdbBuilder::plan` assigns type indices, ID indices, stream IDs, module symbol offsets and symbol record offsets.
+  It checks the TPI, IPI, module symbol, shared symbol and C13 references, and it checks each field width before output.
+- The plan builds the TPI and IPI hash streams, the scope links, the global and public indexes, the DBI source info,
+  `/names`, the named-stream map and the MSF layout. The same builder and options give the same bytes.
+
+`Pdb::contents` and `PdbContents::to_builder` give a semantic rebuild: every record is decoded and encoded again.
+The rebuild keeps the record order, so type indices, ID indices and `/names` offsets stay the same. Stream IDs change.
+It drops stream 0 and streams that no other stream names (`PdbContents::unclaimed_streams`).
+`PdbContents::build_options` keeps the page size of the source; change `BuildOptions::msf` to select another page size.
+The rebuild puts each public symbol in the bucket of its name; LLD 22.1.3 puts some 8-byte names in another bucket.
+
+```sh
+cargo run -p pdbrs --example native_rebuild -- input.pdb rebuilt.pdb
+cargo run -p pdbrs --example native_synthetic -- synthetic.pdb
+```
+
+DIA lists a procedure only if its record names a TPI type (`S_GPROC32`), as `link.exe` writes it.
+DIA2Dump does not list `S_GPROC32_ID` procedures of the synthetic PDB.
 
 ## Required formats and scope
 
@@ -560,7 +588,7 @@ GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 
 Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (see [MSF writing](#implemented-msf-writing)).
 Exact copies, new layouts, semantic builds and semantic edits are implemented for Portable PDBs (see [Portable PDB writing](#implemented-portable-pdb-writing)).
-Native semantic builds and edits are not implemented.
+Native semantic builds are implemented (see [Implemented native building](#implemented-native-building)). Native semantic edits are not implemented.
 
 Keep these operations explicit. Do not silently fall back from preservation to normalization.
 An exact copy is a copy operation, not proof that the source is a valid PDB.

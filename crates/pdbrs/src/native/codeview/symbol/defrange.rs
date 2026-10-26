@@ -8,8 +8,8 @@
 //! `DEFRANGEGLOBALSYM_ON_ENTRY` (a `long` offset and a section number).
 
 use super::super::Fields;
-use super::super::writer::FieldWriter;
 use super::{AddressGaps, AddressRange, SectionOffset};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a def-range with a DIA program (`S_DEFRANGE`).
@@ -25,7 +25,6 @@ pub const S_DEFRANGE_GLOBALSYM_ON_ENTRY: u16 = 0x1180;
 
 /// A def-range with a DIA program ([`S_DEFRANGE`] and [`S_DEFRANGE_SUBFIELD`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeProgram<'a> {
     /// The DIA program that evaluates the value (`program`).
     pub program: u32,
@@ -54,7 +53,7 @@ impl<'a> DefRangeProgram<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.program)?;
         if let Some(offset) = self.parent_offset {
             out.u32(offset)?;
@@ -96,7 +95,7 @@ impl<'a> EntryValues<'a> {
     }
 
     /// Write the words.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         for word in self.words {
             out.bytes(word)?;
         }

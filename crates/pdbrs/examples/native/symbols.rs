@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pdbrs::ErrorKind;
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
@@ -63,7 +63,7 @@ pub(crate) struct Procedures {
 
 /// Decode every module stream and return the procedure offsets per module.
 pub(crate) fn modules(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
     context: &Context<'_>,
     report: &mut Report,
@@ -221,7 +221,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
 
 /// Decode the shared symbol records and the global and public indexes.
 pub(crate) fn shared_symbols(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
     context: &Context<'_>,
     procedures: &Procedures,
