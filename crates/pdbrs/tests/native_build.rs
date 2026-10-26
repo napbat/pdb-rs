@@ -11,6 +11,7 @@ use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
 use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
+use pdbrs::native::msf::WriteOptions;
 use pdbrs::native::write::{BuildOptions, PdbBuilder};
 use pdbrs::native::{Identity, Pdb};
 
@@ -97,6 +98,57 @@ fn synthetic_program_reads_back() {
     assert_eq!(globals.hash_table().records().count(), 4);
     let publics = pdb.public_symbols(&dbi).expect("PSI").expect("PSI present");
     assert_eq!(publics.hash_table().lookup(b"main").count(), 1);
+}
+
+#[test]
+fn rebuild_keeps_the_source_page_size() {
+    let mut options = BuildOptions::default();
+    options.msf = WriteOptions::default().with_page_size(512);
+    let bytes = program::build()
+        .and_then(|builder| builder.plan(&options)?.to_vec())
+        .expect("the synthetic program builds with 512-byte pages");
+    let pdb = Pdb::parse(&bytes).expect("parse");
+    assert_eq!(pdb.msf().block_size(), 512);
+    let contents = pdb.contents().expect("contents");
+    let mut rebuild_options = contents.build_options();
+    assert_eq!(rebuild_options.msf.page_size(), 512);
+    let builder = contents
+        .to_builder(IdentityPolicy::Preserve)
+        .expect("builder");
+    let rebuilt = builder
+        .plan(&rebuild_options)
+        .and_then(|plan| plan.to_vec())
+        .expect("rebuild");
+    assert_eq!(rebuilt, bytes);
+    // The caller can select another page size.
+    rebuild_options.msf = WriteOptions::default().with_page_size(4096);
+    let larger = builder
+        .plan(&rebuild_options)
+        .and_then(|plan| plan.to_vec())
+        .expect("rebuild with 4096-byte pages");
+    let larger = Pdb::parse(&larger).expect("parse");
+    assert_eq!(larger.msf().block_size(), 4096);
+}
+
+#[test]
+fn rebuild_keeps_missing_hash_streams() {
+    let mut options = BuildOptions::default();
+    options.type_hash_stream = false;
+    options.id_hash_stream = false;
+    let bytes = program::build()
+        .and_then(|builder| builder.plan(&options)?.to_vec())
+        .expect("the synthetic program builds without hash streams");
+    let pdb = Pdb::parse(&bytes).expect("parse");
+    let types = pdb.types().expect("TPI").expect("TPI present");
+    assert_eq!(types.header().hash_stream, None);
+    let contents = pdb.contents().expect("contents");
+    let rebuild_options = contents.build_options();
+    assert!(!rebuild_options.type_hash_stream && !rebuild_options.id_hash_stream);
+    let rebuilt = contents
+        .to_builder(IdentityPolicy::Preserve)
+        .and_then(|builder| builder.plan(&rebuild_options)?.to_vec())
+        .expect("rebuild");
+    assert_eq!(rebuilt, bytes);
 }
 
 #[test]

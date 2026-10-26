@@ -20,8 +20,8 @@ use crate::native::types::{
 pub(in crate::native::write) struct PlannedTypes {
     /// The stream bytes.
     pub(in crate::native::write) stream: Vec<u8>,
-    /// The hash stream bytes.
-    pub(in crate::native::write) hash: Vec<u8>,
+    /// The hash stream bytes, if the options select a hash stream.
+    pub(in crate::native::write) hash: Option<Vec<u8>>,
     /// The parsed stream, for the checks of later streams.
     pub(in crate::native::write) parsed: TypeStream,
 }
@@ -69,14 +69,14 @@ fn write(
     records: &[u8],
     adjusters: &[HashAdjuster],
     options: &BuildOptions,
-    hash_stream: StreamId,
+    hash_stream: Option<StreamId>,
 ) -> Result<PlannedTypes> {
     let written = write_type_stream(
         records,
         &TypeStreamOptions {
             index_begin: FIRST_RECORD_INDEX,
             hash_bucket_count: options.hash_buckets,
-            hash_stream: Some(hash_stream),
+            hash_stream,
             hash_aux_stream: None,
             layout: options.hash_layout,
             adjusters,
@@ -85,7 +85,7 @@ fn write(
     let parsed = TypeStream::parse(written.stream.clone())?;
     Ok(PlannedTypes {
         stream: written.stream,
-        hash: written.hash_stream.unwrap_or_default(),
+        hash: written.hash_stream,
         parsed,
     })
 }
@@ -96,7 +96,7 @@ impl PdbBuilder<'_> {
         &self,
         resolver: &Resolver<'_>,
         options: &BuildOptions,
-        hash_stream: StreamId,
+        hash_stream: Option<StreamId>,
     ) -> Result<PlannedTypes> {
         let bytes = records(&self.types, resolver, encode_type)?;
         let planned = write(&bytes, &adjusters(&self.types)?, options, hash_stream)?;
@@ -112,7 +112,7 @@ impl PdbBuilder<'_> {
         &self,
         resolver: &Resolver<'_>,
         options: &BuildOptions,
-        hash_stream: StreamId,
+        hash_stream: Option<StreamId>,
         tpi: &PlannedTypes,
     ) -> Result<PlannedTypes> {
         let bytes = records(&self.ids, resolver, encode_id)?;
