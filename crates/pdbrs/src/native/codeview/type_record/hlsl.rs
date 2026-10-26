@@ -28,7 +28,10 @@ pub struct Hlsl<'a> {
     pub kind: u16,
     /// The raw property word: the number of properties in bits 0 to 3.
     ///
-    /// `cvinfo.h` says that bits 4 to 15 must be zero.
+    /// `cvinfo.h` says that bits 4 to 15 must be zero, but the Windows SDK
+    /// `fxc` compiler writes other values there (for example `0xfb6`). The
+    /// decoder accepts and keeps these bits, so the encoder writes them
+    /// again. [`Hlsl::unused_bits`] returns them.
     pub property_word: u16,
     /// The serialized numeric properties.
     properties: &'a [u8],
@@ -42,8 +45,8 @@ impl<'a> Hlsl<'a> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if `properties` does not hold
-    /// exactly the number of numeric leaves in `property_word`, or if bits
-    /// 4 to 15 of `property_word` are not zero.
+    /// exactly the number of numeric leaves in bits 0 to 3 of
+    /// `property_word`.
     pub fn new(
         subtype: TypeIndex,
         kind: u16,
@@ -51,12 +54,8 @@ impl<'a> Hlsl<'a> {
         properties: &'a [u8],
         size: Numeric<'a>,
     ) -> Result<Self> {
-        if property_word & !PROPERTY_COUNT_MASK != 0 {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("HLSL type has nonzero unused property bits"));
-        }
         let mut rest = properties;
-        for _ in 0..property_word {
+        for _ in 0..property_word & PROPERTY_COUNT_MASK {
             rest = Numeric::parse_prefix(rest)?.1;
         }
         if !rest.is_empty() {
@@ -103,6 +102,21 @@ impl<'a> Hlsl<'a> {
         NumericList {
             bytes: self.properties,
         }
+    }
+
+    /// Return the number of numeric properties: bits 0 to 3 of the
+    /// property word.
+    #[must_use]
+    pub const fn property_count(&self) -> u16 {
+        self.property_word & PROPERTY_COUNT_MASK
+    }
+
+    /// Return bits 4 to 15 of the property word, shifted to bit 0.
+    ///
+    /// `cvinfo.h` defines no meaning for these bits.
+    #[must_use]
+    pub const fn unused_bits(&self) -> u16 {
+        self.property_word >> 4
     }
 }
 
