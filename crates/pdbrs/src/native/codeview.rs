@@ -16,10 +16,13 @@ use core::iter::FusedIterator;
 
 use crate::{Error, ErrorKind, Result};
 
+pub mod id_record;
 pub mod index;
 pub mod numeric;
 
 mod symbol;
+
+use index::{IdIndex, TypeIndex};
 
 pub use symbol::{
     Procedure, S_GDATA32, S_GPROC32, S_GPROC32_ID, S_LDATA32, S_LPROC32, S_LPROC32_ID, S_PUB32,
@@ -207,6 +210,69 @@ impl<'a> Fields<'a> {
     /// Read a little-endian `i32`.
     pub(crate) fn i32(&mut self) -> Result<i32> {
         Ok(i32::from_le_bytes(self.array()?))
+    }
+
+    /// Read a little-endian `u64`.
+    pub(crate) fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.array()?))
+    }
+
+    /// Read a 32-bit type index.
+    pub(crate) fn type_index(&mut self) -> Result<TypeIndex> {
+        Ok(TypeIndex(self.u32()?))
+    }
+
+    /// Read a 32-bit ID index.
+    pub(crate) fn id_index(&mut self) -> Result<IdIndex> {
+        Ok(IdIndex(self.u32()?))
+    }
+
+    /// Read `count` bytes.
+    pub(crate) fn bytes(&mut self, count: usize) -> Result<&'a [u8]> {
+        if count > self.bytes.len() {
+            return Err(self.short());
+        }
+        let (head, rest) = self.bytes.split_at(count);
+        self.bytes = rest;
+        Ok(head)
+    }
+
+    /// Read a NUL-terminated name and consume its terminator.
+    ///
+    /// The name excludes the terminator. It is not decoded as text.
+    pub(crate) fn name(&mut self) -> Result<&'a [u8]> {
+        let end = self
+            .bytes
+            .iter()
+            .position(|&byte| byte == 0)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidFormat, None)
+                    .with_context("CodeView name has no NUL terminator")
+            })?;
+        let (name, rest) = self.bytes.split_at(end);
+        self.bytes = &rest[1..];
+        Ok(name)
+    }
+
+    /// Make sure that the remaining bytes are type-record padding.
+    ///
+    /// Type records pad with `LF_PAD` bytes. Each byte is `0xf0` plus the
+    /// number of padding bytes from that byte to the end, for example
+    /// `f3 f2 f1`. At most three padding bytes are valid.
+    pub(crate) fn finish_type_padding(&self) -> Result<()> {
+        let count = self.bytes.len();
+        let valid = count < 4
+            && self
+                .bytes
+                .iter()
+                .zip((1..=count).rev())
+                .all(|(&byte, left)| usize::from(byte) == 0xf0 + left);
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("CodeView type record has invalid padding"))
+        }
     }
 
     /// Return the bytes that are not read yet.

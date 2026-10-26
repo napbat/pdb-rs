@@ -60,7 +60,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | TPI and IPI | Modern headers, type-indexed record iteration and hash-stream references | Leaf decoding, type graphs and hash lookup |
 | DBI | Modern header, module records, debug-stream references and raw substream views | Source tables, section contributions, section maps and address translation |
 | Symbols | Record framing and common data, public and procedure symbol decoding | Remaining symbol families and global/public index lookup |
-| Module lines | Region bounds and C13 subsection framing | Lines, checksums and inline information |
+| Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding | Non-integer leaves and integration into typed records |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
