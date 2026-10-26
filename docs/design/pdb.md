@@ -4,7 +4,7 @@ Status: the full reader/writer design remains proposed. The library reads every 
 Formats and record kinds outside those samples remain incomplete. Portable PDB parsing and PDB writing are not implemented.
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
-[#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
+[#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
 The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
 
 ## Implemented primitives
@@ -122,6 +122,10 @@ Plan legacy reading, preservation, editing and writing without making them an in
 Use explicit legacy codecs; do not interpret older layouts as MSF 7.0.
 Detect recognized but unimplemented formats and return an unsupported-version error, not a corruption error.
 
+Native PDBs can also use the MSFZ container (PDZ files). MSFZ replaces only the MSF layer; the PDB streams do not change.
+Support MSFZ reading, conversion between MSF 7.0 and MSFZ, and MSFZ writing.
+Keep the MSFZ codec separate from the MSF 7.0 codec. Run the same PDB stream decoders on both containers.
+
 Do not make this crate a linker, symbol server client or PE parser.
 Expose external references, including native type servers, FASTLINK dependencies and portable assembly metadata.
 Do not fetch dependencies or claim that their missing records are available.
@@ -157,10 +161,11 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | Module | Responsibility |
 | --- | --- |
 | `io.rs` | Positional sources, slice adapters and feature-gated file adapters |
-| `compression.rs` | Crate-private raw DEFLATE decoding and encoding with size limits; the only user of `miniz_oxide` |
+| `compression.rs` | Crate-private raw DEFLATE and zstd decoding and encoding with size limits; the only user of `miniz_oxide` and `ruzstd` |
 | `crypto.rs` | Crate-private SHA-2 digests; the only user of `sha2` |
 | `native.rs` and `native/` | Native reader, editor, builder, identity and capability reporting |
 | `native/msf.rs` and `native/msf/` | Superblock, directory, block maps, stream access and container writing |
+| `native/msfz.rs` and `native/msfz/` | MSFZ header, stream directory, Chunk Table, fragment reads, chunk cache and container writing |
 | `native/codeview.rs` and `native/codeview/` | Record framing, type records, symbol records and numeric leaves |
 | `native/types.rs` and `native/types/` | TPI/IPI access, type lookup and hash generation |
 | `native/dbi.rs` and `native/dbi/` | Modules, contributions, section maps, source file info and debug stream references |
@@ -301,6 +306,21 @@ Test each supported size independently and enforce that variant's limits.
 Reject layouts beyond implemented limits instead of truncating block-directory metadata.
 Cross-check historical documentation against Microsoft and LLVM implementations before encoding limits.
 
+## MSFZ invariants
+
+The reader must check these conditions before using the affected data:
+
+- The signature and version 0 select the only supported layout.
+- Directory, Chunk Table, fragment and chunk ranges lie inside the file, and their arithmetic does not overflow.
+- No chunk or uncompressed fragment overlaps another one, the header, the stream directory or the Chunk Table.
+- A nil stream remains distinct from a present stream of length zero.
+- A compressed fragment stays inside the virtual byte array of the decompressed chunks.
+- Each chunk decompresses to exactly its declared size, within the configured limit.
+
+Treat other versions and compression codes as unsupported, not malformed.
+Writers zero-fill gaps and give the same chunk layout for the same input and options.
+Where the MSFZ specification and Microsoft's reference implementation differ, follow the implementation and record the decision in #20.
+
 ## Portable metadata invariants
 
 Use the ECMA-335 metadata layout and Portable PDB debug-table schema.
@@ -352,13 +372,17 @@ Enforce a decompression limit and require the output length to match the declare
 The decompressed result must pass the ordinary portable reader's checks.
 Embedded source is a different custom blob: its format field distinguishes raw bytes from compressed content.
 Apply independent size checks to that blob. Do not confuse it with the embedded PDB envelope.
-Use `miniz_oxide` for raw DEFLATE and `sha2` for SHA-2 digests. Both work with `no_std + alloc`.
-Only `compression.rs` names `miniz_oxide`, and only `crypto.rs` names `sha2`. Keep both modules crate-private.
+
+## Compression and digests
+
+Use portable `no_std + alloc` crates: `miniz_oxide` for raw DEFLATE, `ruzstd` for zstd and `sha2` for SHA-2 digests.
+Another crate can replace one of them later without a change to the public API.
+Only `compression.rs` names `miniz_oxide` and `ruzstd`, and only `crypto.rs` names `sha2`. Keep both modules crate-private.
 Do not expose their types, traits or errors in the public API. Map their failures to `Error` with a location.
 Decode into a buffer of the declared size. Fail on short output, extra output or unused input.
 Report checksums in other algorithms, such as SHA-1 or MD5, as not verified. Do not report them as errors.
 Add another digest only when a fixture needs it, and only inside `crypto.rs`.
-
+GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 
 ## Three distinct write guarantees
 

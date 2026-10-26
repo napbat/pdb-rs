@@ -10,10 +10,12 @@ pdbrs is a Rust library for Program Database (PDB) files. It reads native Window
 | Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
 | Native PDB writing and editing | Not implemented. The container writer is [#15](https://github.com/napbat/pdbrs/issues/15). |
 | Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
+| Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) has one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0),
+[#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ),
 [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and
 [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
 The [design](docs/design/pdb.md) lists each implemented area and its limits.
