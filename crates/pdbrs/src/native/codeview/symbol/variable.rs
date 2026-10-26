@@ -14,8 +14,8 @@ use core::iter::FusedIterator;
 use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Numeric;
-use super::super::writer::FieldWriter;
 use super::SectionOffset;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 flags! {
@@ -50,7 +50,6 @@ flags! {
 ///
 /// The def-range records that follow give the location of the variable.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Local<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -74,17 +73,16 @@ impl<'a> Local<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u16(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// The code range where a def-range location is valid
 /// (`LocalVariableAddrRange`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AddressRange {
     /// The first address of the range.
     pub start: SectionOffset,
@@ -101,7 +99,7 @@ impl AddressRange {
     }
 
     /// Write the start and the length.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.start.write(out)?;
         out.u16(self.length)
     }
@@ -110,7 +108,6 @@ impl AddressRange {
 /// A part of an [`AddressRange`] where the location is not valid
 /// (`LocalVariableAddrGap`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AddressGap {
     /// The start of the gap, relative to the start of the range.
     pub start: u16,
@@ -176,7 +173,7 @@ impl<'a> AddressGaps<'a> {
     }
 
     /// Write all gaps.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         for entry in self.entries {
             out.bytes(entry)?;
         }
@@ -230,7 +227,6 @@ impl FusedIterator for AddressGapIter<'_> {}
 
 /// A frame-pointer-relative def-range (`S_DEFRANGE_FRAMEPOINTER_REL`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeFramePointerRelative<'a> {
     /// The offset of the variable from the frame pointer.
     pub offset: i32,
@@ -254,7 +250,7 @@ impl<'a> DefRangeFramePointerRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.i32(self.offset)?;
         self.range.write(out)?;
         self.gaps.write(out)
@@ -263,7 +259,6 @@ impl<'a> DefRangeFramePointerRelative<'a> {
 
 /// A register def-range (`S_DEFRANGE_REGISTER`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeRegister<'a> {
     /// The register that holds the variable. See the module documentation.
     pub register: u16,
@@ -298,7 +293,7 @@ impl<'a> DefRangeRegister<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.register)?;
         out.u16(self.attributes)?;
         self.range.write(out)?;
@@ -309,7 +304,6 @@ impl<'a> DefRangeRegister<'a> {
 /// A def-range for a part of a variable in a register
 /// (`S_DEFRANGE_SUBFIELD_REGISTER`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeSubfieldRegister<'a> {
     /// The register that holds the part. See the module documentation.
     pub register: u16,
@@ -357,7 +351,7 @@ impl<'a> DefRangeSubfieldRegister<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.register)?;
         out.u16(self.attributes)?;
         out.u32(self.parent_offset)?;
@@ -378,7 +372,6 @@ const fn offset_in_parent(flags: u16) -> u16 {
 
 /// A register-relative def-range (`S_DEFRANGE_REGISTER_REL`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeRegisterRelative<'a> {
     /// The base register. See the module documentation.
     pub register: u16,
@@ -423,7 +416,7 @@ impl<'a> DefRangeRegisterRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.register)?;
         out.u16(self.flags)?;
         out.i32(self.base_offset)?;
@@ -436,7 +429,6 @@ impl<'a> DefRangeRegisterRelative<'a> {
 ///
 /// The variable is at `*(register + base_offset) + offset_in_udt`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DefRangeRegisterRelativeIndirect<'a> {
     /// The base register. See the module documentation.
     pub register: u16,
@@ -485,7 +477,7 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.register)?;
         out.u16(self.flags)?;
         out.i32(self.base_offset)?;
@@ -502,7 +494,6 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
 /// reference gives its layout. The MSVC incremental fixture of #12 confirms
 /// the `S_REGREL32` layout (#13).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct RegisterRelative<'a> {
     /// The offset from the register. LLVM `RegRelativeSym` reads it as
     /// `uint32_t`.
@@ -531,11 +522,11 @@ impl<'a> RegisterRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.offset)?;
         out.type_index(self.type_index)?;
         out.u16(self.register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -544,7 +535,6 @@ impl<'a> RegisterRelative<'a> {
 /// For a thread-local record, the address is in the thread storage section,
 /// for example `.tls`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Data<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -568,16 +558,15 @@ impl<'a> Data<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         self.address.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A constant record (`S_CONSTANT`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Constant<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -601,10 +590,10 @@ impl<'a> Constant<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         self.value.encode(out.out())?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -614,7 +603,6 @@ pub const S_COBOLUDT: u16 = 0x1109;
 
 /// A user-defined type name record (`S_UDT` and [`S_COBOLUDT`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct UserDefinedType<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -631,8 +619,8 @@ impl<'a> UserDefinedType<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }

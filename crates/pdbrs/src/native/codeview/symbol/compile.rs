@@ -6,12 +6,11 @@
 use core::iter::FusedIterator;
 
 use super::super::Fields;
-use super::super::writer::FieldWriter;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// An object file name record (`S_OBJNAME`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ObjectName<'a> {
     /// The signature of the object file. Compilers usually write 0.
     pub signature: u32,
@@ -28,9 +27,9 @@ impl<'a> ObjectName<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.signature)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -135,7 +134,6 @@ impl CompileFlags {
 
 /// A compile record, version 2 (`S_COMPILE2`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Compile2<'a> {
     /// The flags and the source language.
     pub flags: CompileFlags,
@@ -171,20 +169,19 @@ impl<'a> Compile2<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
         out.u16(self.machine)?;
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
-        out.name(self.version)?;
+        out.c_string(self.version)?;
         self.extra_strings.write(out)
     }
 }
 
 /// A compile record, version 3 (`S_COMPILE3`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Compile3<'a> {
     /// The flags and the source language.
     pub flags: CompileFlags,
@@ -233,13 +230,13 @@ impl<'a> Compile3<'a> {
     }
 
     /// Write the fields and the trailing zero bytes.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
         out.u16(self.machine)?;
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
-        out.name(self.version)?;
+        out.c_string(self.version)?;
         for _ in 0..self.trailing_zeros {
             out.u8(0)?;
         }
@@ -251,7 +248,6 @@ impl<'a> Compile3<'a> {
 ///
 /// The strings are key and value pairs, for example `cwd` and a directory.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct EnvironmentBlock<'a> {
     /// The flags byte. Bit 0 is reserved (`rev`). `cvinfo.h` requires the
     /// other bits to be zero; the decoder keeps the byte raw.
@@ -269,7 +265,7 @@ impl<'a> EnvironmentBlock<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u8(self.flags)?;
         self.strings.write(out)
     }
@@ -349,7 +345,7 @@ impl<'a> StringList<'a> {
 
     /// Write the strings and, if the sequence is present, the empty string
     /// that ends it.
-    fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.bytes(self.bytes)?;
         if self.terminated || !self.bytes.is_empty() {
             out.u8(0)?;

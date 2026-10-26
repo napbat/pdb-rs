@@ -5,8 +5,8 @@
 //! `S_SECTION` comes from `SECTIONSYM` in `cvinfo.h`.
 
 use super::super::Fields;
-use super::super::writer::FieldWriter;
 use super::SectionOffset;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a reference to a data symbol in a module (`S_DATAREF`).
@@ -30,7 +30,6 @@ flags! {
 
 /// A public symbol record (`S_PUB32`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Public<'a> {
     /// The flags.
     pub flags: PublicFlags,
@@ -54,16 +53,15 @@ impl<'a> Public<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
         self.address.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A reference to a procedure in a module (`S_PROCREF` and `S_LPROCREF`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ProcedureReference<'a> {
     /// The `SUC` name checksum. Linkers usually write 0.
     pub name_checksum: u32,
@@ -101,17 +99,16 @@ impl<'a> ProcedureReference<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.name_checksum)?;
         out.u32(self.offset)?;
         out.u16(self.module)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// An image section record (`S_SECTION`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Section<'a> {
     /// The section number.
     pub number: u16,
@@ -151,14 +148,14 @@ impl<'a> Section<'a> {
     }
 
     /// Write the fields and a zero reserved byte.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.number)?;
         out.u8(self.alignment)?;
         out.u8(0)?;
         out.u32(self.rva)?;
         out.u32(self.length)?;
         out.u32(self.characteristics)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -166,7 +163,6 @@ impl<'a> Section<'a> {
 ///
 /// A COFF group is a part of an image section, for example `.text$mn`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct CoffGroup<'a> {
     /// The length of the group in bytes.
     pub length: u32,
@@ -194,10 +190,10 @@ impl<'a> CoffGroup<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.length)?;
         out.u32(self.characteristics)?;
         self.address.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }

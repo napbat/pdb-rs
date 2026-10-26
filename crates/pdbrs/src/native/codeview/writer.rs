@@ -1,15 +1,11 @@
-//! A checked writer for the fields of `CodeView` records.
+//! The `CodeView` methods of the native field writer.
 //!
-//! [`FieldWriter`] is the counterpart of [`super::Fields`]. It appends
-//! little-endian fields to a caller `Vec<u8>` with fallible reservation. It
-//! frames a record with [`FieldWriter::begin_record`] and
-//! [`FieldWriter::finish_record`], which pad the record and set its `u16`
-//! length field. Encoders do not truncate values: a value that does not fit
-//! its field gives an error.
-
-use alloc::vec::Vec;
+//! This module adds methods to [`Output`], the counterpart of [`super::Fields`]. The methods
+//! append type indexes and ID indexes. They also frame a record with [`Output::begin_record`]
+//! and [`Output::finish_record`]. These methods pad the record and set its `u16` length field.
 
 use super::index::{IdIndex, TypeIndex};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The alignment of records and field-list members.
@@ -36,66 +32,7 @@ pub(crate) enum Padding {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RecordStart(usize);
 
-/// Return the error for an allocation that failed.
-fn no_memory() -> Error {
-    Error::new(ErrorKind::LimitExceeded, None)
-        .with_context("CodeView record output cannot be allocated")
-}
-
-/// An appender of little-endian fields.
-pub(crate) struct FieldWriter<'v> {
-    /// The output.
-    out: &'v mut Vec<u8>,
-}
-
-impl<'v> FieldWriter<'v> {
-    /// Create a writer that appends to `out`.
-    pub(crate) const fn new(out: &'v mut Vec<u8>) -> Self {
-        Self { out }
-    }
-
-    /// Return the output, for encoders of nested values.
-    pub(crate) const fn out(&mut self) -> &mut Vec<u8> {
-        self.out
-    }
-
-    /// Return the number of bytes in the output.
-    pub(crate) const fn len(&self) -> usize {
-        self.out.len()
-    }
-
-    /// Append bytes.
-    pub(crate) fn bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        self.out.try_reserve(bytes.len()).map_err(|_| no_memory())?;
-        self.out.extend_from_slice(bytes);
-        Ok(())
-    }
-
-    /// Append a `u8`.
-    pub(crate) fn u8(&mut self, value: u8) -> Result<()> {
-        self.bytes(&[value])
-    }
-
-    /// Append a little-endian `u16`.
-    pub(crate) fn u16(&mut self, value: u16) -> Result<()> {
-        self.bytes(&value.to_le_bytes())
-    }
-
-    /// Append a little-endian `u32`.
-    pub(crate) fn u32(&mut self, value: u32) -> Result<()> {
-        self.bytes(&value.to_le_bytes())
-    }
-
-    /// Append a little-endian `i32`.
-    pub(crate) fn i32(&mut self, value: i32) -> Result<()> {
-        self.bytes(&value.to_le_bytes())
-    }
-
-    /// Append a little-endian `u64`.
-    pub(crate) fn u64(&mut self, value: u64) -> Result<()> {
-        self.bytes(&value.to_le_bytes())
-    }
-
+impl Output<'_> {
     /// Append a 32-bit type index.
     pub(crate) fn type_index(&mut self, index: TypeIndex) -> Result<()> {
         self.u32(index.0)
@@ -106,33 +43,16 @@ impl<'v> FieldWriter<'v> {
         self.u32(index.0)
     }
 
-    /// Append a name and its NUL terminator.
-    ///
-    /// A name with a NUL byte gives [`ErrorKind::InvalidFormat`], because a
-    /// reader would end the name at that byte.
-    pub(crate) fn name(&mut self, name: &[u8]) -> Result<()> {
-        if name.contains(&0) {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("CodeView name contains a NUL byte"));
-        }
-        self.out
-            .try_reserve(name.len().saturating_add(1))
-            .map_err(|_| no_memory())?;
-        self.out.extend_from_slice(name);
-        self.out.push(0);
-        Ok(())
-    }
-
     /// Return the current end of the output as a start position.
     ///
     /// Field-list members align relative to the start of their record.
     pub(crate) const fn position(&self) -> RecordStart {
-        RecordStart(self.out.len())
+        RecordStart(self.len())
     }
 
     /// Append padding until the output length from `start` is a multiple of 4.
     pub(crate) fn pad(&mut self, start: RecordStart, padding: Padding) -> Result<()> {
-        let used = (self.out.len() - start.0) % ALIGNMENT;
+        let used = (self.len() - start.0) % ALIGNMENT;
         let run = match padding {
             Padding::None => return Ok(()),
             Padding::Type => &TYPE_PADDING,
@@ -147,7 +67,7 @@ impl<'v> FieldWriter<'v> {
 
     /// Append the length field and the kind field of a record.
     ///
-    /// The length field is a placeholder until [`FieldWriter::finish_record`].
+    /// The length field is a placeholder until [`Output::finish_record`].
     pub(crate) fn begin_record(&mut self, kind: u16) -> Result<RecordStart> {
         let start = self.position();
         self.u16(0)?;
@@ -164,12 +84,12 @@ impl<'v> FieldWriter<'v> {
     pub(crate) fn finish_record(&mut self, start: RecordStart, padding: Padding) -> Result<()> {
         self.pad(start, padding)?;
         // The length field does not count itself.
-        let Ok(length) = u16::try_from(self.out.len() - start.0 - 2) else {
-            self.out.truncate(start.0);
+        let Ok(length) = u16::try_from(self.len() - start.0 - 2) else {
+            self.out().truncate(start.0);
             return Err(Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("CodeView record is longer than its u16 length field allows"));
         };
-        self.out[start.0..start.0 + 2].copy_from_slice(&length.to_le_bytes());
+        self.out()[start.0..start.0 + 2].copy_from_slice(&length.to_le_bytes());
         Ok(())
     }
 }

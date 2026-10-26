@@ -23,6 +23,7 @@ pub mod section;
 pub mod symbols;
 pub mod types;
 mod words;
+pub mod write;
 
 mod reader;
 pub use reader::{Pdb, ReadOptions};

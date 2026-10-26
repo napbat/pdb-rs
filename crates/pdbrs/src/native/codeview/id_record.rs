@@ -143,7 +143,6 @@ impl<'a> IdRecord<'a> {
 
 /// An `LF_FUNC_ID` record: a function that is not a member function.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FunctionId<'a> {
     /// The parent scope, or `None` for the global scope.
     ///
@@ -162,7 +161,6 @@ pub struct FunctionId<'a> {
 
 /// An `LF_MFUNC_ID` record: a member function.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct MemberFunctionId<'a> {
     /// The type of the parent class, structure, union or enum in the TPI
     /// stream.
@@ -213,7 +211,6 @@ impl BuildInfoArgument {
 /// A record can have fewer or more arguments than [`BuildInfoArgument`]
 /// names.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct BuildInfo<'a> {
     /// The arguments in their serialized order.
     ///
@@ -232,7 +229,6 @@ impl BuildInfo<'_> {
 
 /// An `LF_STRING_ID` record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct StringId<'a> {
     /// The `LF_SUBSTR_LIST` record with the leading parts of the string, if
     /// any.
@@ -246,7 +242,6 @@ pub struct StringId<'a> {
 
 /// An `LF_UDT_SRC_LINE` record: the source location of a UDT.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct UdtSourceLine {
     /// The UDT in the TPI stream.
     pub udt: TypeIndex,
@@ -258,7 +253,6 @@ pub struct UdtSourceLine {
 
 /// An `LF_UDT_MOD_SRC_LINE` record: the source location of a UDT in a module.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct UdtModuleSourceLine {
     /// The UDT in the TPI stream.
     pub udt: TypeIndex,

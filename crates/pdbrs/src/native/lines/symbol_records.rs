@@ -7,9 +7,10 @@
 
 use alloc::vec::Vec;
 
-use super::{invalid, put, put_u16};
+use super::invalid;
 use crate::Result;
 use crate::native::codeview::{Record, Records};
+use crate::native::output::Output;
 
 /// The size of the length field and the kind field of a record.
 const PREFIX_SIZE: usize = 4;
@@ -107,7 +108,7 @@ fn encode_symbol_record(record: &Record<'_>, out: &mut Vec<u8>) -> Result<()> {
         .checked_add(PREFIX_SIZE - 2)
         .and_then(|length| u16::try_from(length).ok())
         .ok_or_else(|| invalid("symbol record length does not fit in 16 bits"))?;
-    put_u16(out, length)?;
-    put_u16(out, record.kind)?;
-    put(out, record.data)
+    Output::new(out).u16(length)?;
+    Output::new(out).u16(record.kind)?;
+    Output::new(out).bytes(record.data)
 }

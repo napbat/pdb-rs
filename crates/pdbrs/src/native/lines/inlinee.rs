@@ -3,8 +3,9 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{entry_list, invalid, put_u32, read_u32, to_u32, too_large, truncated};
+use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
 use crate::native::codeview::index::IdIndex;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of the signature at the start of the subsection.
@@ -46,7 +47,7 @@ impl InlineeSignature {
     ///
     /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
     pub fn encode(self, out: &mut Vec<u8>) -> Result<()> {
-        put_u32(out, self.raw())
+        Output::new(out).u32(self.raw())
     }
 }
 
@@ -166,7 +167,6 @@ impl<'a> IntoIterator for &InlineeLines<'a> {
 
 /// The source location of one inlined function (`InlineeSourceLine`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct InlineeLine<'a> {
     /// The `LF_FUNC_ID` or `LF_MFUNC_ID` record of the inlined function.
     pub inlinee: IdIndex,
@@ -237,15 +237,15 @@ fn write_entry(
         ));
     }
     for field in fields {
-        put_u32(out, field)?;
+        Output::new(out).u32(field)?;
     }
     if signature == InlineeSignature::ExtraFiles {
-        put_u32(
-            out,
-            to_u32(count, "inlinee extra file count does not fit in 32 bits")?,
-        )?;
+        Output::new(out).u32(to_u32(
+            count,
+            "inlinee extra file count does not fit in 32 bits",
+        )?)?;
         for offset in extra_files {
-            put_u32(out, offset)?;
+            Output::new(out).u32(offset)?;
         }
     }
     Ok(())

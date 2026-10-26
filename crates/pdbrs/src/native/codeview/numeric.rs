@@ -614,7 +614,7 @@ impl<'a> Numeric<'a> {
     /// - [`ErrorKind::InvalidFormat`] if an `LF_UTF8STRING` value contains a
     ///   NUL byte.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let mut writer = super::writer::FieldWriter::new(out);
+        let mut writer = crate::native::output::Output::new(out);
         writer.u16(self.tag())?;
         match self {
             Self::Integer(leaf) => {
@@ -633,7 +633,7 @@ impl<'a> Numeric<'a> {
                 writer.u16(count)?;
                 writer.bytes(bytes)
             }
-            Self::Utf8String(bytes) => writer.name(bytes),
+            Self::Utf8String(bytes) => writer.c_string(bytes),
             _ => writer.bytes(self.value_bytes().unwrap_or_default()),
         }
     }

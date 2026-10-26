@@ -10,7 +10,7 @@ use core::iter::FusedIterator;
 use super::fields;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of one modifier value of `LF_MODIFIER_EX`.
@@ -88,7 +88,7 @@ impl<'a> Hlsl<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.subtype)?;
         writer.u16(self.kind)?;
         writer.u16(self.property_word)?;
@@ -185,7 +185,7 @@ impl<'a> ModifierEx<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         let count = u16::try_from(self.modifiers.len() / MODIFIER_SIZE).map_err(|_| {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("modifier list is longer than its count field allows")
@@ -233,11 +233,11 @@ impl<'a> Vector<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.u32(self.count)?;
         self.size.encode(writer.out())?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }
 
@@ -287,13 +287,13 @@ impl<'a> Matrix<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.u32(self.rows)?;
         writer.u32(self.columns)?;
         writer.u32(self.major_stride)?;
         writer.u8(self.attributes)?;
         self.size.encode(writer.out())?;
-        writer.name(self.name)
+        writer.c_string(self.name)
     }
 }

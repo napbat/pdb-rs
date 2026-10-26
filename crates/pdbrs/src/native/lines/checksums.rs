@@ -3,7 +3,8 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{invalid, pad4, put, put_u32, too_large, truncated};
+use super::{invalid, pad4, too_large, truncated};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of an entry header: a name offset, a size and a kind.
@@ -67,7 +68,6 @@ impl ChecksumKind {
 
 /// One entry of a file checksum table.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FileChecksum<'a> {
     /// The byte offset of the entry in the subsection data.
     ///
@@ -205,7 +205,7 @@ impl<'a> FileChecksums<'a> {
             let start = usize::try_from(entry.offset).unwrap_or(usize::MAX);
             let end = start.saturating_add(ENTRY_HEADER_SIZE + entry.checksum.len());
             let padding = next.saturating_sub(end).min(ENTRY_ALIGNMENT - 1);
-            put(out, &[0; ENTRY_ALIGNMENT - 1][..padding])?;
+            Output::new(out).bytes(&[0; ENTRY_ALIGNMENT - 1][..padding])?;
         }
         Ok(())
     }
@@ -242,10 +242,10 @@ fn write_entry(
     if checksum.len() != kind.size() {
         return Err(invalid("file checksum size does not match its kind"));
     }
-    put_u32(out, name_offset)?;
+    Output::new(out).u32(name_offset)?;
     // The sizes of all kinds are at most 32, so the size fits in `u8`.
-    put(out, &[checksum.len().to_le_bytes()[0], kind.raw()])?;
-    put(out, checksum)
+    Output::new(out).bytes(&[checksum.len().to_le_bytes()[0], kind.raw()])?;
+    Output::new(out).bytes(checksum)
 }
 
 impl<'s, 'a> IntoIterator for &'s FileChecksums<'a> {

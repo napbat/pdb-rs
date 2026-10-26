@@ -10,7 +10,8 @@ use super::{
 };
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::type_record::{LF_FIELDLIST, encode_vtable_offset};
-use crate::native::codeview::writer::{FieldWriter, Padding};
+use crate::native::codeview::writer::Padding;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The largest record size of LLVM `ContinuationRecordBuilder`
@@ -64,12 +65,12 @@ impl Member<'_> {
     /// - [`ErrorKind::InvalidFormat`] if a name contains a NUL byte, or if a
     ///   virtual table offset does not match the method property.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let mut writer = FieldWriter::new(out);
+        let mut writer = Output::new(out);
         self.encode_into(&mut writer)
     }
 
     /// Append the member and its padding with `writer`.
-    pub(crate) fn encode_into(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(crate) fn encode_into(&self, writer: &mut Output<'_>) -> Result<()> {
         let start = writer.position();
         writer.u16(self.kind())?;
         self.encode_fields(writer)?;
@@ -77,7 +78,7 @@ impl Member<'_> {
     }
 
     /// Append the fields after the kind.
-    fn encode_fields(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    fn encode_fields(&self, writer: &mut Output<'_>) -> Result<()> {
         match self {
             Self::BaseClass(base) | Self::BaseInterface(base) => {
                 writer.u16(base.attributes.bits())?;
@@ -105,49 +106,49 @@ impl Member<'_> {
             Self::FriendFunction(value) => {
                 writer.u16(0)?;
                 writer.type_index(value.function_type)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::Enumerator(value) => {
                 writer.u16(value.attributes.bits())?;
                 value.value.encode(writer.out())?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::DataMember(value) => {
                 writer.u16(value.attributes.bits())?;
                 writer.type_index(value.member_type)?;
                 value.offset.encode(writer.out())?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::StaticMember(value) => {
                 writer.u16(value.attributes.bits())?;
                 writer.type_index(value.member_type)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::OverloadedMethod(value) => {
                 writer.u16(value.overload_count)?;
                 writer.type_index(value.method_list)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::NestedType(value) => {
                 writer.u16(0)?;
                 writer.type_index(value.nested_type)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::NestedTypeEx(value) => {
                 writer.u16(value.attributes.bits())?;
                 writer.type_index(value.nested_type)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::MemberModify(value) => {
                 writer.u16(value.attributes.bits())?;
                 writer.type_index(value.base_type)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
             Self::OneMethod(value) => {
                 writer.u16(value.attributes.bits())?;
                 writer.type_index(value.method_type)?;
                 encode_vtable_offset(writer, value.attributes, value.vtable_offset)?;
-                writer.name(value.name)
+                writer.c_string(value.name)
             }
         }
     }
@@ -155,7 +156,7 @@ impl Member<'_> {
 
 impl FieldList<'_> {
     /// Append the members of a decoded list, each with its padding.
-    pub(crate) fn encode_members(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(crate) fn encode_members(&self, writer: &mut Output<'_>) -> Result<()> {
         for member in self.members() {
             member?.encode_into(writer)?;
         }
@@ -215,7 +216,7 @@ where
     let mut ends: Vec<usize> = Vec::new();
     let mut segment_start = 0;
     {
-        let mut writer = FieldWriter::new(&mut encoded);
+        let mut writer = Output::new(&mut encoded);
         for member in members {
             if matches!(member, Member::Continuation(_)) {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -239,7 +240,7 @@ where
     let count = u32::try_from(ends.len()).map_err(|_| index_overflow())?;
     // Write the last segment first. Each next record refers to the record
     // before it.
-    let mut writer = FieldWriter::new(out);
+    let mut writer = Output::new(out);
     let mut previous: Option<TypeIndex> = None;
     for (position, &end) in ends.iter().enumerate().rev() {
         let start = position.checked_sub(1).map_or(0, |before| ends[before]);

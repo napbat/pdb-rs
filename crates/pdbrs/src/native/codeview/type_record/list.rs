@@ -9,7 +9,7 @@ use core::iter::FusedIterator;
 use super::{MemberAttributes, TRUNCATED, VtableSlotKind, fields};
 use crate::native::codeview::Fields;
 use crate::native::codeview::index::TypeIndex;
-use crate::native::codeview::writer::FieldWriter;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of one type index in bytes.
@@ -97,7 +97,7 @@ impl<'a> TypeIndexList<'a> {
     }
 
     /// Append a `u32` count and the indices.
-    pub(crate) fn encode_counted(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(crate) fn encode_counted(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u32(self.count()?)?;
         writer.bytes(self.indices)
     }
@@ -133,7 +133,7 @@ impl<'a> ArgumentList<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         self.list.encode_counted(writer)
     }
 
@@ -182,7 +182,7 @@ impl MethodListEntry {
     /// Returns [`ErrorKind::InvalidFormat`] if the virtual table offset is
     /// present for a method that does not introduce a virtual slot, or
     /// absent for one that does.
-    pub(crate) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(crate) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.attributes.bits())?;
         writer.u16(0)?;
         writer.type_index(self.method_type)?;
@@ -192,7 +192,7 @@ impl MethodListEntry {
 
 /// Append the virtual table offset of a method, if its kind needs one.
 pub(crate) fn encode_vtable_offset(
-    writer: &mut FieldWriter<'_>,
+    writer: &mut Output<'_>,
     attributes: MemberAttributes,
     vtable_offset: Option<i32>,
 ) -> Result<()> {
@@ -234,7 +234,7 @@ impl<'a> MethodList<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         for entry in self.entries() {
             entry?.encode(writer)?;
         }
@@ -357,7 +357,7 @@ impl<'a> VtableShape<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.count)?;
         writer.bytes(self.descriptors)
     }
@@ -464,7 +464,7 @@ impl<'a> VirtualFunctionTable<'a> {
     }
 
     /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.complete_class)?;
         writer.type_index(self.overridden_table.unwrap_or(TypeIndex::NONE))?;
         writer.u32(self.table_pointer_offset)?;

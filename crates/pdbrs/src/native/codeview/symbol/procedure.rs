@@ -17,8 +17,8 @@ use core::iter::FusedIterator;
 
 use super::super::Fields;
 use super::super::index::{IdIndex, TypeIndex};
-use super::super::writer::FieldWriter;
 use super::{BinaryAnnotations, SectionOffset};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a module-local data-parallel C++ procedure start (`S_LPROC32_DPC`).
@@ -96,7 +96,6 @@ flags! {
 /// [`S_LPROC32`](super::S_LPROC32), [`S_LPROC32_DPC`], the `_ID` kinds of
 /// these and the `EX` kinds, for example [`S_GPROC32EX`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Procedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
     pub parent: u32,
@@ -162,7 +161,7 @@ impl<'a> Procedure<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.u32(self.next)?;
@@ -175,13 +174,13 @@ impl<'a> Procedure<'a> {
         if let Some(flags) = self.extended_flags {
             out.u8(flags.0)?;
         }
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 impl ProcedureType {
     /// Write the index as a `u32`.
-    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(self, out: &mut Output<'_>) -> Result<()> {
         match self {
             Self::Type(index) => out.type_index(index),
             Self::Id(index) => out.id_index(index),
@@ -271,7 +270,6 @@ impl FrameProcedureFlags {
 
 /// A frame procedure record (`S_FRAMEPROC`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FrameProcedure {
     /// The size of the stack frame in bytes.
     pub frame_size: u32,
@@ -307,7 +305,7 @@ impl FrameProcedure {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.frame_size)?;
         out.u32(self.padding_size)?;
         out.u32(self.padding_offset)?;
@@ -319,7 +317,6 @@ impl FrameProcedure {
 
 /// A block start record (`S_BLOCK32`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Block<'a> {
     /// The module stream offset of the enclosing scope record.
     pub parent: u32,
@@ -351,18 +348,17 @@ impl<'a> Block<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A code label record (`S_LABEL32`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Label<'a> {
     /// The address.
     pub address: SectionOffset,
@@ -386,10 +382,10 @@ impl<'a> Label<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u8(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -415,7 +411,6 @@ values! {
 
 /// A thunk start record (`S_THUNK32`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Thunk<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
     pub parent: u32,
@@ -471,7 +466,7 @@ impl<'a> Thunk<'a> {
     ///
     /// A [`ThunkOrdinal::STANDARD`] thunk with variant data gives
     /// [`ErrorKind::InvalidFormat`], because the decoder rejects it.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         if self.ordinal == ThunkOrdinal::STANDARD && !self.variant.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("standard S_THUNK32 record has variant data"));
@@ -482,14 +477,13 @@ impl<'a> Thunk<'a> {
         self.address.write(out)?;
         out.u16(self.length)?;
         out.u8(self.ordinal.0)?;
-        out.name(self.name)?;
+        out.c_string(self.name)?;
         out.bytes(self.variant)
     }
 }
 
 /// An inline site start record (`S_INLINESITE` and [`S_INLINESITE2`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct InlineSite<'a> {
     /// The module stream offset of the enclosing scope record.
     pub parent: u32,
@@ -523,7 +517,7 @@ impl<'a> InlineSite<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.parent)?;
         out.u32(self.end)?;
         out.id_index(self.inlinee)?;
@@ -595,7 +589,7 @@ impl<'a> FunctionList<'a> {
     }
 
     /// Write the count, the functions and the invocation counts.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.functions.write(out)?;
         for entry in self.invocations {
             out.bytes(entry)?;
@@ -664,7 +658,7 @@ impl<'a> IdList<'a> {
     }
 
     /// Write the `u32` count and then the indices.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(count_u32(self.entries.len())?)?;
         for entry in self.entries {
             out.bytes(entry)?;
@@ -718,7 +712,6 @@ impl FusedIterator for IdListIter<'_> {}
 
 /// A call site record (`S_CALLSITEINFO`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct CallSiteInfo {
     /// The address of the call instruction.
     pub address: SectionOffset,
@@ -742,7 +735,7 @@ impl CallSiteInfo {
     }
 
     /// Write the fields and a zero reserved field.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u16(0)?;
         out.type_index(self.type_index)
@@ -779,7 +772,6 @@ values! {
 
 /// A jump table record (`S_ARMSWITCHTABLE`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct JumpTable {
     /// The base address that the entries are relative to.
     pub base: SectionOffset,
@@ -822,7 +814,7 @@ impl JumpTable {
     }
 
     /// Write the fields in the order of [`JumpTable::read`].
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.base.write(out)?;
         out.u16(self.entry.0)?;
         out.u32(self.branch.offset)?;

@@ -7,7 +7,7 @@
 //! of `BUILDINFOSYM`: one ID index.
 
 use super::super::Fields;
-use super::super::writer::FieldWriter;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an export record (`S_EXPORT`).
@@ -44,7 +44,6 @@ flags! {
 
 /// An export record ([`S_EXPORT`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Export<'a> {
     /// The ordinal.
     pub ordinal: u16,
@@ -69,10 +68,10 @@ impl<'a> Export<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.ordinal)?;
         out.u16(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -90,7 +89,6 @@ values! {
 
 /// A record that the linker discarded ([`S_DISCARDED`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Discarded<'a> {
     /// The reason in bits 0 to 7 and unused bits 8 to 31, raw.
     pub raw_reason: u32,
@@ -119,7 +117,7 @@ impl<'a> Discarded<'a> {
     }
 
     /// Write the fields and the original records.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.raw_reason)?;
         out.u32(self.file_id)?;
         out.u32(self.line)?;
@@ -135,7 +133,6 @@ impl<'a> Discarded<'a> {
 
 /// A profile-guided optimization record ([`S_POGODATA`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ProfileData {
     /// The number of calls of the function.
     pub invocations: u32,
@@ -163,7 +160,7 @@ impl ProfileData {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.invocations)?;
         out.u64(self.dynamic_instructions.cast_unsigned())?;
         out.u32(self.static_instructions)?;
@@ -191,7 +188,6 @@ flags! {
 
 /// A module type reference ([`S_MOD_TYPEREF`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ModuleTypeReference {
     /// The flags. Bits 6 to 14 are reserved; the value keeps them.
     pub flags: ModuleTypeReferenceFlags,
@@ -215,7 +211,7 @@ impl ModuleTypeReference {
     }
 
     /// Write the fields.
-    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
         out.u16(self.word0)?;
         out.u16(self.word1)
@@ -227,7 +223,6 @@ impl ModuleTypeReference {
 /// Both names are UTF-16 strings with a NUL code unit at the end. The values
 /// hold the little-endian code units without the terminator.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct PdbMap<'a> {
     /// The source PDB file name.
     pub from: &'a [u8],
@@ -244,7 +239,7 @@ impl<'a> PdbMap<'a> {
     }
 
     /// Write the two names and their terminators.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         write_utf16(out, self.from)?;
         write_utf16(out, self.to)
     }
@@ -268,7 +263,7 @@ fn read_utf16<'a>(fields: &mut Fields<'a>) -> Result<&'a [u8]> {
 }
 
 /// Write UTF-16 code units and a NUL code unit.
-fn write_utf16(out: &mut FieldWriter<'_>, units: &[u8]) -> Result<()> {
+fn write_utf16(out: &mut Output<'_>, units: &[u8]) -> Result<()> {
     let (whole, rest) = units.as_chunks::<2>();
     if !rest.is_empty() || whole.contains(&[0, 0]) {
         return Err(Error::new(ErrorKind::InvalidFormat, None)

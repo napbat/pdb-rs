@@ -1,7 +1,11 @@
 //! Checked little-endian output for native stream encoders.
 //!
-//! [`Output`] appends fields to a caller `Vec<u8>` with fallible reservation. Encoders do not
-//! truncate values. A value that does not fit its field gives an error.
+//! [`Output`] is the only field writer of the native encoders. It appends little-endian fields
+//! to a caller `Vec<u8>` with fallible reservation. Encoders do not truncate values. A value
+//! that does not fit its field gives an error.
+//!
+//! The `codeview::writer` module adds the `CodeView` methods to [`Output`]. These methods write
+//! type indexes and ID indexes, and frame records with padding and a `u16` length field.
 
 use alloc::vec::Vec;
 
@@ -32,6 +36,16 @@ impl<'v> Output<'v> {
     /// Create a writer that appends to `out`.
     pub(crate) const fn new(out: &'v mut Vec<u8>) -> Self {
         Self { out }
+    }
+
+    /// Return the output, for encoders of nested values.
+    pub(crate) const fn out(&mut self) -> &mut Vec<u8> {
+        self.out
+    }
+
+    /// Return the number of bytes in the output.
+    pub(crate) const fn len(&self) -> usize {
+        self.out.len()
     }
 
     /// Reserve space for `additional` more bytes.
@@ -65,6 +79,11 @@ impl<'v> Output<'v> {
 
     /// Append a little-endian `u32`.
     pub(crate) fn u32(&mut self, value: u32) -> Result<()> {
+        self.bytes(&value.to_le_bytes())
+    }
+
+    /// Append a little-endian `i32`.
+    pub(crate) fn i32(&mut self, value: i32) -> Result<()> {
         self.bytes(&value.to_le_bytes())
     }
 

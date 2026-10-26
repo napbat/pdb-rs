@@ -14,9 +14,9 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::writer::FieldWriter;
 use super::SectionOffset;
 use crate::Result;
+use crate::native::output::Output;
 
 /// The kind of a reference to a record in a mini PDB (`S_REF_MINIPDB`).
 pub const S_REF_MINIPDB: u16 = 0x1160;
@@ -33,7 +33,6 @@ values! {
 
 /// A trampoline thunk record (`S_TRAMPOLINE`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Trampoline {
     /// The kind of the trampoline.
     pub kind: TrampolineKind,
@@ -71,7 +70,7 @@ impl Trampoline {
     }
 
     /// Write the fields in the order of [`Trampoline::read`].
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.kind.0)?;
         out.u16(self.thunk_size)?;
         out.u32(self.thunk.offset)?;
@@ -111,7 +110,6 @@ flags! {
 /// A FASTLINK PDB keeps the full records in the object files. This record
 /// gives the name and the place of the full record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FastLink<'a> {
     /// The raw value (`isectCoff` or `typind` in `REFMINIPDB`).
     ///
@@ -167,12 +165,12 @@ impl<'a> FastLink<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.value)?;
         if let Some(module) = self.module {
             out.u16(module)?;
         }
         out.u16(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }

@@ -5,9 +5,9 @@
 //! index, as `S_GPROC32_ID` does for `PROCSYM32`.
 
 use super::super::Fields;
-use super::super::writer::FieldWriter;
 use super::{ProcedureFlags, ProcedureType, SectionOffset};
 use crate::Result;
+use crate::native::output::Output;
 
 /// The kind of a module-local MIPS procedure start (`S_LPROCMIPS`).
 pub const S_LPROCMIPS: u16 = 0x1114;
@@ -28,7 +28,6 @@ pub const S_GPROCIA64_ID: u16 = 0x114b;
 
 /// The links and the code range that all procedure records start with.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ProcedureHeader {
     /// The module stream offset of the enclosing scope record, or 0.
     pub parent: u32,
@@ -58,7 +57,7 @@ impl ProcedureHeader {
     }
 
     /// Write the six `u32` fields.
-    fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    fn write(self, out: &mut Output<'_>) -> Result<()> {
         for value in [
             self.parent,
             self.end,
@@ -85,7 +84,6 @@ fn read_signature(fields: &mut Fields<'_>, id: bool) -> Result<ProcedureType> {
 /// A MIPS procedure start record ([`S_GPROCMIPS`], [`S_LPROCMIPS`] and their
 /// `_ID` kinds).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct MipsProcedure<'a> {
     /// The links and the code range.
     pub header: ProcedureHeader,
@@ -137,7 +135,7 @@ impl<'a> MipsProcedure<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.header.write(out)?;
         out.u32(self.integer_save_mask)?;
         out.u32(self.float_save_mask)?;
@@ -147,14 +145,13 @@ impl<'a> MipsProcedure<'a> {
         self.address.write(out)?;
         out.u8(self.return_register)?;
         out.u8(self.frame_register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// An IA64 procedure start record ([`S_GPROCIA64`], [`S_LPROCIA64`] and
 /// their `_ID` kinds).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Ia64Procedure<'a> {
     /// The links and the code range.
     pub header: ProcedureHeader,
@@ -190,12 +187,12 @@ impl<'a> Ia64Procedure<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.header.write(out)?;
         self.signature.write(out)?;
         self.address.write(out)?;
         out.u16(self.return_register)?;
         out.u8(self.flags.0)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }

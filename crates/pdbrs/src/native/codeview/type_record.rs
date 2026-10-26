@@ -15,8 +15,9 @@
 use alloc::vec::Vec;
 
 use super::index::TypeIndex;
-use super::writer::{FieldWriter, Padding};
+use super::writer::Padding;
 use super::{Fields, Record};
+use crate::native::output::Output;
 use crate::{ErrorKind, Result};
 
 mod alias;
@@ -372,14 +373,14 @@ impl<'a> TypeLeaf<'a> {
     ///   fields do not match each other, for example a unique name without
     ///   the unique-name flag.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let mut writer = FieldWriter::new(out);
+        let mut writer = Output::new(out);
         let start = writer.begin_record(self.kind())?;
         let padding = self.encode_payload(&mut writer)?;
         writer.finish_record(start, padding)
     }
 
     /// Append the payload fields and return the padding rule of the record.
-    fn encode_payload(&self, writer: &mut FieldWriter<'_>) -> Result<Padding> {
+    fn encode_payload(&self, writer: &mut Output<'_>) -> Result<Padding> {
         match self {
             Self::Modifier(value) => value.encode(writer)?,
             Self::Pointer(value) => value.encode(writer)?,
@@ -411,7 +412,7 @@ impl<'a> TypeLeaf<'a> {
             Self::EndPrecompiled(signature) => writer.u32(*signature)?,
             Self::Alias(value) => value.encode(writer)?,
             Self::DefaultArgument(value) => value.encode(writer)?,
-            Self::Managed(name) => writer.name(name)?,
+            Self::Managed(name) => writer.c_string(name)?,
             Self::StridedArray(value) => value.encode(writer)?,
             Self::Hlsl(value) => value.encode(writer)?,
             Self::ModifierEx(value) => value.encode(writer)?,

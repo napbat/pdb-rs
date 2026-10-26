@@ -10,9 +10,9 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::writer::FieldWriter;
 use super::SectionOffset;
 use crate::Result;
+use crate::native::output::Output;
 
 values! {
     /// The way a frame cookie is encoded (`CV_cookietype_e`).
@@ -30,7 +30,6 @@ values! {
 
 /// A security cookie record (`S_FRAMECOOKIE`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct FrameCookie {
     /// The offset of the cookie from the register. `cvinfo.h` gives a
     /// signed `CV_off32_t`.
@@ -59,7 +58,7 @@ impl FrameCookie {
     }
 
     /// Write the fields.
-    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(self, out: &mut Output<'_>) -> Result<()> {
         out.i32(self.offset)?;
         out.u16(self.register)?;
         out.u8(self.kind.0)?;
@@ -69,7 +68,6 @@ impl FrameCookie {
 
 /// A heap allocation call site (`S_HEAPALLOCSITE`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HeapAllocationSite {
     /// The address of the call instruction.
     pub address: SectionOffset,
@@ -93,7 +91,7 @@ impl HeapAllocationSite {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u16(self.instruction_length)?;
         out.type_index(self.type_index)

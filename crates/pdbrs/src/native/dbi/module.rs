@@ -161,6 +161,12 @@ impl ModuleStream {
         self.stream
     }
 
+    /// Return the module stream bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     /// Return the symbol records without the signature.
     ///
     /// A record offset is relative to [`ModuleStream::symbol_offset`]. Add

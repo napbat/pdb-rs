@@ -37,7 +37,6 @@ const STEP_SIZE: usize = 12;
 
 /// A symbol attribute in the user data of an `S_OEM` record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct SymbolAttribute<'a> {
     /// The name as UTF-16LE bytes, without the NUL code unit. The bytes are
     /// not converted to text.
@@ -102,7 +101,6 @@ pub enum AttributeValue<'a> {
 /// `u32` step count and the steps. Roslyn writes the catch handler offset
 /// only if it is not negative; the native writer then stores `0xffffffff`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AsyncMethodInfo<'a> {
     /// The metadata token of the kickoff method: the `async` method that
     /// creates the state machine.
@@ -142,7 +140,6 @@ impl<'a> AsyncMethodInfo<'a> {
 
 /// One await point of an async method.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AsyncStep {
     /// The IL offset where the method yields.
     pub yield_offset: u32,

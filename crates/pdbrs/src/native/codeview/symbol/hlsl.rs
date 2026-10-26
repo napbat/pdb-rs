@@ -9,8 +9,8 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::writer::FieldWriter;
 use super::{AddressGaps, AddressRange, LocalFlags};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an HLSL def-range (`S_DEFRANGE_HLSL`).
@@ -95,7 +95,7 @@ impl<'a> DefRangeHlsl<'a> {
     ///
     /// The number of offsets must equal the register index count in
     /// [`DefRangeHlsl::flags`].
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         if self.offsets.len() != usize::from(self.flags & 0b11) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("HLSL def-range offset count does not match its flags"));
@@ -142,7 +142,6 @@ impl<'a> DefRangeHlsl<'a> {
 /// [`S_GDATA_HLSL32`] and [`S_LDATA_HLSL32`] store 32-bit slots and put the
 /// register type after them. The value keeps the slots as `u32`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HlslData<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -196,7 +195,7 @@ impl<'a> HlslData<'a> {
     }
 
     /// Write the fields. Set `wide` for the 32-bit kinds.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>, wide: bool) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>, wide: bool) -> Result<()> {
         out.type_index(self.type_index)?;
         if !wide {
             out.u16(self.register_type)?;
@@ -220,14 +219,13 @@ impl<'a> HlslData<'a> {
         if wide {
             out.u16(self.register_type)?;
         }
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// An HLSL data symbol with a binding space ([`S_GDATA_HLSL32_EX`] and
 /// [`S_LDATA_HLSL32_EX`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct HlslDataEx<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -267,20 +265,19 @@ impl<'a> HlslDataEx<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u32(self.register_id)?;
         out.u32(self.data_offset)?;
         out.u32(self.bind_space)?;
         out.u32(self.bind_slot)?;
         out.u16(self.register_type)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A DPC group-shared local variable ([`S_LOCAL_DPC_GROUPSHARED`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DpcGroupSharedLocal<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -312,12 +309,12 @@ impl<'a> DpcGroupSharedLocal<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u16(self.flags.0)?;
         out.u16(self.data_slot)?;
         out.u16(self.data_offset)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
@@ -330,7 +327,6 @@ pub struct DpcTagMap<'a> {
 
 /// One entry of a [`DpcTagMap`] (`CV_DPC_SYM_TAG_MAP_ENTRY`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct DpcTag {
     /// The pointer tag value of the symbol.
     pub tag: u32,
@@ -361,7 +357,7 @@ impl<'a> DpcTagMap<'a> {
     }
 
     /// Write the entries.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         for entry in self.entries {
             out.bytes(entry)?;
         }

@@ -10,9 +10,10 @@
 
 use alloc::vec::Vec;
 
-use super::{entry_list, invalid, put_u32};
+use super::{entry_list, invalid};
 use crate::Result;
 use crate::native::fpo::{FRAME_DATA_SIZE, FrameData};
+use crate::native::output::Output;
 
 /// The size of the relocation value.
 const RELOCATION_SIZE: usize = 4;
@@ -86,7 +87,7 @@ impl<'a> FrameDataSubsection<'a> {
     /// Returns the errors of [`FrameDataSubsection::encode_parts`].
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         if let Some(relocation) = self.relocation {
-            put_u32(out, relocation)?;
+            Output::new(out).u32(relocation)?;
         }
         for record in self.records {
             record.encode(out)?;
@@ -107,7 +108,7 @@ impl<'a> FrameDataSubsection<'a> {
         out: &mut Vec<u8>,
     ) -> Result<()> {
         if let Some(relocation) = relocation {
-            put_u32(out, relocation)?;
+            Output::new(out).u32(relocation)?;
         }
         for record in records {
             record.encode(out)?;

@@ -10,8 +10,9 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{entry_list, invalid, put_u32, read_u32, to_u32, too_large, truncated};
+use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
 use crate::Result;
+use crate::native::output::Output;
 
 /// The size of one item ID.
 const ID_SIZE: usize = 4;
@@ -35,7 +36,6 @@ entry_list!(
 /// The item IDs that a module uses from one other module
 /// (`CrossScopeReferences`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct CrossScopeImport<'a> {
     /// The byte offset of the name of the other module: the object file
     /// path or the PDB path of its compilation (`PdbIdScope`).
@@ -162,16 +162,13 @@ fn write_import(
     ids: impl ExactSizeIterator<Item = u32>,
     out: &mut Vec<u8>,
 ) -> Result<()> {
-    put_u32(out, module_name_offset)?;
-    put_u32(
-        out,
-        to_u32(
-            ids.len(),
-            "cross-scope import count does not fit in 32 bits",
-        )?,
-    )?;
+    Output::new(out).u32(module_name_offset)?;
+    Output::new(out).u32(to_u32(
+        ids.len(),
+        "cross-scope import count does not fit in 32 bits",
+    )?)?;
     for id in ids {
-        put_u32(out, id)?;
+        Output::new(out).u32(id)?;
     }
     Ok(())
 }
@@ -228,7 +225,6 @@ fn split_import(bytes: &[u8]) -> Result<(CrossScopeImport<'_>, &[u8])> {
 
 /// One exported item ID (`LocalIdAndGlobalIdPair`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct CrossScopeExport {
     /// The item ID in the scope of the module.
     pub local_id: u32,
@@ -262,8 +258,8 @@ impl CrossScopeExport {
     /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
     /// if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        put_u32(out, self.local_id)?;
-        put_u32(out, self.global_id)
+        Output::new(out).u32(self.local_id)?;
+        Output::new(out).u32(self.global_id)
     }
 }
 

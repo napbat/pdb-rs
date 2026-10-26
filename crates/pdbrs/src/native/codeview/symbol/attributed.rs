@@ -12,8 +12,8 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::writer::FieldWriter;
 use super::{LocalFlags, SectionOffset};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a managed type reference (`S_MANTYPREF`).
@@ -51,7 +51,6 @@ pub const S_ATTR_MANYREG: u16 = 0x1131;
 
 /// The attributes of a variable (`CV_lvar_attr`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct VariableAttributes {
     /// The first code address where the variable is live.
     pub address: SectionOffset,
@@ -68,7 +67,7 @@ impl VariableAttributes {
     }
 
     /// Write the address and the flags.
-    fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+    fn write(self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u16(self.flags.0)
     }
@@ -133,7 +132,7 @@ impl<'a> RegisterList<'a> {
     }
 
     /// Write the count and the registers.
-    fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    fn write(&self, out: &mut Output<'_>) -> Result<()> {
         let count = self.count()?;
         if self.wide {
             out.u16(count)?;
@@ -182,7 +181,6 @@ impl<'a> RegisterList<'a> {
 /// The kinds are [`S_MANYREG`], [`S_MANYREG2`], [`S_MANMANYREG`],
 /// [`S_MANMANYREG2`] and [`S_ATTR_MANYREG`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct ManyRegisters<'a> {
     /// The type index, or a metadata token for the managed kinds.
     pub type_index: TypeIndex,
@@ -215,19 +213,18 @@ impl<'a> ManyRegisters<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         if let Some(attributes) = self.attributes {
             attributes.write(out)?;
         }
         self.registers.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A variable in an IL slot ([`S_LOCALSLOT`] and [`S_PARAMSLOT`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct Slot<'a> {
     /// The slot index.
     pub slot: u32,
@@ -251,17 +248,16 @@ impl<'a> Slot<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.slot)?;
         out.u32(self.type_or_token)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A frame-relative variable with attributes ([`S_MANFRAMEREL`] and
 /// [`S_ATTR_FRAMEREL`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AttributedFrameRelative<'a> {
     /// The offset from the frame. `cvinfo.h` gives a signed `CV_off32_t`.
     pub offset: i32,
@@ -289,18 +285,17 @@ impl<'a> AttributedFrameRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.i32(self.offset)?;
         out.type_index(self.type_index)?;
         self.attributes.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A register variable with attributes ([`S_MANREGISTER`] and
 /// [`S_ATTR_REGISTER`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AttributedRegister<'a> {
     /// The type index, or a metadata token for [`S_MANREGISTER`].
     pub type_index: TypeIndex,
@@ -328,18 +323,17 @@ impl<'a> AttributedRegister<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         self.attributes.write(out)?;
         out.u16(self.register)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
 
 /// A register-relative variable with attributes ([`S_MANREGREL`] and
 /// [`S_ATTR_REGREL`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct AttributedRegisterRelative<'a> {
     /// The offset from the register.
     pub offset: u32,
@@ -371,11 +365,11 @@ impl<'a> AttributedRegisterRelative<'a> {
     }
 
     /// Write the fields.
-    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.offset)?;
         out.type_index(self.type_index)?;
         out.u16(self.register)?;
         self.attributes.write(out)?;
-        out.name(self.name)
+        out.c_string(self.name)
     }
 }
