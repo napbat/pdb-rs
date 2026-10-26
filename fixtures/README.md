@@ -93,6 +93,7 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `msvc-x64-annotation` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL` |
 | `msvc-x64-vc120` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL,VC120` |
 | `msvc-x64-lazy` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:LAZY` |
+| `clang-lld-x64-static` | `clang-cl` + `lld-link` | x64 | `/Zi /Od /MTd`, `/DEBUG:FULL` |
 | `rust-link-x64-debug` | `rustc` + `link` | x86_64 | debug profile |
 | `rust-link-x64-release` | `rustc` + `link` | x86_64 | release profile with full debug information |
 | `rust-lld-x64-debug` | `rustc` + `lld-link` | x86_64 | debug profile |
@@ -141,6 +142,7 @@ these items.
 | `msvc-x64-annotation` | `demo.exe`, `demo.pdb` | `S_ANNOTATION` module symbols and `S_ANNOTATIONREF` global symbols. | #30 |
 | `msvc-x64-vc120` | `demo.exe`, `demo.pdb` | The PDB Info feature `VC110` (20091201) instead of `VC140`. | #32 |
 | `msvc-x64-lazy` | `demo.exe`, `demo.pdb` | The PDB Info feature `NOTM` (no type merge). The TPI and IPI streams are empty. The module streams have `S_MOD_TYPEREF`, `S_GPROC32_ID`, `S_LPROC32_ID` and `S_PROC_ID_END` records. The type and ID indices of the module symbols refer to the records in the object files. | #30, #32 |
+| `clang-lld-x64-static` | `demo.exe`, `demo.pdb` | The type records of the static runtime library (`/MTd`). MASM (`ml64`) wrote some of them: `LF_STRUCTURE` records such as `CsFrameEncoded` and `ThunkFrame` end with `f1` and two stale bytes, not with the `LF_PAD` run `f3 f2 f1`. | #29 |
 
 Some notes about the variants:
 

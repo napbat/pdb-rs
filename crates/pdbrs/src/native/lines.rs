@@ -82,8 +82,9 @@ pub use checksums::{
 };
 pub use coff_symbol_rva::{CoffSymbolRvas, CoffSymbolRvasIter, encode_coff_symbol_rvas};
 pub use cross_scope::{
-    CrossScopeExport, CrossScopeExports, CrossScopeExportsIter, CrossScopeIds, CrossScopeIdsIter,
-    CrossScopeImport, CrossScopeImports, CrossScopeImportsIter,
+    CrossScopeContext, CrossScopeExport, CrossScopeExports, CrossScopeExportsIter, CrossScopeIds,
+    CrossScopeIdsIter, CrossScopeImport, CrossScopeImports, CrossScopeImportsIter,
+    CrossScopeModules, CrossScopeRule, CrossScopeViolation, validate_cross_scope,
 };
 pub use frame_data::{FrameDataRecords, FrameDataRecordsIter, FrameDataSubsection};
 pub use inlinee::{

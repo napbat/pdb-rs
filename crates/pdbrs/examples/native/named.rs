@@ -5,9 +5,11 @@ use std::collections::HashSet;
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::auxiliary::{
-    LinkInfo, NamedStreamKind, SourceLink, SourceServer, TmCache, TypeMapKind, TypeMapStream,
-    UdtSourceLineUndone,
+    LinkInfo, NamedStreamKind, SourceLink, SourceServer, TmCache, TypeMapContext, TypeMapKind,
+    TypeMapStream, UdtSourceLineUndone,
 };
+use pdbrs::native::codeview::id_record::IdTable;
+use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::info::Feature;
 use pdbrs::native::info::InfoBuilder;
@@ -116,8 +118,13 @@ pub(crate) fn named_streams(
                     let mut encoded = Vec::new();
                     cache.encode(&mut encoded)?;
                     report.reencoded("/TMCache streams", &bytes, &encoded);
-                    let ends = [tpi.header().index_end, ipi.header().index_end];
-                    type_maps(pdb, &cache, ends, report)?;
+                    let ids = IdTable::new(ipi)?;
+                    let context = TypeMapContext::new(
+                        TypeIndex(tpi.header().index_end),
+                        IdIndex(ipi.header().index_end),
+                    )
+                    .with_ids(&ids);
+                    type_maps(pdb, &cache, &context, report)?;
                 }
             }
             NamedStreamKind::UdtSourceLineUndone => {
@@ -241,13 +248,12 @@ fn injected_source(
     Ok(())
 }
 
-/// Decode the type map streams that `/TMCache` names, with their precompiled-header maps.
-///
-/// `ends` holds the TPI and IPI index ends.
+/// Decode the type map streams that `/TMCache` names, with their precompiled-header maps, and
+/// report the findings of [`TypeMapStream::validate`] as inconsistencies.
 fn type_maps(
     pdb: &Pdb<impl ReadAt>,
     cache: &TmCache<'_>,
-    ends: [u32; 2],
+    context: &TypeMapContext<'_>,
     report: &mut Report,
 ) -> Outcome {
     let mut pending: Vec<StreamId> = cache.streams().flatten().collect();
@@ -269,37 +275,23 @@ fn type_maps(
         {
             pending.push(precompiled);
         }
-        check_type_map(&map, ends)?;
+        let violations = map.validate(context)?;
+        for violation in &violations {
+            report.inconsistency(format!(
+                "type map stream {}: {} at position {}, value {:#x}",
+                id.0,
+                violation.rule.description(),
+                violation.position,
+                violation.value
+            ));
+        }
+        report.add(
+            "type map function ID pairs validated",
+            map.function_types().len(),
+        );
         report.add("type map streams", 1);
         report.type_maps.insert(bytes);
     }
     report.add("/TMCache entries", cache.entries().len());
-    Ok(())
-}
-
-/// Check that the map values and the function ID pairs of a type map are in range.
-fn check_type_map(map: &TypeMapStream<'_>, [tpi_end, ipi_end]: [u32; 2]) -> Outcome {
-    let within = |value: u32, end: u32| value == 0 || (0x1000..end).contains(&value);
-    let count = |len: usize| u32::try_from(len).map_err(|_| "type map is too long");
-    let (type_end, function_ids) = if map.kind() == TypeMapKind::TypeServer {
-        if !map.ids().all(|value| within(value, ipi_end)) {
-            return Err("type map names an ID past the IPI stream".into());
-        }
-        (tpi_end, 0x1000..0x1000 + count(map.ids().len())?)
-    } else {
-        let first = map.first_index();
-        let end = first
-            .checked_add(count(map.types().len())?)
-            .ok_or("type map index range overflows")?;
-        (tpi_end.max(ipi_end), first..end)
-    };
-    if !map.types().all(|value| within(value, type_end)) {
-        return Err("type map names an index past the TPI and IPI streams".into());
-    }
-    for (function, ty) in map.function_types() {
-        if !function_ids.contains(&function) || !(0x1000..tpi_end).contains(&ty) {
-            return Err("type map function ID pair is out of range".into());
-        }
-    }
     Ok(())
 }

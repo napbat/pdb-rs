@@ -6,6 +6,9 @@
 //! ID indexes in the scope of another module or of the PDB. They stay raw
 //! `u32` values, because their index space depends on the producer
 //! (`Mod1::fUpdateTiOrIdReferencedByNonSyms` in `PDB/dbi/mod.cpp`).
+//! [`validate_cross_scope`] checks the references between modules.
+
+mod validate;
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
@@ -13,6 +16,10 @@ use core::iter::FusedIterator;
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
 use crate::Result;
 use crate::native::output::Output;
+
+pub use validate::{
+    CrossScopeContext, CrossScopeModules, CrossScopeRule, CrossScopeViolation, validate_cross_scope,
+};
 
 /// The size of one item ID.
 const ID_SIZE: usize = 4;

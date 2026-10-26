@@ -21,7 +21,7 @@ pub use source_server::{
     SourceServer, SourceServerFile, SourceServerSection, SourceServerVariable,
 };
 pub use tm_cache::{TM_CACHE_VERSION, TmCache, TmCacheBuilder, TmCacheEntry};
-pub use type_map::{TypeMapKind, TypeMapStream};
+pub use type_map::{TypeMapContext, TypeMapKind, TypeMapRule, TypeMapStream, TypeMapViolation};
 pub use udt_source_line_undone::UdtSourceLineUndone;
 
 use super::injected_source::{HEADER_BLOCK_STREAM_NAME, SOURCE_FILE_STREAM_PREFIX};

@@ -2,7 +2,12 @@
 //!
 //! [`ModuleSymbols`] checks the parent and end links. This module keeps a
 //! copy of the open scopes with their code ranges, and checks the records in
-//! each scope against them.
+//! each scope against them. The `inline_site` module gives the code ranges of
+//! inline sites.
+
+mod inline_site;
+
+use inline_site::SiteRange;
 
 use alloc::vec::Vec;
 
@@ -16,6 +21,7 @@ use super::{
     ValidationContext, ValidationReport, Violation, check_references, register,
 };
 use crate::native::address::SectionOffset;
+use crate::native::codeview::index::TypeIndex;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
@@ -59,6 +65,36 @@ impl CodeRange {
     }
 }
 
+/// The code ranges of an inline site.
+#[derive(Clone, Copy, Debug)]
+enum SiteRanges {
+    /// The ranges are `Checker::site_ranges[start..end]`.
+    Valid {
+        /// The position of the first range.
+        start: usize,
+        /// The position after the last range.
+        end: usize,
+    },
+    /// The annotations give no valid ranges.
+    Unknown,
+}
+
+/// A def-range check against the code ranges of an inline site that needs
+/// a separated code chunk of the procedure. [`Checker::finish`] runs it,
+/// because MSVC writes `S_SEPCODE` after the end of the procedure.
+struct DeferredSite {
+    /// The code range of the procedure (chunk 0).
+    procedure: CodeRange,
+    /// The code ranges of the inline site.
+    ranges: Vec<SiteRange>,
+    /// The parts of the def-range outside its gaps.
+    parts: Vec<CodeRange>,
+    /// The offset of the def-range record.
+    offset: u32,
+    /// The kind of the def-range record.
+    kind: u16,
+}
+
 /// An open scope with its code range.
 #[derive(Clone, Copy, Debug)]
 struct Frame {
@@ -69,6 +105,8 @@ struct Frame {
     /// `true` if the scope covers no code: a code range of length 0, or an
     /// inline site whose code length annotations are all 0.
     empty: bool,
+    /// The code ranges of an inline site; `None` for other scopes.
+    site: Option<SiteRanges>,
 }
 
 /// The location fields of a def-range record.
@@ -78,6 +116,10 @@ struct DefRange<'a> {
     range: Option<AddressRange>,
     /// The gaps in the range.
     gaps: Option<AddressGaps<'a>>,
+    /// `true` if the range attributes set the "may have no user name" bit
+    /// (`CV_RANGEATTR::maybe`). The location is then valid also where the
+    /// name of the variable is not in scope.
+    may_have_no_name: bool,
 }
 
 /// The state of the checks of one module stream.
@@ -103,6 +145,12 @@ struct Checker<'r, 'c> {
     cpu: Option<u16>,
     /// The flags of the local that the next def-range record belongs to.
     local: Option<LocalFlags>,
+    /// The type of that local.
+    local_type: Option<TypeIndex>,
+    /// The code ranges of the open inline sites, in stack order.
+    site_ranges: Vec<SiteRange>,
+    /// The def-range checks that need separated code chunks.
+    deferred: Vec<DeferredSite>,
 }
 
 /// Check a module symbol stream. See [`super::validate_module_symbols`].
@@ -122,6 +170,9 @@ pub(super) fn validate(
         separated: Vec::new(),
         cpu: None,
         local: None,
+        local_type: None,
+        site_ranges: Vec::new(),
+        deferred: Vec::new(),
     };
     for scoped in ModuleSymbols::new(symbols, stream, base, context.max_depth) {
         match scoped {
@@ -215,14 +266,59 @@ fn def_range<'a>(symbol: &Symbol<'a>) -> Option<DefRange<'a>> {
             return Some(DefRange {
                 range: None,
                 gaps: None,
+                may_have_no_name: false,
             });
         }
         _ => return None,
     };
+    let may_have_no_name = match symbol.data() {
+        SymbolData::DefRangeRegister(value) => value.may_have_no_name(),
+        SymbolData::DefRangeSubfieldRegister(value) => value.may_have_no_name(),
+        _ => false,
+    };
     Some(DefRange {
         range: Some(range),
         gaps: Some(gaps),
+        may_have_no_name,
     })
+}
+
+/// Return the offset in the parent variable of a subfield def-range.
+///
+/// `S_DEFRANGE_REGISTER_REL` gives an offset only if its spilled-member bit
+/// (bit 0 of the flags) is set. The offset is in bits 4 to 15.
+fn subfield_offset(symbol: &Symbol<'_>) -> Option<u32> {
+    match symbol.data() {
+        SymbolData::DefRangeProgram(value) => value.parent_offset,
+        SymbolData::DefRangeSubfieldRegister(value) => Some(value.parent_offset),
+        SymbolData::DefRangeRegisterRelative(value) if value.flags & 1 != 0 => {
+            Some(u32::from(value.flags >> 4))
+        }
+        _ => None,
+    }
+}
+
+/// Return the code range of chunk `number` of `procedure`.
+///
+/// Chunk 0 is the procedure. Chunk `n` is the `n`-th `S_SEPCODE` scope in
+/// `separated` whose parent address is the start of the procedure.
+fn chunk(
+    separated: &[(SectionOffset, CodeRange)],
+    procedure: CodeRange,
+    number: u32,
+) -> Option<CodeRange> {
+    let Some(index) = usize::try_from(number).ok()?.checked_sub(1) else {
+        return Some(procedure);
+    };
+    let start = SectionOffset {
+        section: procedure.section,
+        offset: procedure.start,
+    };
+    separated
+        .iter()
+        .filter(|&&(parent, _)| parent == start)
+        .nth(index)
+        .map(|&(_, code)| code)
 }
 
 /// Return `true` if an inline site has code length annotations and all of
@@ -280,18 +376,32 @@ impl Checker<'_, '_> {
             self.violate(Rule::RegisterUnknown, offset, kind)?;
         }
         match symbol.data() {
-            SymbolData::Local(local) => self.local_record(local.flags, offset, kind)?,
+            SymbolData::Local(local) => {
+                self.local_record(local.flags, offset, kind)?;
+                self.local_type = Some(local.type_index);
+            }
             // The def-ranges after an `S_FILESTATIC` record give the location
             // of an enregistered static (`FILESTATICSYM` in `cvinfo.h`).
-            SymbolData::FileStatic(value) => self.local = Some(value.flags),
-            SymbolData::DpcGroupSharedLocal(value) => self.local = Some(value.flags),
+            SymbolData::FileStatic(value) => {
+                self.local = Some(value.flags);
+                self.local_type = Some(value.type_index);
+            }
+            SymbolData::DpcGroupSharedLocal(value) => {
+                self.local = Some(value.flags);
+                self.local_type = Some(value.type_index);
+            }
             // LLD replaces a record that it cannot remap with `S_SKIP`, also
             // between a local and its def-ranges (Rust LLD fixture of #12).
             SymbolData::Skip(_) => {}
-            _ => match def_range(symbol) {
-                Some(range) => self.def_range(&range, offset, kind)?,
-                None => self.local = None,
-            },
+            _ => {
+                if let Some(range) = def_range(symbol) {
+                    self.def_range(&range, offset, kind)?;
+                    self.subfield(symbol, offset, kind)?;
+                } else {
+                    self.local = None;
+                    self.local_type = None;
+                }
+            }
         }
         if symbol.scope().is_some() {
             self.open(symbol, offset)?;
@@ -365,6 +475,80 @@ impl Checker<'_, '_> {
         if let Some(gaps) = def_range.gaps {
             self.gaps(gaps, range.length, offset, kind)?;
         }
+        if def_range.may_have_no_name {
+            return Ok(());
+        }
+        self.inline_site(range, def_range.gaps, offset, kind)
+    }
+
+    /// Check a def-range against the code ranges of its innermost inline
+    /// site.
+    fn inline_site(
+        &mut self,
+        range: AddressRange,
+        gaps: Option<AddressGaps<'_>>,
+        offset: u32,
+        kind: u16,
+    ) -> Result<()> {
+        let site = self.stack.iter().rev().find_map(|frame| frame.site);
+        let (Some(SiteRanges::Valid { end, .. }), Some(procedure)) =
+            (site, self.stack.iter().find_map(|frame| frame.range))
+        else {
+            return Ok(());
+        };
+        let start = self
+            .stack
+            .iter()
+            .find_map(|frame| match frame.site {
+                Some(SiteRanges::Valid { start, .. }) => Some(start),
+                _ => None,
+            })
+            .unwrap_or(0);
+        let mut parts = Vec::new();
+        inline_site::parts(range, gaps, &mut parts)?;
+        if parts.is_empty() {
+            return Ok(());
+        }
+        let ranges = &self.site_ranges[start..end];
+        let mut absolute = Vec::new();
+        if inline_site::absolute(
+            ranges,
+            |number| chunk(&self.separated, procedure, number),
+            &mut absolute,
+        )? {
+            if !inline_site::touches(&absolute, &parts) {
+                self.violate(Rule::DefRangeOutsideInlineSite, offset, kind)?;
+            }
+        } else if ranges.iter().any(|range| range.chunk != 0) {
+            let mut copy = Vec::new();
+            copy.try_reserve_exact(ranges.len())
+                .map_err(|_| allocation_error())?;
+            copy.extend_from_slice(ranges);
+            let deferred = DeferredSite {
+                procedure,
+                ranges: copy,
+                parts,
+                offset,
+                kind,
+            };
+            push(&mut self.deferred, deferred)?;
+        }
+        Ok(())
+    }
+
+    /// Check the parent offset of a subfield def-range against the size of
+    /// the type of its local.
+    fn subfield(&mut self, symbol: &Symbol<'_>, offset: u32, kind: u16) -> Result<()> {
+        let (Some(parent_offset), Some(local_type), Some(type_size)) = (
+            subfield_offset(symbol),
+            self.local_type,
+            self.context.type_size,
+        ) else {
+            return Ok(());
+        };
+        if type_size(local_type).is_some_and(|size| u64::from(parent_offset) >= size) {
+            self.violate(Rule::SubfieldOutsideType, offset, kind)?;
+        }
         Ok(())
     }
 
@@ -432,11 +616,40 @@ impl Checker<'_, '_> {
             push(&mut self.separated, (separated.parent_address, code))?;
         }
         push(&mut self.starts, (offset, kind))?;
+        let mut site = None;
         let empty = match symbol.data() {
-            SymbolData::InlineSite(site) => inline_site_is_empty(site.annotations),
+            SymbolData::InlineSite(value) => {
+                site = Some(self.site_ranges(value.annotations, offset, kind)?);
+                inline_site_is_empty(value.annotations)
+            }
             _ => range.is_some_and(|code| code.start == code.end),
         };
-        push(&mut self.stack, Frame { kind, range, empty })
+        push(
+            &mut self.stack,
+            Frame {
+                kind,
+                range,
+                empty,
+                site,
+            },
+        )
+    }
+
+    /// Compute the code ranges of an inline site from its annotations.
+    fn site_ranges(
+        &mut self,
+        annotations: BinaryAnnotations<'_>,
+        offset: u32,
+        kind: u16,
+    ) -> Result<SiteRanges> {
+        let start = self.site_ranges.len();
+        if inline_site::site_ranges(annotations, &mut self.site_ranges)? {
+            let end = self.site_ranges.len();
+            Ok(SiteRanges::Valid { start, end })
+        } else {
+            self.violate(Rule::InlineSiteAnnotations, offset, kind)?;
+            Ok(SiteRanges::Unknown)
+        }
     }
 
     /// Check an end record and pop the frame of its scope.
@@ -445,6 +658,9 @@ impl Checker<'_, '_> {
         let Some(frame) = self.stack.pop() else {
             return Ok(());
         };
+        if let Some(SiteRanges::Valid { start, .. }) = frame.site {
+            self.site_ranges.truncate(start);
+        }
         let id_procedure = ID_PROCEDURES.contains(&frame.kind);
         if kind == S_PROC_ID_END && !id_procedure {
             self.violate(Rule::ProcedureIdEndKind, offset, kind)?;
@@ -464,6 +680,20 @@ impl Checker<'_, '_> {
                 .any(|&(parent, range)| parent == procedure && range.contains(&code));
             if !separated {
                 self.violate(Rule::DefRangeOutsideProcedure, offset, kind)?;
+            }
+        }
+        let deferred = core::mem::take(&mut self.deferred);
+        let mut absolute = Vec::new();
+        for site in deferred {
+            // A site that names a chunk that the stream does not have is not
+            // checked.
+            let known = inline_site::absolute(
+                &site.ranges,
+                |number| chunk(&self.separated, site.procedure, number),
+                &mut absolute,
+            )?;
+            if known && !inline_site::touches(&absolute, &site.parts) {
+                self.violate(Rule::DefRangeOutsideInlineSite, site.offset, site.kind)?;
             }
         }
         let nexts = core::mem::take(&mut self.nexts);

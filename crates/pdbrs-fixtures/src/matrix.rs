@@ -673,6 +673,14 @@ pub static FIXTURES: &[Fixture] = &[
         // records; the module symbols keep the type indices of the object files.
         msvc(Arch::X64, DEBUG, &["/DEBUG:LAZY", "/INCREMENTAL:NO"]),
     ),
+    native(
+        "clang-lld-x64-static",
+        "clang-cl + lld-link",
+        "debug, static runtime library",
+        // The static runtime has objects from MASM (`ml64`). Some of their `LF_STRUCTURE`
+        // records end with `f1` and two stale bytes instead of the `LF_PAD` run (#29).
+        clang(Linker::Lld, Arch::X64, &["/Zi", "/Od", "/MTd"], LINK_DEBUG),
+    ),
     rust("rust-link-x64-debug", Linker::Msvc, Arch::X64, false),
     rust("rust-link-x64-release", Linker::Msvc, Arch::X64, true),
     rust("rust-lld-x64-debug", Linker::Lld, Arch::X64, false),

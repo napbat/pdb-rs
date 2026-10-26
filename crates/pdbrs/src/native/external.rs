@@ -12,11 +12,15 @@
 //! - FASTLINK objects (`/DEBUG:FASTLINK`, feature code `MINI`): `S_FASTLINK` records of a
 //!   module refer to records that stay in the object file of the module. The module record
 //!   gives the object file, or the library that holds it.
+//! - Module type records (feature code `NOTM`, MSVC `/DEBUG:LAZY`): the linker does not merge
+//!   types, and the type and ID indices of the module symbols refer to the records of the input
+//!   object. The `S_MOD_TYPEREF` record of each module tells which stream of the PDB holds
+//!   them ([`ModuleTypeSource`]). The records are in the PDB, but not in TPI and IPI.
 
 use alloc::vec::Vec;
 
 use super::Pdb;
-use super::codeview::symbol::{S_FASTLINK, S_OBJNAME, SymbolData};
+use super::codeview::symbol::{ModuleTypeSource, S_FASTLINK, S_MOD_TYPEREF, S_OBJNAME, SymbolData};
 use super::dbi::{Dbi, TypeServer};
 use super::info::Feature;
 use super::output::no_memory;
@@ -57,12 +61,24 @@ pub struct ModuleTypeServer {
     pub type_server: u8,
 }
 
+/// The source of the type records of one module, from its `S_MOD_TYPEREF` record.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct ModuleTypeDependency {
+    /// The index of the module.
+    pub module: u32,
+    /// Where the type records of the module are.
+    pub source: ModuleTypeSource,
+}
+
 /// The external dependencies of a PDB.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ExternalDependencies {
     /// `true` if the PDB has the `MINI` feature code of a FASTLINK PDB.
     pub mini_pdb: bool,
+    /// `true` if the PDB has the `NOTM` feature code: the linker did not merge types.
+    pub no_type_merge: bool,
     /// The entries of the DBI type-server map: PDBs that hold types of the modules.
     pub type_servers: Vec<TypeServer>,
     /// The modules with a non-zero type-server index, in module order.
@@ -71,6 +87,8 @@ pub struct ExternalDependencies {
     pub precompiled: Vec<PrecompiledTypes>,
     /// The modules with `S_FASTLINK` records, in module order.
     pub fastlink_objects: Vec<FastLinkObject>,
+    /// The modules with an `S_MOD_TYPEREF` record, in module order.
+    pub module_types: Vec<ModuleTypeDependency>,
 }
 
 impl ExternalDependencies {
@@ -81,6 +99,7 @@ impl ExternalDependencies {
             && self.type_server_modules.is_empty()
             && self.precompiled.is_empty()
             && self.fastlink_objects.is_empty()
+            && self.module_types.is_empty()
     }
 }
 
@@ -97,6 +116,7 @@ impl<S: ReadAt> Pdb<S> {
     pub fn external_dependencies(&self, dbi: &Dbi) -> Result<ExternalDependencies> {
         let mut dependencies = ExternalDependencies {
             mini_pdb: self.info().has_feature(Feature::MinimalDebugInfo),
+            no_type_merge: self.info().has_feature(Feature::NoTypeMerge),
             type_servers: dbi.type_server_map()?,
             ..ExternalDependencies::default()
         };
@@ -124,6 +144,15 @@ impl<S: ReadAt> Pdb<S> {
                     signature = name.signature;
                 } else if record.kind == S_FASTLINK {
                     references += 1;
+                } else if record.kind == S_MOD_TYPEREF
+                    && let SymbolData::ModuleTypeReference(reference) = record.symbol()?.data()
+                {
+                    let modules = &mut dependencies.module_types;
+                    modules.try_reserve(1).map_err(|_| no_memory())?;
+                    modules.push(ModuleTypeDependency {
+                        module: module.index,
+                        source: reference.source(),
+                    });
                 }
             }
             if signature != 0 {

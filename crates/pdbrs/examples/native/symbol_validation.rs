@@ -46,13 +46,14 @@ fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<u16> {
 
 /// Make the library context from the example context.
 fn validation_context<'c>(
-    context: &Context<'_>,
+    context: &'c Context<'_>,
     id_kinds: &'c dyn Fn(IdIndex) -> Option<u16>,
     lengths: &'c [u32],
 ) -> ValidationContext<'c> {
     let base = ValidationContext::new(context.tpi_end, context.ids.index_end())
         .with_id_kinds(id_kinds)
-        .with_module_count(context.module_count);
+        .with_module_count(context.module_count)
+        .with_type_sizes(context.type_size);
     if context.addresses.is_some() {
         base.with_section_lengths(lengths)
     } else {

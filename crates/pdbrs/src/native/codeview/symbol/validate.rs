@@ -164,6 +164,8 @@ pub struct ValidationContext<'c> {
     module_record: Option<&'c dyn Fn(u16, u32) -> ModuleRecord>,
     /// The virtual size of each section, by section number minus 1.
     section_lengths: Option<&'c [u32]>,
+    /// The size in bytes of a type.
+    type_size: Option<&'c dyn Fn(TypeIndex) -> Option<u64>>,
     /// The largest number of open scopes.
     max_depth: usize,
 }
@@ -178,6 +180,7 @@ impl fmt::Debug for ValidationContext<'_> {
             .field("module_count", &self.module_count)
             .field("module_record", &self.module_record.is_some())
             .field("section_lengths", &self.section_lengths)
+            .field("type_size", &self.type_size.is_some())
             .field("max_depth", &self.max_depth)
             .finish()
     }
@@ -197,6 +200,7 @@ impl<'c> ValidationContext<'c> {
             module_count: None,
             module_record: None,
             section_lengths: None,
+            type_size: None,
             max_depth: DEFAULT_MAX_DEPTH,
         }
     }
@@ -232,6 +236,20 @@ impl<'c> ValidationContext<'c> {
     #[must_use]
     pub const fn with_section_lengths(mut self, lengths: &'c [u32]) -> Self {
         self.section_lengths = Some(lengths);
+        self
+    }
+
+    /// Add a function that gives the size in bytes of a type, or `None` if
+    /// the size is not known.
+    ///
+    /// [`crate::native::types::type_size`] computes the size from the TPI
+    /// records. The subfield def-range check needs this function.
+    #[must_use]
+    pub const fn with_type_sizes(
+        mut self,
+        type_size: &'c dyn Fn(TypeIndex) -> Option<u64>,
+    ) -> Self {
+        self.type_size = Some(type_size);
         self
     }
 
@@ -374,7 +392,13 @@ fn check_references(
             report.violate(Rule::TypeIndexRange, offset, kind)?;
         }
     }
-    if let Some(id) = symbol.id_index() {
+    // MSVC `/DEBUG:LAZY` writes ID 0 ("no ID") in the `S_LPROC32_ID` records
+    // of exception funclets (`msvc-x64-lazy`, #30). A linker that merges
+    // types writes them as `S_LPROC32` with type 0.
+    if let Some(id) = symbol
+        .id_index()
+        .filter(|&id| !(id == IdIndex::NONE && ID_PROCEDURES.contains(&kind)))
+    {
         // No reference gives the IPI kind of an `S_SOURCELINK` record.
         let expected = match kind {
             S_BUILDINFO => Some(&[LF_BUILDINFO][..]),
