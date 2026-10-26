@@ -13,6 +13,9 @@
 //!   reads the source bytes of that stream when it writes. Thus an exact
 //!   stream comparison, for example `pdbtool compare`, shows the stream as
 //!   identical.
+//! - If an encoded stream has the bytes of its source stream, the plan keeps
+//!   the source stream. [`PdbEditPlan::changed_streams`] lists only the
+//!   streams with other bytes, the removed streams and the new streams.
 //! - A removed stream becomes a nil stream, so the IDs of the other streams
 //!   do not change.
 //! - A new stream gets the next stream ID after the last source stream.
@@ -53,8 +56,9 @@
 //!   each as an `S_LPROC32` record with type 0 and an `S_END` record. Its
 //!   global references are the offsets of these `S_LPROCREF` records. A
 //!   module without such a procedure has no module stream.
-//! - The DBI header has the stripped flag. The modules have no source files
-//!   and no line data. The section contributions have zero CRCs.
+//! - The DBI header has the stripped flag. The modules have no source files,
+//!   no line data and no EC name indices. The EC name table is empty. The
+//!   section contributions have zero CRCs.
 //! - The plan removes `/names` and the `/src/` streams. `/names` stays if the
 //!   PDB has a new FPO stream, because its frame programs refer to `/names`.
 //!   `/TMCache` and `/UDTSRCLINEUNDONE` become empty. The plan removes the
