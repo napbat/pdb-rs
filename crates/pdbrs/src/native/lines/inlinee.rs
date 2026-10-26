@@ -1,8 +1,9 @@
 //! `DEBUG_S_INLINEELINES` subsections: source lines of inlined functions.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{entry_list, read_u32, too_large, truncated};
+use super::{entry_list, invalid, put_u32, read_u32, to_u32, too_large, truncated};
 use crate::native::codeview::index::IdIndex;
 use crate::{Error, ErrorKind, Result};
 
@@ -37,6 +38,15 @@ impl InlineeSignature {
             Self::Normal => 0,
             Self::ExtraFiles => 1,
         }
+    }
+
+    /// Append the 4-byte signature at the start of the subsection to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(self, out: &mut Vec<u8>) -> Result<()> {
+        put_u32(out, self.raw())
     }
 }
 
@@ -119,6 +129,21 @@ impl<'a> InlineeLines<'a> {
             left: self.count,
         }
     }
+
+    /// Append the subsection data to `out`: the signature and all entries.
+    ///
+    /// The output is equal to the data that [`InlineeLines::decode`] read.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`InlineeLine::encode`].
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.signature.encode(out)?;
+        for entry in self {
+            entry.encode(self.signature, out)?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> IntoIterator for InlineeLines<'a> {
@@ -154,6 +179,76 @@ pub struct InlineeLine<'a> {
     ///
     /// The list is empty for [`InlineeSignature::Normal`].
     pub extra_files: ChecksumOffsets<'a>,
+}
+
+impl InlineeLine<'_> {
+    /// Append the entry to `out` in the layout of `signature`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`encode_inlinee_line`].
+    pub fn encode(&self, signature: InlineeSignature, out: &mut Vec<u8>) -> Result<()> {
+        write_entry(
+            signature,
+            [self.inlinee.0, self.checksum_offset, self.source_line],
+            self.extra_files.iter(),
+            out,
+        )
+    }
+}
+
+/// Append one entry of a `DEBUG_S_INLINEELINES` subsection to `out`.
+///
+/// Use the signature of the subsection ([`InlineeSignature::encode`]).
+///
+/// # Errors
+///
+/// - [`ErrorKind::InvalidFormat`] if `extra_files` is not empty and the
+///   signature is [`InlineeSignature::Normal`].
+/// - [`ErrorKind::LimitExceeded`] if the extra file count does not fit in
+///   32 bits, or if the output cannot grow.
+pub fn encode_inlinee_line(
+    signature: InlineeSignature,
+    inlinee: IdIndex,
+    checksum_offset: u32,
+    source_line: u32,
+    extra_files: &[u32],
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    write_entry(
+        signature,
+        [inlinee.0, checksum_offset, source_line],
+        extra_files.iter().copied(),
+        out,
+    )
+}
+
+/// Append an entry with the header `fields` and `extra_files` to `out`.
+fn write_entry(
+    signature: InlineeSignature,
+    fields: [u32; 3],
+    extra_files: impl ExactSizeIterator<Item = u32>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    let count = extra_files.len();
+    if signature == InlineeSignature::Normal && count != 0 {
+        return Err(invalid(
+            "inlinee line signature 0 does not allow extra files",
+        ));
+    }
+    for field in fields {
+        put_u32(out, field)?;
+    }
+    if signature == InlineeSignature::ExtraFiles {
+        put_u32(
+            out,
+            to_u32(count, "inlinee extra file count does not fit in 32 bits")?,
+        )?;
+        for offset in extra_files {
+            put_u32(out, offset)?;
+        }
+    }
+    Ok(())
 }
 
 entry_list!(

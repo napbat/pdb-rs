@@ -4,11 +4,10 @@ use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::index::TypeIndex;
-use pdbrs::native::codeview::numeric::Integer;
+use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    LocalFlags, MANAGED_ATTRIBUTE_OEM_ID, ManagedConstantValue, ProcedureFlags, S_GMANPROC,
-    S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, ScopeLinks, Symbol,
-    SymbolData,
+    LocalFlags, MANAGED_ATTRIBUTE_OEM_ID, ProcedureFlags, S_GMANPROC, S_LMANPROC, S_MANCONSTANT,
+    S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, ScopeLinks, Symbol, SymbolData,
 };
 
 /// A builder for little-endian symbol payloads.
@@ -162,9 +161,11 @@ fn rejects_truncated_managed_procedures() {
 fn rejects_managed_procedure_padding_that_is_not_zero() {
     let payload = managed_procedure(b"f\0").bytes(&[0, 1]).0;
     assert_eq!(error(S_GMANPROC, &payload), ErrorKind::InvalidFormat);
-    // Four zero bytes are not padding.
+    // Four zero bytes are padding that the decoder keeps (#30).
     let payload = managed_procedure(b"f\0").bytes(&[0; 4]).0;
-    assert_eq!(error(S_LMANPROC, &payload), ErrorKind::InvalidFormat);
+    decode(S_LMANPROC, &payload, |symbol| {
+        assert!(symbol.padding() >= 4);
+    });
 }
 
 /// Return an `S_MANSLOT` payload.
@@ -220,7 +221,7 @@ fn managed_constant(value: &[u8], name: &[u8]) -> Payload {
 }
 
 /// Decode a managed constant and return its value.
-fn constant_value(value: &[u8], check: impl FnOnce(ManagedConstantValue<'_>)) {
+fn constant_value(value: &[u8], check: impl FnOnce(Numeric<'_>)) {
     let payload = padded(&managed_constant(value, b"Seed\0").0);
     decode(S_MANCONSTANT, &payload, |symbol| {
         let SymbolData::ManagedConstant(constant) = symbol.data() else {
@@ -242,7 +243,7 @@ fn decodes_managed_integer_constants() {
         (&[0x03, 0x80, 0xff, 0xff, 0xff, 0xff], Integer::Signed(-1)),
     ] {
         constant_value(bytes, |value| {
-            assert_eq!(value, ManagedConstantValue::Integer(expected));
+            assert_eq!(value.integer(), Some(expected));
         });
     }
 }
@@ -253,11 +254,11 @@ fn decodes_managed_string_constants() {
     constant_value(
         &[0x10, 0x80, 6, 0, b'c', b's', b'h', b'a', b'r', b'p'],
         |value| {
-            assert_eq!(value, ManagedConstantValue::String(b"csharp"));
+            assert_eq!(value, Numeric::VarString(b"csharp"));
         },
     );
     constant_value(&[0x10, 0x80, 0, 0], |value| {
-        assert_eq!(value, ManagedConstantValue::String(b""));
+        assert_eq!(value, Numeric::VarString(b""));
     });
 }
 
@@ -267,31 +268,23 @@ fn decodes_managed_fixed_size_constants() {
     let mut bytes = vec![0x06, 0x80];
     bytes.extend_from_slice(&real64);
     constant_value(&bytes, |value| {
-        assert_eq!(
-            value,
-            ManagedConstantValue::Fixed {
-                leaf: 0x8006,
-                bytes: &real64
-            }
-        );
+        assert_eq!(value, Numeric::Real64(real64));
     });
     // LF_DECIMAL has 16 value bytes, LF_REAL16 has two.
     for (leaf, size) in [(0x8019_u16, 16), (0x801c, 2), (0x800f, 32)] {
         let mut bytes = leaf.to_le_bytes().to_vec();
         bytes.extend(core::iter::repeat_n(0xab, size));
         constant_value(&bytes, |value| {
-            let ManagedConstantValue::Fixed { leaf: found, bytes } = value else {
-                panic!("expected a fixed-size leaf");
-            };
-            assert_eq!((found, bytes.len()), (leaf, size));
+            assert_eq!(value.value_bytes().map(<[u8]>::len), Some(size));
+            assert_eq!(value.encoded_len(), size + 2);
         });
     }
 }
 
 #[test]
 fn rejects_managed_constants_with_unknown_leaves() {
-    // LF_UTF8STRING has no known size in this decoder.
-    let payload = managed_constant(&[0x1b, 0x80], b"a\0").0;
+    // 0x80ff is not a numeric leaf.
+    let payload = managed_constant(&[0xff, 0x80], b"a\0").0;
     assert_eq!(
         error(S_MANCONSTANT, &payload),
         ErrorKind::UnsupportedVersion

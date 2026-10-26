@@ -6,7 +6,7 @@
 //! missing tool never changes the result of the fixture build.
 
 mod dia2dump;
-mod file_version;
+pub mod file_version;
 mod patch;
 mod pdbtool;
 pub mod verifier;

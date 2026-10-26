@@ -1,19 +1,26 @@
-//! Auxiliary named streams: `/LinkInfo`, `/TMCache`, `/UDTSRCLINEUNDONE` and `sourcelink`.
+//! Auxiliary named streams: `/LinkInfo`, `/TMCache`, `/UDTSRCLINEUNDONE`, `sourcelink` and
+//! `srcsrv`.
 //!
 //! The PDB Info stream maps these names to stream indices. [`NamedStreamKind::classify`] maps a
 //! named-stream name to the decoder for its contents. Each decoder takes the stream bytes and
 //! the stream ID. Errors have the stream ID and a logical offset, and no physical offset.
 //! [`TmCache`] names unnamed type map streams; [`TypeMapStream`] decodes them.
+//!
+//! Each decoded value has an `encode` function that gives the same stream bytes again.
 
 mod link_info;
 mod source_link;
+mod source_server;
 mod tm_cache;
 mod type_map;
 mod udt_source_line_undone;
 
-pub use link_info::{LINK_INFO_VERSION_TWO, LinkInfo};
+pub use link_info::{LINK_INFO_VERSION_ONE, LINK_INFO_VERSION_TWO, LinkInfo};
 pub use source_link::SourceLink;
-pub use tm_cache::{TM_CACHE_VERSION, TmCache, TmCacheEntry};
+pub use source_server::{
+    SourceServer, SourceServerFile, SourceServerSection, SourceServerVariable,
+};
+pub use tm_cache::{TM_CACHE_VERSION, TmCache, TmCacheBuilder, TmCacheEntry};
 pub use type_map::{TypeMapKind, TypeMapStream};
 pub use udt_source_line_undone::UdtSourceLineUndone;
 
@@ -30,6 +37,9 @@ pub const UDT_SOURCE_LINE_UNDONE_STREAM_NAME: &[u8] = b"/UDTSRCLINEUNDONE";
 
 /// The name of the Source Link stream of .NET Windows PDBs.
 pub const SOURCE_LINK_STREAM_NAME: &[u8] = b"sourcelink";
+
+/// The name of the source server stream that source indexing tools add.
+pub const SOURCE_SERVER_STREAM_NAME: &[u8] = b"srcsrv";
 
 /// The decoder that a named stream needs, from its exact name bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +62,8 @@ pub enum NamedStreamKind<'a> {
     },
     /// The `sourcelink` stream: [`SourceLink`].
     SourceLink,
+    /// The `srcsrv` stream: [`SourceServer`].
+    SourceServer,
     /// A name that this reader does not recognize.
     Other,
 }
@@ -72,6 +84,7 @@ impl<'a> NamedStreamKind<'a> {
             UDT_SOURCE_LINE_UNDONE_STREAM_NAME => Self::UdtSourceLineUndone,
             HEADER_BLOCK_STREAM_NAME => Self::SourceHeaderBlock,
             SOURCE_LINK_STREAM_NAME => Self::SourceLink,
+            SOURCE_SERVER_STREAM_NAME => Self::SourceServer,
             _ => Self::Other,
         }
     }

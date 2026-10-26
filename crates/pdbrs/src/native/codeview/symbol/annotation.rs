@@ -19,6 +19,7 @@
 //! a linked PDB uses it as padding. The decoder accepts it only as the record
 //! padding at the end: fewer than four bytes, all zero.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use crate::{Error, ErrorKind, Result};
@@ -72,6 +73,92 @@ pub enum Annotation {
     },
     /// Opcode 13: set the end column.
     ChangeColumnEnd(u32),
+}
+
+impl Annotation {
+    /// Append the compressed opcode and operands to `out`.
+    ///
+    /// The encoder uses the shortest compressed form, as `CVCompressData`
+    /// in `cvinfo.h` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] for an operand that needs more
+    /// than 29 bits, or a code delta of
+    /// [`Annotation::ChangeCodeOffsetAndLineOffset`] above 15. Returns
+    /// [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let (opcode, first, second) = match *self {
+            Self::CodeOffset(value) => (1, value, None),
+            Self::ChangeCodeOffsetBase(value) => (2, value, None),
+            Self::ChangeCodeOffset(value) => (3, value, None),
+            Self::ChangeCodeLength(value) => (4, value, None),
+            Self::ChangeFile(value) => (5, value, None),
+            Self::ChangeLineOffset(value) => (6, encode_signed(value)?, None),
+            Self::ChangeLineEndDelta(value) => (7, value, None),
+            Self::ChangeRangeKind(value) => (8, value, None),
+            Self::ChangeColumnStart(value) => (9, value, None),
+            Self::ChangeColumnEndDelta(value) => (10, encode_signed(value)?, None),
+            Self::ChangeCodeOffsetAndLineOffset {
+                code_delta,
+                line_delta,
+            } => {
+                let line = encode_signed(line_delta)?;
+                // The operand has 29 bits: 4 for the code delta, 25 for the line.
+                if code_delta > 0xf || line >> 25 != 0 {
+                    return Err(too_large());
+                }
+                (11, (line << 4) | code_delta, None)
+            }
+            Self::ChangeCodeLengthAndCodeOffset {
+                code_length,
+                code_delta,
+            } => (12, code_length, Some(code_delta)),
+            Self::ChangeColumnEnd(value) => (13, value, None),
+        };
+        compress(out, opcode)?;
+        compress(out, first)?;
+        if let Some(second) = second {
+            compress(out, second)?;
+        }
+        Ok(())
+    }
+}
+
+/// Return the error for an operand that does not fit a compressed integer.
+fn too_large() -> Error {
+    Error::new(ErrorKind::LimitExceeded, None)
+        .with_context("binary annotation operand does not fit in 29 bits")
+}
+
+/// Append a compressed unsigned integer (`CVCompressData` in `cvinfo.h`).
+fn compress(out: &mut Vec<u8>, value: u32) -> Result<()> {
+    let bytes = value.to_be_bytes();
+    let encoded: &[u8] = if value <= 0x7f {
+        &bytes[3..]
+    } else if value <= 0x3fff {
+        &[bytes[2] | 0x80, bytes[3]]
+    } else if value <= 0x1fff_ffff {
+        &[bytes[0] | 0xc0, bytes[1], bytes[2], bytes[3]]
+    } else {
+        return Err(too_large());
+    };
+    out.try_reserve(encoded.len()).map_err(|_| {
+        Error::new(ErrorKind::LimitExceeded, None)
+            .with_context("binary annotation output cannot be allocated")
+    })?;
+    out.extend_from_slice(encoded);
+    Ok(())
+}
+
+/// Encode a signed operand: the magnitude shifted left by one and the sign
+/// in bit 0 (`EncodeSignedInt32` in `cvinfo.h`).
+fn encode_signed(value: i32) -> Result<u32> {
+    let magnitude = value.unsigned_abs();
+    if magnitude > 0x0fff_ffff {
+        return Err(too_large());
+    }
+    Ok((magnitude << 1) | u32::from(value < 0))
 }
 
 /// A validated sequence of binary annotations.

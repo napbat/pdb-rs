@@ -9,7 +9,9 @@
 //! The value is 0xffffffff for an external symbol that the linker resolved
 //! to an absolute value, for example `__guard_flags`.
 
-use super::{entry_list, invalid};
+use alloc::vec::Vec;
+
+use super::{entry_list, invalid, put_u32};
 use crate::Result;
 
 /// The size of one entry.
@@ -42,4 +44,33 @@ impl<'a> CoffSymbolRvas<'a> {
         }
         Ok(Self::new(data))
     }
+
+    /// Append the subsection data to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded)
+    /// if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        write_rvas(self.iter(), out)
+    }
+}
+
+/// Append the data of a `DEBUG_S_COFF_SYMBOL_RVA` subsection to `out`: one
+/// RVA for each COFF symbol table record of the object file.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if
+/// the output cannot grow.
+pub fn encode_coff_symbol_rvas(rvas: &[u32], out: &mut Vec<u8>) -> Result<()> {
+    write_rvas(rvas.iter().copied(), out)
+}
+
+/// Append each RVA of `rvas` to `out`.
+fn write_rvas(rvas: impl Iterator<Item = u32>, out: &mut Vec<u8>) -> Result<()> {
+    for rva in rvas {
+        put_u32(out, rva)?;
+    }
+    Ok(())
 }

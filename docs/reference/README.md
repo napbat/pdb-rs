@@ -24,6 +24,7 @@ MSF 7.0 specifies the container. PDB streams and CodeView records have separate 
 Neither documentation set is complete. Microsoft explicitly marks its pdb-rs documents as non-authoritative.
 LLVM's record lists also omit some record kinds. Do not use either list as a closed-world support boundary.
 Resolve conflicts through pinned implementation sources and independent producer and consumer fixtures.
+The [native coverage](../design/native-coverage.md#reference-reconciliation) document lists each imported document with its conflicts and the undocumented assumptions of pdbrs.
 
 LLVM uses MyST roles, labels and directives. A plain Markdown viewer does not render all cross-references.
 Relative file paths are preserved. Links outside the copied trees still require upstream resources.

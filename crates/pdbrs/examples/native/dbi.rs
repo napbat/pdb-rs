@@ -1,13 +1,43 @@
 //! The DBI substreams, the optional debug streams and address translation.
 
-use pdbrs::ErrorKind;
 use pdbrs::io::FileReader;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
-use pdbrs::native::dbi::{Dbi, DebugStream};
-use pdbrs::native::section::SectionHeaders;
+use pdbrs::native::dbi::{Dbi, DbiBuilder, DebugStream, OwnedModule, Substream};
+use pdbrs::native::msf::StreamId;
 
 use crate::{Context, Outcome, Report};
+
+/// Encode the DBI stream, each substream, each module record and the builder model again.
+///
+/// Each encoder must give the bytes of the stream.
+pub(crate) fn reencode_dbi(pdb: &Pdb<FileReader>, dbi: &Dbi, report: &mut Report) -> Outcome {
+    let original = pdb.stream_bytes(StreamId(3))?;
+    let mut encoded = Vec::new();
+    dbi.encode(&mut encoded)?;
+    report.reencoded("DBI streams", &original, &encoded);
+    let mut rebuilt = Vec::new();
+    DbiBuilder::from_dbi(dbi)?.encode(&mut rebuilt)?;
+    report.reencoded("DBI streams from the builder model", &original, &rebuilt);
+    for kind in Substream::ALL {
+        let mut encoded = Vec::new();
+        dbi.encode_substream(kind, &mut encoded)?;
+        report.reencoded("DBI substreams", dbi.substream(kind), &encoded);
+    }
+    for module in dbi.modules() {
+        let module = module?;
+        let start = usize::try_from(module.offset)? - dbi.substream_offset(Substream::ModuleInfo);
+        let mut encoded = Vec::new();
+        OwnedModule::from_module(&module)?.encode(&mut encoded)?;
+        let end = start + encoded.len();
+        let stored = dbi
+            .substream(Substream::ModuleInfo)
+            .get(start..end)
+            .ok_or("module record is outside the module info substream")?;
+        report.reencoded("DBI module records", stored, &encoded);
+    }
+    Ok(())
+}
 
 /// Load the section-header stream and claim every optional debug stream.
 ///
@@ -21,15 +51,58 @@ pub(crate) fn section_header_bytes(
     for (slot, id) in dbi.debug_streams().enumerate() {
         let Some(id) = id else { continue };
         report.claim(id);
+        let original = pdb.stream_bytes(id)?;
         if slot == DebugStream::SectionHeader.index() {
-            headers = Some(pdb.stream_bytes(id)?);
-        } else if slot == DebugStream::OriginalSectionHeader.index() {
-            SectionHeaders::parse(&pdb.stream_bytes(id)?)?;
-        } else if slot != DebugStream::Fpo.index() && slot != DebugStream::NewFpo.index() {
-            report.undecoded(format!("optional debug stream slot {slot}"));
+            headers = Some(original.clone());
         }
+        let Some(encoded) = encode_debug_stream(pdb, dbi, slot)? else {
+            report.undecoded(format!("optional debug stream slot {slot}"));
+            continue;
+        };
+        report.reencoded("optional debug streams", &original, &encoded);
     }
     Ok(headers)
+}
+
+/// Decode the optional debug stream in `slot` and encode it again.
+///
+/// Return `None` for a slot after the slots that [`DebugStream`] names.
+fn encode_debug_stream(pdb: &Pdb<FileReader>, dbi: &Dbi, slot: usize) -> Outcome<Option<Vec<u8>>> {
+    let missing = || "optional debug stream is missing";
+    let kinds = [
+        DebugStream::Fpo,
+        DebugStream::Exception,
+        DebugStream::Fixup,
+        DebugStream::OmapToSource,
+        DebugStream::OmapFromSource,
+        DebugStream::SectionHeader,
+        DebugStream::TokenRidMap,
+        DebugStream::Xdata,
+        DebugStream::Pdata,
+        DebugStream::NewFpo,
+        DebugStream::OriginalSectionHeader,
+    ];
+    let Some(&kind) = kinds.get(slot) else {
+        return Ok(None);
+    };
+    let bytes = match kind {
+        DebugStream::Fpo => pdb.fpo(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::NewFpo => pdb.frame_data(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Exception => pdb.exception_data(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Fixup => pdb.fixups(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::OmapToSource | DebugStream::OmapFromSource => {
+            pdb.omap(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
+        }
+        DebugStream::SectionHeader | DebugStream::OriginalSectionHeader => pdb
+            .section_headers(dbi, kind)?
+            .ok_or_else(missing)?
+            .to_bytes()?,
+        DebugStream::TokenRidMap => pdb.token_rid_map(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Xdata | DebugStream::Pdata => {
+            pdb.debug_blob(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
+        }
+    };
+    Ok(Some(bytes))
 }
 
 /// Decode the FPO and new-FPO streams, and resolve each frame program in `/names`.
@@ -99,7 +172,7 @@ pub(crate) fn debug_info_tables(
     {
         report.add("EC names", ec.entries().count());
     }
-    report.supported(dbi.verify_type_server_map(), "DBI type server map")?;
+    report.add("type servers", dbi.type_server_map()?.len());
     Ok(module_count)
 }
 
@@ -119,10 +192,6 @@ pub(crate) fn translate(
         // Section 0 and the absolute segment after the last section have no RVA.
         Err(_) if section == 0 || usize::from(section) > map.sections().len() => {
             report.add("addresses without an RVA", 1);
-        }
-        // OMAP translation is not implemented.
-        Err(error) if error.kind() == ErrorKind::UnsupportedVersion => {
-            report.add("addresses not translated (OMAP)", 1);
         }
         Err(error) => return Err(error.into()),
     }

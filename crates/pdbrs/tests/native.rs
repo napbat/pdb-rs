@@ -97,13 +97,23 @@ fn with_debug_info(info_age: u32, dbi_age: u32, debug_target: u16) -> Vec<u8> {
 }
 
 #[test]
-fn rejects_inconsistent_info_and_dbi_ages() {
+fn rejects_a_dbi_age_larger_than_the_info_age() {
     let bytes = with_debug_info(1, 2, u16::MAX);
     let pdb = Pdb::parse(&bytes).unwrap();
     assert_eq!(
         pdb.debug_info().unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
+}
+
+#[test]
+fn accepts_an_info_age_larger_than_the_dbi_age() {
+    // `pdbstr -w` increments only the Info age.
+    let bytes = with_debug_info(2, 1, u16::MAX);
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let dbi = pdb.debug_info().unwrap().unwrap();
+    assert_eq!(dbi.header().age, 1);
+    assert_eq!(pdb.info().identity().age(), 2);
 }
 
 #[test]

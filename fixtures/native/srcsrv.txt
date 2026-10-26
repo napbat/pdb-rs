@@ -1,0 +1,17 @@
+SRCSRV: ini ------------------------------------------------
+VERSION=2
+INDEXVERSION=2
+VERCTRL=http
+DATETIME=Mon Jan 01 00:00:00 2024
+SRCSRV: variables ------------------------------------------
+SRCSRVVERCTRL=http
+HTTP_ALIAS=https://raw.githubusercontent.com/napbat/pdbrs/main
+HTTP_EXTRACT_TARGET=%HTTP_ALIAS%/%var2%
+SRCSRVTRG=%HTTP_EXTRACT_TARGET%
+SRCSRV: source files ---------------------------------------
+main.cpp*fixtures/native/main.cpp
+types.cpp*fixtures/native/types.cpp
+control.cpp*fixtures/native/control.cpp
+big_enum.cpp*fixtures/native/big_enum.cpp
+c_api.c*fixtures/native/c_api.c
+SRCSRV: end ------------------------------------------------

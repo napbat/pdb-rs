@@ -243,6 +243,8 @@ raw_enum! {
         NearFast = 0x04,
         /// Far fast call.
         FarFast = 0x05,
+        /// A skipped (unused) call index (`CV_CALL_SKIPPED` in `cvconst.h`).
+        Skipped = 0x06,
         /// Near standard call.
         NearStdCall = 0x07,
         /// Far standard call.

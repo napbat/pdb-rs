@@ -1,8 +1,9 @@
 //! `DEBUG_S_LINES` subsections: line blocks of one code contribution.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{entry_list, invalid, read_u32, too_large, truncated};
+use super::{entry_list, invalid, put_u16, put_u32, read_u32, to_u32, too_large, truncated};
 use crate::{Error, ErrorKind, Result};
 
 /// The line number that tells a debugger to always step into the code
@@ -56,10 +57,38 @@ pub struct LinesHeader {
 }
 
 impl LinesHeader {
+    /// Create a header from its fields.
+    #[must_use]
+    pub const fn new(code_offset: u32, segment: u16, flags: u16, code_size: u32) -> Self {
+        Self {
+            code_offset,
+            segment,
+            flags,
+            code_size,
+        }
+    }
+
     /// Return `true` if each block has column entries.
     #[must_use]
     pub const fn has_columns(&self) -> bool {
         self.flags & HAVE_COLUMNS != 0
+    }
+
+    /// Append the 12-byte header to `out`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the flags have a bit other than
+    ///   the column flag.
+    /// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        if self.flags & !HAVE_COLUMNS != 0 {
+            return Err(invalid("line subsection header has unknown flags"));
+        }
+        put_u32(out, self.code_offset)?;
+        put_u16(out, self.segment)?;
+        put_u16(out, self.flags)?;
+        put_u32(out, self.code_size)
     }
 }
 
@@ -164,6 +193,23 @@ impl<'a> LinesSubsection<'a> {
             left: self.block_count,
         }
     }
+
+    /// Append the subsection data to `out`: the header and all blocks.
+    ///
+    /// The output is equal to the data that [`LinesSubsection::decode`]
+    /// read.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`LinesHeader::encode`] and
+    /// [`LineBlock::encode`].
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.header.encode(out)?;
+        for block in self.blocks() {
+            block.encode(out)?;
+        }
+        Ok(())
+    }
 }
 
 /// The lines of one source file in a `DEBUG_S_LINES` subsection.
@@ -179,6 +225,89 @@ pub struct LineBlock<'a> {
     ///
     /// The list has one entry for each line entry, in the same order.
     pub columns: Option<ColumnEntries<'a>>,
+}
+
+impl LineBlock<'_> {
+    /// Append the block to `out`: the block header, the line entries and
+    /// the column entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`encode_line_block`].
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        write_block(
+            self.checksum_offset,
+            self.lines.iter(),
+            self.columns.map(|columns| columns.iter()),
+            out,
+        )
+    }
+}
+
+/// Append one block of a `DEBUG_S_LINES` subsection to `out`.
+///
+/// Give `columns` only if the subsection header has the column flag
+/// ([`LinesHeader::has_columns`]). Give one column entry for each line
+/// entry. The function computes the block size.
+///
+/// # Errors
+///
+/// - [`ErrorKind::InvalidFormat`] if the number of column entries is not
+///   the number of line entries, or if a line entry does not fit its bit
+///   fields ([`LineEntry::encode`]).
+/// - [`ErrorKind::LimitExceeded`] if the count or the block size does not
+///   fit in 32 bits, or if the output cannot grow.
+pub fn encode_line_block(
+    checksum_offset: u32,
+    lines: &[LineEntry],
+    columns: Option<&[ColumnEntry]>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    write_block(
+        checksum_offset,
+        lines.iter().copied(),
+        columns.map(|columns| columns.iter().copied()),
+        out,
+    )
+}
+
+/// Append one block with the entries of `lines` and `columns` to `out`.
+fn write_block(
+    checksum_offset: u32,
+    lines: impl ExactSizeIterator<Item = LineEntry>,
+    columns: Option<impl ExactSizeIterator<Item = ColumnEntry>>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    let count = lines.len();
+    let entry_size = match &columns {
+        Some(columns) if columns.len() != count => {
+            return Err(invalid(
+                "line block has a different number of column entries and line entries",
+            ));
+        }
+        Some(_) => LINE_SIZE + COLUMN_SIZE,
+        None => LINE_SIZE,
+    };
+    let size = count
+        .checked_mul(entry_size)
+        .and_then(|size| size.checked_add(BLOCK_HEADER_SIZE))
+        .ok_or_else(|| too_large("line block size does not fit in 32 bits"))?;
+    put_u32(out, checksum_offset)?;
+    put_u32(
+        out,
+        to_u32(count, "line block count does not fit in 32 bits")?,
+    )?;
+    put_u32(
+        out,
+        to_u32(size, "line block size does not fit in 32 bits")?,
+    )?;
+    for line in lines {
+        line.encode(out)?;
+    }
+    for column in columns.into_iter().flatten() {
+        column.encode(out)?;
+    }
+    Ok(())
 }
 
 /// One line entry (`CV_Line_t`).
@@ -199,6 +328,17 @@ pub struct LineEntry {
 }
 
 impl LineEntry {
+    /// Create a line entry from its fields.
+    #[must_use]
+    pub const fn new(offset: u32, line_start: u32, end_delta: u8, is_statement: bool) -> Self {
+        Self {
+            offset,
+            line_start,
+            end_delta,
+            is_statement,
+        }
+    }
+
     /// Decode a serialized line entry.
     const fn parse(bytes: [u8; LINE_SIZE]) -> Self {
         let [o0, o1, o2, o3, f0, f1, f2, f3] = bytes;
@@ -211,6 +351,29 @@ impl LineEntry {
             end_delta,
             is_statement: flags & STATEMENT_BIT != 0,
         }
+    }
+
+    /// Append the 8-byte entry to `out`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the start line does not fit in
+    ///   24 bits or the end line delta does not fit in 7 bits.
+    /// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        if self.line_start & !START_LINE_MASK != 0 {
+            return Err(invalid("line number does not fit in 24 bits"));
+        }
+        let end_delta = u32::from(self.end_delta);
+        if end_delta & !END_DELTA_MASK != 0 {
+            return Err(invalid("line end delta does not fit in 7 bits"));
+        }
+        let statement = if self.is_statement { STATEMENT_BIT } else { 0 };
+        put_u32(out, self.offset)?;
+        put_u32(
+            out,
+            self.line_start | end_delta << END_DELTA_SHIFT | statement,
+        )
     }
 }
 
@@ -225,6 +388,12 @@ pub struct ColumnEntry {
 }
 
 impl ColumnEntry {
+    /// Create a column entry from its fields.
+    #[must_use]
+    pub const fn new(start: u16, end: u16) -> Self {
+        Self { start, end }
+    }
+
     /// Decode a serialized column entry.
     const fn parse(bytes: [u8; COLUMN_SIZE]) -> Self {
         let [s0, s1, e0, e1] = bytes;
@@ -232,6 +401,16 @@ impl ColumnEntry {
             start: u16::from_le_bytes([s0, s1]),
             end: u16::from_le_bytes([e0, e1]),
         }
+    }
+
+    /// Append the 4-byte entry to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        put_u16(out, self.start)?;
+        put_u16(out, self.end)
     }
 }
 

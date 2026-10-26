@@ -22,10 +22,12 @@ pub mod index;
 pub mod numeric;
 pub mod type_record;
 
+pub(crate) mod writer;
+
 pub mod symbol;
 
 use index::{IdIndex, TypeIndex};
-use numeric::Integer;
+use numeric::Numeric;
 
 /// The size of the length field and the kind field at the start of a record.
 const PREFIX_LEN: usize = 4;
@@ -252,12 +254,12 @@ impl<'a> Fields<'a> {
         Ok(name)
     }
 
-    /// Read an integer numeric leaf.
+    /// Read a numeric leaf of any kind.
     ///
-    /// A truncated leaf returns the configured error. A non-integer leaf
+    /// A truncated leaf returns the configured error. An unknown leaf tag
     /// returns [`ErrorKind::UnsupportedVersion`].
-    pub(crate) fn integer(&mut self) -> Result<Integer> {
-        let (value, rest) = Integer::parse_prefix(self.bytes).map_err(|error| {
+    pub(crate) fn numeric(&mut self) -> Result<Numeric<'a>> {
+        let (value, rest) = Numeric::parse_prefix(self.bytes).map_err(|error| {
             if error.kind() == ErrorKind::UnexpectedEof {
                 self.short()
             } else {
@@ -290,18 +292,6 @@ impl<'a> Fields<'a> {
         } else {
             Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("CodeView type record has invalid padding"))
-        }
-    }
-
-    /// Make sure that the remaining bytes are fewer than four zero bytes.
-    ///
-    /// Symbol records in PDB streams pad with zero bytes.
-    pub(crate) fn finish_zero_padding(&self) -> Result<()> {
-        if self.bytes.len() < 4 && self.bytes.iter().all(|&byte| byte == 0) {
-            Ok(())
-        } else {
-            Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("CodeView symbol record has invalid padding"))
         }
     }
     /// Return the bytes that are not read yet.

@@ -4,13 +4,42 @@
 //! `Thunk32Sym`, `InlineSiteSym`, `CallerSym`, `CallSiteInfoSym` and
 //! `JumpTableSym` in LLVM `SymbolRecordMapping.cpp`. The reserved field of
 //! `S_CALLSITEINFO` comes from `CALLSITEINFO` in `cvinfo.h`.
+//! `INLINESITESYM2` and `FUNCTIONLIST` in `cvinfo.h` give the layouts of
+//! `S_INLINESITE2` and `S_CALLERS`.
+//!
+//! No pinned reference gives the layout of the `S_GPROC32EX` kinds. The
+//! DIA SDK of Visual Studio 18 has debug type records for its `cvinfo.h` in
+//! `lib/amd64/diaguids.lib`. They give `PROCSYM32EX`: the `PROCSYM32`
+//! layout with a 2-byte `CV_EXPROCFLAGS` in place of the 1-byte
+//! `CV_PROCFLAGS`.
 
 use core::iter::FusedIterator;
 
 use super::super::Fields;
 use super::super::index::{IdIndex, TypeIndex};
+use super::super::writer::FieldWriter;
 use super::{BinaryAnnotations, SectionOffset};
 use crate::{Error, ErrorKind, Result};
+
+/// The kind of a module-local data-parallel C++ procedure start (`S_LPROC32_DPC`).
+pub const S_LPROC32_DPC: u16 = 0x1155;
+/// The kind of a module-local data-parallel C++ procedure start with an ID
+/// index (`S_LPROC32_DPC_ID`).
+pub const S_LPROC32_DPC_ID: u16 = 0x1156;
+/// The kind of a list of callers (`S_CALLERS`).
+pub const S_CALLERS: u16 = 0x115b;
+/// The kind of an inline site start with an invocation count (`S_INLINESITE2`).
+pub const S_INLINESITE2: u16 = 0x115d;
+/// The kind of a global procedure start with extended flags (`S_GPROC32EX`).
+pub const S_GPROC32EX: u16 = 0x1172;
+/// The kind of a module-local procedure start with extended flags (`S_LPROC32EX`).
+pub const S_LPROC32EX: u16 = 0x1173;
+/// The kind of a global procedure start with extended flags and an ID index
+/// (`S_GPROC32EX_ID`).
+pub const S_GPROC32EX_ID: u16 = 0x1174;
+/// The kind of a module-local procedure start with extended flags and an ID
+/// index (`S_LPROC32EX_ID`).
+pub const S_LPROC32EX_ID: u16 = 0x1175;
 
 flags! {
     /// The flags of a procedure or a label (`CV_PROCFLAGS`).
@@ -46,7 +75,26 @@ pub enum ProcedureType {
     Id(IdIndex),
 }
 
-/// A procedure start record (`S_GPROC32`, `S_LPROC32` and their `_ID` kinds).
+flags! {
+    /// The second flags byte of an extended procedure (`CV_EXPROCFLAGS`).
+    ///
+    /// The names come from the bit fields of `CV_EXPROCFLAGS` in the debug
+    /// type records of the DIA SDK. No reference describes the bits.
+    ExtendedProcedureFlags(u8) {
+        /// `CV_PFLAG_COMPGEN`: the compiler generated the procedure.
+        COMPILER_GENERATED = 1 << 0;
+        /// `CV_PFLAG_CXXMOD`: the procedure belongs to a C++ module.
+        CXX_MODULE = 1 << 1;
+        /// `CV_PFLAG_CXXMODEXP`: a C++ module exports the procedure.
+        CXX_MODULE_EXPORT = 1 << 2;
+    }
+}
+
+/// A procedure start record.
+///
+/// The kinds are [`S_GPROC32`](super::S_GPROC32),
+/// [`S_LPROC32`](super::S_LPROC32), [`S_LPROC32_DPC`], the `_ID` kinds of
+/// these and the `EX` kinds, for example [`S_GPROC32EX`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Procedure<'a> {
@@ -69,13 +117,16 @@ pub struct Procedure<'a> {
     pub address: SectionOffset,
     /// The flags.
     pub flags: ProcedureFlags,
+    /// The second flags byte of the `EX` kinds, or `None` for the other kinds.
+    pub extended_flags: Option<ExtendedProcedureFlags>,
     /// The name.
     pub name: &'a [u8],
 }
 
 impl<'a> Procedure<'a> {
-    /// Read the fields. Set `id` for the `_ID` kinds.
-    pub(super) fn read(fields: &mut Fields<'a>, id: bool) -> Result<Self> {
+    /// Read the fields. Set `id` for the `_ID` kinds and `extended` for the
+    /// `EX` kinds.
+    pub(super) fn read(fields: &mut Fields<'a>, id: bool, extended: bool) -> Result<Self> {
         let parent = fields.u32()?;
         let end = fields.u32()?;
         let next = fields.u32()?;
@@ -89,6 +140,11 @@ impl<'a> Procedure<'a> {
         };
         let address = SectionOffset::read(fields)?;
         let flags = ProcedureFlags(fields.u8()?);
+        let extended_flags = if extended {
+            Some(ExtendedProcedureFlags(fields.u8()?))
+        } else {
+            None
+        };
         let name = fields.name()?;
         Ok(Self {
             parent,
@@ -100,8 +156,36 @@ impl<'a> Procedure<'a> {
             signature,
             address,
             flags,
+            extended_flags,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.parent)?;
+        out.u32(self.end)?;
+        out.u32(self.next)?;
+        out.u32(self.code_length)?;
+        out.u32(self.debug_start)?;
+        out.u32(self.debug_end)?;
+        self.signature.write(out)?;
+        self.address.write(out)?;
+        out.u8(self.flags.0)?;
+        if let Some(flags) = self.extended_flags {
+            out.u8(flags.0)?;
+        }
+        out.name(self.name)
+    }
+}
+
+impl ProcedureType {
+    /// Write the index as a `u32`.
+    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+        match self {
+            Self::Type(index) => out.type_index(index),
+            Self::Id(index) => out.id_index(index),
+        }
     }
 }
 
@@ -221,6 +305,16 @@ impl FrameProcedure {
             flags,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.frame_size)?;
+        out.u32(self.padding_size)?;
+        out.u32(self.padding_offset)?;
+        out.u32(self.callee_saved_size)?;
+        self.exception_handler.write(out)?;
+        out.u32(self.flags.0)
+    }
 }
 
 /// A block start record (`S_BLOCK32`).
@@ -255,6 +349,15 @@ impl<'a> Block<'a> {
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.parent)?;
+        out.u32(self.end)?;
+        out.u32(self.code_length)?;
+        self.address.write(out)?;
+        out.name(self.name)
+    }
 }
 
 /// A code label record (`S_LABEL32`).
@@ -280,6 +383,13 @@ impl<'a> Label<'a> {
             flags,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.address.write(out)?;
+        out.u8(self.flags.0)?;
+        out.name(self.name)
     }
 }
 
@@ -356,9 +466,28 @@ impl<'a> Thunk<'a> {
             variant,
         })
     }
+
+    /// Write the fields.
+    ///
+    /// A [`ThunkOrdinal::STANDARD`] thunk with variant data gives
+    /// [`ErrorKind::InvalidFormat`], because the decoder rejects it.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        if self.ordinal == ThunkOrdinal::STANDARD && !self.variant.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("standard S_THUNK32 record has variant data"));
+        }
+        out.u32(self.parent)?;
+        out.u32(self.end)?;
+        out.u32(self.next)?;
+        self.address.write(out)?;
+        out.u16(self.length)?;
+        out.u8(self.ordinal.0)?;
+        out.name(self.name)?;
+        out.bytes(self.variant)
+    }
 }
 
-/// An inline site start record (`S_INLINESITE`).
+/// An inline site start record (`S_INLINESITE` and [`S_INLINESITE2`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineSite<'a> {
@@ -368,28 +497,115 @@ pub struct InlineSite<'a> {
     pub end: u32,
     /// The ID index of the inlined function in the IPI stream.
     pub inlinee: IdIndex,
+    /// The entry count of an [`S_INLINESITE2`] record, or `None` for an
+    /// `S_INLINESITE` record.
+    pub invocations: Option<u32>,
     /// The binary annotations without the trailing padding.
     pub annotations: BinaryAnnotations<'a>,
 }
 
 impl<'a> InlineSite<'a> {
-    /// Read the fields.
-    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
+    /// Read the fields. Set `counted` for [`S_INLINESITE2`].
+    pub(super) fn read(fields: &mut Fields<'a>, counted: bool) -> Result<Self> {
         let parent = fields.u32()?;
         let end = fields.u32()?;
         let inlinee = fields.id_index()?;
+        let invocations = if counted { Some(fields.u32()?) } else { None };
         let annotations = BinaryAnnotations::new(fields.rest())?;
         fields.bytes(fields.rest().len())?;
         Ok(Self {
             parent,
             end,
             inlinee,
+            invocations,
             annotations,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.parent)?;
+        out.u32(self.end)?;
+        out.id_index(self.inlinee)?;
+        if let Some(invocations) = self.invocations {
+            out.u32(invocations)?;
+        }
+        out.bytes(self.annotations.bytes())
+    }
 }
 
-/// A counted list of ID indices (`S_INLINEES` and `S_CALLEES`).
+/// A list of functions with optional invocation counts (`S_CALLEES` and
+/// [`S_CALLERS`]).
+///
+/// The counts parallel the functions. `cvinfo.h` says that the count array
+/// can be shorter than the function list: a missing count is zero.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FunctionList<'a> {
+    /// The ID indices of the functions.
+    functions: IdList<'a>,
+    /// The little-endian 32-bit invocation counts.
+    invocations: &'a [[u8; 4]],
+}
+
+impl<'a> FunctionList<'a> {
+    /// Read the function list and the counts that follow it.
+    ///
+    /// The counts fill whole 4-byte units of the rest of the record, up to
+    /// the number of functions.
+    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
+        let functions = IdList::read(fields)?;
+        let count = functions.len().min(fields.rest().len() / 4);
+        let (invocations, _) = fields.bytes(count * 4)?.as_chunks();
+        Ok(Self {
+            functions,
+            invocations,
+        })
+    }
+
+    /// Create a list from functions and little-endian 32-bit counts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if the length of `invocations`
+    /// is not a multiple of 4 or if it holds more counts than functions.
+    pub fn new(functions: IdList<'a>, invocations: &'a [u8]) -> Result<Self> {
+        let (invocations, rest) = invocations.as_chunks();
+        if !rest.is_empty() || invocations.len() > functions.len() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("function list has invalid invocation counts"));
+        }
+        Ok(Self {
+            functions,
+            invocations,
+        })
+    }
+
+    /// Return the ID indices of the functions.
+    #[must_use]
+    pub const fn functions(&self) -> IdList<'a> {
+        self.functions
+    }
+
+    /// Return the stored invocation counts. A function without a count has
+    /// the count 0.
+    pub fn invocations(&self) -> impl ExactSizeIterator<Item = u32> + 'a {
+        self.invocations
+            .iter()
+            .map(|bytes| u32::from_le_bytes(*bytes))
+    }
+
+    /// Write the count, the functions and the invocation counts.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.functions.write(out)?;
+        for entry in self.invocations {
+            out.bytes(entry)?;
+        }
+        Ok(())
+    }
+}
+
+/// A counted list of ID indices (`S_INLINEES` and the functions of a
+/// [`FunctionList`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct IdList<'a> {
     /// The little-endian 32-bit indices.
@@ -430,6 +646,30 @@ impl<'a> IdList<'a> {
         IdListIter {
             entries: self.entries.iter(),
         }
+    }
+
+    /// Create a list from little-endian 32-bit indices without a count.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
+    /// a multiple of 4.
+    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
+        let (entries, rest) = bytes.as_chunks();
+        if !rest.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("symbol index list is not a multiple of 4 bytes"));
+        }
+        Ok(Self { entries })
+    }
+
+    /// Write the `u32` count and then the indices.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(count_u32(self.entries.len())?)?;
+        for entry in self.entries {
+            out.bytes(entry)?;
+        }
+        Ok(())
     }
 }
 
@@ -499,6 +739,13 @@ impl CallSiteInfo {
             address,
             type_index,
         })
+    }
+
+    /// Write the fields and a zero reserved field.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.address.write(out)?;
+        out.u16(0)?;
+        out.type_index(self.type_index)
     }
 }
 
@@ -573,4 +820,23 @@ impl JumpTable {
             entry_count,
         })
     }
+
+    /// Write the fields in the order of [`JumpTable::read`].
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.base.write(out)?;
+        out.u16(self.entry.0)?;
+        out.u32(self.branch.offset)?;
+        out.u32(self.table.offset)?;
+        out.u16(self.branch.section)?;
+        out.u16(self.table.section)?;
+        out.u32(self.entry_count)
+    }
+}
+
+/// Convert a list length to a `u32` count field.
+pub(super) fn count_u32(count: usize) -> Result<u32> {
+    u32::try_from(count).map_err(|_| {
+        Error::new(ErrorKind::LimitExceeded, None)
+            .with_context("symbol list count does not fit in 32 bits")
+    })
 }

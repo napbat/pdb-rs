@@ -24,9 +24,14 @@
 //! linear probing from `hash % capacity` (`Map::find` in `map.h`). A lookup stops at the first
 //! bucket that is neither present nor deleted.
 
+mod owned;
+
+pub use owned::{HashTableKeys, HashTableProducer, OwnedHashTable};
+
 use alloc::vec::Vec;
 
 use super::msf::StreamId;
+use super::output::{Output, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// The size of a key or a bit vector word in bytes.
@@ -44,6 +49,14 @@ pub trait HashTableValue<'a>: Sized {
     /// Returns an error if the bytes do not hold a valid value. The table adds the stream ID
     /// and the logical offset of the value.
     fn decode(bytes: &'a [u8]) -> Result<Self>;
+
+    /// Append exactly [`Self::SIZE`] bytes for the value to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow, or an error if a field
+    /// does not fit its serialized width.
+    fn encode(&self, out: &mut Vec<u8>) -> Result<()>;
 }
 
 impl HashTableValue<'_> for u32 {
@@ -54,6 +67,10 @@ impl HashTableValue<'_> for u32 {
             Error::new(ErrorKind::InvalidFormat, None).with_context("hash table value size")
         })?;
         Ok(Self::from_le_bytes(word))
+    }
+
+    fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        Output::new(out).u32(*self)
     }
 }
 
@@ -174,6 +191,30 @@ impl<'a, V: HashTableValue<'a>> HashTable<'a, V> {
             entries_offset,
             entry_size,
         })
+    }
+
+    /// Append the serialized table to `out`.
+    ///
+    /// The output keeps the capacity, the bit vector words and the bucket of each entry, so a
+    /// decoded table gives the same bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if a count does not fit in `u32` or the output
+    /// cannot grow, or an error from [`HashTableValue::encode`].
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let mut output = Output::new(out);
+        output.u32(to_u32(self.entries.len(), "hash table size")?)?;
+        output.u32(self.capacity)?;
+        for words in [self.present, self.deleted] {
+            output.u32(to_u32(words.len() / WORD, "hash table bit vector")?)?;
+            output.bytes(words)?;
+        }
+        for entry in &self.entries {
+            Output::new(out).u32(entry.key)?;
+            entry.value.encode(out)?;
+        }
+        Ok(())
     }
 }
 

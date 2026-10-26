@@ -12,18 +12,29 @@
 //! Other structures refer to a name by its byte offset in the string buffer.
 //! [`StringTable::get`] resolves such an offset.
 //!
-//! Version 1 tables put each name at bucket `hash_string_v1(name) %
-//! bucket_count` and use linear probing on collisions. This decoder looks up
-//! and checks version 1 buckets. It reads version 2 tables, but it does not
-//! hash their names.
+//! A table puts each name at bucket [`HashVersion::hash`] `% bucket_count` and
+//! uses linear probing on collisions. Version 1 uses [`hash_string_v1`] and
+//! version 2 uses [`hash_string_v2`] (Microsoft `NMT::setHashFunc`).
+//! [`StringTable::find`] and [`StringTable::verify_buckets`] use the hash of the
+//! table version.
+//!
+//! [`StringTable::encode`] writes a decoded table again with the same bytes.
+//! [`StringTableBuilder`] makes a new table or changes a table with the
+//! insertion rules of Microsoft `NMT` (`PDB/include/nmt.h`).
 //!
 //! The layout follows LLVM `PDBStringTable.cpp` and `PDBStringTableBuilder.cpp`
 //! and the `PDBStringTableHeader` type in `RawTypes.h`.
 
+mod builder;
+
+pub use builder::StringTableBuilder;
+
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::codeview::Fields;
-use super::hash::hash_string_v1;
+use super::hash::{hash_string_v1, hash_string_v2};
+use super::output::{Output, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// The signature at the start of a string table.
@@ -32,9 +43,9 @@ pub const SIGNATURE: u32 = 0xeffe_effe;
 /// The hash function version of a string table.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum HashVersion {
-    /// Version 1: [`hash_string_v1`] with linear probing.
+    /// Version 1 (`verLongHash`): [`hash_string_v1`] with linear probing.
     V1,
-    /// Version 2. This crate does not hash version 2 names.
+    /// Version 2 (`verLongHashV2`): [`hash_string_v2`] with linear probing.
     V2,
 }
 
@@ -46,6 +57,19 @@ impl HashVersion {
             Self::V1 => 1,
             Self::V2 => 2,
         }
+    }
+
+    /// Return the hash of a name before the reduction modulo the bucket count.
+    ///
+    /// Microsoft `NMT::hashSz` reduces the hash modulo `0xffff_ffff` first. This function
+    /// applies that reduction too, so a hash of `0xffff_ffff` becomes 0.
+    #[must_use]
+    pub fn hash(self, name: &[u8]) -> u32 {
+        let hash = match self {
+            Self::V1 => hash_string_v1(name),
+            Self::V2 => hash_string_v2(name),
+        };
+        hash % u32::MAX
     }
 }
 
@@ -149,6 +173,27 @@ impl<'a> StringTable<'a> {
         Ok(table)
     }
 
+    /// Append the serialized table to `out`.
+    ///
+    /// The output keeps the string buffer, the bucket array and the name count, so a decoded
+    /// table gives the same bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if a size does not fit in `u32` or the output
+    /// cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let mut output = Output::new(out);
+        output.reserve(16 + self.strings.len() + self.buckets.len() * 4)?;
+        output.u32(SIGNATURE)?;
+        output.u32(self.hash_version.value())?;
+        output.u32(to_u32(self.strings.len(), "string table buffer size")?)?;
+        output.bytes(self.strings)?;
+        output.u32(to_u32(self.buckets.len(), "string table bucket count")?)?;
+        output.bytes(self.buckets.as_flattened())?;
+        output.u32(self.name_count)
+    }
+
     /// Return the hash function version.
     #[must_use]
     pub const fn hash_version(&self) -> HashVersion {
@@ -212,21 +257,22 @@ impl<'a> StringTable<'a> {
         })
     }
 
-    /// Find the offset of a name through the version 1 hash buckets.
+    /// Find the offset of a name through the hash buckets.
     ///
-    /// The search starts at bucket `hash_string_v1(name) % bucket_count` and
-    /// stops at the first empty bucket, as in LLVM `getIDForString`.
+    /// The search starts at bucket [`HashVersion::hash`] `% bucket_count` and
+    /// stops at the first empty bucket, as in Microsoft `NMT::find` and LLVM
+    /// `getIDForString`.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedVersion`] for a version 2 table.
+    /// Returns [`ErrorKind::InvalidReference`] if a bucket on the probe
+    /// sequence does not refer to a NUL-terminated name.
     pub fn find(&self, name: &[u8]) -> Result<Option<u32>> {
-        self.require_v1()?;
         let count = self.buckets.len();
         if count == 0 {
             return Ok(None);
         }
-        let start = home_bucket(name, count);
+        let start = home_bucket(self.hash_version, name, count);
         for step in 0..count {
             let offset = u32::from_le_bytes(self.buckets[(start + step) % count]);
             if offset == 0 {
@@ -248,10 +294,9 @@ impl<'a> StringTable<'a> {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::UnsupportedVersion`] for a version 2 table.
     /// - [`ErrorKind::InvalidFormat`] if an empty bucket hides a name.
+    /// - [`ErrorKind::InvalidReference`] if a bucket does not refer to a name.
     pub fn verify_buckets(&self) -> Result<BucketPlacement> {
-        self.require_v1()?;
         let count = self.buckets.len();
         let mut placement = BucketPlacement::default();
         // Start after an empty bucket. A full table has no empty bucket, and
@@ -267,7 +312,7 @@ impl<'a> StringTable<'a> {
                 run = 0;
                 continue;
             }
-            let home = home_bucket(self.get(offset)?, count);
+            let home = home_bucket(self.hash_version, self.get(offset)?, count);
             let distance = (slot + count - home) % count;
             if distance > run {
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -282,22 +327,13 @@ impl<'a> StringTable<'a> {
         }
         Ok(placement)
     }
-
-    /// Return an error for a table that does not use version 1 hashing.
-    fn require_v1(&self) -> Result<()> {
-        match self.hash_version {
-            HashVersion::V1 => Ok(()),
-            HashVersion::V2 => Err(Error::new(ErrorKind::UnsupportedVersion, None)
-                .with_context("string table version 2 hashing is not supported")),
-        }
-    }
 }
 
-/// Return the home bucket of a name in a version 1 table with `count` buckets.
-fn home_bucket(name: &[u8], count: usize) -> usize {
+/// Return the home bucket of a name in a table with `count` buckets.
+fn home_bucket(version: HashVersion, name: &[u8], count: usize) -> usize {
     // `count` comes from a `u32` field, so the remainder fits in `usize`.
     let count = u32::try_from(count).unwrap_or(u32::MAX);
-    usize::try_from(hash_string_v1(name) % count).unwrap_or(usize::MAX)
+    usize::try_from(version.hash(name) % count).unwrap_or(usize::MAX)
 }
 
 /// Return the NUL-terminated name at `offset` of `strings`, if it exists.

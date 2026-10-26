@@ -9,14 +9,17 @@ use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
 use pdbrs::native::codeview::symbol::{
-    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbols, Oem, Symbol, SymbolData,
-    Trampoline, TrampolineKind,
+    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
+    Symbol, SymbolData, Trampoline, TrampolineKind,
 };
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
-use pdbrs::native::symbols::{HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets};
+use pdbrs::native::symbols::{
+    HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets, SymbolRecordWriter,
+};
 
 use crate::dbi::translate;
+use crate::symbol_encoding::{reencode, rewrite_module};
 use crate::{Context, Outcome, Report};
 
 /// The deepest scope nesting that the example accepts in a module.
@@ -54,6 +57,8 @@ pub(crate) struct Procedures {
     incomplete: HashSet<u16>,
     /// The `S_TRAMPOLINE` records of all modules.
     trampolines: Vec<Trampoline>,
+    /// The record kinds of the module streams for the library checks.
+    records: crate::symbol_validation::ModuleRecords,
 }
 
 /// Decode every module stream and return the procedure offsets per module.
@@ -77,8 +82,10 @@ pub(crate) fn modules(
         }
         let checksums = lines.as_ref().and_then(ModuleLines::checksums);
         let base = u32::try_from(stream.symbol_offset())?;
+        crate::symbol_validation::module(&stream, index, context, &mut procedures.records, report)?;
         let symbols =
             ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+        let mut writer = Some(ModuleSymbolWriter::new(base));
         for scoped in symbols {
             let Some(scoped) = report.supported(scoped, "module symbol scope")? else {
                 procedures.incomplete.insert(index);
@@ -86,6 +93,10 @@ pub(crate) fn modules(
             };
             let symbol = scoped.symbol;
             check_symbol(&symbol, context, report)?;
+            reencode(&symbol, report)?;
+            if let Some(writer) = &mut writer {
+                writer.push_symbol(&symbol)?;
+            }
             match symbol.data() {
                 SymbolData::Unsupported(_) => {
                     report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
@@ -112,6 +123,9 @@ pub(crate) fn modules(
                 _ => {}
             }
             report.add("module symbols", 1);
+        }
+        if !procedures.incomplete.contains(&index) {
+            rewrite_module(writer.take(), stream.symbol_data(), report)?;
         }
         if let Some(lines) = &lines {
             module_lines(lines, context, report)?;
@@ -198,7 +212,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
                 }
             }
             LineSubsection::CoffSymbolRvas(rvas) => coff_symbol_rvas(rvas.iter(), context, report)?,
-            _ => report.undecoded(format!("C13 subsection {:#x}", subsection.kind)),
+            other => crate::lines::other_subsection(other, &file_name, context, report)?,
         }
         report.add("C13 subsections", 1);
     }
@@ -219,12 +233,18 @@ pub(crate) fn shared_symbols(
     report.claim(id);
     let bytes = pdb.stream_bytes(id)?;
     let offsets = RecordOffsets::frame(&bytes, id)?;
+    crate::symbol_validation::shared(&bytes, id, context, &procedures.records, report)?;
+    let mut writer = SymbolRecordWriter::new();
     for record in Records::new(&bytes) {
         let record = record?;
         let symbol = record
             .symbol()
             .map_err(|error| error.with_stream(id.0, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
+        reencode(&symbol, report)?;
+        if writer.push_symbol(&symbol)?.0 != record.offset {
+            return Err("a rewritten symbol record moves to another offset".into());
+        }
         if let Some(reference) = symbol.procedure_reference() {
             let module = reference
                 .module_index()
@@ -269,6 +289,15 @@ pub(crate) fn shared_symbols(
         "shared symbols outside both indexes",
         offsets.len() - indexed.len(),
     );
+    let rebuilt = writer.finish();
+    report.add("symbol record streams rewritten", 1);
+    // The run stops at the first difference, so a finished run prints 0.
+    report.add("symbol record streams rewritten with different bytes", 0);
+    if rebuilt.bytes != bytes {
+        return Err("the symbol record stream rewrites to different bytes".into());
+    }
+    // The index builders read the names from the rewritten stream.
+    crate::symbol_indexes::symbol_indexes(pdb, dbi, &rebuilt.bytes, report)?;
     Ok(())
 }
 

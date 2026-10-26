@@ -362,7 +362,7 @@ fn dbi_accessors_decode_substreams() {
     assert!(dbi.section_map().unwrap().unwrap().is_empty());
     let sources = dbi.source_info().unwrap().unwrap();
     assert_eq!(sources.modules().nth(1).unwrap().file_count(), 1);
-    dbi.verify_type_server_map().unwrap();
+    assert_eq!(dbi.type_server_map().unwrap(), []);
     let names = dbi.ec_names().unwrap().unwrap();
     assert_eq!(names.find(b"a").unwrap(), Some(1));
 }
@@ -374,7 +374,7 @@ fn dbi_accessors_return_none_for_empty_substreams() {
     assert!(dbi.section_map().unwrap().is_none());
     assert!(dbi.source_info().unwrap().is_none());
     assert!(dbi.ec_names().unwrap().is_none());
-    dbi.verify_type_server_map().unwrap();
+    assert_eq!(dbi.type_server_map().unwrap(), []);
 }
 
 #[test]
@@ -404,11 +404,7 @@ fn dbi_accessor_errors_have_substream_locations() {
     let base = base + 4;
     assert_located(dbi.source_info(), ErrorKind::InvalidFormat, base);
     let base = base + 12;
-    assert_located(
-        dbi.verify_type_server_map(),
-        ErrorKind::UnsupportedVersion,
-        base,
-    );
+    assert_located(dbi.type_server_map(), ErrorKind::UnexpectedEof, base);
     let base = base + 4;
     assert_located(dbi.ec_names(), ErrorKind::InvalidSignature, base);
 }

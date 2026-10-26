@@ -1,17 +1,25 @@
-//! Records that the linker writes: trampolines and FASTLINK references.
+//! Records that the linker writes: trampolines and mini PDB references.
 //!
 //! The layout of `S_TRAMPOLINE` follows `TrampolineSym` in LLVM
 //! `SymbolRecordMapping.cpp` and `TRAMPOLINESYM` in `cvinfo.h`.
 //!
-//! No reference gives a layout for `S_FASTLINK`. LLVM calls the kind
-//! `S_REF_MINIPDB2`. The layout is `REFMINIPDB` of `cvinfo.h` without the
-//! module index. The MSVC 14.44 FASTLINK fixture of #12 and its object files
-//! confirm it. The decision is in #13.
+//! `S_REF_MINIPDB` follows `REFMINIPDB` in `cvinfo.h`. No pinned reference
+//! gives a layout for `S_FASTLINK`. LLVM calls the kind `S_REF_MINIPDB2`.
+//! The layout is `REFMINIPDB` of `cvinfo.h` without the module index. The
+//! MSVC 14.44 FASTLINK fixture of #12 and its object files confirm it. The
+//! decision is in #13. The debug type records of `cvinfo.h` in the DIA SDK
+//! of Visual Studio 18 (`lib/amd64/diaguids.lib`) give `REFMINIPDB2` with
+//! the same layout, and the flag bits `fThunk` (bit 5) and `fNamespace`
+//! (bit 6).
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
+use super::super::writer::FieldWriter;
 use super::SectionOffset;
 use crate::Result;
+
+/// The kind of a reference to a record in a mini PDB (`S_REF_MINIPDB`).
+pub const S_REF_MINIPDB: u16 = 0x1160;
 
 values! {
     /// The kind of a trampoline.
@@ -61,13 +69,24 @@ impl Trampoline {
             },
         })
     }
+
+    /// Write the fields in the order of [`Trampoline::read`].
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.kind.0)?;
+        out.u16(self.thunk_size)?;
+        out.u32(self.thunk.offset)?;
+        out.u32(self.target.offset)?;
+        out.u16(self.thunk.section)?;
+        out.u16(self.target.section)
+    }
 }
 
 flags! {
-    /// The flags of a FASTLINK reference.
+    /// The flags of a mini PDB reference.
     ///
-    /// Bits 0 to 4 come from `REFMINIPDB` in `cvinfo.h`. Bit 6 is not
-    /// documented: the fixture sets it only on namespace names.
+    /// Bits 0 to 4 come from `REFMINIPDB` in `cvinfo.h`. Bits 5 and 6 come
+    /// from `REFMINIPDB2` in the DIA SDK. The FASTLINK fixture of #12 sets
+    /// bit 6 only on namespace names.
     FastLinkFlags(u16) {
         /// The name is local to the object file.
         LOCAL = 1 << 0;
@@ -79,13 +98,15 @@ flags! {
         LABEL = 1 << 3;
         /// The name is a constant.
         CONSTANT = 1 << 4;
-        /// The name is a namespace. This meaning comes from the fixture.
+        /// The name is a thunk (`fThunk`).
+        THUNK = 1 << 5;
+        /// The name is a namespace (`fNamespace`).
         NAMESPACE = 1 << 6;
     }
 }
 
-/// A reference from a FASTLINK PDB to a record in an object file
-/// (`S_FASTLINK`).
+/// A reference from a mini PDB to a record in an object file
+/// (`S_FASTLINK` and [`S_REF_MINIPDB`]).
 ///
 /// A FASTLINK PDB keeps the full records in the object files. This record
 /// gives the name and the place of the full record.
@@ -100,6 +121,9 @@ pub struct FastLink<'a> {
     /// section that holds the full record. Use [`FastLink::type_index`]
     /// and [`FastLink::section`].
     pub value: u32,
+    /// The module index (`imod`) of an [`S_REF_MINIPDB`] record, or `None`
+    /// for an `S_FASTLINK` record.
+    pub module: Option<u16>,
     /// The flags.
     pub flags: FastLinkFlags,
     /// The name. The first record of a module has an empty name.
@@ -107,12 +131,18 @@ pub struct FastLink<'a> {
 }
 
 impl<'a> FastLink<'a> {
-    /// Read the fields.
-    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
+    /// Read the fields. Set `module` for [`S_REF_MINIPDB`].
+    pub(super) fn read(fields: &mut Fields<'a>, module: bool) -> Result<Self> {
         let value = fields.u32()?;
+        let module = if module { Some(fields.u16()?) } else { None };
         let flags = FastLinkFlags(fields.u16()?);
         let name = fields.name()?;
-        Ok(Self { value, flags, name })
+        Ok(Self {
+            value,
+            module,
+            flags,
+            name,
+        })
     }
 
     /// Return the type index in the object file, if the UDT bit is set.
@@ -134,5 +164,15 @@ impl<'a> FastLink<'a> {
         } else {
             Some(self.value)
         }
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.value)?;
+        if let Some(module) = self.module {
+            out.u16(module)?;
+        }
+        out.u16(self.flags.0)?;
+        out.name(self.name)
     }
 }

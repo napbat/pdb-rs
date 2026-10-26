@@ -27,6 +27,7 @@ use super::index::{IdIndex, TypeIndex};
 use super::{Fields, Record};
 use crate::{Error, ErrorKind, Result};
 
+mod encode;
 mod table;
 
 pub use table::{IdTable, MAX_STRING_DEPTH};
@@ -131,6 +132,7 @@ impl<'a> IdRecord<'a> {
                 name_offset: fields.u32()?,
                 line: fields.u32()?,
                 module: fields.u16()?,
+                padded: !fields.rest().is_empty(),
             }),
             _ => return Ok(Self::Unsupported(record)),
         };
@@ -266,6 +268,11 @@ pub struct UdtModuleSourceLine {
     pub line: u32,
     /// The raw module value that contributes the UDT definition.
     pub module: u16,
+    /// `true` if `LF_PAD` padding follows the module field.
+    ///
+    /// Microsoft `link.exe` writes this record without padding: its 18 bytes
+    /// are not a multiple of 4. [`IdRecord::encode`] keeps the form.
+    pub padded: bool,
 }
 
 /// A borrowed list of serialized ID indices.

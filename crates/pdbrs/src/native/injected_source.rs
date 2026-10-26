@@ -19,20 +19,29 @@
 //! This module does not decode the `/names` string table. The caller resolves the name offsets.
 //!
 //! The .NET symbol writers use the compression byte 101 ([`SourceCompression::DotNet`]). Their
-//! streams hold a [`DotNetDocument`] record, not the file contents.
+//! streams hold a [`DotNetDocument`] record, not the file contents. A file whose virtual file
+//! name ends with `.natvis` is a Natvis file ([`InjectedSourceKind::Natvis`]).
+//!
+//! [`SourceHeaderBlock::encode`] gives the bytes of a decoded stream again.
+//! [`SourceHeaderBlockBuilder`] makes a new stream.
 
+mod builder;
 mod document;
+mod natvis;
 
+pub use builder::{InjectedFile, SourceHeaderBlockBuilder};
 pub use document::{
     CHECKSUM_SHA1, CHECKSUM_SHA256, ChecksumCheck, DOCUMENT_TYPE_TEXT, DotNetDocument,
     LANGUAGE_CSHARP, VENDOR_MICROSOFT,
 };
+pub use natvis::{Natvis, is_natvis_name};
 
 use alloc::vec::Vec;
 
 use super::hash::hash_buffer_v8;
 use super::hash_table::{Cursor, HashTable, HashTableEntry, HashTableValue};
 use super::msf::StreamId;
+use super::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The name of the stream that describes the injected source files.
@@ -85,6 +94,31 @@ impl SourceCompression {
             other => Self::Unknown(other),
         }
     }
+
+    /// Return the raw compression byte.
+    #[must_use]
+    pub const fn to_raw(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::RunLength => 1,
+            Self::Huffman => 2,
+            Self::Lz => 3,
+            Self::DotNet => 101,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+/// The kind of the contents of an injected source file.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum InjectedSourceKind {
+    /// A .NET document record: the compression is [`SourceCompression::DotNet`].
+    DotNetDocument,
+    /// A Natvis file: the virtual file name ends with `.natvis`. See [`Natvis`].
+    Natvis,
+    /// Another file.
+    File,
 }
 
 /// One entry of the `/src/headerblock` table (`SrcHeaderBlockEntry`).
@@ -168,9 +202,57 @@ impl HashTableValue<'_> for InjectedSource {
             reserved,
         })
     }
+
+    fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let mut output = Output::new(out);
+        output.reserve(Self::SIZE)?;
+        for word in [
+            ENTRY_SIZE,
+            SOURCE_VERSION_ONE,
+            self.crc,
+            self.file_size,
+            self.file_name_offset,
+            self.object_name_offset,
+            self.virtual_file_name_offset,
+        ] {
+            output.u32(word)?;
+        }
+        output.u8(self.compression.to_raw())?;
+        output.u8(u8::from(self.is_virtual))?;
+        output.u16(0)?;
+        output.bytes(&self.reserved)
+    }
 }
 
 impl InjectedSource {
+    /// Classify the entry by its compression and its virtual file name.
+    ///
+    /// `virtual_file_name` is the `/names` string at
+    /// [`InjectedSource::virtual_file_name_offset`].
+    #[must_use]
+    pub fn kind(&self, virtual_file_name: &[u8]) -> InjectedSourceKind {
+        if self.compression == SourceCompression::DotNet {
+            InjectedSourceKind::DotNetDocument
+        } else if is_natvis_name(virtual_file_name) {
+            InjectedSourceKind::Natvis
+        } else {
+            InjectedSourceKind::File
+        }
+    }
+
+    /// Check the contents of a Natvis file stream and return its XML text.
+    ///
+    /// The function applies [`InjectedSource::verify_content`] and then [`Natvis::parse`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`InjectedSource::verify_content`], and the errors of
+    /// [`Natvis::parse`] with the stream ID and logical offset 0.
+    pub fn verify_natvis<'c>(&self, content: &'c [u8], stream: StreamId) -> Result<Natvis<'c>> {
+        let content = self.verify_content(content, stream)?;
+        Natvis::parse(content).map_err(|error| error.with_stream(stream.0, 0))
+    }
+
     /// Check the contents of the file stream and return the file contents.
     ///
     /// `content` holds the full stream `stream`. The check needs no compression, a size equal
@@ -361,6 +443,30 @@ impl<'a> SourceHeaderBlock<'a> {
     pub const fn table(&self) -> &HashTable<'a, InjectedSource> {
         &self.table
     }
+
+    /// Append the serialized stream to `out`.
+    ///
+    /// The output keeps the header and the hash table, so a decoded stream gives the same
+    /// bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        encode_header(self.header, out)?;
+        self.table.encode(out)
+    }
+}
+
+/// Append the 64-byte `/src/headerblock` header.
+fn encode_header(header: SourceBlockHeader, out: &mut Vec<u8>) -> Result<()> {
+    let mut output = Output::new(out);
+    output.reserve(HEADER_SIZE)?;
+    output.u32(SOURCE_VERSION_ONE)?;
+    output.u32(header.size)?;
+    output.u64(header.file_time)?;
+    output.u32(header.age)?;
+    output.zeros(HEADER_PADDING)
 }
 
 /// Return the named-stream name of the contents of a file with `virtual_file_name`.

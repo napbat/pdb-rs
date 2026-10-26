@@ -139,9 +139,20 @@ fn rejects_padding_that_is_not_zero() {
 }
 
 #[test]
-fn rejects_four_padding_bytes() {
+fn keeps_four_or_more_zero_padding_bytes() {
+    // The HLSL compiler fxc writes more zero bytes than the alignment needs.
     let bytes = record(S_PUB32, &public_payload(b"main\0\0\0\0\0"));
-    assert_eq!(decode_kind(&bytes), ErrorKind::InvalidFormat);
+    let symbol = Records::new(&bytes)
+        .next()
+        .unwrap()
+        .unwrap()
+        .symbol()
+        .unwrap();
+    assert_eq!(symbol.name(), Some(&b"main"[..]));
+    assert!(symbol.padding() >= 4);
+    let mut out = Vec::new();
+    symbol.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
 }
 
 #[test]
@@ -220,11 +231,11 @@ fn decodes_procedure_fields() {
 
 #[test]
 fn keeps_unsupported_kinds_raw() {
-    // S_COBOLUDT is a known kind that this crate does not decode.
-    let bytes = record(0x1109, &[0x10, 0x10, 0, 0, 0xff, b'T', 0, 0]);
+    // No reference gives the layout of S_ALTOBJNAME, so this crate keeps it raw.
+    let bytes = record(0x1181, &[0x10, 0x10, 0, 0, 0xff, b'T', 0, 0]);
     let record = Records::new(&bytes).next().unwrap().unwrap();
     let symbol = record.symbol().unwrap();
-    assert_eq!(symbol.kind(), 0x1109);
+    assert_eq!(symbol.kind(), 0x1181);
     assert_eq!(
         *symbol.data(),
         SymbolData::Unsupported(&[0x10, 0x10, 0, 0, 0xff, b'T', 0, 0])

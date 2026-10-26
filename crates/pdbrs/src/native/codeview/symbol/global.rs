@@ -5,8 +5,14 @@
 //! `S_SECTION` comes from `SECTIONSYM` in `cvinfo.h`.
 
 use super::super::Fields;
+use super::super::writer::FieldWriter;
 use super::SectionOffset;
 use crate::{Error, ErrorKind, Result};
+
+/// The kind of a reference to a data symbol in a module (`S_DATAREF`).
+pub const S_DATAREF: u16 = 0x1126;
+/// The kind of a reference to an annotation symbol in a module (`S_ANNOTATIONREF`).
+pub const S_ANNOTATIONREF: u16 = 0x1128;
 
 flags! {
     /// The flags of a public symbol (`CV_PUBSYMFLAGS`).
@@ -45,6 +51,13 @@ impl<'a> Public<'a> {
             address,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.flags.0)?;
+        self.address.write(out)?;
+        out.name(self.name)
     }
 }
 
@@ -85,6 +98,14 @@ impl<'a> ProcedureReference<'a> {
     #[must_use]
     pub const fn module_index(&self) -> Option<u16> {
         self.module.checked_sub(1)
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.name_checksum)?;
+        out.u32(self.offset)?;
+        out.u16(self.module)?;
+        out.name(self.name)
     }
 }
 
@@ -128,6 +149,17 @@ impl<'a> Section<'a> {
             name,
         })
     }
+
+    /// Write the fields and a zero reserved byte.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.number)?;
+        out.u8(self.alignment)?;
+        out.u8(0)?;
+        out.u32(self.rva)?;
+        out.u32(self.length)?;
+        out.u32(self.characteristics)?;
+        out.name(self.name)
+    }
 }
 
 /// A COFF group record (`S_COFFGROUP`).
@@ -159,5 +191,13 @@ impl<'a> CoffGroup<'a> {
             address,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.length)?;
+        out.u32(self.characteristics)?;
+        self.address.write(out)?;
+        out.name(self.name)
     }
 }

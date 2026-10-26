@@ -10,6 +10,7 @@
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
+use super::super::writer::FieldWriter;
 use super::SectionOffset;
 use crate::Result;
 
@@ -56,6 +57,14 @@ impl FrameCookie {
             flags,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.i32(self.offset)?;
+        out.u16(self.register)?;
+        out.u8(self.kind.0)?;
+        out.u8(self.flags)
+    }
 }
 
 /// A heap allocation call site (`S_HEAPALLOCSITE`).
@@ -81,5 +90,12 @@ impl HeapAllocationSite {
             instruction_length,
             type_index,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.address.write(out)?;
+        out.u16(self.instruction_length)?;
+        out.type_index(self.type_index)
     }
 }

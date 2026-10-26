@@ -1,0 +1,9 @@
+LIBRARY demo
+EXPORTS
+    demo_dll_add
+    demo_dll_by_ordinal @7
+    demo_dll_hidden @8 NONAME
+    demo_dll_private PRIVATE
+    demo_dll_counter DATA
+    demo_dll_limit CONSTANT
+    demo_dll_tick = kernel32.GetTickCount
