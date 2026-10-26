@@ -1,4 +1,7 @@
-// Records and pattern matching.
+// Records, pattern matching and the stack trace output of the stack mode.
+using System;
+using System.Diagnostics;
+
 namespace PdbrsDemo;
 
 internal abstract record Shape(string Name);
@@ -31,6 +34,14 @@ internal static class Shapes
         Rect(var width, var height) => width * height,
         _ => 0.0,
     };
+
+    // Print the stack trace with file names and line numbers. Return 0 to keep the exit code.
+    public static int PrintTrace()
+    {
+        var trace = new StackTrace(true);
+        Console.Write(trace.ToString());
+        return 0;
+    }
 
     private static string Classify(int value) => value switch
     {

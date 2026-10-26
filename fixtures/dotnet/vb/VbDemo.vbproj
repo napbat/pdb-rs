@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The generator sets DebugType and the artifacts path on the command line. -->
+  <!-- RootNamespace gives the default namespace record. The extra project imports go into the -->
+  <!-- import scope of the project. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -8,5 +10,10 @@
     <OptionStrict>On</OptionStrict>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Import Include="System.Text" />
+    <Import Include="Sb = System.Text.StringBuilder" />
+  </ItemGroup>
 
 </Project>

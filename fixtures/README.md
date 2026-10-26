@@ -14,13 +14,43 @@ exception handling and .NET async state machines.
 | --- | --- |
 | `native/` | C++20 and C17 sources for MSVC and `clang-cl`: `main.cpp`, `types.cpp`, `control.cpp`, `big_enum.cpp`, `c_api.c` and two headers. |
 | `rust/` | A standalone Cargo project. Its empty `[workspace]` table keeps it out of the root workspace. |
-| `dotnet/csharp/` | A C# console project with three source files. |
-| `dotnet/vb/` | A Visual Basic console project. |
-| `dotnet/fsharp/` | An F# console project. It needs the `FSharp.Core` package from NuGet. |
+| `dotnet/csharp/` | A C# console project with four source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs` and `Locals.cs`. |
+| `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
+| `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
 
 Each program runs without arguments, prints a checksum and exits with code 0. MSVC-only
 constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m128` and
 `__vectorcall` code is only in x86 and x64 builds.
+
+### .NET demos
+
+The .NET demos give the Portable PDB reader and writer data for each debug table (#23, #24,
+#26). Each demo has these items:
+
+- async methods and iterators
+- more than one source document
+- methods without sequence points: abstract methods, extern methods and compiler-generated
+  members, for example the kickoff methods of state machines and record members
+
+Each demo also has these language-specific items:
+
+| Demo | Items |
+| --- | --- |
+| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. |
+| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. |
+| F# | `task { }` state machines, `seq { }` classes, an `async { }` workflow, records and discriminated unions. The generator builds the F# demo with `Optimize=true`, because the F# compiler makes a `task { }` state machine only with optimization. The F# compiler writes no `StateMachineMethod` rows. |
+
+With the argument `stack`, each .NET demo prints `System.Diagnostics.StackTrace(true)` and
+exits with code 0. The stack goes through more than one source file, an async method and an
+iterator. Use this mode to compare the file names and line numbers of a changed PDB with the
+original PDB (#26):
+
+```sh
+dotnet target/fixtures/dotnet-csharp-portable/artifacts/bin/CSharpDemo/debug/CSharpDemo.dll stack
+```
+
+The output of the F# demo also has frames from `FSharp.Core`. Their file names and line numbers
+come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 
 ## Matrix
 
@@ -47,7 +77,7 @@ constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m12
 | `dotnet-csharp-full` | `dotnet build` | AnyCPU | `DebugType=full` |
 | `dotnet-csharp-embed-sources` | `dotnet build` | AnyCPU | `DebugType=portable`, `EmbedAllSources=true` |
 | `dotnet-vb-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
-| `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
+| `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable`, `Optimize=true` |
 
 The `clang-cl` and `lld-link` tools come from the LLVM component of Visual Studio, not from a
 separate LLVM installation. MSVC 14.50 and later ignore `/DEBUG:FASTLINK` (warning LNK4315)

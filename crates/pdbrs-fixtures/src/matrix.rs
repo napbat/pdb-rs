@@ -392,9 +392,10 @@ pub static FIXTURES: &[Fixture] = &[
     dotnet(
         "dotnet-fsharp-portable",
         "f#",
-        "debug, portable",
+        "debug, portable, optimized",
         ("fsharp", "FSharpDemo", "fsproj"),
-        &["DebugType=portable"],
+        // The F# compiler makes a state machine for `task { }` only with optimization.
+        &["DebugType=portable", "Optimize=true"],
         Some(Kind::PortablePdb),
     ),
 ];
