@@ -53,8 +53,12 @@ const SHOWN_DIFFERENCES: usize = 10;
 /// One output file of the fixture manifest.
 struct Output {
     fixture: String,
-    /// `true` if the producer is `dotnet`, so an image has CLI metadata.
+    /// `true` if an image of the fixture has CLI metadata: the producer is `dotnet`, or the
+    /// language is C++/CLI (a mixed-mode image).
     managed: bool,
+    /// `true` if every consumer rejects the PDBs of the fixture because of a producer defect.
+    /// The `dxc` PDBs use a page beyond the declared page count (#27).
+    producer_defect: bool,
     kind: String,
     path: PathBuf,
 }
@@ -71,7 +75,10 @@ fn outputs(fixtures: &Path) -> Result<Vec<Output>, String> {
     let mut outputs = Vec::new();
     for entry in entries {
         let fixture = entry.get("name").and_then(Value::as_str).unwrap_or("?");
-        let managed = entry.get("producer").and_then(Value::as_str) == Some("dotnet");
+        let producer = entry.get("producer").and_then(Value::as_str);
+        let language = entry.get("language").and_then(Value::as_str);
+        let managed = producer == Some("dotnet") || language == Some("c++/cli");
+        let producer_defect = producer == Some("dxc");
         let Some(Value::Array(files)) = entry.get("outputs") else {
             continue;
         };
@@ -85,6 +92,7 @@ fn outputs(fixtures: &Path) -> Result<Vec<Output>, String> {
             outputs.push(Output {
                 fixture: fixture.to_owned(),
                 managed,
+                producer_defect,
                 kind: kind.to_owned(),
                 path: fixtures.join(relative),
             });
@@ -270,13 +278,24 @@ pub fn detect(fixtures: &Path) -> Result<bool, String> {
 /// The result for an image without CLI metadata.
 const NO_METADATA: &str = "no CLI metadata in the image";
 
+/// The result for an MSF file that uses a page beyond its declared page count.
+const PAGE_OUTSIDE: &str = "rejected: page outside the declared pages";
+
 /// Return the inputs of one output with the expected and the actual result of each.
 ///
-/// An image of a managed fixture must have CLI metadata, and the facade must reject it as
-/// assembly metadata. A native image has no CLI metadata.
+/// An image of a managed fixture (also a C++/CLI image) must have CLI metadata, and the facade
+/// must reject it as assembly metadata. A native image has no CLI metadata. The PDBs of a
+/// fixture with a known producer defect must be rejected, as `pdbtool` and DIA reject them.
 fn checks(output: &Output, file: &str, bytes: &[u8]) -> Vec<(String, &'static str, String)> {
     match output.kind.as_str() {
-        "native-pdb" | "native-pdz" => vec![(file.to_owned(), "native", outcome(bytes))],
+        "native-pdb" | "native-pdz" => {
+            let expected = if output.producer_defect {
+                PAGE_OUTSIDE
+            } else {
+                "native"
+            };
+            vec![(file.to_owned(), expected, outcome(bytes))]
+        }
         "portable-pdb" => vec![(file.to_owned(), "portable", outcome(bytes))],
         "image" | "embedded-in-image" => {
             let metadata = cli_metadata(bytes).map_or_else(|| NO_METADATA.to_owned(), outcome);
@@ -334,6 +353,13 @@ fn outcome(bytes: &[u8]) -> String {
                     "rejected: MPDB payload".to_owned()
                 }
                 ErrorKind::InvalidSignature => "rejected: no PDB signature".to_owned(),
+                ErrorKind::InvalidReference
+                    if error
+                        .context()
+                        .is_some_and(|context| context.contains("outside the declared pages")) =>
+                {
+                    PAGE_OUTSIDE.to_owned()
+                }
                 _ => format!("error: {error}"),
             }
         }
@@ -350,6 +376,7 @@ mod tests {
         Output {
             fixture: fixture.to_owned(),
             managed: true,
+            producer_defect: false,
             kind: kind.to_owned(),
             path: PathBuf::from(path),
         }
