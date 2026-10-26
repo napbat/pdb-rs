@@ -1,4 +1,4 @@
-//! Module streams and their C13 subsections.
+//! Module streams, their C13 subsections and their global references.
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
@@ -9,12 +9,33 @@ use crate::native::codeview::Records;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
+mod global_refs;
+mod write;
+
+pub use global_refs::{GlobalRefs, GlobalRefsIter};
+pub use write::{EncodedModuleStream, ModuleStreamParts};
+
 /// The `CV_SIGNATURE_C13` value at the start of a symbol region.
 const SIGNATURE_C13: u32 = 4;
 /// The size of the signature at the start of a symbol region.
 const SIGNATURE_SIZE: usize = 4;
 /// The size of a C13 subsection header: a kind and a length.
 const SUBSECTION_HEADER_SIZE: usize = 8;
+
+/// The region sizes of a module stream, as the DBI module record keeps them.
+///
+/// [`ModuleStreamParts::encode`] returns the sizes of the stream that it
+/// writes. Copy them into the module record.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct ModuleRegionSizes {
+    /// The size of the symbol region, with the 4-byte signature. The value
+    /// is 0 if the stream has no symbol region.
+    pub symbol_bytes: u32,
+    /// The size of the C11 line region.
+    pub c11_bytes: u32,
+    /// The size of the C13 line region.
+    pub c13_bytes: u32,
+}
 
 /// A module stream split into its regions, with owned serialized bytes.
 ///
@@ -189,8 +210,44 @@ impl ModuleStream {
 
     /// Return the raw global reference bytes, without their size field.
     #[must_use]
-    pub fn global_refs(&self) -> &[u8] {
+    pub fn global_ref_data(&self) -> &[u8] {
         &self.bytes[self.global_refs.clone()]
+    }
+
+    /// Decode the global references: offsets into the symbol record stream.
+    ///
+    /// Call [`GlobalRefs::validate`] to check the offsets against the
+    /// symbol record stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if the size of the global
+    /// references is not a multiple of 4. The error identifies the module
+    /// stream and the offset of the global references.
+    pub fn global_refs(&self) -> Result<GlobalRefs<'_>> {
+        GlobalRefs::parse(
+            self.global_ref_data(),
+            self.stream.0,
+            self.global_refs.start,
+        )
+    }
+
+    /// Return the region sizes of the stream, as the module record keeps
+    /// them.
+    #[must_use]
+    pub fn region_sizes(&self) -> ModuleRegionSizes {
+        // `parse` read each size from a `u32` field of the module record.
+        let size = |range: &Range<usize>| u32::try_from(range.len()).unwrap_or(u32::MAX);
+        let symbol_bytes = if self.symbols.start == SIGNATURE_SIZE {
+            size(&(0..self.symbols.end))
+        } else {
+            0
+        };
+        ModuleRegionSizes {
+            symbol_bytes,
+            c11_bytes: size(&self.c11),
+            c13_bytes: size(&self.c13),
+        }
     }
 }
 

@@ -26,7 +26,10 @@ mod module;
 mod section_contribution;
 mod section_map;
 mod sources;
-pub use module::{ModuleStream, Subsection, Subsections};
+pub use module::{
+    EncodedModuleStream, GlobalRefs, GlobalRefsIter, ModuleRegionSizes, ModuleStream,
+    ModuleStreamParts, Subsection, Subsections,
+};
 pub use section_contribution::{
     SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
     SectionContributionIter, SectionContributionVersion, SectionContributions,
