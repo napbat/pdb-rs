@@ -2,6 +2,10 @@
 members = ["crates/pdbrs"]
 resolver = "3"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
 [workspace.lints.rust]
 warnings = { level = "deny", priority = -2 }
 unused = { level = "deny", priority = -1 }

@@ -1,9 +1,16 @@
 [package]
 name = "pdbrs"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "Format identification and I/O primitives for native and Portable PDBs"
 
-[dependencies]
+[features]
+default = ["std"]
+std = []
 
 [lints]
 workspace = true
+
+[[example]]
+name = "inspect"
+required-features = ["std"]

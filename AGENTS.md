@@ -26,8 +26,12 @@ name as the area (for example `pdbrs`).
 
 ## Project
 
-The repository is a Cargo workspace. Its `pdbrs` package uses edition 2024 and lives in
-`crates/pdbrs/`. The default executable is in `crates/pdbrs/src/main.rs`.
+The repository is a Cargo workspace. Its `pdbrs` library uses edition 2024 and lives in
+`crates/pdbrs/`. The library root is `crates/pdbrs/src/lib.rs`.
+
+The default `std` feature enables standard I/O error integration and file access on Unix and Windows.
+Keep the shared primitives usable with `--no-default-features`.
+The `inspect` example identifies container signatures; it does not validate PDB contents.
 
 - Keep the standard Cargo package layout.
 - Do not assume that this repository has docstore's crates, layers or storage engine.
@@ -95,8 +99,11 @@ Run these checks after code changes before you report the change as complete:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 cargo doc --workspace --no-deps
+cargo doc --workspace --no-deps --no-default-features
 cargo test --workspace
+cargo test --workspace --no-default-features
 ```
 
 Exercise the changed behavior as well as the automated checks. Report which checks ran and

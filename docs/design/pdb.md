@@ -1,7 +1,32 @@
 # PDB reader and writer design
 
-Status: proposal. This document defines intended behavior, not implemented APIs.
-The workspace currently contains a `pdbrs` executable that prints a greeting.
+Status: the full reader/writer design remains proposed. The library now implements the primitives listed below.
+No public API claims to parse complete PDBs or write them yet.
+
+## Implemented primitives
+
+The `pdbrs` package is a library, with no default executable and no external dependencies.
+Its default `std` feature enables standard I/O error sources and file adapters.
+With `--no-default-features`, the implemented primitives use `core` without an allocator.
+
+- `io::ReadAt` provides checked positional reads and little-endian integer decoding for slices and references.
+- `io::FileReader` provides bounded file access on Unix and Windows under `std`.
+  It captures the file length and owns the handle. Windows positional reads can change the underlying cursor.
+- `format::probe` identifies modern MSF, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
+  It examines a bounded prefix, not container or record validity.
+  `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
+- `Error` retains an error kind, a physical offset when known and an underlying I/O error under `std`.
+- `native::Identity` distinguishes modern GUID-and-age from legacy signature-and-age.
+- `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
+
+Run signature inspection on Unix or Windows with:
+
+```sh
+cargo run -p pdbrs --example inspect -- path/to/input.pdb
+```
+
+The example reports its limited validation scope. The stream parsers, record codecs, editors,
+builders and embedded compression described below are not exposed as placeholder APIs.
 
 ## Required formats and scope
 
@@ -64,8 +89,8 @@ Use one fallible build path and an immutable output plan.
 
 ## Package and module boundaries
 
-Keep one public library package at `crates/pdbrs`. Add `src/lib.rs` when implementation begins.
-Move the greeting executable out of the package when a real command-line consumer is needed.
+Keep one public library package at `crates/pdbrs`, with its root in `src/lib.rs`.
+Use the `inspect` example for the current signature-inspection workflow.
 Do not add empty modules or another crate just to reserve names.
 
 Proposed modules, relative to `crates/pdbrs/src/`:
@@ -523,8 +548,12 @@ Run both default features and `--no-default-features` once the library feature c
 The existing local build produced `target/debug/pdbrs.pdb`. A direct header and directory inspection
 found 4096-byte blocks, 89 streams and two present empty streams. Declared and actual file sizes matched.
 This checks one real container layout; it is not a parser test or a format-coverage claim.
-No Portable PDB or legacy implementation or interoperability run exists yet.
-Their format contracts come from the references below.
+The library's signature probe was exercised against a Rust-produced native PDB, a .NET-produced Portable PDB,
+an embedded PDB payload and ordinary CLI assembly metadata. A synthetic Small MSF signature was also identified.
+Truncated and unknown signatures returned errors with byte offsets.
+These checks establish signature and I/O behavior, not PDB parser or writer interoperability.
+No complete native, portable or legacy stream parser or writer exists yet.
+The remaining format contracts come from the references below.
 
 References used for this proposal:
 
