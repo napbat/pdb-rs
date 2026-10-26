@@ -2,7 +2,7 @@
 name = "pdbrs"
 version.workspace = true
 edition.workspace = true
-description = "Format identification and I/O primitives for native and Portable PDBs"
+description = "Native PDB reading and shared I/O primitives for native and Portable PDBs"
 
 [features]
 default = ["std"]
@@ -16,4 +16,8 @@ workspace = true
 
 [[example]]
 name = "inspect"
+required-features = ["std"]
+
+[[example]]
+name = "native"
 required-features = ["std"]

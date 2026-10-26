@@ -1,0 +1,213 @@
+//! Zero-copy framing of `CodeView` records.
+//!
+//! A `CodeView` record starts with a little-endian `u16` length and a
+//! little-endian `u16` kind. The length counts the kind and the payload. It
+//! does not count the length field. Symbol records and type records use the
+//! same framing.
+//!
+//! [`Records`] frames a byte sequence into [`Record`] values. It keeps
+//! records of all kinds, also kinds that this crate cannot decode. It keeps
+//! the padding at the end of a record as part of [`Record::data`].
+//!
+//! [`Record::symbol`] decodes the fixed fields and the name of some common
+//! symbol kinds. It does not demangle names.
+
+use core::iter::FusedIterator;
+
+use crate::{Error, ErrorKind, Result};
+
+mod symbol;
+
+pub use symbol::{
+    Procedure, S_GDATA32, S_GPROC32, S_GPROC32_ID, S_LDATA32, S_LPROC32, S_LPROC32_ID, S_PUB32,
+    Symbol, SymbolDetail,
+};
+
+/// The size of the length field and the kind field at the start of a record.
+const PREFIX_LEN: usize = 4;
+
+/// The smallest valid value of the length field. It covers the kind field.
+const MIN_RECORD_LEN: u16 = 2;
+
+/// One framed `CodeView` record.
+///
+/// The record borrows its payload from the sequence that [`Records`] frames.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Record<'a> {
+    /// The byte offset of the length field in the framed sequence.
+    ///
+    /// This offset is relative to the slice given to [`Records::new`]. It is
+    /// not a file offset.
+    pub offset: u32,
+    /// The record kind, for example [`S_PUB32`] or a type leaf kind.
+    pub kind: u16,
+    /// The payload after the kind field.
+    ///
+    /// The payload includes the padding at the end of the record.
+    pub data: &'a [u8],
+}
+
+impl<'a> Record<'a> {
+    /// Decode the record as a symbol, if this crate supports its kind.
+    ///
+    /// Supported kinds are [`S_PUB32`], [`S_GDATA32`], [`S_LDATA32`],
+    /// [`S_GPROC32`], [`S_LPROC32`], [`S_GPROC32_ID`] and [`S_LPROC32_ID`].
+    /// Return `Ok(None)` for all other kinds. Do not use this function on type
+    /// records: type leaf kinds and symbol kinds use different value spaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if the payload of a supported kind
+    /// is too short for its fixed fields, or if its name has no terminating
+    /// NUL byte. The error does not have a file offset.
+    pub fn symbol(&self) -> Result<Option<Symbol<'a>>> {
+        symbol::decode(*self)
+    }
+}
+
+/// An iterator that frames a byte sequence into `CodeView` records.
+///
+/// The iterator does not copy record bytes. It stops after the last complete
+/// record at the end of the sequence. It returns one error for a malformed
+/// record and then stops.
+#[derive(Clone, Debug)]
+pub struct Records<'a> {
+    /// The full sequence.
+    bytes: &'a [u8],
+    /// The offset of the next record in `bytes`.
+    position: usize,
+    /// `true` after the iterator returned an error.
+    failed: bool,
+}
+
+impl<'a> Records<'a> {
+    /// Create an iterator over the records in `bytes`.
+    ///
+    /// The first record starts at offset 0. Remove a stream signature before
+    /// you call this function.
+    #[must_use]
+    pub const fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            position: 0,
+            failed: false,
+        }
+    }
+
+    /// Return the offset of the next record in the sequence.
+    ///
+    /// After an error, the offset identifies the start of the record that
+    /// caused the error. Use this offset to add a location to the error.
+    #[must_use]
+    pub const fn position(&self) -> usize {
+        self.position
+    }
+
+    /// Frame the record at the current position and move past it.
+    fn read(&mut self) -> Result<Record<'a>> {
+        let offset = u32::try_from(self.position).map_err(|_| {
+            Error::new(ErrorKind::OffsetOverflow, None)
+                .with_context("CodeView record offset does not fit in 32 bits")
+        })?;
+        let rest = &self.bytes[self.position..];
+        let Some((&[l0, l1, k0, k1], _)) = rest.split_first_chunk::<PREFIX_LEN>() else {
+            return Err(Error::new(ErrorKind::UnexpectedEof, None)
+                .with_context("CodeView record prefix is truncated"));
+        };
+        let length = u16::from_le_bytes([l0, l1]);
+        if length < MIN_RECORD_LEN {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("CodeView record length does not cover the kind"));
+        }
+        // The length field does not count itself.
+        let total = usize::from(length) + 2;
+        let Some(record) = rest.get(PREFIX_LEN..total) else {
+            return Err(Error::new(ErrorKind::UnexpectedEof, None)
+                .with_context("CodeView record extends past the end of the sequence"));
+        };
+        // `total` bytes are inside `rest`, so the sum is at most `bytes.len()`.
+        self.position += total;
+        Ok(Record {
+            offset,
+            kind: u16::from_le_bytes([k0, k1]),
+            data: record,
+        })
+    }
+}
+
+impl<'a> Iterator for Records<'a> {
+    type Item = Result<Record<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.position >= self.bytes.len() {
+            return None;
+        }
+        let result = self.read();
+        self.failed = result.is_err();
+        Some(result)
+    }
+}
+
+impl FusedIterator for Records<'_> {}
+
+/// A reader for little-endian fixed fields in a bounded byte slice.
+///
+/// Each read moves past the bytes that it consumes. A read past the end
+/// returns an error with the configured kind and context, and no file offset.
+pub(crate) struct Fields<'a> {
+    /// The bytes that are not read yet.
+    bytes: &'a [u8],
+    /// The error kind for a read past the end.
+    kind: ErrorKind,
+    /// The error context for a read past the end.
+    context: &'static str,
+}
+
+impl<'a> Fields<'a> {
+    /// Create a reader over `bytes`.
+    pub(crate) const fn new(bytes: &'a [u8], kind: ErrorKind, context: &'static str) -> Self {
+        Self {
+            bytes,
+            kind,
+            context,
+        }
+    }
+
+    /// Return the error for a read past the end.
+    fn short(&self) -> Error {
+        Error::new(self.kind, None).with_context(self.context)
+    }
+
+    /// Read a fixed number of bytes.
+    fn array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let bytes = self.bytes;
+        let (head, rest) = bytes.split_first_chunk::<N>().ok_or_else(|| self.short())?;
+        self.bytes = rest;
+        Ok(*head)
+    }
+
+    /// Read a `u8`.
+    pub(crate) fn u8(&mut self) -> Result<u8> {
+        Ok(u8::from_le_bytes(self.array()?))
+    }
+
+    /// Read a little-endian `u16`.
+    pub(crate) fn u16(&mut self) -> Result<u16> {
+        Ok(u16::from_le_bytes(self.array()?))
+    }
+
+    /// Read a little-endian `u32`.
+    pub(crate) fn u32(&mut self) -> Result<u32> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    /// Read a little-endian `i32`.
+    pub(crate) fn i32(&mut self) -> Result<i32> {
+        Ok(i32::from_le_bytes(self.array()?))
+    }
+
+    /// Return the bytes that are not read yet.
+    pub(crate) const fn rest(&self) -> &'a [u8] {
+        self.bytes
+    }
+}

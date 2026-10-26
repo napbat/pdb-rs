@@ -1,8 +1,9 @@
 //! Building blocks for native Windows and Portable .NET PDB files.
 //!
-//! The current API provides sequential I/O, positional byte access, signature
-//! probing and format-specific identity types. It does not yet parse PDB
-//! streams, decode debug records or write PDB files.
+//! The API reads MSF 7.0 containers, native PDB metadata and framed debug
+//! records. It decodes common data, public and procedure symbols. Other record
+//! kinds remain available as raw bytes. Full semantic decoding is not complete.
+//! Portable PDB parsing and PDB writing are not implemented.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
@@ -23,6 +24,8 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 pub mod error;
 pub mod format;

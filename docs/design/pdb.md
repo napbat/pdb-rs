@@ -1,7 +1,7 @@
 # PDB reader and writer design
 
-Status: the full reader/writer design remains proposed. The library now implements the primitives listed below.
-No public API claims to parse complete PDBs or write them yet.
+Status: the full reader/writer design remains proposed. The library implements native reading and the shared primitives listed below.
+Native semantic decoding is incomplete. Portable PDB parsing and PDB writing are not implemented.
 
 ## Implemented primitives
 
@@ -20,7 +20,7 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
 - `format::probe` identifies modern MSF, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
   It examines a bounded prefix, not container or record validity.
   `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
-- `Error` retains an error kind, a physical offset when known and a typed `nostdio::IoError` in both feature modes.
+- `Error` retains an error kind, physical or stream-relative location, operation context and a typed `nostdio::IoError`.
 - `native::Identity` distinguishes modern GUID-and-age from legacy signature-and-age.
 - `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
 
@@ -37,8 +37,41 @@ cargo run -p pdbrs --example streams
 cargo run -p pdbrs --example streams --no-default-features
 ```
 
-The example reports its limited validation scope. The stream parsers, record codecs, editors,
-builders and embedded compression described below are not exposed as placeholder APIs.
+The examples report their validation scope. Editors, builders and embedded compression are not exposed as placeholder APIs.
+
+## Implemented native reading
+
+`native::Pdb::open` opens a file under `std`. `Pdb::parse` borrows a byte slice.
+`Pdb::read` and `Pdb::with_options` accept any stable `ReadAt` source, including `SeekReader`.
+These source-based APIs also work with `no_std + alloc`.
+
+Opening reads the MSF directory and PDB Info stream. Other typed accessors load one requested stream at a time.
+Raw `msf::Stream` reads join fragmented blocks without loading the complete stream.
+The default limits are 64 MiB for the directory and 64 MiB for each typed stream load.
+Callers can change these limits through `ReadOptions`. Allocation failures return `LimitExceeded`.
+
+| Area | Implemented | Not yet implemented |
+| --- | --- | --- |
+| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks | Free-page-map allocation consistency |
+| PDB Info | Identity, named streams, feature codes and named-stream reference checks | Older Info layouts |
+| TPI and IPI | Modern headers, type-indexed record iteration and hash-stream references | Leaf decoding, type graphs and hash lookup |
+| DBI | Modern header, module records, debug-stream references and raw substream views | Source tables, section contributions, section maps and address translation |
+| Symbols | Record framing and common data, public and procedure symbol decoding | Remaining symbol families and global/public index lookup |
+| Module lines | Region bounds and C13 subsection framing | Lines, checksums and inline information |
+
+Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
+Header validation does not validate every record payload. Iterate records to check their framing.
+Unsupported container and stream versions return `UnsupportedVersion`; no heuristic fallback parses them as modern data.
+Full native support remains required. This coverage table does not reduce the scope below.
+
+Run native inspection with:
+
+```sh
+cargo run -p pdbrs --example native -- path/to/input.pdb
+```
+
+The example enumerates type, ID, shared symbol, module symbol and C13 subsection records.
+It reports decoded symbol counts separately from total framed record counts.
 
 ## Required formats and scope
 
@@ -557,14 +590,32 @@ Run both default features and `--no-default-features` once the library feature c
 
 ## Research evidence and references
 
-The existing local build produced `target/debug/pdbrs.pdb`. A direct header and directory inspection
-found 4096-byte blocks, 89 streams and two present empty streams. Declared and actual file sizes matched.
-This checks one real container layout; it is not a parser test or a format-coverage claim.
-The library's signature probe was exercised against a Rust-produced native PDB, a .NET-produced Portable PDB,
-an embedded PDB payload and ordinary CLI assembly metadata. A synthetic Small MSF signature was also identified.
-Truncated and unknown signatures returned errors with byte offsets.
-These checks establish signature and I/O behavior, not PDB parser or writer interoperability.
-No complete native, portable or legacy stream parser or writer exists yet.
+The existing local build produced `target/debug/pdbrs.pdb`.
+The native reader successfully enumerated its streams and records. LLVM `llvm-pdbutil` 22.1.6 agreed on these counts:
+
+| Item | pdbrs | llvm-pdbutil |
+| --- | ---: | ---: |
+| TPI records | 811 | 811 |
+| IPI records | 6,281 | 6,281 |
+| Modules | 73 | 73 |
+| Shared symbol records | 993 | 993 |
+| Module symbol records | 10,818 | 10,818 |
+
+The reader reported 4096-byte blocks, 89 streams and 368 C13 subsections.
+All eight displayed symbol names matched LLVM's output.
+LLVM called one module symbol kind unknown; both readers retained that record in their counts.
+The same five counts matched on the generated `inspect`, `streams` and `native` example PDBs.
+A separate consumer used the reader with default features disabled through `SeekReader`.
+It obtained the same type, ID, module and module symbol counts from the original Rust PDB.
+A truncated copy of that PDB failed with `UnexpectedEof` and the physical end offset.
+
+These are local Rust build outputs, not redistributed fixtures. Automated tests do not depend on them.
+The tests use synthetic containers for all supported page sizes, fragmentation, directory growth, malformed data and resource limits.
+The current smoke runs establish native reading behavior, not complete semantic decoding or writer interoperability.
+MSVC-only and other producer fixtures remain required by the acceptance plan.
+
+The signature probe was also exercised against a .NET-produced Portable PDB, an embedded PDB payload and ordinary CLI assembly metadata.
+A synthetic Small MSF signature was identified. These checks establish signature behavior, not portable or legacy parsing.
 The remaining format contracts come from the references below.
 
 References used for this proposal:

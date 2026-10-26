@@ -1,7 +1,16 @@
-//! Identity types for modern and legacy native PDB files.
+//! Native PDB containers, streams and record views.
 //!
 //! Container versions, stream versions and record kinds are independent.
-//! These identity values do not imply that a corresponding codec is available.
+//! Typed decoders report unsupported versions rather than guessing a layout.
+
+pub mod codeview;
+pub mod dbi;
+pub mod info;
+pub mod msf;
+pub mod types;
+
+mod reader;
+pub use reader::{Pdb, ReadOptions};
 
 /// The matching identity of a native PDB and its PE debug reference.
 ///

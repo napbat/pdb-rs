@@ -1,0 +1,219 @@
+//! Tests for `CodeView` record framing and symbol decoding.
+
+use pdbrs::ErrorKind;
+use pdbrs::native::codeview::{
+    Record, Records, S_GDATA32, S_GPROC32_ID, S_LDATA32, S_LPROC32, S_PUB32, SymbolDetail,
+};
+
+/// Serialize one record with `kind` and `payload`.
+fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
+    let length = u16::try_from(payload.len() + 2).unwrap();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&length.to_le_bytes());
+    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn decode_kind(bytes: &[u8]) -> ErrorKind {
+    let record = Records::new(bytes).next().unwrap().unwrap();
+    record.symbol().unwrap_err().kind()
+}
+
+fn public_payload(name: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&2_u32.to_le_bytes());
+    payload.extend_from_slice(&0x1234_u32.to_le_bytes());
+    payload.extend_from_slice(&1_u16.to_le_bytes());
+    payload.extend_from_slice(name);
+    payload
+}
+
+#[test]
+fn frames_records_of_all_kinds_with_their_padding() {
+    let mut bytes = record(0x9999, &[0xaa, 0xbb, 0xf2, 0xf1]);
+    bytes.extend(record(0x1504, &[]));
+    bytes.extend(record(
+        0x1606,
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    ));
+
+    let records: Vec<Record<'_>> = Records::new(&bytes).map(Result::unwrap).collect();
+
+    assert_eq!(records.len(), 3);
+    assert_eq!(
+        (records[0].offset, records[0].kind, records[0].data),
+        (0, 0x9999, &[0xaa, 0xbb, 0xf2, 0xf1][..])
+    );
+    assert_eq!((records[1].offset, records[1].kind), (8, 0x1504));
+    assert_eq!(records[1].data, []);
+    assert_eq!((records[2].offset, records[2].kind), (12, 0x1606));
+    assert_eq!(records[2].data.len(), 14);
+}
+
+#[test]
+fn empty_sequence_has_no_records() {
+    assert!(Records::new(&[]).next().is_none());
+}
+
+#[test]
+fn rejects_length_that_does_not_cover_the_kind() {
+    for length in [0_u16, 1] {
+        let mut bytes = record(0x1101, &[0; 4]);
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.extend_from_slice(&[0; 6]);
+        let mut records = Records::new(&bytes);
+        assert!(records.next().unwrap().is_ok());
+        let error = records.next().unwrap().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+        assert_eq!(error.offset(), None);
+        assert_eq!(records.position(), 8);
+        assert!(records.next().is_none());
+    }
+}
+
+#[test]
+fn rejects_truncated_prefix_at_each_length() {
+    for trailing in 1..4 {
+        let mut bytes = record(0x1101, &[]);
+        bytes.extend(std::iter::repeat_n(0x06, trailing));
+        let mut records = Records::new(&bytes);
+        assert!(records.next().unwrap().is_ok());
+        let error = records.next().unwrap().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+        assert_eq!(records.position(), 4);
+        assert!(records.next().is_none());
+    }
+}
+
+#[test]
+fn rejects_record_that_extends_past_the_end() {
+    let mut bytes = record(0x1101, &[1, 2, 3, 4]);
+    bytes.pop();
+    let mut records = Records::new(&bytes);
+    let error = records.next().unwrap().unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+    assert_eq!(records.position(), 0);
+    assert!(records.next().is_none());
+}
+
+#[test]
+fn accepts_record_that_ends_exactly_at_the_end() {
+    let bytes = record(0x1101, &[1, 2, 3]);
+    let mut records = Records::new(&bytes);
+    assert_eq!(records.next().unwrap().unwrap().data, &[1, 2, 3]);
+    assert!(records.next().is_none());
+    assert_eq!(records.position(), bytes.len());
+}
+
+#[test]
+fn decodes_public_name_without_padding() {
+    let bytes = record(S_PUB32, &public_payload(b"main\0\0\0"));
+    let record = Records::new(&bytes).next().unwrap().unwrap();
+    let symbol = record.symbol().unwrap().unwrap();
+
+    assert_eq!(symbol.kind(), S_PUB32);
+    assert_eq!(symbol.name(), b"main");
+    assert_eq!(symbol.section(), 1);
+    assert_eq!(symbol.offset(), 0x1234);
+    assert_eq!(symbol.detail(), SymbolDetail::Public { flags: 2 });
+    assert_eq!(symbol.type_index(), None);
+    assert_eq!(symbol.code_length(), None);
+    assert_eq!(symbol.record(), record);
+}
+
+#[test]
+fn name_stops_at_first_nul_even_if_padding_is_not_zero() {
+    let bytes = record(S_PUB32, &public_payload(b"_start\0\xf2\xf1"));
+    let record = Records::new(&bytes).next().unwrap().unwrap();
+    assert_eq!(record.symbol().unwrap().unwrap().name(), b"_start");
+}
+
+#[test]
+fn decodes_data_symbols() {
+    for kind in [S_GDATA32, S_LDATA32] {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1003_u32.to_le_bytes());
+        payload.extend_from_slice(&0x40_u32.to_le_bytes());
+        payload.extend_from_slice(&3_u16.to_le_bytes());
+        payload.extend_from_slice(b"GLOBAL\0\0");
+        let bytes = record(kind, &payload);
+        let record = Records::new(&bytes).next().unwrap().unwrap();
+        let symbol = record.symbol().unwrap().unwrap();
+
+        assert_eq!(symbol.kind(), kind);
+        assert_eq!(symbol.name(), b"GLOBAL");
+        assert_eq!((symbol.section(), symbol.offset()), (3, 0x40));
+        assert_eq!(symbol.type_index(), Some(0x1003));
+        assert_eq!(symbol.code_length(), None);
+    }
+}
+
+#[test]
+fn decodes_procedure_fields() {
+    for kind in [S_GPROC32_ID, S_LPROC32] {
+        let mut payload = Vec::new();
+        for value in [0_u32, 0x200, 0, 0x55, 4, 0x50, 0x1010, 0x30] {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        payload.extend_from_slice(&1_u16.to_le_bytes());
+        payload.push(0x80);
+        payload.extend_from_slice(b"_ZN4core3fmt5write17h0123456789abcdefE\0");
+        let bytes = record(kind, &payload);
+        let record = Records::new(&bytes).next().unwrap().unwrap();
+        let symbol = record.symbol().unwrap().unwrap();
+
+        assert_eq!(symbol.name(), b"_ZN4core3fmt5write17h0123456789abcdefE");
+        assert_eq!((symbol.section(), symbol.offset()), (1, 0x30));
+        assert_eq!(symbol.code_length(), Some(0x55));
+        assert_eq!(symbol.type_index(), Some(0x1010));
+        let SymbolDetail::Procedure(procedure) = symbol.detail() else {
+            panic!("expected a procedure");
+        };
+        assert_eq!((procedure.end, procedure.debug_start), (0x200, 4));
+        assert_eq!((procedure.debug_end, procedure.flags), (0x50, 0x80));
+    }
+}
+
+#[test]
+fn other_kinds_are_not_decoded() {
+    // S_UDT has a type index and a name, but it has no address.
+    let bytes = record(0x1108, &[0x10, 0x10, 0, 0, b'T', 0]);
+    let record = Records::new(&bytes).next().unwrap().unwrap();
+    assert_eq!(record.symbol().unwrap(), None);
+}
+
+#[test]
+fn rejects_symbol_name_without_terminator() {
+    let bytes = record(S_PUB32, &public_payload(b"main"));
+    assert_eq!(decode_kind(&bytes), ErrorKind::InvalidFormat);
+}
+
+#[test]
+fn rejects_payload_shorter_than_fixed_fields() {
+    let public = public_payload(b"");
+    assert_eq!(
+        decode_kind(&record(S_PUB32, &public[..9])),
+        ErrorKind::InvalidFormat
+    );
+    assert_eq!(
+        decode_kind(&record(S_GPROC32_ID, &[0; 34])),
+        ErrorKind::InvalidFormat
+    );
+    // The fixed fields are complete, but the name terminator is absent.
+    assert_eq!(
+        decode_kind(&record(S_GPROC32_ID, &[0; 35])),
+        ErrorKind::InvalidFormat
+    );
+    assert_eq!(
+        decode_kind(&record(S_LDATA32, &[0; 10])),
+        ErrorKind::InvalidFormat
+    );
+}
+
+#[test]
+fn accepts_empty_name() {
+    let bytes = record(S_GDATA32, &[0; 11]);
+    let record = Records::new(&bytes).next().unwrap().unwrap();
+    assert_eq!(record.symbol().unwrap().unwrap().name(), b"");
+}
