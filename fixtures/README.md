@@ -16,8 +16,8 @@ exception handling and .NET async state machines.
 | `native/dll/` | A small DLL for the `msvc-x64-dll` fixture: `exports.cpp` and the module-definition file `exports.def`. |
 | `native/clr/` | A mixed C++/CLI program for the `msvc-x64-clr` fixture: `managed.cpp`. |
 | `rust/` | A standalone Cargo project. Its empty `[workspace]` table keeps it out of the root workspace. |
-| `dotnet/csharp/` | A C# console project with four source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs` and `Locals.cs`. |
-| `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
+| `dotnet/csharp/` | A C# console project with six source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs`, `Locals.cs`, `Mapping.cs` and `Constants.cs`. |
+| `dotnet/vb/` | A Visual Basic console project with three source files: `Program.vb`, `Tracing.vb` and `Mapping.vb`. |
 | `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
 | `hlsl/` | HLSL shaders for `fxc` and `dxc`: `vertex.hlsl`, `pixel.hlsl`, `compute.hlsl` and the shared header `common.hlsli`. |
 | `tools/msfz-encode/` | Not a demo program: the standalone Cargo project of `msfz-encode`, the producer of the `msfz-*` fixtures (see [Consumer tools](#consumer-tools)). It uses Microsoft's `ms-pdb-msf` and `ms-pdb-msfz` crates, not pdbrs. |
@@ -40,8 +40,8 @@ Each demo also has these language-specific items:
 
 | Demo | Items |
 | --- | --- |
-| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. In `Mapping.cs`, `#line 100 "Mapped.template"` maps part of one method to another document, so its sequence points change documents (#23). The build with embedded sources embeds `Mapped.template` too. |
-| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. In `Mapping.vb`, two `#ExternalSource` blocks map parts of one function to `Mapped.vb` and `MappedNext.vb`, so its sequence points change documents (#23). The VB compiler hides the other lines of that file. |
+| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. In `Mapping.cs`, `#line 100 "Mapped.template"` maps part of one method to another document, so its sequence points change documents (#23). The build with embedded sources embeds `Mapped.template` too. `Constants.cs` has a local constant of each constant type: `float` and `double` (also NaN, infinities and negative zero), `decimal` (also scales and the limits), `string` (also empty, non-ASCII and with a NUL), `char`, `sbyte` to `ulong` and `nint`/`nuint` at their limits, `bool`, null references and enums with `sbyte`, `int`, `long` and `ulong` values. In the Windows PDB, these give the numeric leaves `LF_REAL32`, `LF_REAL64`, `LF_DECIMAL`, `LF_VARSTRING`, `LF_CHAR` to `LF_UQUADWORD` and immediate values in `S_MANCONSTANT` (#39). |
+| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. In `Mapping.vb`, two `#ExternalSource` blocks map parts of one function to `Mapped.vb` and `MappedNext.vb`, so its sequence points change documents (#23). The VB compiler hides the other lines of that file. `ConstantValues` in `Program.vb` has `Const` values of each constant type of Visual Basic. In the Windows PDB (`dotnet-vb-full`), a `Date` constant gives `LF_DATE` with the .NET tick count, not an OLE automation date (#39). |
 | F# | `task { }` state machines, `seq { }` classes, an `async { }` workflow, records and discriminated unions. The generator builds the F# demo with `Optimize=true`, because the F# compiler makes a `task { }` state machine only with optimization. The F# compiler writes no `StateMachineMethod` rows. |
 
 With the argument `stack`, each .NET demo prints `System.Diagnostics.StackTrace(true)` and
@@ -104,6 +104,7 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `dotnet-csharp-full` | `dotnet build` | AnyCPU | `DebugType=full` |
 | `dotnet-csharp-embed-sources` | `dotnet build` | AnyCPU | `DebugType=portable`, `EmbedAllSources=true` |
 | `dotnet-vb-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
+| `dotnet-vb-full` | `dotnet build` | AnyCPU | `DebugType=full` |
 | `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable`, `Optimize=true` |
 | `hlsl-fxc-sm50-debug` | `fxc` | DXBC | `/Zi /Od`, profiles `vs_5_0`, `ps_5_0`, `cs_5_0` |
 | `hlsl-fxc-sm51-debug` | `fxc` | DXBC | `/Zi /Od`, profiles `vs_5_1`, `ps_5_1`, `cs_5_1` |
@@ -229,7 +230,7 @@ The manifest gives the kind `native-pdz`, the option set as the configuration an
 
 | Fixture | `pdz-encode` options | Sources |
 | --- | --- | --- |
-| `pdz-default` | none (defaults) | Each MSF 7.0 PDB of each fixture, except `hlsl-dxc-debug` (47 files) |
+| `pdz-default` | none (defaults) | Each MSF 7.0 PDB of each fixture, except `hlsl-dxc-debug` (48 files) |
 | `pdz-compress-stream-dir` | `--compress-stream-dir` | `msvc-x64-debug`, `clang-lld-x64-debug`, `rust-link-x64-debug`, `dotnet-csharp-full` |
 | `pdz-one-stream-per-chunk` | `--one-stream-per-chunk` | the same four |
 | `pdz-small-chunks` | `--max-chunk-size 4K` (the smallest size): large streams cross chunks | the same four |

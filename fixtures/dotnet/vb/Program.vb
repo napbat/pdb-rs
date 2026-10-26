@@ -87,7 +87,67 @@ Module Program
             total += value
         Next
         Dim element As XElement = <demo:item>vb</demo:item>
-        Return total + element.Value.Length
+        Return total + element.Value.Length + ConstantValues()
+    End Function
+
+    ' Local constants of each constant type of Visual Basic. A Windows PDB keeps each value in an
+    ' S_MANCONSTANT record with a numeric leaf. The function returns 0, so the checksum of the
+    ' demo does not change.
+    Function ConstantValues() As Integer
+        Const Earliest As Date = #1/1/0001#
+        Const Stamp As Date = #2024-01-02 13:45:30#
+        Const Latest As Date = #12/31/9999 11:59:59 PM#
+        Const TimeOnly As Date = #6:30:00 AM#
+
+        Const DecimalZero As Decimal = 0D
+        Const DecimalScaled As Decimal = 12.750D
+        Const DecimalNegative As Decimal = -0.0001D
+        Const DecimalMax As Decimal = Decimal.MaxValue
+
+        Const SingleValue As Single = 1.5F
+        Const SingleNaN As Single = Single.NaN
+        Const DoubleValue As Double = 0.1R
+        Const DoubleNaN As Double = Double.NaN
+        Const DoubleInfinity As Double = Double.NegativeInfinity
+        Const DoubleNegativeZero As Double = -0.0R
+
+        Const EmptyText As String = ""
+        Const AsciiText As String = "constant"
+        Const OtherText As String = "Grüße € 日本語 😀"
+        Const NulText As String = "a" & vbNullChar & "b"
+
+        Const Letter As Char = "A"c
+        Const CharZero As Char = ChrW(0)
+        Const CharEuro As Char = "€"c
+        Const CharMax As Char = ChrW(&HFFFF)
+
+        Const IsTrue As Boolean = True
+        Const IsFalse As Boolean = False
+
+        Const SByteMin As SByte = SByte.MinValue
+        Const ByteMax As Byte = Byte.MaxValue
+        Const ShortMin As Short = Short.MinValue
+        Const UShortMax As UShort = UShort.MaxValue
+        Const IntegerMin As Integer = Integer.MinValue
+        Const UIntegerMax As UInteger = UInteger.MaxValue
+        Const LongMin As Long = Long.MinValue
+        Const ULongMax As ULong = ULong.MaxValue
+
+        Const NoObject As Object = Nothing
+        Const NoText As String = Nothing
+        Const Day As DayOfWeek = DayOfWeek.Sunday
+
+        Dim values As Object() = {
+            Earliest, Stamp, Latest, TimeOnly, DecimalZero, DecimalScaled, DecimalNegative,
+            DecimalMax, SingleValue, SingleNaN, DoubleValue, DoubleNaN, DoubleInfinity,
+            DoubleNegativeZero, EmptyText, AsciiText, OtherText, NulText, Letter, CharZero,
+            CharEuro, CharMax, IsTrue, IsFalse, SByteMin, ByteMax, ShortMin, UShortMax,
+            IntegerMin, UIntegerMax, LongMin, ULongMax, NoObject, NoText, Day
+        }
+        Dim failures As Integer = If(values.Length = 35, 0, 1)
+        failures += If(Double.IsNaN(DoubleNaN) AndAlso Single.IsNaN(SingleNaN), 0, 1)
+        failures += If(Stamp.Hour = 13 AndAlso TimeOnly.Year = 1, 0, 1)
+        Return failures
     End Function
 
 End Module

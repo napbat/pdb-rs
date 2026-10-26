@@ -780,6 +780,15 @@ pub static FIXTURES: &[Fixture] = &[
         &["DebugType=portable"],
         Some(Kind::PortablePdb),
     ),
+    // The Windows PDB of the VB demo: VB `Date` constants give `LF_DATE` in `S_MANCONSTANT`.
+    dotnet(
+        "dotnet-vb-full",
+        "visual basic",
+        "debug, full",
+        ("vb", "VbDemo", "vbproj"),
+        &["DebugType=full"],
+        Some(Kind::NativePdb),
+    ),
     dotnet(
         "dotnet-fsharp-portable",
         "f#",

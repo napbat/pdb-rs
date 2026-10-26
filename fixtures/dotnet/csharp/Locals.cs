@@ -50,7 +50,8 @@ internal static class LocalInfo
         object? value = NoObject;
         int extra = text is null && value is null ? 1 : 0;
         return Max(total, 0) + pair.Left + pair.Right + fromDynamic + mixed.Name.Length + extra
-            + (int)(Wide >> 40) + (int)(Ratio * 2) + (int)Price + Letter + (int)Day;
+            + (int)(Wide >> 40) + (int)(Ratio * 2) + (int)Price + Letter + (int)Day
+            + ConstantValues.Check();
     }
 }
 
