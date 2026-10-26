@@ -76,6 +76,7 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `msvc-x64-dll` | `cl` + `link` | x64 | `/Zi /Od`, `/DLL /DEF:exports.def` |
 | `msvc-x64-xfg` | `cl` + `link` from Visual Studio 2022 | x64 | `/Zi /Od /guard:xfg`, `/DEBUG:FULL /guard:xfg` |
 | `msvc-x64-debugtype` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /DEBUGTYPE:CV,FIXUP,PDATA` |
+| `msvc-arm64-debugtype` | `cl` + `link` | ARM64 | `/Zi /Od`, `/DEBUG:FULL /DEBUGTYPE:CV,FIXUP,PDATA` |
 | `msvc-x64-stripped` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBSTRIPPED` |
 | `msvc-x64-natvis` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /NATVIS:demo.natvis` |
 | `msvc-x64-srcsrv` | `cl` + `link` + `pdbstr` | x64 | `/Zi /Od`, `/DEBUG:FULL`, then `pdbstr -w -s:srcsrv` on a copy |
@@ -103,7 +104,7 @@ and write a full PDB. For this reason, `msvc-x64-fastlink` uses the tools of a V
 
 ### Native variants
 
-The `msvc-x64-*` variants after `clang-link-x64-debug` give the native reader record kinds and
+The `msvc-*` variants after `clang-link-x64-debug` give the native reader record kinds and
 streams that the other fixtures do not contain (#27). Each variant is small. Most variants use
 the sources of `native/`. The table gives the outputs and the items that only the variant
 contains. The issue in the last column decodes these items.
@@ -115,6 +116,7 @@ contains. The issue in the last column decodes these items.
 | `msvc-x64-dll` | `demo.dll`, `demo.pdb` | `S_EXPORT` symbols with each flag: explicit ordinal, NONAME, DATA, CONSTANT, PRIVATE and forwarder. | #30 |
 | `msvc-x64-xfg` | `demo.exe`, `demo.pdb` | None in the PDB. The object files in `obj/` have the XFG hash subsections `0xFF` and `0x100`. | #31 |
 | `msvc-x64-debugtype` | `demo.exe`, `demo.pdb` | The optional debug streams Fixup (slot 2), Xdata (slot 7) and Pdata (slot 8). | #32 |
+| `msvc-arm64-debugtype` | `demo.exe`, `demo.pdb` | The same optional debug streams as `msvc-x64-debugtype`, with the ARM64 forms of the `.pdata` and `.xdata` data. | #32 |
 | `msvc-x64-stripped` | `demo.exe`, `demo.pdb`, `demo.stripped.pdb` | A stripped PDB: no `/names` stream and no type records. 51 of 58 modules have no stream. The other modules have only procedure stubs. The globals are only public symbols and procedure references. | #32 |
 | `msvc-x64-natvis` | `demo.exe`, `demo.pdb` | None that is new. `demo.natvis` is an injected source (`/src/headerblock`, `/src/files/...`). The Rust fixtures have Natvis injected sources from `link.exe` and `lld-link` too, but no fixture of C++ code had them. | #32 |
 | `msvc-x64-srcsrv` | `demo.exe`, `demo.pdb`, `demo.srcsrv.pdb` | The `srcsrv` named stream. `pdbstr` also increments the age in the PDB Info stream, but not in the DBI stream. | #32 |
