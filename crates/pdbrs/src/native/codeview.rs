@@ -16,6 +16,9 @@ use core::iter::FusedIterator;
 
 use crate::{Error, ErrorKind, Result};
 
+pub mod index;
+pub mod numeric;
+
 mod symbol;
 
 pub use symbol::{

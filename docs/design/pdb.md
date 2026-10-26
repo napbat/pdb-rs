@@ -61,6 +61,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | DBI | Modern header, module records, debug-stream references and raw substream views | Source tables, section contributions, section maps and address translation |
 | Symbols | Record framing and common data, public and procedure symbol decoding | Remaining symbol families and global/public index lookup |
 | Module lines | Region bounds and C13 subsection framing | Lines, checksums and inline information |
+| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding | Non-integer leaves and integration into typed records |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
 Header validation does not validate every record payload. Iterate records to check their framing.
@@ -75,6 +76,12 @@ cargo run -p pdbrs --example native -- path/to/input.pdb
 
 The example enumerates type, ID, shared symbol, module symbol and C13 subsection records.
 It reports decoded symbol counts separately from total framed record counts.
+
+The [implementation map](../issues/0001-native-pdb-support.md#implementation-map-and-starting-point) defines the next module boundaries and acceptance milestone.
+Start with integer numeric leaves, field lists and typed TPI records before adding lookup acceleration.
+`native::codeview::numeric::Integer::parse_prefix` now supplies the integer decoder without allocation.
+A temporary consumer matched all 40 shared integer constant names and values in the original Rust PDB against LLVM in both feature modes.
+This verifies the numeric decoder, not complete constant-symbol or type decoding.
 
 ## Required formats and scope
 

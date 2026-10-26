@@ -5,6 +5,7 @@
 
 pub mod codeview;
 pub mod dbi;
+pub mod hash;
 pub mod info;
 pub mod msf;
 pub mod types;

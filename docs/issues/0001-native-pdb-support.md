@@ -34,6 +34,65 @@ Do not add a PE parser, linker, symbol server client or automatic external-file 
 The [design evidence](../design/pdb.md#research-evidence-and-references) records the smoke results and their limits.
 Counts prove enumeration, not complete semantics. No native writer or semantic editor exists at this baseline.
 
+## Implementation map and starting point
+
+Start with integer numeric leaves, then field lists and typed TPI records.
+These expose Rust type sizes, field offsets, enum values and function signatures.
+Do not start with hash acceleration or writing: neither adds meaning to opaque records.
+
+All paths below are relative to `crates/pdbrs/src/`.
+Only the numeric component is added by this step. Other new paths are planned, not placeholder modules.
+
+| Order | Module boundary | Deliverable and dependencies |
+| --- | --- | --- |
+| 1 | `native/codeview/numeric.rs` | Implemented integer leaves. Shared by type sizes, member offsets, enumerators and integer constants. |
+| 2 | `native/codeview/field_list.rs` | Borrowed field-list member iteration, attributes and continuations. Uses numeric leaves; unknown unframed members stop decoding. |
+| 3 | `native/codeview/type_record.rs` | Borrowed typed leaves: modifiers, pointers, arrays, aggregates, enums, procedures, member functions, argument lists and bitfields. |
+| 4 | `native/types/index.rs` | Optional offset index, primitive interpretation, forward references and bounded type resolution. Keep stream ownership in `TypeStream`. |
+| 5 | `native/codeview/id.rs` | IPI strings, function IDs, build info and UDT source references. Resolve IDs separately from types. |
+| 6 | Existing `native/codeview/symbol.rs` and children | Extend the existing symbol API with constants, locals, ranges, scope links and inline sites. Do not introduce a second symbol API. |
+| 7 | `native/lines.rs` and children | C13 checksums, file names, line/column tables, inlinee lines and annotation programs. Reuse existing module subsection framing. |
+| 8 | Existing `native/dbi.rs` and children; `native/address.rs` | Source tables, section contributions/maps, section headers and OMAP. Join module/section coordinates without assuming every address has an RVA. |
+| 9 | `native/symbols.rs` and children | GSI/PSI lookup and address indexes over the existing shared symbol records. Reuse the semantic decoders. |
+| 10 | `native/msf/write.rs`, then native builder/editor modules | Implement checked output plans, container repacking, semantic encoders and dependent-index rebuilds. No public write API before a real output path exists. |
+
+Steps 7 and 8 can proceed separately from full type resolution once their reference contracts are defined.
+Auxiliary streams, compatibility variants and complete record coverage remain required by the checklists below.
+This order prioritizes the Rust sample; it does not make that sample the format specification.
+
+### Shared contracts
+
+- Decode payloads into borrowed views. Keep names and unknown payloads as bytes.
+- Return the unconsumed suffix when decoding embedded variable-length values. Do not assume alignment between fields.
+- Keep framing, payload decoding and cross-record resolution separate.
+- Represent primitive type indices explicitly. Do not index them into TPI.
+- Keep type indices, IPI IDs, stream IDs and record offsets distinct in new semantic APIs.
+- Preserve unknown top-level records. Never skip an unknown unframed field-list member by guessing its length.
+- Keep allocations fallible and optional indexes bounded. Bound continuation chains and recursive resolution.
+- Attach stream/record locations at the owning layer. Shared payload decoders must not invent physical offsets.
+- Add each new module only when it implements exercised behavior. Do not add empty modules or methods that return dummy results.
+
+### First completed component
+
+`codeview::numeric::Integer::parse_prefix` decodes immediate unsigned values and all nine explicit integer leaf tags.
+It retains signedness through 128 bits and returns the untouched suffix without allocation.
+Non-integer and unknown tags return `UnsupportedVersion`; truncated integer encodings return `UnexpectedEof`.
+Floating-point, complex, decimal, date and string representations remain separate work.
+
+Boundary tests cover every integer width, sign extremes, the immediate/tag boundary, truncation and suffix preservation.
+A temporary consumer decoded all 40 shared `S_CONSTANT` integer values in the original Rust PDB.
+Names and values matched LLVM exactly in both feature modes, including `18446744073709551615`.
+This does not yet add `S_CONSTANT` to `Record::symbol`.
+
+### Next acceptance milestone: Rust type inspection
+
+- [ ] Decode field lists and the aggregate, enum, pointer, modifier and function families present in the Rust sample.
+- [ ] Resolve field types and continuation records without recursion failures or repeated full-stream scans.
+- [ ] Print type names, sizes, field names/offsets, enum values and function signatures from a real PDB.
+- [ ] Compare those semantic results with LLVM, not only record counts.
+- [ ] Preserve unknown leaves and report incomplete semantic coverage explicitly.
+- [ ] Exercise signed enum values, recursive types, forward declarations, malformed members and both feature modes.
+
 ## Coverage accounting
 
 - [ ] Reconcile every imported document against the implementation. Record conflicts and undocumented assumptions.
