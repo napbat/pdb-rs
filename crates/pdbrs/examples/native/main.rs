@@ -22,13 +22,12 @@ use std::error::Error;
 
 use pdbrs::io::FileReader;
 use pdbrs::native::Pdb;
-use pdbrs::native::address::AddressMap;
+use pdbrs::native::address::{AddressMap, AddressTables};
 use pdbrs::native::auxiliary::TypeMapStream;
 use pdbrs::native::codeview::id_record::IdTable;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::msf::{OldDirectory, StreamId};
 use pdbrs::native::names::StringTable;
-use pdbrs::native::section::SectionHeaders;
 use pdbrs::{ErrorKind, Result as PdbResult};
 
 use dbi::{debug_info_tables, frame_data, reencode_dbi, section_header_bytes};
@@ -162,12 +161,11 @@ fn main() -> Outcome {
         report.add("PDB Info age above the DBI age", 1);
         println!("PDB Info age: {info_age}, DBI age: {}", dbi.header().age);
     }
-    let header_bytes = section_header_bytes(&pdb, &dbi, &mut report)?;
-    let addresses = header_bytes
-        .as_deref()
-        .map(SectionHeaders::parse)
-        .transpose()?
-        .map(|headers| AddressMap::new(headers, &dbi));
+    section_header_bytes(&pdb, &dbi, &mut report)?;
+    // The tables hold the section headers and, if the DBI stream names them, the OMAP tables
+    // and the original section headers.
+    let tables = pdb.address_tables(&dbi)?;
+    let addresses = tables.as_ref().map(AddressTables::map);
     let module_count = debug_info_tables(&dbi, addresses.as_ref(), &mut report)?;
     let context = Context {
         names,
