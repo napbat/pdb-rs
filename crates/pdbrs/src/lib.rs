@@ -1,8 +1,9 @@
 //! Building blocks for native Windows and Portable .NET PDB files.
 //!
-//! The API reads MSF 7.0 and MSFZ containers, native PDB metadata and framed debug
-//! records. It decodes common data, public and procedure symbols. Other record
-//! kinds remain available as raw bytes. Full semantic decoding is not complete.
+//! The API reads MSF 7.0 and MSFZ containers and native PDB streams. [`native::Pdb`]
+//! decodes every modern `CodeView` record kind, numeric leaf and C13 subsection
+//! that has a layout definition, and checks the references between records.
+//! Record kinds without a layout remain available as raw bytes.
 //! [`native::container::Container`] gives one stream reader for both containers.
 //!
 //! [`portable::Pdb`] reads standalone Portable PDBs: the metadata root, the
@@ -14,11 +15,12 @@
 //! example the metadata of an assembly) because it has no `#Pdb` stream.
 //!
 //! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
-//! repacks and new layouts of arbitrary streams. [`portable::write`] writes
-//! Portable PDBs: exact copies and new layouts from raw rows and heaps.
-//! [`portable::PdbBuilder`] and [`portable::PdbEditor`] build and edit
-//! Portable PDBs from typed records. Native PDB semantic building and editing
-//! are not implemented.
+//! repacks and new layouts of arbitrary streams. Each native record and
+//! stream has an encoder. [`native::write::PdbBuilder`] builds new native
+//! PDBs, and [`native::PdbEditor`] edits native PDBs and rebuilds the
+//! dependent indexes. [`portable::write`] writes Portable PDBs: exact copies
+//! and new layouts from raw rows and heaps. [`portable::PdbBuilder`] and
+//! [`portable::PdbEditor`] build and edit Portable PDBs from typed records.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
