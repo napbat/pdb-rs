@@ -34,6 +34,8 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
 - `portable::custom` decodes and encodes the custom debug information blobs of all kinds in the Portable PDB specification and Roslyn (#24).
   It keeps unknown kinds as raw bytes. The native `MD2` Edit and Continue records (kinds 6, 7 and 9) use the same codecs.
   `portable::Pdb::custom_debug_information` reads a row with its kind GUID and its value blob.
+- `portable::debug` has the typed rows of the debug tables and the codecs of their blobs: document names, sequence points, local constant signatures and imports (#23).
+  Each codec has an encoder that takes resolved heap offsets and row IDs, for the writer (#26). `Pdb::validate_debug` checks the ordering and reference rules.
 
 Run signature inspection on Unix or Windows with:
 
@@ -112,7 +114,7 @@ It does not read rows or heap values. `Pdb::row` and `Pdb::rows` read one row at
 | `#Pdb` | PDB ID, entry point (nil or an external `MethodDef` row), referenced type-system tables and their row counts, exact stream size | — |
 | `#~` | Version 2.0, `HeapSizes`, `Valid` and `Sorted` masks, row counts up to `0xFFFFFF`, heap, table and coded index widths from local and external row counts, row extents. A table outside the debug schema with rows gives `InvalidFormat`; `#-` and delta `HeapSizes` flags give `UnsupportedVersion` | Uncompressed `#-` tables |
 | Heaps | `#Strings` termination, `#Blob` and `#US` length prefixes, `#GUID` indexes, the empty first entry and 16-byte GUID boundaries | — |
-| Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked | Blob decoding and ordering rules (#23); typed custom debug information on rows (#24) |
+| Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked. `portable::debug` (#23): typed rows of seven tables (`CustomDebugInformation` in `portable::custom`, #24); document names, languages and hash algorithms; sequence points (hidden points, document records, signed deltas, IL offset and line and column bounds); local constant signatures (all type codes, enums, general values, custom modifiers); imports of the nine kinds; an encoder for each blob in the Roslyn form; `Pdb::validate_debug` | Instruction boundaries and the IL size of the first scope of a method: they need the method bodies of the assembly |
 | Dispatch | `pdbrs::Pdb` and `pdbrs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
 
 Read a complete Portable PDB with:
@@ -122,11 +124,28 @@ cargo run -p pdbrs --example portable -- path/to/input.pdb
 ```
 
 The example reads every row and every heap value that a row refers to. It fails at the first value that it cannot read.
+It decodes every blob of the debug tables and every custom debug information value, encodes each again and compares the bytes.
+Then it runs `Pdb::validate_debug` and prints the report: each rule with the number of checked items, or the reason why the rule was not checked.
 The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `System.Reflection.Metadata`.
 `cargo run -p pdbrs-fixtures -- verify-portable` compares it with the pdbrs dump; `fixtures/README.md` describes the format.
-Evidence ([#22](https://github.com/napbat/pdbrs/issues/22)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) give dumps without differences.
+The dump has the raw rows, the decoded debug tables (#23) and the decoded custom debug information (#24).
+Evidence ([#22](https://github.com/napbat/pdbrs/issues/22), [#23](https://github.com/napbat/pdbrs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
+The encoders give the same bytes for every debug table blob of the C# and VB fixtures.
+For F#, 26 sequence point blobs differ only in the `LocalSignature` header: the F# compiler writes a full `StandAloneSig` token, not a row. The decoder accepts both forms.
 `cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
 It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
+
+`Pdb::validate_debug` checks these rules and stops at the first violation:
+
+- Unique document names; hash sizes of the defined hash algorithms.
+- The `MethodDebugInformation` row count against the `MethodDef` count from `ValidateOptions` or from the `#Pdb` stream.
+- Sequence point blobs: documents and the `LocalSignature` row exist; a method without sequence points has a nil document.
+- `LocalScope` order (method, start, descending length), non-nil methods, IL ranges, nesting, and the first scope of each method at offset 0 and around the other scopes.
+- Contiguous variable and constant runs that give each row to one scope; unique variable indexes and names, and unique constant names, in each scope.
+- Constant signatures and their external type rows; import blobs and their assemblies, types, aliases and namespaces; import-parent chains without cycles.
+- `StateMachineMethod` sorted by `MoveNextMethod` with unique methods; `CustomDebugInformation` sorted by `Parent`.
+
+A nil `VariableList` or `ConstantList` is an empty run if its table has no rows (the F# compiler writes nil `ConstantList` values).
 
 ## Implemented Portable PDB writing
 
