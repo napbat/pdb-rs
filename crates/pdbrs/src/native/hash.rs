@@ -28,6 +28,27 @@ pub fn hash_string_v1(bytes: &[u8]) -> u32 {
     result ^ (result >> 16)
 }
 
+/// Return the version 2 string hash (`HasherV2::lhashPbCb` in Microsoft `misc.h`).
+///
+/// Version 2 string tables use this function. The result is the value before the reduction
+/// modulo `0xffff_ffff` that `NMT` applies; LLVM `hashStringV2` returns the same value.
+#[must_use]
+pub fn hash_string_v2(bytes: &[u8]) -> u32 {
+    let step = |hash: u32, item: u32| {
+        let hash = hash.wrapping_add(item);
+        let hash = hash.wrapping_add(hash << 10);
+        hash ^ (hash >> 6)
+    };
+    let (words, rest) = bytes.as_chunks::<4>();
+    let hash = words.iter().fold(0xb170_a1bf, |hash, word| {
+        step(hash, u32::from_le_bytes(*word))
+    });
+    let hash = rest
+        .iter()
+        .fold(hash, |hash, &byte| step(hash, u32::from(byte)));
+    hash.wrapping_mul(1_664_525).wrapping_add(1_013_904_223)
+}
+
 /// Return the buffer hash `SigForPbCb`, a CRC-32 with an initial and final value of zero.
 ///
 /// Type hashes use this function for most records. Injected-source entries

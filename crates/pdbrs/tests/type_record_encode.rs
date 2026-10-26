@@ -420,16 +420,39 @@ fn dimension_bounds_need_a_primitive_integer_type() {
 }
 
 #[test]
+fn shader_records_keep_fxc_property_bits() {
+    // An `LF_HLSL` record of the Windows SDK `fxc` compiler: kind 0x219 and
+    // the property word 0x07c0, with nonzero bits 4 to 15 (#29).
+    let full = [
+        0x0e, 0x00, 0x17, 0x15, 0x75, 0, 0, 0, 0x19, 0x02, 0xc0, 0x07, 0, 0, 0xf2, 0xf1,
+    ];
+    let TypeLeaf::Hlsl(hlsl) = decode(&full) else {
+        panic!("not an HLSL record");
+    };
+    assert_eq!(hlsl.subtype, TypeIndex(0x75));
+    assert_eq!(hlsl.kind, 0x0219);
+    assert_eq!(hlsl.property_word, 0x07c0);
+    assert_eq!(hlsl.property_count(), 0);
+    assert_eq!(hlsl.unused_bits(), 0x07c);
+    assert_eq!(hlsl.properties().count(), 0);
+    assert_eq!(hlsl.size.integer(), Some(Integer::Unsigned(0)));
+    let mut out = Vec::new();
+    TypeLeaf::Hlsl(hlsl).encode(&mut out).unwrap();
+    assert_eq!(out, full);
+    // Bits 0 to 3 still give the number of properties.
+    let payload = bytes(&[&u32le(0), &[0x10, 0], &[0x61, 0x62], &[7, 0], &[16, 0]]);
+    let full = check(LF_HLSL, &payload);
+    let TypeLeaf::Hlsl(hlsl) = decode(&full) else {
+        panic!("not an HLSL record");
+    };
+    assert_eq!(hlsl.property_count(), 1);
+    assert_eq!(hlsl.unused_bits(), 0x626);
+    let numbers: Vec<_> = hlsl.properties().map(|value| value.integer()).collect();
+    assert_eq!(numbers, [Some(Integer::Unsigned(7))]);
+}
+
+#[test]
 fn shader_records_check_their_counts() {
-    // Bits 4 to 15 of the HLSL property word must be zero.
-    let payload = bytes(&[&u32le(0), &[0x10, 0], &[0x10, 0], &[16, 0]]);
-    let error = TypeLeaf::decode(Record {
-        offset: 0,
-        kind: LF_HLSL,
-        data: &record(LF_HLSL, &payload)[4..],
-    })
-    .unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let error = ModifierEx::new(TypeIndex(0x40), &[1, 0, 2]).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let modifiers = ModifierEx::new(TypeIndex(0x40), &[1, 0, 2, 0]).unwrap();

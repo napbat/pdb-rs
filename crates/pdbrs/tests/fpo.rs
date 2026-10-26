@@ -1,7 +1,10 @@
 //! Tests for the FPO and new-FPO (frame data) streams.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::fpo::{FPO_RECORD_SIZE, FRAME_DATA_SIZE, FpoStream, FrameDataStream, FrameKind};
+use pdbrs::native::debug_stream::DebugRecord;
+use pdbrs::native::fpo::{
+    FPO_RECORD_SIZE, FRAME_DATA_SIZE, FpoData, FpoStream, FrameData, FrameDataStream, FrameKind,
+};
 use pdbrs::native::msf::StreamId;
 
 /// The stream ID of the synthetic streams.
@@ -157,4 +160,53 @@ fn frame_data_stream_has_no_header_and_rejects_partial_records() {
         &FrameDataStream::parse(vec![0; FRAME_DATA_SIZE - 1], STREAM).unwrap_err(),
         0,
     );
+}
+
+#[test]
+fn fpo_records_encode_the_same_bytes() {
+    let bytes = [
+        fpo(0x28ca, 6, 0, 0, 0x0800),
+        fpo(u32::MAX, u32::MAX, u32::MAX, u16::MAX, 0xffff),
+        fpo(0x1000, 0x20, 3, 2, 0x4000 | 0x1000 | 0x0500 | 0x80),
+        fpo(0, 0, 0, 0, 0x8000 | 0x2000),
+    ]
+    .concat();
+    let stream = FpoStream::parse(bytes.clone(), STREAM).unwrap();
+    assert_eq!(stream.to_bytes().unwrap(), bytes);
+    let records: Vec<_> = stream.iter().collect();
+    assert_eq!(FpoStream::from_records(&records).unwrap(), stream);
+
+    let mut record = FpoData::new(0x1000, 0x20);
+    assert_eq!(record.frame, FrameKind::Fpo);
+    record.saved_registers = 7;
+    record.frame = FrameKind::NonFpo;
+    let mut out = Vec::new();
+    record.encode(&mut out).unwrap();
+    assert_eq!(out, fpo(0x1000, 0x20, 0, 0, 0xc700));
+    record.saved_registers = 8;
+    let error = record.encode(&mut out).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    assert_eq!(out.len(), FPO_RECORD_SIZE);
+}
+
+#[test]
+fn frame_data_records_encode_the_same_bytes() {
+    let bytes = [
+        frame([0x1000, 290, 52, 0, 0, 0x20], 16, 0, 0b100),
+        frame([u32::MAX; 6], u16::MAX, u16::MAX, u32::MAX),
+    ]
+    .concat();
+    let stream = FrameDataStream::parse(bytes.clone(), STREAM).unwrap();
+    let mut out = Vec::new();
+    stream.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
+    let mut record = FrameData::new(0x1000, 290);
+    record.locals_size = 52;
+    record.program = 0x20;
+    record.prolog_size = 16;
+    record.flags = 0b100;
+    let mut one = Vec::new();
+    DebugRecord::encode(&record, &mut one).unwrap();
+    assert_eq!(one, bytes[..FRAME_DATA_SIZE]);
+    assert_eq!(FrameData::SIZE, FRAME_DATA_SIZE);
 }

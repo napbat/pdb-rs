@@ -6,7 +6,10 @@
 //! local document paths to URLs. This reader keeps the bytes. It does not parse the JSON and
 //! does not fetch the URLs.
 
+use alloc::vec::Vec;
+
 use crate::native::msf::StreamId;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// A decoded `sourcelink` stream, borrowed from the stream bytes.
@@ -46,5 +49,17 @@ impl<'a> SourceLink<'a> {
     #[must_use]
     pub const fn json(&self) -> &'a str {
         self.json
+    }
+
+    /// Append the stream bytes, the JSON text, to `out`.
+    ///
+    /// A decoded stream gives the same bytes again. To make a new stream, decode the JSON
+    /// text with [`SourceLink::parse`] first: it checks the shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        Output::new(out).bytes(self.json.as_bytes())
     }
 }

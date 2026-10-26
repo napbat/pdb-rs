@@ -498,6 +498,20 @@ pub static FIXTURES: &[Fixture] = &[
         ),
     ),
     native(
+        "msvc-arm64-debugtype",
+        "msvc",
+        "debug, debugtype cv fixup pdata",
+        msvc(
+            Arch::Arm64,
+            DEBUG,
+            &[
+                "/DEBUG:FULL",
+                "/INCREMENTAL:NO",
+                "/DEBUGTYPE:CV,FIXUP,PDATA",
+            ],
+        ),
+    ),
+    native(
         "msvc-x64-stripped",
         "msvc",
         "debug, pdbstripped",

@@ -21,10 +21,15 @@
 //!
 //! A map value of 0 marks an index that the linker did not map. A function ID pair holds a
 //! function ID of the input and the PDB type index of its function type.
+//!
+//! [`TypeMapStream::encode`] gives the bytes of a decoded stream again. It keeps the 2 padding
+//! bytes of version 2.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use crate::native::msf::StreamId;
+use crate::native::output::{Output, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// The first type index and the first ID index of a type server.
@@ -50,6 +55,8 @@ pub enum TypeMapKind {
 pub struct TypeMapStream<'a> {
     /// The stream kind and its header fields.
     kind: TypeMapKind,
+    /// The 2 bytes after the precompiled header stream of version 2, kept raw.
+    padding: [u8; 2],
     /// The first input index of the maps.
     first_index: u32,
     /// The type map (version 1) or the map (version 2).
@@ -90,13 +97,14 @@ impl<'a> TypeMapStream<'a> {
             return Err(truncated(bytes.len()));
         };
         let value = |index: usize| words.get(index).map(|word| u32::from_le_bytes(*word));
-        let (kind, first_index, header, counts) = match u32::from_le_bytes(version) {
+        let (kind, padding, first_index, header, counts) = match u32::from_le_bytes(version) {
             1 => {
                 let (Some(types), Some(ids)) = (value(1), value(2)) else {
                     return Err(truncated(bytes.len()));
                 };
                 (
                     TypeMapKind::TypeServer,
+                    [0; 2],
                     TYPE_SERVER_FIRST_INDEX,
                     3,
                     [types, ids, 0],
@@ -117,7 +125,7 @@ impl<'a> TypeMapStream<'a> {
                     precompiled,
                     signature,
                 };
-                (kind, first, 5, [count, 0, offsets])
+                (kind, [pch[2], pch[3]], first, 5, [count, 0, offsets])
             }
             _ => {
                 return Err(error(
@@ -149,6 +157,7 @@ impl<'a> TypeMapStream<'a> {
         let [types, ids, offsets] = parts;
         Ok(Self {
             kind,
+            padding,
             first_index,
             types,
             ids,
@@ -202,5 +211,51 @@ impl<'a> TypeMapStream<'a> {
                 u32::from_le_bytes([b0, b1, b2, b3]),
             )
         })
+    }
+
+    /// Append the stream bytes to `out`.
+    ///
+    /// A decoded stream gives the same bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if a count or the precompiled header stream number
+    /// does not fit its field, or if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let count = |len: usize| to_u32(len, "type map count");
+        let mut output = Output::new(out);
+        match self.kind {
+            TypeMapKind::TypeServer => {
+                output.u32(1)?;
+                output.u32(count(self.types.len())?)?;
+                output.u32(count(self.ids.len())?)?;
+            }
+            TypeMapKind::Object {
+                precompiled,
+                signature,
+            } => {
+                let stream = match precompiled {
+                    None => u16::MAX,
+                    Some(id) => u16::try_from(id.0)
+                        .ok()
+                        .filter(|&number| number != u16::MAX)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::LimitExceeded, None).with_context(
+                                "type map precompiled header stream does not fit in u16",
+                            )
+                        })?,
+                };
+                output.u32(2)?;
+                output.u16(stream)?;
+                output.bytes(&self.padding)?;
+                output.u32(signature)?;
+                output.u32(self.first_index)?;
+                output.u32(count(self.types.len())?)?;
+            }
+        }
+        for part in [self.types, self.ids, self.offsets] {
+            output.bytes(part.as_flattened())?;
+        }
+        output.bytes(self.functions.as_flattened())
     }
 }
