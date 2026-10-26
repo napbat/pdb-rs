@@ -62,7 +62,7 @@ A top-level record of a kind without a decoder keeps its kind and payload (`Type
 
 ## Fixture evidence
 
-The fixture counts in the notes come from the native PDBs of the fixture manifest (`cargo run -p pdbrs-fixtures`, #12, #27 and #1): 48 PDBs of 43 fixtures, and 63 PDZ files that `pdbtool pdz-encode` wrote from them (#37).
+The fixture counts in the notes come from the native PDBs of the fixture manifest (`cargo run -p pdbrs-fixtures`, #12, #27 and #1): 48 PDBs of 43 fixtures, and 78 PDZ files: `pdbtool pdz-encode` wrote 63 of them from the PDBs (#37), and `msfz-encode` (Microsoft's `ms-pdb-msfz` 0.1.10 writer, without pdbrs) wrote 15 in the fixtures `msfz-deflate`, `msfz-deflate-dir` and `msfz-uncompressed` ([#1 evidence](https://github.com/napbat/pdbrs/issues/1#issuecomment-6418248178)).
 A read of every record with the pdbrs reader at `b4d4cdc` gave the counts. The `native` example does not print counts for each kind.
 The 3 PDBs of `hlsl-dxc-debug` are not in the counts: their MSF header declares fewer pages than the streams use, and `pdbtool`, DIA and pdbrs reject them (#27).
 
@@ -84,21 +84,21 @@ Each cell gives `complete / partial / missing / not applicable`.
 
 | Page | Rows | Raw preservation | Semantic reading | Reference validation | Writing | Editing and index rebuilding | Independent fixture evidence |
 | --- | ---: | --- | --- | --- | --- | --- | --- |
-| [Containers and PDB streams](native-coverage/streams.md) | 141 | 119 / 0 / 0 / 22 | 109 / 0 / 9 / 23 | 76 / 1 / 8 / 56 | 103 / 4 / 5 / 29 | 106 / 4 / 5 / 26 | 84 / 9 / 21 / 27 |
+| [Containers and PDB streams](native-coverage/streams.md) | 141 | 119 / 0 / 0 / 22 | 109 / 0 / 9 / 23 | 76 / 1 / 8 / 56 | 103 / 4 / 5 / 29 | 106 / 4 / 5 / 26 | 86 / 8 / 20 / 27 |
 | [Types, IDs and numeric leaves](native-coverage/types.md) | 257 | 180 / 0 / 0 / 77 | 175 / 0 / 0 / 82 | 63 / 0 / 0 / 194 | 167 / 0 / 0 / 90 | 97 / 0 / 0 / 160 | 81 / 3 / 78 / 95 |
 | [Symbol records](native-coverage/symbols.md) | 224 | 137 / 0 / 0 / 87 | 128 / 0 / 4 / 92 | 108 / 0 / 4 / 112 | 129 / 4 / 0 / 91 | 129 / 4 / 0 / 91 | 74 / 0 / 58 / 92 |
 | [C13 line data and module streams](native-coverage/lines.md) | 32 | 31 / 0 / 0 / 1 | 28 / 0 / 1 / 3 | 18 / 0 / 1 / 13 | 30 / 1 / 0 / 1 | 29 / 1 / 0 / 2 | 15 / 5 / 9 / 3 |
-| Total | 654 | 467 / 0 / 0 / 187 | 440 / 0 / 14 / 200 | 265 / 1 / 13 / 375 | 429 / 9 / 5 / 211 | 361 / 9 / 5 / 279 | 254 / 17 / 166 / 217 |
+| Total | 654 | 467 / 0 / 0 / 187 | 440 / 0 / 14 / 200 | 265 / 1 / 13 / 375 | 429 / 9 / 5 / 211 | 361 / 9 / 5 / 279 | 256 / 16 / 165 / 217 |
 
 ## Remaining open cells
 
 Each `missing` or `partial` cell of a modern or extension row names its open issue and the reason. The table groups them by issue and column.
 All of them need `external-input`: a producer or a layout definition that is not available here.
-[#1](https://github.com/napbat/pdbrs/issues/1) holds the open MSFZ cells, because [#20](https://github.com/napbat/pdbrs/issues/20) is closed. No producer writes these MSFZ forms into a fixture, for example a stream larger than 4 GiB; synthetic tests of [#37](https://github.com/napbat/pdbrs/issues/37) and [#38](https://github.com/napbat/pdbrs/issues/38) cover them.
+[#1](https://github.com/napbat/pdbrs/issues/1) holds the open MSFZ cells, because [#20](https://github.com/napbat/pdbrs/issues/20) is closed. Microsoft's writer (`ms-pdb-msfz` 0.1.10, the `msfz-encode` fixtures) cannot write these forms: it compresses each chunk, puts each fragment into one chunk and limits a stream to less than 4 GiB ([evidence](https://github.com/napbat/pdbrs/issues/1#issuecomment-6418248178)). Synthetic tests of [#37](https://github.com/napbat/pdbrs/issues/37) and [#38](https://github.com/napbat/pdbrs/issues/38) cover them.
 
 | Issue | Column | Cells | Rows |
 | --- | --- | ---: | --- |
-| #1 | Independent fixture evidence | 5 | Stream directory, raw DEFLATE, Chunk, stored, Chunk, raw DEFLATE, Compressed fragment across chunk boundaries, Stream larger than 4 GiB |
+| #1 | Independent fixture evidence | 3 | Chunk, stored, Compressed fragment across chunk boundaries, Stream larger than 4 GiB |
 | #29 | Semantic reading | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Reference validation | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Writing | 1 | Auxiliary hash stream (`hash_aux_stream`) |
@@ -124,7 +124,7 @@ All of them need `external-input`: a producer or a layout definition that is not
 
 Every imported reference document has a section on a reconciliation page. The table gives the result for each document.
 "pdbrs" is `implemented`, `partial`, `not implemented` or `not applicable` (no format content). The counts are the listed conflicts and undocumented assumptions.
-Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not applicable; 357 conflicts and 306 undocumented assumptions.
+Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not applicable; 357 conflicts and 308 undocumented assumptions.
 
 | Document | pdbrs | Conflicts | Undocumented assumptions |
 | --- | --- | ---: | ---: |
@@ -146,7 +146,7 @@ Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not appli
 | [`microsoft-pdb-rs/docs/pdb/pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbpdbmd) | partial | 3 | 7 |
 | [`microsoft-pdb-rs/docs/pdb/names_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbnames_streammd) | implemented | 9 | 3 |
 | [`microsoft-pdb-rs/docs/pdb/msf.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfmd) | implemented | 9 | 7 |
-| [`microsoft-pdb-rs/docs/pdb/msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd) | implemented | 13 | 5 |
+| [`microsoft-pdb-rs/docs/pdb/msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd) | implemented | 13 | 7 |
 | [`microsoft-pdb-rs/docs/pdb/mini_pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmini_pdbmd) | implemented | 5 | 5 |
 | [`microsoft-pdb-rs/docs/pdb/module_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmodule_streammd) | partial | 3 | 14 |
 | [`microsoft-pdb-rs/docs/pdb/ipi_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbipi_streammd) | implemented | 3 | 6 |
@@ -290,7 +290,7 @@ pdbrs does not load external files. `Pdb::external_dependencies` lists the type 
 
 | Format | Decision |
 | --- | --- |
-| MSFZ containers | Implemented: reading (#37), writing and conversion in both directions (#38); stored chunks, DEFLATE directories and fragments across chunks have no producer |
+| MSFZ containers | Implemented: reading (#37), writing and conversion in both directions (#38). Microsoft's writer makes raw DEFLATE directories and chunks (`msfz-*` fixtures, #1), and DIA rejects them as it rejects the pdbrs output. Stored chunks, fragments across chunks and streams larger than 4 GiB have no producer |
 | Small MSF and other legacy versions and kinds | Required, deferred (#16) |
 | 65536-byte pages | Read; not written, because consumers reject them (#15) |
 | Edits in place and incremental MSF commits | Not planned ([design](pdb.md#implemented-native-reading)); the editor writes a new file (#34) |

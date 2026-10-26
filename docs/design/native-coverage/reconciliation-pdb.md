@@ -158,6 +158,8 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - Writer layout (#38): the chunks start at offset 80 without gaps; the stream directory and the Chunk Table start at the next multiple of 16; gaps are zero. Each chunk holds the next `max_chunk_size` bytes of the streams in stream ID order.
   - A fragment of the writer never crosses a chunk boundary, because the `ms-pdb-msfz` reader (`pdbtool compare`) reads a fragment from one chunk only (#38).
   - DIA2Dump (`msdia140.dll` of Visual Studio 18) rejects each file with raw DEFLATE chunks (`HRESULT = 806D000C`); it reads zstd chunks and compressed stream directories (#38).
+  - DIA2Dump also rejects the raw DEFLATE chunks and the raw DEFLATE stream directory of Microsoft's writer (`ms-pdb-msfz` 0.1.10 through `msfz-encode`, fixtures `msfz-deflate` and `msfz-deflate-dir`), with the same `806D000C`. It reads the `msfz-uncompressed` files, which have no chunks. Thus the DIA result for DEFLATE is not a pdbrs defect (#1).
+  - `ms-pdb-msfz` 0.1.10 cannot write stored chunks (`Compression` has only `Zstd` and `Deflate`), fragments across chunks (`MsfzWriterFile::write_to_chunks` puts one write into one chunk) or a stream of 4 GiB or more (`StreamWriter::write` limits it below `NIL_STREAM_SIZE`) (#1).
 
 ### `microsoft-pdb-rs/docs/pdb/mini_pdb.md`
 - Documents: mini PDBs (`/DEBUG:FASTLINK`), the `MinimalDebugInfo` feature code and its effect on the GSI/PSI bucket count (0x1000 or 0x3FFFF).
