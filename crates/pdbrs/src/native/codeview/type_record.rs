@@ -7,10 +7,13 @@
 //! `cvinfo.h` and `TypeRecordMapping.cpp` in LLVM.
 //!
 //! Each decoder reads all fixed fields, numeric leaves and names. The bytes
-//! after the last field must be valid `LF_PAD` padding. Names stay as
+//! after the last field must be valid `LF_PAD` padding. UDT records also
+//! accept the padding form of Microsoft Macro Assembler and keep it (see
+//! [`TypeLeaf::producer_padding`]). Names stay as
 //! bytes. Kinds without a decoder give [`TypeLeaf::Unsupported`], which keeps
 //! the kind and the payload. The encoders pad each record to a multiple of
-//! 4 bytes with `LF_PAD` bytes, as Microsoft and LLVM do.
+//! 4 bytes with `LF_PAD` bytes, as Microsoft and LLVM do. A UDT record with
+//! producer padding gets these bytes again.
 
 use alloc::vec::Vec;
 
@@ -255,7 +258,8 @@ impl<'a> TypeLeaf<'a> {
     /// - [`ErrorKind::InvalidFormat`] if the payload is truncated, if a name
     ///   has no terminator, if an enumeration field has an unknown value, if
     ///   a field-list member is malformed, or if bytes after the last field
-    ///   are not valid padding.
+    ///   are not valid padding. UDT records also accept the MASM form of
+    ///   [`TypeLeaf::producer_padding`].
     /// - [`ErrorKind::UnsupportedVersion`] for a numeric leaf with an unknown
     ///   tag, for a field-list member kind without a decoder, or for constant
     ///   dimension bounds of a type without a known size.
@@ -371,7 +375,8 @@ impl<'a> TypeLeaf<'a> {
     ///   record that is too long.
     /// - [`ErrorKind::InvalidFormat`] if a name contains a NUL byte, or if
     ///   fields do not match each other, for example a unique name without
-    ///   the unique-name flag.
+    ///   the unique-name flag, or producer padding outside the MASM form or
+    ///   that does not end the record on a 4-byte boundary.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let mut writer = Output::new(out);
         let start = writer.begin_record(self.kind())?;
@@ -391,11 +396,11 @@ impl<'a> TypeLeaf<'a> {
             Self::Bitfield(value) => value.encode(writer)?,
             Self::MethodList(value) => value.encode(writer)?,
             Self::Array(value) => value.encode(writer)?,
-            Self::Class(value) => value.encode(writer)?,
-            Self::WideClass(value) => value.encode(writer)?,
-            Self::Union(value) => value.encode(writer)?,
-            Self::WideUnion(value) => value.encode(writer)?,
-            Self::Enum(value) => value.encode(writer)?,
+            Self::Class(value) => return value.encode(writer),
+            Self::WideClass(value) => return value.encode(writer),
+            Self::Union(value) => return value.encode(writer),
+            Self::WideUnion(value) => return value.encode(writer),
+            Self::Enum(value) => return value.encode(writer),
             Self::VtableShape(value) => value.encode(writer)?,
             Self::VirtualFunctionTable(value) => value.encode(writer)?,
             Self::Label(mode) => writer.u16(mode.raw())?,
@@ -440,6 +445,23 @@ impl<'a> TypeLeaf<'a> {
             }
         }
         Ok(Padding::Type)
+    }
+
+    /// Return the bytes after the last field of a UDT record if they are not the standard
+    /// `LF_PAD` run, or an empty slice.
+    ///
+    /// Microsoft Macro Assembler writes these bytes after some `LF_STRUCTURE` names, for
+    /// example `f1 6d 65`. Other kinds always give an empty slice.
+    #[must_use]
+    pub const fn producer_padding(&self) -> &'a [u8] {
+        match self {
+            Self::Class(value) => value.producer_padding,
+            Self::WideClass(value) => value.producer_padding,
+            Self::Union(value) => value.producer_padding,
+            Self::WideUnion(value) => value.producer_padding,
+            Self::Enum(value) => value.producer_padding,
+            _ => &[],
+        }
     }
 
     /// Return the options, the name and the unique name of a user-defined type.

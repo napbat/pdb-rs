@@ -139,6 +139,13 @@ pub(crate) fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Re
         let Some(leaf) = report.supported(decoded, &what)? else {
             continue;
         };
+        let padding = leaf.producer_padding();
+        if !padding.is_empty() {
+            report.inconsistency(format!(
+                "TPI record {:#x} ends with MASM padding {padding:02x?} instead of the LF_PAD run",
+                record.index
+            ));
+        }
         let start = encoded.len();
         leaf.encode(&mut encoded).map_err(location)?;
         if encoded[start..] != *tpi.full_record(&record.record)? {

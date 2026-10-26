@@ -403,6 +403,7 @@ fn types(
         size: number(4),
         name: ADDED_TYPE.as_bytes(),
         unique_name: None,
+        producer_padding: &[],
     }))?;
     editor.add_global(
         S_UDT,

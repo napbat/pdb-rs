@@ -26,6 +26,9 @@ pub(crate) enum Padding {
     Type,
     /// Zero bytes, for symbol records.
     Zero,
+    /// No padding. The record already ends on a 4-byte boundary, for example with the
+    /// producer padding of a UDT record.
+    Aligned,
 }
 
 /// The start of a record or a field-list member in the output.
@@ -51,10 +54,21 @@ impl Output<'_> {
     }
 
     /// Append padding until the output length from `start` is a multiple of 4.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] for [`Padding::Aligned`] if the length is not a
+    /// multiple of 4.
     pub(crate) fn pad(&mut self, start: RecordStart, padding: Padding) -> Result<()> {
         let used = (self.len() - start.0) % ALIGNMENT;
         let run = match padding {
             Padding::None => return Ok(()),
+            Padding::Aligned if used == 0 => return Ok(()),
+            Padding::Aligned => {
+                return Err(Error::new(ErrorKind::InvalidFormat, None).with_context(
+                    "producer padding does not end the record on a 4-byte boundary",
+                ));
+            }
             Padding::Type => &TYPE_PADDING,
             Padding::Zero => &ZERO_PADDING,
         };
@@ -79,10 +93,16 @@ impl Output<'_> {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::LimitExceeded`] if the record is longer than the
-    /// `u16` length field allows. The output then ends at `start`.
+    /// - [`ErrorKind::LimitExceeded`] if the record is longer than the `u16` length field
+    ///   allows.
+    /// - The errors of [`Output::pad`].
+    ///
+    /// After an error, the output ends at `start`.
     pub(crate) fn finish_record(&mut self, start: RecordStart, padding: Padding) -> Result<()> {
-        self.pad(start, padding)?;
+        if let Err(error) = self.pad(start, padding) {
+            self.out().truncate(start.0);
+            return Err(error);
+        }
         // The length field does not count itself.
         let Ok(length) = u16::try_from(self.len() - start.0 - 2) else {
             self.out().truncate(start.0);

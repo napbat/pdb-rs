@@ -243,6 +243,12 @@ Records end with `LF_PAD` bytes to a 4-byte boundary. `0xf0 + n` means that `n` 
 | `LF_PAD14` | `0xfe` | complete ([code][fl], [code][cv], [check][t:field_list], [check][e15]) | complete ([code][fl], [code][cv], [check][t:field_list], [check][t:id_record]) | not applicable (no references) | not applicable (the encoders pad to 4 bytes, so they write at most 3 bytes) | not applicable (the encoders write at most 3 padding bytes) | not applicable (4-byte alignment needs at most 3 padding bytes) | Field lists accept descending runs; ID records accept `f3 f2 f1` only |
 | `LF_PAD15` | `0xff` | complete ([code][fl], [code][cv], [check][t:field_list], [check][e15]) | complete ([code][fl], [code][cv], [check][t:field_list], [check][t:id_record]) | not applicable (no references) | not applicable (the encoders pad to 4 bytes, so they write at most 3 bytes) | not applicable (the encoders write at most 3 padding bytes) | not applicable (4-byte alignment needs at most 3 padding bytes) | Field lists accept descending runs; ID records accept `f3 f2 f1` only |
 
+UDT records (`LF_CLASS`, `LF_STRUCTURE`, `LF_INTERFACE`, `LF_UNION`, `LF_ENUM` and the wide kinds) also accept one producer form after the names.
+Microsoft Macro Assembler (`ml64` 14.50) writes `f1` and two stale bytes after an odd-length name, for example `f1 6d 65` after `CsFrameEncoded` in `libvcruntime.lib`.
+`link.exe` and `lld-link` copy the record to the PDB, and LLVM, DIA and `pdbtool` read it.
+The decoder keeps 1 to 3 bytes that start with an `LF_PAD` byte in the `producer_padding` field, and the encoder writes them again (#29).
+The `clang-lld-x64-static` fixture has such a record. Other trailing bytes stay `InvalidFormat`.
+
 ## Markers and name aliases
 
 Markers are range limits in `cvinfo.h`, not records. A name alias is a second name for a value that has its own row.

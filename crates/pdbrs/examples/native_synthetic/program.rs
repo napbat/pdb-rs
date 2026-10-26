@@ -125,6 +125,7 @@ pub fn build() -> Result<PdbBuilder<'static>> {
         size: number(0),
         name: b"Point",
         unique_name: None,
+        producer_padding: &[],
     }))?;
     let pointer = builder.add_type_with(move |resolver, out| {
         TypeLeaf::Pointer(Pointer {
@@ -172,6 +173,7 @@ pub fn build() -> Result<PdbBuilder<'static>> {
             size: number(8),
             name: b"Point",
             unique_name: None,
+            producer_padding: &[],
         })
         .encode(out)
     })?;
