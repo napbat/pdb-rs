@@ -21,11 +21,12 @@ pub mod id_record;
 pub mod index;
 pub mod numeric;
 pub mod type_record;
+pub(crate) mod writer;
 
 pub mod symbol;
 
 use index::{IdIndex, TypeIndex};
-use numeric::Integer;
+use numeric::{Integer, Numeric};
 
 /// The size of the length field and the kind field at the start of a record.
 const PREFIX_LEN: usize = 4;
@@ -258,6 +259,22 @@ impl<'a> Fields<'a> {
     /// returns [`ErrorKind::UnsupportedVersion`].
     pub(crate) fn integer(&mut self) -> Result<Integer> {
         let (value, rest) = Integer::parse_prefix(self.bytes).map_err(|error| {
+            if error.kind() == ErrorKind::UnexpectedEof {
+                self.short()
+            } else {
+                error
+            }
+        })?;
+        self.bytes = rest;
+        Ok(value)
+    }
+
+    /// Read a numeric leaf of any kind.
+    ///
+    /// A truncated leaf returns the configured error. An unknown leaf tag
+    /// returns [`ErrorKind::UnsupportedVersion`].
+    pub(crate) fn numeric(&mut self) -> Result<Numeric<'a>> {
+        let (value, rest) = Numeric::parse_prefix(self.bytes).map_err(|error| {
             if error.kind() == ErrorKind::UnexpectedEof {
                 self.short()
             } else {

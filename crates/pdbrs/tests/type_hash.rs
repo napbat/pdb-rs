@@ -227,10 +227,26 @@ fn rejects_hash_input_that_is_not_one_record() {
         type_record_hash(&pointer()[..6]).unwrap_err().kind(),
         ErrorKind::UnexpectedEof
     );
+    // A wide class without its name is malformed.
     let class2 = record(0x1608, &[0; 20]);
     assert_eq!(
         type_record_hash(&class2).unwrap_err().kind(),
-        ErrorKind::UnsupportedVersion
+        ErrorKind::InvalidFormat
+    );
+}
+
+#[test]
+fn hashes_wide_udt_records_by_name() {
+    // Options, field list, derivation list, shape, member count 1, size 8, "W".
+    let mut payload = vec![0; 16];
+    payload.extend_from_slice(&[1, 0, 8, 0, b'W', 0]);
+    let class2 = record(0x1608, &payload);
+    assert_eq!(type_record_hash(&class2).unwrap(), hash_string_v1(b"W"));
+    let mut union2 = vec![0; 8];
+    union2.extend_from_slice(&[1, 0, 8, 0, b'U', 0]);
+    assert_eq!(
+        type_record_hash(&record(0x160a, &union2)).unwrap(),
+        hash_string_v1(b"U")
     );
 }
 

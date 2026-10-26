@@ -385,11 +385,14 @@ fn members_follow_continuations() {
         .members(TypeIndex(0x1001))
         .unwrap()
         .map(|member| match member.unwrap() {
-            Member::Enumerator(enumerator) => enumerator.value,
+            Member::Enumerator(enumerator) => enumerator.value.integer(),
             other => panic!("unexpected member {other:?}"),
         })
         .collect();
-    assert_eq!(values, [Integer::Unsigned(2), Integer::Unsigned(1)]);
+    assert_eq!(
+        values,
+        [Some(Integer::Unsigned(2)), Some(Integer::Unsigned(1))]
+    );
 }
 
 #[test]

@@ -23,10 +23,17 @@ use crate::{Error, ErrorKind, Result};
 mod forward;
 mod hash;
 mod lookup;
+mod validate;
+mod write;
 
 pub use forward::ForwardRefs;
 pub use hash::{HashAdjuster, IndexOffset, TypeHashes, type_record_hash};
 pub use lookup::{FieldMembers, TypeTable};
+pub use validate::{ReferenceLimits, ReferenceSummary, validate_type_references};
+pub use write::{
+    DEFAULT_HASH_BUCKETS, HashLayout, TypeStreamBytes, TypeStreamOptions, serialize_hash_adjusters,
+    write_type_stream,
+};
 
 /// The TPI and IPI version that this crate supports (`PdbTpiV80`).
 pub const TPI_V80: u32 = 20_040_203;
@@ -160,6 +167,12 @@ impl TypeStream {
     pub fn record_bytes(&self) -> &[u8] {
         // `parse` makes sure that the stream ends at the end of the records.
         &self.bytes[HEADER_SIZE..]
+    }
+
+    /// Return the full stream: the header and the record bytes.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return an iterator over the records and their indices.

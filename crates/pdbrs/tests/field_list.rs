@@ -67,11 +67,11 @@ fn decodes_data_members_and_enumerators() {
     };
     assert_eq!(data_member.attributes.access(), MemberAccess::Public);
     assert_eq!(data_member.member_type, TypeIndex(0x74));
-    assert_eq!(data_member.offset, Integer::Unsigned(8));
+    assert_eq!(data_member.offset.integer(), Some(Integer::Unsigned(8)));
     assert_eq!(data_member.name, b"x");
     assert_eq!(static_member.attributes.access(), MemberAccess::Private);
     assert_eq!(static_member.name, b"s");
-    assert_eq!(enumerator.value, Integer::Signed(-1));
+    assert_eq!(enumerator.value.integer(), Some(Integer::Signed(-1)));
     assert_eq!(enumerator.name, b"Minus");
     assert_eq!(FieldList::decode(&data).unwrap().continuation(), None);
 }
@@ -120,14 +120,14 @@ fn decodes_base_classes_and_vtable_pointer() {
         panic!("unexpected members {list:?}");
     };
     assert_eq!(base.base_type, TypeIndex(0x1002));
-    assert_eq!(base.offset, Integer::Unsigned(0));
+    assert_eq!(base.offset.integer(), Some(Integer::Unsigned(0)));
     assert!(!direct.indirect);
     assert_eq!(direct.base_type, TypeIndex(0x1003));
     assert_eq!(direct.vbptr_type, TypeIndex(0x1004));
-    assert_eq!(direct.vbptr_offset, Integer::Unsigned(8));
-    assert_eq!(direct.vbtable_index, Integer::Unsigned(1));
+    assert_eq!(direct.vbptr_offset.integer(), Some(Integer::Unsigned(8)));
+    assert_eq!(direct.vbtable_index.integer(), Some(Integer::Unsigned(1)));
     assert!(indirect.indirect);
-    assert_eq!(indirect.vbtable_index, Integer::Unsigned(2));
+    assert_eq!(indirect.vbtable_index.integer(), Some(Integer::Unsigned(2)));
     assert_eq!(*table, TypeIndex(0x1006));
 }
 
