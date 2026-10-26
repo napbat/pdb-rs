@@ -11,6 +11,7 @@
 //! Names stay bytes.
 
 mod dbi;
+mod external;
 mod named;
 mod symbols;
 mod types;
@@ -30,6 +31,7 @@ use pdbrs::native::section::SectionHeaders;
 use pdbrs::{ErrorKind, Result as PdbResult};
 
 use dbi::{debug_info_tables, frame_data, section_header_bytes};
+use external::external_dependencies;
 use named::{info_and_names, named_streams};
 use symbols::{modules, shared_symbols};
 use types::{hash_stream_bytes, identifiers, types};
@@ -175,6 +177,7 @@ fn main() -> Outcome {
     frame_data(&pdb, &dbi, &context, &mut report)?;
     let procedures = modules(&pdb, &dbi, &context, &mut report)?;
     shared_symbols(&pdb, &dbi, &context, &procedures, &mut report)?;
+    external_dependencies(&pdb, &dbi, &mut report)?;
     unclaimed_streams(&pdb, &mut report)?;
     print(&report);
     let undecoded: usize = report.undecoded.values().sum();
