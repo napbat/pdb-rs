@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The generator sets DebugType and the artifacts path on the command line. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PdbrsDemo</RootNamespace>
+    <OptionStrict>On</OptionStrict>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+</Project>

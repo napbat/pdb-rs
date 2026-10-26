@@ -1,0 +1,9 @@
+[package]
+name = "pdbrs-fixtures"
+version.workspace = true
+edition.workspace = true
+description = "Build the demo programs in fixtures/ and record their PDB outputs"
+publish = false
+
+[lints]
+workspace = true
