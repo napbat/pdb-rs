@@ -213,18 +213,23 @@ impl<S: ReadAt> Pdb<S> {
 
     /// Load DBI metadata and check its age and referenced stream IDs.
     ///
+    /// The DBI age must not be larger than the PDB Info age. Writers that change only
+    /// named streams, for example `pdbstr -w`, increment the Info age and keep the DBI
+    /// age. Image matching uses the DBI age.
+    ///
     /// # Errors
     ///
-    /// Returns errors for I/O, limits, malformed DBI, age mismatch or invalid
-    /// references. Module payloads are checked only when explicitly loaded.
+    /// Returns errors for I/O, limits, malformed DBI, a DBI age that is larger
+    /// than the Info age or invalid references. Module payloads are checked
+    /// only when explicitly loaded.
     pub fn debug_info(&self) -> Result<Option<Dbi>> {
         let Some(stream) = self.optional_stream(StreamId(3))? else {
             return Ok(None);
         };
         let dbi = Dbi::parse(stream.read_all(self.options.max_stream_bytes)?)?;
-        if dbi.header().age != self.info.identity().age() {
+        if dbi.header().age > self.info.identity().age() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("PDB Info and DBI ages differ")
+                .with_context("DBI age is larger than the PDB Info age")
                 .with_stream(3, 8));
         }
         let header = dbi.header();
