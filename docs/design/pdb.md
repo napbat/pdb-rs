@@ -73,6 +73,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts. Writing: GSI and PSI builders with the producer bucket order and the MSVC or LLVM conventions for empty tables and address order (`IndexProducer`); the GSI and PSI of every native fixture rebuild to the same bytes (#30) | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoding of 57 symbol kinds, including every kind in the Rust sample PDBs, the MSVC, Clang and rustc producer fixtures (#13), the LLD `S_SKIP` filler and the managed kinds of .NET Windows PDBs (#14: `S_GMANPROC`, `S_LMANPROC`, `S_MANSLOT`, `S_MANCONSTANT`, `S_TOKENREF`, `S_OEM` with the Roslyn `MD2` custom debug information and `asyncMethodInfo` attributes); zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations. `S_FRAMEREG`, `S_FASTLINK` and `S_REGREL32_ENCTMP` layouts come from fixtures (#13) | Other symbol kinds (kept raw as `Unsupported`) |
+| Symbol validation | `codeview::symbol::validate` checks module and shared symbol records (#30): procedure end kinds, `next` links, scope code ranges, TPI and IPI references with IPI record kinds, module references, def-range locals, ranges and gaps, local flags, section lengths and register numbers for the module CPU. It collects each broken rule in a report | Def-range checks against inline-site code ranges and subfield offsets against type sizes |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines, COFF symbol RVAs (`0xfd`) and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists; `S_MANCONSTANT` also keeps `LF_VARSTRING` and fixed-size real, complex, decimal and date leaves | Non-integer leaves in other records |
 
@@ -94,6 +95,7 @@ It joins line and inlinee data to `/names`, procedure references to module symbo
 It translates symbol, contribution and line addresses to RVAs, and counts the absolute addresses that have none.
 It fails if any record kind, subsection kind or stream has no typed decoder.
 It reports a decoded stream that no other stream names, with the reason, and does not fail for it.
+It runs the checks of `codeview::symbol::validate` on each module stream and on the shared symbols, and reports each broken rule as an inconsistency.
 
 `Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.

@@ -85,6 +85,7 @@ mod managed;
 mod procedure;
 mod scope;
 mod storage;
+pub mod validate;
 mod variable;
 
 pub use annotation::{Annotation, Annotations, BinaryAnnotations};
