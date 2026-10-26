@@ -136,8 +136,8 @@ Names and values matched LLVM exactly in both feature modes, including `18446744
 ## Container and PDB streams
 
 - [x] Finish MSF validation, including active free-page-map allocation consistency, reserved intervals, boundary sizes and directory growth.
-- [ ] Implement exact copying and stream-preserving repacking. Preserve stream IDs, nil slots, empty streams and unknown stream bytes.
-- [ ] Implement deterministic MSF writing with coherent directory pages and free-page maps. Validate output plans before writing.
+- [ ] Implement exact copying and stream-preserving repacking. Preserve stream IDs, nil slots, empty streams and unknown stream bytes (#15).
+- [ ] Implement deterministic MSF writing with coherent directory pages and free-page maps. Validate output plans before writing (#15).
 - [ ] Complete Info serialization, named-stream hash tables, feature handling and the native GUID/age identity policy.
 - [ ] Complete `/names` string tables and their hashes. Preserve raw names and supported encodings.
 - [ ] Complete TPI/IPI type lookup, hash values, index-offset buffers, hash adjusters and auxiliary references.
@@ -176,12 +176,15 @@ Names and values matched LLVM exactly in both feature modes, including `18446744
 
 ## Deferred legacy track
 
+GitHub issue #16 tracks this work, including the conflict between Microsoft `msf.cpp` (16-bit header page numbers) and the pdb-rs `msf.md` description.
+
 - [ ] Support Small MSF/PDB 2.0 through a separate container codec.
 - [ ] Inventory older Info and DBI layouts, absent IPI, old type indices, Pascal-style names and old CodeView kinds.
 - [ ] Implement C11 line data and NB10 signature/age matching.
 - [ ] Implement legacy preservation, editing and writing with explicit representability checks. Do not silently upgrade or downgrade formats.
 
 These tasks do not block the initial modern-native release, but remain open requirements.
+Portable PDB support is a separate initial requirement; GitHub issue #17 tracks it.
 
 ## Verification and release gates
 

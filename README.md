@@ -7,13 +7,14 @@ pdbrs is a Rust library for Program Database (PDB) files. It reads native Window
 
 | Area | Status |
 | --- | --- |
-| Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers can use record kinds that pdbrs keeps raw. |
-| Native PDB writing and editing | Not implemented. |
-| Portable PDB | Signature identification only. Parsing is not implemented. |
-| Legacy native PDB (Small MSF 2.00) | Signature identification only. |
+| Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
+| Native PDB writing and editing | Not implemented. The container writer is [#15](https://github.com/napbat/pdbrs/issues/15). |
+| Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
+| Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
 [NATIVE-0001](docs/issues/0001-native-pdb-support.md) and GitHub issue
-[#1](https://github.com/napbat/pdbrs/issues/1) track the remaining work.
+[#1](https://github.com/napbat/pdbrs/issues/1) track native work; GitHub issue
+[#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
 The [design](docs/design/pdb.md) lists each implemented area and its limits.
 
 ## Use
