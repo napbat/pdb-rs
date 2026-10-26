@@ -1,0 +1,13 @@
+# Store and check out text files with LF line endings on every platform.
+* text=auto eol=lf
+
+# Windows command scripts need CRLF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Build outputs and debug files are binary.
+*.dll binary
+*.exe binary
+*.lib binary
+*.obj binary
+*.pdb binary
