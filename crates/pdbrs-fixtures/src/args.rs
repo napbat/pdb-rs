@@ -10,6 +10,7 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   --out <dir>    Write the fixtures and manifest.json to <dir>.
                  The default is target/fixtures/ below the workspace root.
   --only <name>  Build only the named fixture. Give the option again for more fixtures.
+                 The manifest keeps the entries of the other fixtures.
   --list         Print the fixture names and stop.
   --help         Print this text and stop.
 

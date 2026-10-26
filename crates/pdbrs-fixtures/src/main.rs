@@ -2,7 +2,8 @@
 //!
 //! The generator builds each fixture of the matrix in its own directory below the output
 //! root. It writes `manifest.json` with the status, tool versions, commands and outputs of
-//! each fixture. It exits with a failure code if a fixture with an available toolchain fails.
+//! each fixture. A run with `--only` keeps the entries of the other fixtures from the earlier
+//! manifest. It exits with a failure code if a fixture with an available toolchain fails.
 //!
 //! The `tools` command installs `pdbtool` and builds `DIA2Dump` into `target/tools/bin`. The
 //! fixture manifest copies the tool records of `target/tools/manifest.json`.
@@ -110,9 +111,16 @@ fn build(options: Options) -> Result<bool, String> {
     let header = Header::now(&workspace, &out);
     let consumer_tools = tools::consumer_tools(&workspace);
     let manifest = out.join("manifest.json");
+    // A run with `--only` keeps the entries of the other fixtures from the earlier manifest.
+    let previous = if options.only.is_empty() {
+        None
+    } else {
+        manifest::read_previous(&manifest)
+    };
+    let fixtures = manifest::fixture_entries(previous.as_ref(), &records);
     fs::write(
         &manifest,
-        manifest::render(&header, &records, consumer_tools),
+        manifest::render(&header, fixtures, consumer_tools),
     )
     .map_err(|error| format!("cannot write {}: {error}", manifest.display()))?;
     println!("wrote {}", manifest.display());

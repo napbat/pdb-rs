@@ -102,7 +102,8 @@ The generator does these steps:
 2. It runs `vcvarsall.bat` once for each architecture and keeps the environment.
 3. It gives that environment to each compiler and linker process.
 4. It deletes the directory of each selected fixture and builds the fixture again.
-5. It classifies each output by its contents and writes `manifest.json`.
+5. It classifies each output by its contents and writes `manifest.json`. With `--only`, it
+   keeps the entries of the other fixtures from the earlier manifest.
 
 The generator exits with a failure code if a fixture with an available toolchain fails. A
 missing toolchain does not cause a failure. The manifest records the fixture as `unavailable`
@@ -115,7 +116,14 @@ own directory with a `build.log` file. Native builds put object files in `obj/`.
 use `target/` in the fixture directory as `CARGO_TARGET_DIR`. .NET builds use `artifacts/` in
 the fixture directory as the artifacts path, so no `bin/` or `obj/` directory appears here.
 
-`manifest.json` lists the selected fixtures of the last run. For each fixture it records:
+`manifest.json` lists the fixtures in matrix order. A run without `--only` writes the entries
+of all fixtures. A run with `--only` reads the earlier `manifest.json` of the output root, if it
+exists. It replaces or adds the entries of the selected fixtures and keeps the other entries.
+The header fields, for example the commit and the time, always come from the last run. If the
+generator cannot read or parse the earlier manifest, it writes a warning and lists only the
+selected fixtures.
+
+For each fixture the manifest records:
 
 - the name, producer, language, architecture and configuration
 - the status (`built`, `failed` or `unavailable`) and the reason

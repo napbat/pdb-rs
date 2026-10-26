@@ -1,12 +1,14 @@
 //! Build records and the `manifest.json` file.
 
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::classify::Kind;
-use crate::json::Value;
-use crate::matrix::Fixture;
+use crate::json::{self, Value};
+use crate::matrix::{FIXTURES, Fixture};
 use crate::step::Step;
 use crate::toolchain::capture;
 
@@ -172,15 +174,68 @@ impl Header {
     }
 }
 
-/// Render the fixture manifest with the consumer tools section.
-pub fn render(header: &Header, records: &[Record], consumer_tools: Value) -> String {
+/// Render the fixture manifest with the consumer tools section and the fixture entries.
+pub fn render(header: &Header, fixtures: Vec<Value>, consumer_tools: Value) -> String {
     header.render(vec![
         ("consumer_tools".to_owned(), consumer_tools),
-        (
-            "fixtures".to_owned(),
-            Value::Array(records.iter().map(Record::to_value).collect()),
-        ),
+        ("fixtures".to_owned(), Value::Array(fixtures)),
     ])
+}
+
+/// Read an earlier manifest at `path`.
+///
+/// Return `None` if the file does not exist. If the file cannot be read or parsed, write a
+/// warning and return `None`.
+pub fn read_previous(path: &Path) -> Option<Value> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!("warning: cannot read {}: {error}", path.display());
+            return None;
+        }
+    };
+    match json::parse(&text) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            eprintln!("warning: cannot parse {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+/// Make the fixture entries of a manifest from the records of this run.
+///
+/// Without `previous`, the entries are the records. With the `previous` manifest, keep each
+/// earlier entry whose name has no record in this run. A record replaces the earlier entry
+/// with the same name. Put the entries in matrix order. Entries with a name that the matrix
+/// does not have come last, in their earlier order.
+pub fn fixture_entries(previous: Option<&Value>, records: &[Record]) -> Vec<Value> {
+    let mut entries: Vec<(String, Value)> = previous
+        .and_then(|manifest| match manifest.get("fixtures") {
+            Some(Value::Array(fixtures)) => Some(fixtures.as_slice()),
+            _ => None,
+        })
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?;
+            let replaced = records.iter().any(|record| record.fixture.name == name);
+            (!replaced).then(|| (name.to_owned(), entry.clone()))
+        })
+        .collect();
+    entries.extend(
+        records
+            .iter()
+            .map(|record| (record.fixture.name.to_owned(), record.to_value())),
+    );
+    entries.sort_by_key(|(name, _)| {
+        FIXTURES
+            .iter()
+            .position(|fixture| fixture.name == name)
+            .unwrap_or(usize::MAX)
+    });
+    entries.into_iter().map(|(_, entry)| entry).collect()
 }
 
 /// The path of `path` relative to `root`, with `/` separators.
@@ -195,9 +250,83 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Header, relative_path, render};
+    use super::{Header, Record, Status, fixture_entries, relative_path, render};
     use crate::json::{self, Value};
+    use crate::matrix::FIXTURES;
     use std::path::{Path, PathBuf};
+
+    fn record(index: usize, status: Status) -> Record {
+        Record {
+            fixture: &FIXTURES[index],
+            status,
+            reason: None,
+            tools: Vec::new(),
+            steps: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    fn entry(name: &str, status: &str) -> Value {
+        Value::object([
+            ("name", Value::string(name)),
+            ("status", Value::string(status)),
+        ])
+    }
+
+    fn names_and_status(entries: &[Value]) -> Vec<(&str, &str)> {
+        entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.get("name").and_then(Value::as_str).unwrap(),
+                    entry.get("status").and_then(Value::as_str).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn entries_without_an_earlier_manifest_are_the_records() {
+        let records = [record(1, Status::Built), record(0, Status::Failed)];
+        let entries = fixture_entries(None, &records);
+        assert_eq!(
+            names_and_status(&entries),
+            [(FIXTURES[0].name, "failed"), (FIXTURES[1].name, "built")]
+        );
+    }
+
+    #[test]
+    fn a_partial_run_replaces_and_adds_entries_and_keeps_the_others() {
+        let previous = Value::object([(
+            "fixtures",
+            Value::Array(vec![
+                entry("retired-fixture", "built"),
+                entry(FIXTURES[2].name, "failed"),
+                entry(FIXTURES[0].name, "built"),
+            ]),
+        )]);
+        let records = [record(2, Status::Built), record(1, Status::Unavailable)];
+        let entries = fixture_entries(Some(&previous), &records);
+        assert_eq!(
+            names_and_status(&entries),
+            [
+                (FIXTURES[0].name, "built"),
+                (FIXTURES[1].name, "unavailable"),
+                (FIXTURES[2].name, "built"),
+                ("retired-fixture", "built"),
+            ]
+        );
+        assert_eq!(entries[0], entry(FIXTURES[0].name, "built"));
+        assert_eq!(entries[2], records[0].to_value());
+    }
+
+    #[test]
+    fn an_earlier_manifest_without_fixtures_adds_nothing() {
+        let previous = Value::object([("fixtures", Value::Null)]);
+        let records = [record(3, Status::Built)];
+        let entries = fixture_entries(Some(&previous), &records);
+        assert_eq!(names_and_status(&entries), [(FIXTURES[3].name, "built")]);
+    }
 
     #[test]
     fn renders_the_header_then_the_consumer_tools_then_the_fixtures() {
@@ -207,7 +336,7 @@ mod tests {
             unix_seconds: 7,
         };
         let tools = Value::object([("tools", Value::Array(Vec::new()))]);
-        let manifest = json::parse(&render(&header, &[], tools.clone())).unwrap();
+        let manifest = json::parse(&render(&header, Vec::new(), tools.clone())).unwrap();
         let Value::Object(members) = &manifest else {
             panic!("the manifest is not an object");
         };
