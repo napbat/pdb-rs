@@ -11,72 +11,50 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }
 
-/// Return the SHA-384 digest of `data`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "first user: #17 Portable PDB checksum entries")
-)]
-pub(crate) fn sha384(data: &[u8]) -> [u8; 48] {
-    Sha384::digest(data).into()
+/// Define an incremental digest of data that arrives in pieces.
+macro_rules! hasher {
+    ($(#[$doc:meta])* $name:ident, $digest:ident, $size:literal) => {
+        $(#[$doc])*
+        #[derive(Clone, Default)]
+        pub(crate) struct $name($digest);
+
+        impl $name {
+            /// Create a hasher with no input.
+            pub(crate) fn new() -> Self {
+                Self::default()
+            }
+
+            /// Add `data` to the input.
+            pub(crate) fn update(&mut self, data: &[u8]) {
+                self.0.update(data);
+            }
+
+            /// Return the digest of all input.
+            pub(crate) fn finalize(self) -> [u8; $size] {
+                self.0.finalize().into()
+            }
+        }
+    };
 }
 
-/// Return the SHA-512 digest of `data`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "first user: #17 Portable PDB checksum entries")
-)]
-pub(crate) fn sha512(data: &[u8]) -> [u8; 64] {
-    Sha512::digest(data).into()
-}
-
-/// An incremental SHA-256 digest of data that arrives in pieces.
-#[derive(Clone, Default)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "first user: #17 Portable PDB content ID of planned output"
-    )
-)]
-pub(crate) struct Sha256Hasher(Sha256);
-
-impl Sha256Hasher {
-    /// Create a hasher with no input.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "first user: #17 Portable PDB content ID of planned output"
-        )
-    )]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add `data` to the input.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "first user: #17 Portable PDB content ID of planned output"
-        )
-    )]
-    pub(crate) fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    /// Return the SHA-256 digest of all input.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "first user: #17 Portable PDB content ID of planned output"
-        )
-    )]
-    pub(crate) fn finalize(self) -> [u8; 32] {
-        self.0.finalize().into()
-    }
-}
+hasher!(
+    /// An incremental SHA-256 digest.
+    Sha256Hasher,
+    Sha256,
+    32
+);
+hasher!(
+    /// An incremental SHA-384 digest.
+    Sha384Hasher,
+    Sha384,
+    48
+);
+hasher!(
+    /// An incremental SHA-512 digest.
+    Sha512Hasher,
+    Sha512,
+    64
+);
 
 #[cfg(test)]
 mod tests;

@@ -16,8 +16,15 @@ pub use nostdio::{
     BufRead, Cursor, IoError, Read, ReadBe, ReadLe, Seek, SeekFrom, Write, WriteBe, WriteLe,
 };
 
+mod copy;
 mod seek;
+pub(crate) use copy::copy_all;
 pub use seek::SeekReader;
+
+#[cfg(feature = "std")]
+mod replace;
+#[cfg(feature = "std")]
+pub(crate) use replace::write_new_file;
 
 #[cfg(all(feature = "std", any(unix, windows)))]
 mod file;

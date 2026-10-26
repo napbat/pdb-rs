@@ -10,7 +10,9 @@
 //! `target/tools/manifest.json`.
 //!
 //! The `verify-portable` command compares the pdbrs and verifier dumps of the Portable PDB
-//! fixtures. The `detect` command opens each fixture output with the format facade of pdbrs.
+//! fixtures. The `verify-rebuild` command rebuilds them with the pdbrs writer and compares the
+//! result with the original. The `detect` command opens each fixture output with the format
+//! facade of pdbrs.
 
 mod args;
 mod classify;
@@ -57,6 +59,11 @@ fn main() -> ExitCode {
             let workspace = workspace_root();
             let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
             exit_code(verify::verify_portable(&workspace, &fixtures))
+        }
+        Ok(Action::VerifyRebuild(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_rebuild(&workspace, &fixtures))
         }
         Ok(Action::Detect(fixtures)) => {
             let fixtures =

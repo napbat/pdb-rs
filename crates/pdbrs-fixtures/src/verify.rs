@@ -9,8 +9,14 @@
 //! `detect` opens each output of the fixture manifest with the format facade `pdbrs::Pdb`
 //! and compares the detected format with the kind that the manifest records. The CLI metadata
 //! of each image must give the "ordinary assembly metadata" error, not a Portable PDB.
+//!
+//! `verify-rebuild` (see [`rebuild`]) rebuilds each Portable PDB with the pdbrs writer and
+//! compares the bytes, the ID and the verifier dump with the original.
 
 mod dump;
+mod rebuild;
+
+pub use rebuild::verify_rebuild;
 
 use std::fs;
 use std::path::{Path, PathBuf};

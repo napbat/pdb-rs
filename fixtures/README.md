@@ -255,6 +255,28 @@ check also confirms the widths. SRM does not expose the `VariableList` and `Cons
 columns or the `StateMachineMethod` rows. The verifier reads them from the row bytes and checks
 them against the SRM views of the same data. A failed check stops the verifier with an error.
 
+### Rebuild check
+
+The `verify-rebuild` command checks the Portable PDB writer of pdbrs with the same inputs:
+
+```sh
+cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
+```
+
+For each input, the command checks these items and prints `yes` or `NO` for each one:
+
+1. `portable::Pdb::copy_exact` gives the same bytes.
+2. `Pdb::to_parts` and a plan with `IdPolicy::ContentDerived` give the same bytes and the same
+   PDB ID. The fixtures are deterministic builds, so SRM computed the original ID with the
+   same algorithm.
+3. A second plan gives the same bytes. A plan with the original ID as an explicit ID gives the
+   same bytes. The `MPDB` payload of the plan decodes to the same bytes.
+4. The verifier dump of the rebuilt file is the same as the verifier dump of the original.
+
+The command writes `<fixture>.pdb`, `<fixture>.original.srm.txt` and
+`<fixture>.rebuilt.srm.txt` to `target/verify-rebuild/`. It exits with a failure code if a
+check fails.
+
 ### Dump format
 
 The dump is UTF-8 text with `\n` line ends. Each line has a keyword and `name=value` fields.

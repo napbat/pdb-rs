@@ -13,8 +13,9 @@
 //! example the metadata of an assembly) because it has no `#Pdb` stream.
 //!
 //! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
-//! repacks and new layouts of arbitrary streams. PDB semantic building and
-//! editing and Portable PDB writing are not implemented.
+//! repacks and new layouts of arbitrary streams. [`portable::write`] writes
+//! Portable PDBs: exact copies and new layouts from raw rows and heaps. PDB
+//! semantic building and editing are not implemented.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
