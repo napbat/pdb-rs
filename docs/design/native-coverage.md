@@ -2,7 +2,7 @@
 
 This document gives the coverage of modern native PDBs (MSF 7.0 and MSFZ containers) for each record kind, stream version and container feature.
 It is product documentation: it tells what the library reads, checks, writes and edits today. GitHub issues hold the scope and the evidence.
-The epics [#1](https://github.com/napbat/pdbrs/issues/1) (MSF 7.0) and [#20](https://github.com/napbat/pdbrs/issues/20) (MSFZ) own the native scope, and [#28](https://github.com/napbat/pdbrs/issues/28) owns this accounting.
+The epic [#1](https://github.com/napbat/pdbrs/issues/1) owns the native scope. [#20](https://github.com/napbat/pdbrs/issues/20) (MSFZ) is closed, so #1 also holds the open MSFZ cells. [#28](https://github.com/napbat/pdbrs/issues/28) owns this accounting.
 
 Legacy native PDBs ([#16](https://github.com/napbat/pdbrs/issues/16)) and Portable PDBs ([#17](https://github.com/napbat/pdbrs/issues/17)) have their own epics.
 Legacy kinds and versions have rows here, marked `not applicable (legacy, #16)`, so that the inventory is complete. Portable PDB has no rows.
@@ -93,11 +93,12 @@ Each cell gives `complete / partial / missing / not applicable`.
 ## Remaining open cells
 
 Each `missing` or `partial` cell of a modern or extension row names its open issue and the reason. The table groups them by issue and column.
-All of them need `external-input` (a producer or a layout definition that is not available here), except the MSFZ stream larger than 4 GiB, which needs a very large input.
+All of them need `external-input`: a producer or a layout definition that is not available here.
+[#1](https://github.com/napbat/pdbrs/issues/1) holds the open MSFZ cells, because [#20](https://github.com/napbat/pdbrs/issues/20) is closed. No producer writes these MSFZ forms into a fixture, for example a stream larger than 4 GiB; synthetic tests of [#37](https://github.com/napbat/pdbrs/issues/37) and [#38](https://github.com/napbat/pdbrs/issues/38) cover them.
 
 | Issue | Column | Cells | Rows |
 | --- | --- | ---: | --- |
-| #20 | Independent fixture evidence | 5 | Stream directory, raw DEFLATE, Chunk, stored, Chunk, raw DEFLATE, Compressed fragment across chunk boundaries, Stream larger than 4 GiB |
+| #1 | Independent fixture evidence | 5 | Stream directory, raw DEFLATE, Chunk, stored, Chunk, raw DEFLATE, Compressed fragment across chunk boundaries, Stream larger than 4 GiB |
 | #29 | Semantic reading | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Reference validation | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Writing | 1 | Auxiliary hash stream (`hash_aux_stream`) |
