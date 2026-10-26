@@ -1,0 +1,3 @@
+This file is not compiled. The #line directive in Mapping.cs maps part of a method to this
+document, as a code generator maps generated code to its template. The C# build with embedded
+sources embeds this file too, so it must exist.

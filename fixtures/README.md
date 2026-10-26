@@ -36,8 +36,8 @@ Each demo also has these language-specific items:
 
 | Demo | Items |
 | --- | --- |
-| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. |
-| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. |
+| C# | Async and iterator state machines with `StateMachineMethod` rows and async stepping records. Local constants of many types, also an enum type from another assembly. Nested scopes, `dynamic` locals and tuple element names in a method without a state machine. Alias and `using static` imports, records with primary constructors, a `#line hidden` region. In `Mapping.cs`, `#line 100 "Mapped.template"` maps part of one method to another document, so its sequence points change documents (#23). The build with embedded sources embeds `Mapped.template` too. |
+| Visual Basic | Async and iterator state machines with `StateMachineMethod` rows. `Static` locals, local constants (also `Date` and `Decimal`), file-level alias and XML namespace imports, project-level imports in `VbDemo.vbproj` and the default namespace from `RootNamespace`. In `Mapping.vb`, two `#ExternalSource` blocks map parts of one function to `Mapped.vb` and `MappedNext.vb`, so its sequence points change documents (#23). The VB compiler hides the other lines of that file. |
 | F# | `task { }` state machines, `seq { }` classes, an `async { }` workflow, records and discriminated unions. The generator builds the F# demo with `Optimize=true`, because the F# compiler makes a `task { }` state machine only with optimization. The F# compiler writes no `StateMachineMethod` rows. |
 
 With the argument `stack`, each .NET demo prints `System.Diagnostics.StackTrace(true)` and

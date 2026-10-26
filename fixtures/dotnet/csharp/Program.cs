@@ -41,7 +41,7 @@ public static class Program
         int shapeTotal = Shapes.Describe();
         int hidden = HiddenRegion.Compute(Seed);
         int locals = LocalInfo.Compute(Seed);
-        int counted = new StepCounter(2).Next();
+        int counted = new StepCounter(2).Next() + MappedRegion.Compute(0);
 
         int total = addOffset(1) + LocalSquare(pair.Count) + StaticLocalCube(2) + fromDynamic
             + iteratorSum + asyncResult + shapeTotal + hidden + locals + counted + pair.Name.Length;

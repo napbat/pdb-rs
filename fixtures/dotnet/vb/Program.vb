@@ -28,7 +28,7 @@ Module Program
         Dim offset As Integer = 2
         Dim addOffset As Func(Of Integer, Integer) = Function(value) value + offset
         Dim constants As Integer = LocalConstants(3)
-        Dim stepped As Integer = New StepCounter(2).NextValue()
+        Dim stepped As Integer = New StepCounter(2).NextValue() + MappedRegion.Compute(0)
 
         Dim total As Integer = iteratorSum + counted + asyncResult + addOffset(1) + constants + stepped
         Console.WriteLine("vb demo checksum " & total.ToString())
