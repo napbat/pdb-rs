@@ -122,7 +122,7 @@ Most cells are fixture evidence for kinds that no local producer writes (`extern
 
 Every imported reference document has a section on a reconciliation page. The table gives the result for each document.
 "pdbrs" is `implemented`, `partial`, `not implemented` or `not applicable` (no format content). The counts are the listed conflicts and undocumented assumptions.
-Totals: 96 documents; 77 implemented, 8 partial, 1 not implemented, 10 not applicable; 353 conflicts and 270 undocumented assumptions.
+Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not applicable; 353 conflicts and 274 undocumented assumptions.
 
 | Document | pdbrs | Conflicts | Undocumented assumptions |
 | --- | --- | ---: | ---: |
@@ -144,7 +144,7 @@ Totals: 96 documents; 77 implemented, 8 partial, 1 not implemented, 10 not appli
 | [`microsoft-pdb-rs/docs/pdb/pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbpdbmd) | partial | 3 | 6 |
 | [`microsoft-pdb-rs/docs/pdb/names_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbnames_streammd) | implemented | 9 | 3 |
 | [`microsoft-pdb-rs/docs/pdb/msf.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfmd) | implemented | 9 | 7 |
-| [`microsoft-pdb-rs/docs/pdb/msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd) | not implemented | 11 | 0 |
+| [`microsoft-pdb-rs/docs/pdb/msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd) | implemented | 11 | 4 |
 | [`microsoft-pdb-rs/docs/pdb/mini_pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmini_pdbmd) | implemented | 5 | 4 |
 | [`microsoft-pdb-rs/docs/pdb/module_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmodule_streammd) | partial | 3 | 10 |
 | [`microsoft-pdb-rs/docs/pdb/ipi_stream.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbipi_streammd) | implemented | 3 | 4 |

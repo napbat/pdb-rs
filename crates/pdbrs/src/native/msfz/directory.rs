@@ -9,10 +9,10 @@ use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
 /// The stream directory value that marks a nil stream.
-const NIL_STREAM_SIZE: u32 = u32::MAX;
+pub(super) const NIL_STREAM_SIZE: u32 = u32::MAX;
 
 /// Bit 63 of a fragment location: the fragment is in the chunks.
-const COMPRESSED_BIT: u64 = 1 << 63;
+pub(super) const COMPRESSED_BIT: u64 = 1 << 63;
 
 /// Bits 48 to 62 of an uncompressed fragment location. They are reserved and must be 0.
 const RESERVED_BITS: u64 = 0x7fff << 48;

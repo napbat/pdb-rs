@@ -1,23 +1,31 @@
-//! Copy, repack and compare native PDB containers.
+//! Copy, repack, convert and compare native PDB containers.
 //!
 //! Usage:
 //!
 //! ```text
 //! msf copy <input> <output>
 //! msf repack [--page-size <bytes>|source] [--old-directory empty|preserve] <input> <output>
+//! msf pdz-encode [--max-chunk-size <bytes>[K|M]] [--one-stream-per-chunk]
+//!     [--compress-stream-dir] [--pad16k] [--deflate] [--old-directory empty|preserve]
+//!     <input> <output>
 //! msf compare <original> <written>
 //! ```
 //!
 //! - `copy` writes a byte-identical copy. It does not check the input.
-//! - `repack` writes a new layout with the same streams. The default page size is 4096 and
-//!   the default stream 0 policy is `empty`. `--page-size source` keeps the page size of the
-//!   input. A preserved stream 0 with bytes needs the page size of the input.
+//! - `repack` writes an MSF 7.00 container with the same streams. The input can be MSF 7.00
+//!   or MSFZ, so `repack` also converts MSFZ to MSF 7.00. The default page size is 4096 and
+//!   the default stream 0 policy is `empty`. `--page-size source` keeps the page size of an
+//!   MSF 7.00 input. A preserved stream 0 with bytes needs the page size of the input.
+//! - `pdz-encode` writes an MSFZ container with the same streams. The input can be MSF 7.00 or
+//!   MSFZ. The options are those of `pdbtool pdz-encode`: the maximum chunk size (default
+//!   1M, from 4K to 1024M), one stream for each chunk, a zstd stream directory and padding to
+//!   16 KiB. `--deflate` writes raw DEFLATE chunks instead of zstd chunks. The default stream
+//!   0 policy is `empty`, as `pdbtool pdz-encode` writes it.
 //! - `compare` opens both files as MSF 7.00 or MSFZ containers. It compares the presence, the
 //!   size and the bytes of each stream. For an MSF 7.00 written file, it also checks the free
 //!   page map; MSFZ has no free page map. It fails if a stream other than stream 0 differs or
 //!   if an MSF 7.00 written file has allocated pages without a reference. Stream 0 holds the
 //!   previous MSF stream directory, so it can differ, for example in an MSFZ copy.
-//! - `repack` reads MSF 7.00 input only. Conversion from MSFZ is #38.
 //!
 //! The output must not be the input file.
 
@@ -26,7 +34,8 @@ use std::path::Path;
 
 use pdbrs::io::FileReader;
 use pdbrs::native::container::Container;
-use pdbrs::native::msf::{Msf, OldDirectoryPolicy, StreamId, WriteOptions, copy_exact_file};
+use pdbrs::native::msf::{OldDirectoryPolicy, StreamId, WriteOptions, copy_exact_file};
+use pdbrs::native::msfz::{self, Codec};
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -38,6 +47,7 @@ fn main() -> Outcome {
     match arguments.split_first() {
         Some((command, rest)) if command == "copy" => copy(rest),
         Some((command, rest)) if command == "repack" => repack(rest),
+        Some((command, rest)) if command == "pdz-encode" => pdz_encode(rest),
         Some((command, rest)) if command == "compare" => compare(rest),
         _ => Err(usage()),
     }
@@ -46,7 +56,10 @@ fn main() -> Outcome {
 /// Return the usage error.
 fn usage() -> Box<dyn Error> {
     "usage: msf copy <input> <output> | msf repack [--page-size <bytes>|source] \
-     [--old-directory empty|preserve] <input> <output> | msf compare <original> <written>"
+     [--old-directory empty|preserve] <input> <output> | msf pdz-encode \
+     [--max-chunk-size <bytes>[K|M]] [--one-stream-per-chunk] [--compress-stream-dir] \
+     [--pad16k] [--deflate] [--old-directory empty|preserve] <input> <output> | \
+     msf compare <original> <written>"
         .into()
 }
 
@@ -78,13 +91,7 @@ fn repack(arguments: &[String]) -> Outcome {
                     options = options.with_page_size(value.parse()?);
                 }
             }
-            "--old-directory" => {
-                policy = match rest.next().map(String::as_str) {
-                    Some("empty") => OldDirectoryPolicy::Empty,
-                    Some("preserve") => OldDirectoryPolicy::Preserve,
-                    _ => return Err(usage()),
-                };
-            }
+            "--old-directory" => policy = old_directory(rest.next())?,
             _ => paths.push(argument),
         }
     }
@@ -92,11 +99,14 @@ fn repack(arguments: &[String]) -> Outcome {
         return Err(usage());
     };
     check_paths(input, output)?;
-    let msf = Msf::open(FileReader::open(input)?)?;
+    let container = Container::open(FileReader::open(input)?)?;
     if source_page_size {
+        let msf = container
+            .msf()
+            .ok_or("--page-size source needs an MSF 7.00 input")?;
         options = options.with_page_size(msf.block_size());
     }
-    let plan = msf.repack(options, policy)?;
+    let plan = container.to_msf(options, policy)?;
     plan.write_file(output)?;
     println!(
         "repacked {} streams: page size {}, {} pages, directory {} bytes, stream 0 {policy:?}",
@@ -106,6 +116,72 @@ fn repack(arguments: &[String]) -> Outcome {
         plan.directory_size(),
     );
     Ok(())
+}
+
+/// Write an MSFZ container with the options of `pdbtool pdz-encode`.
+fn pdz_encode(arguments: &[String]) -> Outcome {
+    let mut options = msfz::WriteOptions::default();
+    let mut policy = OldDirectoryPolicy::default();
+    let mut paths = Vec::new();
+    let mut rest = arguments.iter();
+    while let Some(argument) = rest.next() {
+        match argument.as_str() {
+            "--max-chunk-size" => {
+                let value = rest.next().ok_or_else(usage)?;
+                options = options.with_max_chunk_size(parse_bytes(value)?);
+            }
+            "--one-stream-per-chunk" => options = options.with_one_stream_per_chunk(true),
+            "--compress-stream-dir" => options = options.with_directory_codec(Some(Codec::Zstd)),
+            "--pad16k" => options = options.with_pad_16k(true),
+            "--deflate" => options = options.with_codec(Codec::Deflate),
+            "--old-directory" => policy = old_directory(rest.next())?,
+            _ => paths.push(argument),
+        }
+    }
+    let [input, output] = paths.as_slice() else {
+        return Err(usage());
+    };
+    check_paths(input, output)?;
+    let container = Container::open(FileReader::open(input)?)?;
+    let plan = container.to_msfz(options, policy)?;
+    plan.write_file(output)?;
+    println!(
+        "encoded {} streams: {} chunks of at most {} bytes, {} fragments, directory {} bytes \
+         ({} stored), {} bytes, stream 0 {policy:?}",
+        plan.stream_count(),
+        plan.chunk_count(),
+        options.max_chunk_size(),
+        plan.fragment_count(),
+        plan.directory_size(),
+        plan.stored_directory_size(),
+        plan.file_size(),
+    );
+    Ok(())
+}
+
+/// Parse a stream 0 policy.
+fn old_directory(value: Option<&String>) -> Outcome<OldDirectoryPolicy> {
+    match value.map(String::as_str) {
+        Some("empty") => Ok(OldDirectoryPolicy::Empty),
+        Some("preserve") => Ok(OldDirectoryPolicy::Preserve),
+        _ => Err(usage()),
+    }
+}
+
+/// Parse a byte count with an optional `K` (1024) or `M` (1048576) suffix, as
+/// `pdbtool pdz-encode` does.
+fn parse_bytes(text: &str) -> Outcome<u32> {
+    let (digits, unit) = if let Some(digits) = text.strip_suffix(['k', 'K']) {
+        (digits, 1 << 10)
+    } else if let Some(digits) = text.strip_suffix(['m', 'M']) {
+        (digits, 1 << 20)
+    } else {
+        (text, 1)
+    };
+    digits
+        .parse::<u32>()?
+        .checked_mul(unit)
+        .ok_or_else(|| "size is too large".into())
 }
 
 /// Print the facts of a container.

@@ -52,6 +52,7 @@ pub use old_directory::{OldDirectory, OldStream, OldStreams};
 #[cfg(feature = "std")]
 pub use write::copy_exact_file;
 pub use write::{MsfBuilder, OldDirectoryPolicy, WriteOptions, WritePlan, copy_exact};
+pub(crate) use write::{StreamSource, plan_sizes};
 
 /// The file offset of the page size field.
 const PAGE_SIZE_OFFSET: u64 = 32;

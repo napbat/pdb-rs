@@ -14,8 +14,9 @@
 //! result with the original. The `verify-edit` command edits and builds them with the pdbrs
 //! editor and checks the result with the verifier and the fixture programs. The
 //! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs builder and
-//! compares each result with the original through the consumer tools. The `detect` command
-//! opens each fixture output with the format facade of pdbrs.
+//! compares each result with the original through the consumer tools. The `verify-msfz`
+//! command writes and converts MSFZ files with pdbrs and checks them through the consumer
+//! tools. The `detect` command opens each fixture output with the format facade of pdbrs.
 
 mod args;
 mod classify;
@@ -83,6 +84,11 @@ fn main() -> ExitCode {
             let workspace = workspace_root();
             let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
             exit_code(verify::verify_native_edit(&workspace, &fixtures))
+        }
+        Ok(Action::VerifyMsfz(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_msfz(&workspace, &fixtures))
         }
         Ok(Action::Detect(fixtures)) => {
             let fixtures =

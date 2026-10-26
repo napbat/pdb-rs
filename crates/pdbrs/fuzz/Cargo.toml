@@ -62,6 +62,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "msfz_convert"
+path = "fuzz_targets/msfz_convert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "native_pdb"
 path = "fuzz_targets/native_pdb.rs"
 test = false

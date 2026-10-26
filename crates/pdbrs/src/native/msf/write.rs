@@ -96,10 +96,50 @@ impl Default for WriteOptions {
     }
 }
 
-/// A source of stream bytes for a [`WritePlan`].
-trait StreamSource {
+/// A source of stream bytes for a container plan.
+///
+/// The MSF 7.00 plan ([`WritePlan`]) and the MSFZ plan
+/// ([`msfz::WritePlan`](crate::native::msfz::WritePlan)) read stream bytes through this trait.
+pub(crate) trait StreamSource {
     /// Fill `buffer` with the bytes of stream `id` that start at `offset`.
     fn read_stream(&self, id: u32, offset: u64, buffer: &mut [u8]) -> Result<()>;
+}
+
+/// Plan a container for streams with the sizes `sizes` from `source`.
+///
+/// `None` marks a nil stream. The function checks that each size fits in an MSF stream.
+///
+/// # Errors
+///
+/// - [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more, the layout
+///   exceeds a limit or an allocation fails.
+/// - The errors of the layout (see [`WritePlan`]).
+pub(crate) fn plan_sizes<'a>(
+    options: WriteOptions,
+    sizes: &[Option<u64>],
+    source: &'a dyn StreamSource,
+) -> Result<WritePlan<'a>> {
+    check_page_size(options.page_size)?;
+    let mut list = Vec::new();
+    list.try_reserve_exact(sizes.len())
+        .map_err(|_| plan_allocation_failed())?;
+    for (id, size) in (0_u32..).zip(sizes) {
+        list.push(match size {
+            None => NIL_STREAM_SIZE,
+            Some(size) => u32::try_from(*size)
+                .ok()
+                .filter(|&size| size != NIL_STREAM_SIZE)
+                .ok_or_else(|| stream_too_large(id))?,
+        });
+    }
+    WritePlan::new(options, list, source)
+}
+
+/// Return the error for a stream that does not fit in an MSF stream.
+fn stream_too_large(id: u32) -> Error {
+    Error::new(ErrorKind::LimitExceeded, None)
+        .with_context("stream is too large for an MSF stream")
+        .with_stream(id, 0)
 }
 
 /// The frozen layout of a new container and the source of its stream bytes.

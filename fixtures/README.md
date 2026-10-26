@@ -749,3 +749,51 @@ classes are:
 - `DIA2Dump -t` lists no UDT of the source PDB (FASTLINK and managed PDBs), so `-type` finds no added type.
 - The stripped PDB keeps the source stream IDs, and `link.exe` writes the stripped symbol
   records in another order, so the stream numbers and the symbol record offsets differ.
+
+## MSFZ writer check
+
+The `verify-msfz` command checks the MSFZ writer and the conversions of pdbrs (#38):
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-msfz [--fixtures <dir>]
+```
+
+The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It builds the `native`
+example of pdbrs first. It has three parts.
+
+1. Encode. The command writes each `native-pdb` output as MSFZ with `Container::to_msfz` and
+   each of six option sets: `default`, `compress-stream-dir` (zstd directory),
+   `one-stream-per-chunk`, `small-chunks` (4 KiB, the smallest size), `pad16k` and `deflate`
+   (raw DEFLATE chunks). Stream 0 is empty, as `pdbtool pdz-encode` writes it. The output is
+   `target/verify-msfz/encode/<fixture>/<PDB file stem>/<option set>/<file name>`. The name
+   keeps the `.pdb` extension for DIA. Each output must pass these checks:
+   - A second write gives the same bytes.
+   - `pdbtool compare <source> <output>` reports no stream with differences.
+   - `DIA2Dump -all` gives the same masked output as for the source.
+   - The pdbrs reader gives the same streams from stream 1, and an empty stream 0.
+   - The `native` example gives the same output, apart from the lines that start with
+     `container:`.
+2. Reference. The command writes the source of each `pdz-*` fixture with the matching option
+   set and compares the bytes with the `pdz-encode` file. It prints the sizes and the chunk and
+   fragment counts of both files, and the reasons for different bytes. Different bytes do not
+   make the command fail.
+3. Decode. The command converts each `pdz-*` fixture to MSF 7.0 with `Container::to_msf` and the
+   page size of the original. The output is
+   `target/verify-msfz/decode/<PDZ fixture>/<source fixture>/<file stem>/<file name>`. Each
+   output must pass these checks:
+   - A second conversion gives the same bytes.
+   - `pdbtool check` shows 0 PDBs with errors.
+   - The normalized `llvm-pdbutil dump --all` output and the masked `DIA2Dump -all` output are
+     the same as for the original MSF 7.0 fixture.
+   - The streams are equal to the streams of the PDZ file, and from stream 1 to the original.
+
+Two `DIA2Dump` results are explained and do not make the command fail:
+
+- DIA rejects each file with raw DEFLATE chunks (`loadDataFromPdb failed - HRESULT =
+  806D000C`). DIA reads only zstd chunks. `pdbtool` and pdbrs read the DEFLATE files.
+- For `msvc-x64-incremental`, DIA prints function names with their signatures for each MSFZ
+  file, also for the `pdz-encode` file. The check accepts the output if it is the same as for
+  the `pdz-default` fixture of the same source.
+
+A different output writes `<name>.original.txt`, `<name>.written.txt` and `<name>.diff` next to
+the output file.

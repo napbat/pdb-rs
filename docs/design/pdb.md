@@ -2,6 +2,7 @@
 
 Status: the full reader/writer design remains proposed. The library reads, writes and edits modern native PDBs (MSF 7.0); the [native coverage](native-coverage.md) document gives the state of each record kind, stream version and container feature.
 Kinds without a local producer or a layout definition remain open there as `external-input`. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
+It reads and writes MSFZ containers (PDZ files) and converts between MSF 7.0 and MSFZ (see [Implemented MSFZ writing](#implemented-msfz-writing)).
 The library reads the metadata of standalone Portable PDBs and the raw rows of their eight debug tables (see [Implemented Portable PDB reading](#implemented-portable-pdb-reading)).
 The library writes Portable PDBs: exact copies, new layouts from raw rows and heaps, semantic builds and edits (see [Implemented Portable PDB writing](#implemented-portable-pdb-writing)).
 Portable PDB blob decoding is partial. The library builds new native PDBs from semantic records (see [Implemented native building](#implemented-native-building)).
@@ -583,7 +584,7 @@ Where the MSFZ specification and Microsoft's reference implementation differ, fo
 
 ### Implemented MSFZ reading
 
-Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing and conversion are not implemented ([#38](https://github.com/napbat/pdbrs/issues/38)).
+Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/37)). The writer and the conversions are in [Implemented MSFZ writing](#implemented-msfz-writing) ([#38](https://github.com/napbat/pdbrs/issues/38)).
 
 - `format::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
 - `native::msfz::Msfz` checks every invariant above when it opens a file. It decodes stored (code 0), zstd (code 1) and raw DEFLATE (code 2) chunks and stream directories through `compression.rs`. Other codes and versions give `UnsupportedVersion`.
@@ -594,6 +595,57 @@ Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/
 - The decisions for the differences between the specification and `ms-pdb-msfz` 0.1.10 are in [#37](https://github.com/napbat/pdbrs/issues/37#issuecomment-6415233037). Two decisions follow the specification, because it is a superset: a compressed fragment can continue into the next chunks, and non-zero reserved location bits are an error.
 - `pdbtool pdz-encode` writes stream 0 (the previous MSF stream directory) as an empty stream. Stream comparisons start at stream 1, as `pdbtool compare` does.
 - Evidence: every stream of the 63 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdbrs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. For `msvc-x64-lazy`, both files stop at the same error of the symbol reader. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
+
+### Implemented MSFZ writing
+
+The `native::msfz` module writes MSFZ containers, and `native::container::Container` converts between MSF 7.0 and MSFZ ([#38](https://github.com/napbat/pdbrs/issues/38)).
+[#38](https://github.com/napbat/pdbrs/issues/38#issuecomment-6416340034) records the decisions.
+
+| Operation | API | Guarantee |
+| --- | --- | --- |
+| New MSFZ container | `MsfzBuilder::plan` | A consistent container with the given streams, without a PDB semantic claim. A stream can be larger than 4 GiB |
+| MSF 7.0 or MSFZ to MSFZ | `Container::to_msfz` | Stream IDs, nil and empty streams and all stream bytes. `OldDirectoryPolicy` selects stream 0 |
+| MSF 7.0 or MSFZ to MSF 7.0 | `Container::to_msf` | The same, through the MSF writer (`Msf::repack` for MSF 7.0 input). A stream of `0xFFFFFFFF` bytes or more gives `LimitExceeded` |
+
+`msfz::WriteOptions` has the options of `pdbtool pdz-encode` and the chunk codec:
+
+- The maximum chunk size: 1 MiB by default, from 4 KiB to 1 GiB. `pdz-encode` changes other values to the nearest limit; the plan rejects them with `InvalidFormat`.
+- One stream for each chunk: each stream with data starts a new chunk.
+- Stream directory compression (`with_directory_codec`): off by default, because some readers do not read a compressed directory. `pdz-encode --compress-stream-dir` uses zstd.
+- Padding to 16 KiB (`with_pad_16k`): a workaround for the first MSVC PDZ decoder.
+- The chunk codec: zstd (the default) or raw DEFLATE, through `compression.rs`.
+- `MsfzLimits`: the plan rejects a chunk, a directory or a Chunk Table that a reader with these limits does not open.
+
+The plan computes and checks the full layout before output. The layout is deterministic:
+
+1. The 80-byte header is at offset 0. The chunks follow from offset 80 in Chunk Table order, without gaps.
+2. The stream directory and then the Chunk Table start at the next multiple of 16. With padding, zero bytes follow to 16 384 bytes. All gaps are zero.
+3. The bytes of the streams with data, in stream ID order, form one sequence. Each chunk holds the next `max_chunk_size` bytes. Only the last chunk (of each stream, with one stream for each chunk) can be smaller.
+4. A fragment never crosses a chunk boundary: the `ms-pdb-msfz` reader (`pdbtool compare`) reads a fragment from one chunk only. The writer writes no uncompressed fragments.
+
+The header holds the offsets of the directory and the Chunk Table, and these depend on the compressed chunk sizes. Thus planning reads all stream bytes and compresses each chunk once to get its size.
+`WritePlan::write_to` compresses each chunk again and fails with `InvalidFormat` if a size changed (the source changed).
+The memory is one chunk buffer, its compressed bytes, the directory and the Chunk Table. `write_to`, `to_vec` and `write_file` have the contract of the MSF writer: a planning error writes nothing, and `write_file` leaves no partial file.
+
+Write a PDZ file, convert it back and compare the streams:
+
+```sh
+cargo run -p pdbrs --example msf -- pdz-encode --max-chunk-size 64K --compress-stream-dir input.pdb output.pdz.pdb
+cargo run -p pdbrs --example msf -- repack output.pdz.pdb back.pdb
+cargo run -p pdbrs --example msf -- compare input.pdb back.pdb
+```
+
+`pdz-encode` takes `--max-chunk-size <bytes>[K|M]`, `--one-stream-per-chunk`, `--compress-stream-dir`, `--pad16k`, `--deflate` and `--old-directory empty|preserve`.
+`repack` reads MSF 7.0 or MSFZ input.
+
+Evidence ([#38](https://github.com/napbat/pdbrs/issues/38)): `cargo run --release -p pdbrs-fixtures -- verify-msfz` (see `fixtures/README.md`).
+
+- Encode: 48 native PDBs with six option sets (defaults, a compressed directory, one stream for each chunk, 4 KiB chunks, padding and DEFLATE chunks) give 288 PDZ files. All are deterministic, `pdbtool compare` reports "Files are IDENTICAL" for each, and the pdbrs reader and the `native` example give the same streams and output as for the source.
+- DIA2Dump `-all` gives the same output as for the source for 235 files. For `msvc-x64-incremental`, DIA gives another output for each MSFZ file, also for the `pdz-encode` file; the pdbrs files give the same output as the `pdz-encode` file (5 files).
+  DIA rejects all 48 files with raw DEFLATE chunks (`HRESULT = 806D000C`): DIA reads only zstd chunks. `pdbtool` and pdbrs read them.
+- Decode: the 63 PDZ fixtures convert to MSF 7.0 (with the page size of the original) deterministically. `pdbtool check` reports 0 errors, and `llvm-pdbutil dump --all` and DIA2Dump give the same output as for the original. The streams are equal to the PDZ file and, from stream 1, to the original.
+- `pdz-encode` output: no pdbrs file is byte-identical, and none needs to be. `pdz-encode` stores the Info stream and the DBI header uncompressed, ends chunks at record and substream boundaries, and uses the zstd C library. The streams are the same.
+- The `msfz_convert` fuzz target (`docs/fuzzing.md`) converts MSF 7.0 and MSFZ input to MSFZ and back.
 
 ## Portable metadata invariants
 

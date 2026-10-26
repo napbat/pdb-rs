@@ -127,10 +127,6 @@ fn decode_frame(decoder: &mut FrameDecoder, input: &mut &[u8], output: &mut [u8]
 /// # Errors
 ///
 /// Returns [`crate::ErrorKind::LimitExceeded`] if the output allocation fails.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "first user: #20 MSFZ chunk encoding")
-)]
 pub(crate) fn encode(input: &[u8]) -> Result<Vec<u8>> {
     let mut drain = Drain::default();
     let mut compressor = FrameCompressor::new(CompressionLevel::Fastest);

@@ -6,6 +6,7 @@
 //! an out-of-memory condition or a failed assertion is a finding. A round-trip
 //! target asserts that the output of an encoder decodes to the same value.
 
+pub mod convert;
 pub mod input;
 pub mod msf;
 pub mod msfz;

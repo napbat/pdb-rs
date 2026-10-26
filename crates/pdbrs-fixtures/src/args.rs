@@ -11,6 +11,7 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- verify-native-build [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- verify-native-edit [--fixtures <dir>]
+       cargo run -p pdbrs-fixtures -- verify-msfz [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
@@ -47,6 +48,13 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
                  fixture, write the results to target/verify-native-edit/ and check them with
                  pdbtool, llvm-pdbutil, DIA2Dump and pdbstr. Compare the strip with the
                  link /PDBSTRIPPED output of msvc-x64-stripped.
+
+  verify-msfz    Write each native PDB fixture as MSFZ with the pdbrs writer and six option
+                 sets, and check each output with pdbtool compare, DIA2Dump, the pdbrs reader
+                 and the native example. Compare the outputs with the pdz-* fixtures of
+                 pdbtool pdz-encode. Convert each pdz-* fixture to MSF 7.0 and check it with
+                 pdbtool check, llvm-pdbutil and DIA2Dump. Write the results to
+                 target/verify-msfz/.
 
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
                  with the manifest. The CLI metadata of each image must be rejected.
@@ -85,6 +93,10 @@ pub enum Action {
     /// Apply each native edit to each native PDB fixture and check the results through the
     /// consumer tools. The value is the fixture root, if the user gave one.
     VerifyNativeEdit(Option<PathBuf>),
+    /// Write MSFZ files from the native PDB fixtures, convert the PDZ fixtures to MSF 7.0 and
+    /// check both through the consumer tools. The value is the fixture root, if the user gave
+    /// one.
+    VerifyMsfz(Option<PathBuf>),
 }
 
 /// The options of a build.
@@ -118,6 +130,7 @@ where
         ("verify-edit", Action::VerifyEdit),
         ("verify-native-build", Action::VerifyNativeBuild),
         ("verify-native-edit", Action::VerifyNativeEdit),
+        ("verify-msfz", Action::VerifyMsfz),
     ] {
         if arguments.next_if(|argument| argument == command).is_some() {
             return fixture_root(command, &mut arguments).map(action);
@@ -235,6 +248,7 @@ mod tests {
             run(&["verify-native-edit"]),
             Ok(Action::VerifyNativeEdit(None))
         );
+        assert_eq!(run(&["verify-msfz"]), Ok(Action::VerifyMsfz(None)));
         assert_eq!(
             run(&["detect", "--fixtures", "D:/f"]),
             Ok(Action::Detect(Some(PathBuf::from("D:/f"))))

@@ -39,6 +39,7 @@ pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
         Msf::open(bytes.as_slice())?;
         corpus.add("msf", &bytes)?;
         corpus.add_parts("msf_repack", &[0x08], &[], &bytes)?;
+        corpus.add_parts("msfz_convert", &[0x2c], &[], &bytes)?;
     }
     // The builder target reads a page size selector, then tagged streams.
     let mut build = vec![0];

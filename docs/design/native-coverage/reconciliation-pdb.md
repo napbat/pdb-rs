@@ -132,7 +132,7 @@ The comparison used `main` at `8dc001c`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
 
 ### `microsoft-pdb-rs/docs/pdb/msfz.md`
 - Documents: the MSFZ container: 80-byte header, signature, version 0, variable-length stream directory of 12-byte fragments, fragment location encoding, 20-byte Chunk Table entries, compression codes, overlap rules, validation and read procedures.
-- pdbrs: not implemented — no MSFZ container code exists; `crates/pdbrs/src/format.rs` `probe` does not know the MSFZ signature and returns `InvalidSignature` (#20). Only the zstd codec for MSFZ chunks exists (`crates/pdbrs/src/compression/zstd.rs`, no caller yet). `docs/design/pdb.md` plans `native/msfz.rs` and `native/msfz/` and says to follow `ms-pdb-msfz` where it differs from this specification.
+- pdbrs: implemented — reading: `crates/pdbrs/src/native/msfz.rs` and `native/msfz/` (header, stream directory, Chunk Table, fragments and the chunk cache, #37). Writing: `native/msfz/write.rs` and `native/msfz/write/` (`MsfzBuilder`, `WritePlan`, #38). Conversion in both directions: `native/container/convert.rs` (`Container::to_msfz`, `Container::to_msf`, #38). The codecs are in `crates/pdbrs/src/compression/`.
 - Conflicts:
   - Directory size check (document vs `ms-pdb-msfz` `reader.rs`): the validation procedure checks `num_streams * size_of::<StreamEntry>() == stream_dir_size_uncompressed`. The layout sections define no `StreamEntry`, and the directory is variable-length; the reference reader does not apply the check (#20).
   - Read procedure (document vs its own layout): it names a per-stream `compression` field, `COMPRESSION_CHUNKED`, `location` and `uncompressed_size` of a `StreamEntry`. These do not exist in the fragment layout (#20).
@@ -144,8 +144,12 @@ The comparison used `main` at `8dc001c`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - Rules in `ms-pdb-msfz` that the document does not state: a fragment location of 0xFFFFFFFF_FFFFFFFF is invalid; a fragment size of 0xFFFFFFFF after the first fragment is invalid.
   - "Uncompressed streams ... stored in a single contiguous sequence of bytes" contradicts the multi-fragment model of the same document.
   - Writer behavior not in the document (`ms-pdb-msfz` `writer.rs`): 16-byte alignment of written pieces, default chunk threshold 1 MiB, default Zstd, stream 0 reserved as zero-length, and `MIN_FILE_SIZE_16K` (0x4000) padding as a workaround for the PDZ decoder in DIA (`pdbtool pdz-encode --pad16k`).
-  - Large streams: the document allows streams larger than 4 GiB. MSF 7.0 and the PDB stream structures use 32-bit sizes, so such a stream cannot convert to MSF 7.0. Inference, not tested: pdbrs conversion (#20) must reject it.
-- Undocumented assumptions: None. (pdbrs has no MSFZ container code. #20 records the decisions: follow `ms-pdb-msfz`; zstd through `ruzstd`, raw DEFLATE through `miniz_oxide`, only inside `compression.rs`.)
+  - Large streams: the document allows streams larger than 4 GiB. MSF 7.0 and the PDB stream structures use 32-bit sizes, so such a stream cannot convert to MSF 7.0. `Container::to_msf` rejects a stream of 0xFFFFFFFF bytes or more with `LimitExceeded` (test `an_msfz_stream_of_4_gib_does_not_convert_to_msf`, #38).
+- Undocumented assumptions:
+  - #37 records the reader decisions, and #38 records the writer decisions. Both follow `ms-pdb-msfz` where it differs from this document.
+  - Writer layout (#38): the chunks start at offset 80 without gaps; the stream directory and the Chunk Table start at the next multiple of 16; gaps are zero. Each chunk holds the next `max_chunk_size` bytes of the streams in stream ID order.
+  - A fragment of the writer never crosses a chunk boundary, because the `ms-pdb-msfz` reader (`pdbtool compare`) reads a fragment from one chunk only (#38).
+  - DIA2Dump (`msdia140.dll` of Visual Studio 18) rejects each file with raw DEFLATE chunks (`HRESULT = 806D000C`); it reads zstd chunks and compressed stream directories (#38).
 
 ### `microsoft-pdb-rs/docs/pdb/mini_pdb.md`
 - Documents: mini PDBs (`/DEBUG:FASTLINK`), the `MinimalDebugInfo` feature code and its effect on the GSI/PSI bucket count (0x1000 or 0x3FFFF).

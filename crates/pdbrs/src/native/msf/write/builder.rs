@@ -2,9 +2,9 @@
 
 use alloc::vec::Vec;
 
-use super::super::{NIL_STREAM_SIZE, StreamId};
+use super::super::StreamId;
 use super::layout::check_page_size;
-use super::{StreamSource, WriteOptions, WritePlan, plan_allocation_failed};
+use super::{StreamSource, WriteOptions, WritePlan, plan_allocation_failed, plan_sizes};
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
@@ -91,21 +91,10 @@ impl<R: ReadAt> MsfBuilder<R> {
         sizes
             .try_reserve_exact(self.streams.len())
             .map_err(|_| plan_allocation_failed())?;
-        for (id, stream) in (0_u32..).zip(&self.streams) {
-            let size = match stream {
-                None => NIL_STREAM_SIZE,
-                Some(data) => u32::try_from(data.len()?)
-                    .ok()
-                    .filter(|&size| size != NIL_STREAM_SIZE)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::LimitExceeded, None)
-                            .with_context("stream is too large for an MSF stream")
-                            .with_stream(id, 0)
-                    })?,
-            };
-            sizes.push(size);
+        for stream in &self.streams {
+            sizes.push(stream.as_ref().map(ReadAt::len).transpose()?);
         }
-        WritePlan::new(options, sizes, self)
+        plan_sizes(options, &sizes, self)
     }
 }
 

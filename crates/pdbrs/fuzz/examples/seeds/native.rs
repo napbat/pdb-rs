@@ -42,6 +42,10 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
             corpus.add_parts("msf_repack", &[selector], &[], bytes)?;
         }
     }
+    // The selectors cover each MSFZ option (see `pdbrs_fuzz::convert::options`).
+    for selector in [0x00_u8, 0x1d, 0xe6] {
+        corpus.add_parts("msfz_convert", &[selector], &[], bytes)?;
+    }
     corpus.add("native_pdb", bytes)?;
     let pdb = Pdb::parse(bytes)?;
     let mut kinds = Kinds::default();

@@ -6,8 +6,13 @@
 //!
 //! Use [`Container::msf`] or [`Container::msfz`] for checks that apply to one container only,
 //! for example [`Msf::check_free_page_map`].
+//!
+//! [`Container::to_msfz`] and [`Container::to_msf`] convert either container to MSFZ or to
+//! MSF 7.00 (#38).
 
 use alloc::vec::Vec;
+
+mod convert;
 
 use super::msf::{self, Msf, MsfLimits, StreamId};
 use super::msfz::{self, Msfz, MsfzLimits};

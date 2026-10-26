@@ -13,6 +13,10 @@
 //! from Microsoft's reader and writer (`ms-pdb-msfz` 0.1.10), the reader follows the decisions
 //! recorded in #37.
 //!
+//! [`MsfzBuilder::plan`] and `Container::to_msfz` (see
+//! [`Container`](crate::native::container::Container)) write new containers through a
+//! [`WritePlan`]. The decisions of the writer are recorded in #38.
+//!
 //! # Validation
 //!
 //! [`Msfz::open`] and [`Msfz::with_limits`] check these rules before they return:
@@ -62,6 +66,12 @@ mod header;
 mod layout;
 #[cfg(test)]
 mod tests;
+mod write;
+
+pub use write::{
+    Codec, DEFAULT_MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, MsfzBuilder, PAD_16K_SIZE,
+    WriteOptions, WritePlan,
+};
 
 use cache::ChunkCache;
 use directory::{Chunk, Entry, Fragment, Location};
