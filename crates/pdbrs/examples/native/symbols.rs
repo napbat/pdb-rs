@@ -54,6 +54,8 @@ pub(crate) struct Procedures {
     incomplete: HashSet<u16>,
     /// The `S_TRAMPOLINE` records of all modules.
     trampolines: Vec<Trampoline>,
+    /// The record kinds of the module streams for the library checks.
+    records: crate::symbol_validation::ModuleRecords,
 }
 
 /// Decode every module stream and return the procedure offsets per module.
@@ -77,6 +79,7 @@ pub(crate) fn modules(
         }
         let checksums = lines.as_ref().and_then(ModuleLines::checksums);
         let base = u32::try_from(stream.symbol_offset())?;
+        crate::symbol_validation::module(&stream, index, context, &mut procedures.records, report)?;
         let symbols =
             ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
         for scoped in symbols {
@@ -219,6 +222,7 @@ pub(crate) fn shared_symbols(
     report.claim(id);
     let bytes = pdb.stream_bytes(id)?;
     let offsets = RecordOffsets::frame(&bytes, id)?;
+    crate::symbol_validation::shared(&bytes, id, context, &procedures.records, report)?;
     for record in Records::new(&bytes) {
         let record = record?;
         let symbol = record

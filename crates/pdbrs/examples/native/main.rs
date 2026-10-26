@@ -12,6 +12,7 @@
 
 mod dbi;
 mod named;
+mod symbol_validation;
 mod symbols;
 mod types;
 
