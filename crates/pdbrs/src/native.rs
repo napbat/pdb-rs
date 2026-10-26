@@ -7,6 +7,7 @@ pub mod address;
 pub mod auxiliary;
 pub mod codeview;
 pub mod dbi;
+pub mod debug_stream;
 pub mod fpo;
 pub mod hash;
 pub mod hash_table;
