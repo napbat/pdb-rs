@@ -57,13 +57,13 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks | Free-page-map allocation consistency |
 | PDB Info | Identity, named streams, feature codes and named-stream reference checks | Older Info layouts |
-| TPI and IPI | Modern headers, type-indexed record iteration and hash-stream references | Leaf decoding, type graphs and hash lookup |
+| TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions | OMAP translation |
 | Symbols | Typed decoding of 38 symbol kinds, including every kind in the Rust sample PDBs; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
-| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding | Non-integer leaves and integration into typed records |
+| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
 Header validation does not validate every record payload. Iterate records to check their framing.

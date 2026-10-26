@@ -16,9 +16,11 @@ use core::iter::FusedIterator;
 
 use crate::{Error, ErrorKind, Result};
 
+pub mod field_list;
 pub mod id_record;
 pub mod index;
 pub mod numeric;
+pub mod type_record;
 
 pub mod symbol;
 
@@ -223,7 +225,6 @@ impl<'a> Fields<'a> {
     pub(crate) fn id_index(&mut self) -> Result<IdIndex> {
         Ok(IdIndex(self.u32()?))
     }
-
     /// Read `count` bytes.
     pub(crate) fn bytes(&mut self, count: usize) -> Result<&'a [u8]> {
         if count > self.bytes.len() {
@@ -271,7 +272,6 @@ impl<'a> Fields<'a> {
     pub(crate) const fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
-
     /// Make sure that the remaining bytes are type-record padding.
     ///
     /// Type records pad with `LF_PAD` bytes. Each byte is `0xf0` plus the
@@ -304,7 +304,6 @@ impl<'a> Fields<'a> {
                 .with_context("CodeView symbol record has invalid padding"))
         }
     }
-
     /// Return the bytes that are not read yet.
     pub(crate) const fn rest(&self) -> &'a [u8] {
         self.bytes

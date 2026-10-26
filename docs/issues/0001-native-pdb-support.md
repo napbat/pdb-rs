@@ -30,6 +30,8 @@ Do not add a PE parser, linker, symbol server client or automatic external-file 
 - [x] Frame shared and module symbols. Decode `S_PUB32`, `S_LDATA32`, `S_GDATA32`, `S_LPROC32`, `S_GPROC32`, `S_LPROC32_ID` and `S_GPROC32_ID`.
 - [x] Frame C13 subsections. Keep unknown kinds raw.
 - [x] Match LLVM record/module counts on four local Rust-produced PDBs. Exercise native reading with default features disabled.
+- [x] Decode every TPI leaf and field-list member in the four Rust PDBs. Match LLVM `dump --types` names, sizes, members, enumerators, pointers, signatures, method lists and forward-reference targets.
+- [x] Verify all stored TPI/IPI hash values and index offset pairs against the records.
 
 The [design evidence](../design/pdb.md#research-evidence-and-references) records the smoke results and their limits.
 Counts prove enumeration, not complete semantics. No native writer or semantic editor exists at this baseline.
@@ -46,9 +48,9 @@ Only the numeric component is added by this step. Other new paths are planned, n
 | Order | Module boundary | Deliverable and dependencies |
 | --- | --- | --- |
 | 1 | `native/codeview/numeric.rs` | Implemented integer leaves. Shared by type sizes, member offsets, enumerators and integer constants. |
-| 2 | `native/codeview/field_list.rs` | Borrowed field-list member iteration, attributes and continuations. Uses numeric leaves; unknown unframed members stop decoding. |
-| 3 | `native/codeview/type_record.rs` | Borrowed typed leaves: modifiers, pointers, arrays, aggregates, enums, procedures, member functions, argument lists and bitfields. |
-| 4 | `native/types/index.rs` | Optional offset index, primitive interpretation, forward references and bounded type resolution. Keep stream ownership in `TypeStream`. |
+| 2 | `native/codeview/field_list.rs` | Implemented borrowed field-list member iteration, attributes and continuations. Uses numeric leaves; unknown unframed members stop decoding. |
+| 3 | `native/codeview/type_record.rs` | Implemented borrowed typed leaves: modifiers, pointers, arrays, aggregates, enums, procedures, member functions, argument lists, bitfields, method lists and vtable shapes. |
+| 4 | `native/types/lookup.rs`, `native/types/forward.rs`, `native/types/hash.rs` | Implemented offset-table lookup, bounded continuation chains, forward-reference resolution and hash-stream decoding and verification. Keep stream ownership in `TypeStream`. |
 | 5 | `native/codeview/id.rs` | IPI strings, function IDs, build info and UDT source references. Resolve IDs separately from types. |
 | 6 | Existing `native/codeview/symbol.rs` and children | Extend the existing symbol API with constants, locals, ranges, scope links and inline sites. Do not introduce a second symbol API. |
 | 7 | `native/lines.rs` and children | C13 checksums, file names, line/column tables, inlinee lines and annotation programs. Reuse existing module subsection framing. |
@@ -86,12 +88,12 @@ Names and values matched LLVM exactly in both feature modes, including `18446744
 
 ### Next acceptance milestone: Rust type inspection
 
-- [ ] Decode field lists and the aggregate, enum, pointer, modifier and function families present in the Rust sample.
-- [ ] Resolve field types and continuation records without recursion failures or repeated full-stream scans.
+- [x] Decode field lists and the aggregate, enum, pointer, modifier and function families present in the Rust sample.
+- [x] Resolve field types and continuation records without recursion failures or repeated full-stream scans.
 - [ ] Print type names, sizes, field names/offsets, enum values and function signatures from a real PDB.
-- [ ] Compare those semantic results with LLVM, not only record counts.
-- [ ] Preserve unknown leaves and report incomplete semantic coverage explicitly.
-- [ ] Exercise signed enum values, recursive types, forward declarations, malformed members and both feature modes.
+- [x] Compare those semantic results with LLVM, not only record counts.
+- [x] Preserve unknown leaves and report incomplete semantic coverage explicitly.
+- [x] Exercise signed enum values, recursive types, forward declarations, malformed members and both feature modes.
 
 ## Coverage accounting
 
