@@ -19,14 +19,22 @@
 //! This module does not decode the `/names` string table. The caller resolves the name offsets.
 //!
 //! The .NET symbol writers use the compression byte 101 ([`SourceCompression::DotNet`]). Their
-//! streams hold a [`DotNetDocument`] record, not the file contents.
+//! streams hold a [`DotNetDocument`] record, not the file contents. A file whose virtual file
+//! name ends with `.natvis` is a Natvis file ([`InjectedSourceKind::Natvis`]).
+//!
+//! [`SourceHeaderBlock::encode`] gives the bytes of a decoded stream again.
+//! [`SourceHeaderBlockBuilder`] makes a new stream.
 
+mod builder;
 mod document;
+mod natvis;
 
+pub use builder::{InjectedFile, SourceHeaderBlockBuilder};
 pub use document::{
     CHECKSUM_SHA1, CHECKSUM_SHA256, ChecksumCheck, DOCUMENT_TYPE_TEXT, DotNetDocument,
     LANGUAGE_CSHARP, VENDOR_MICROSOFT,
 };
+pub use natvis::{Natvis, is_natvis_name};
 
 use alloc::vec::Vec;
 
@@ -99,6 +107,18 @@ impl SourceCompression {
             Self::Unknown(value) => value,
         }
     }
+}
+
+/// The kind of the contents of an injected source file.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum InjectedSourceKind {
+    /// A .NET document record: the compression is [`SourceCompression::DotNet`].
+    DotNetDocument,
+    /// A Natvis file: the virtual file name ends with `.natvis`. See [`Natvis`].
+    Natvis,
+    /// Another file.
+    File,
 }
 
 /// One entry of the `/src/headerblock` table (`SrcHeaderBlockEntry`).
@@ -205,6 +225,34 @@ impl HashTableValue<'_> for InjectedSource {
 }
 
 impl InjectedSource {
+    /// Classify the entry by its compression and its virtual file name.
+    ///
+    /// `virtual_file_name` is the `/names` string at
+    /// [`InjectedSource::virtual_file_name_offset`].
+    #[must_use]
+    pub fn kind(&self, virtual_file_name: &[u8]) -> InjectedSourceKind {
+        if self.compression == SourceCompression::DotNet {
+            InjectedSourceKind::DotNetDocument
+        } else if is_natvis_name(virtual_file_name) {
+            InjectedSourceKind::Natvis
+        } else {
+            InjectedSourceKind::File
+        }
+    }
+
+    /// Check the contents of a Natvis file stream and return its XML text.
+    ///
+    /// The function applies [`InjectedSource::verify_content`] and then [`Natvis::parse`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`InjectedSource::verify_content`], and the errors of
+    /// [`Natvis::parse`] with the stream ID and logical offset 0.
+    pub fn verify_natvis<'c>(&self, content: &'c [u8], stream: StreamId) -> Result<Natvis<'c>> {
+        let content = self.verify_content(content, stream)?;
+        Natvis::parse(content).map_err(|error| error.with_stream(stream.0, 0))
+    }
+
     /// Check the contents of the file stream and return the file contents.
     ///
     /// `content` holds the full stream `stream`. The check needs no compression, a size equal
