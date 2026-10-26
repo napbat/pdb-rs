@@ -1,15 +1,16 @@
 //! Building blocks for native Windows and Portable .NET PDB files.
 //!
-//! The current API provides positional byte access, signature probing and
-//! format-specific identity types. It does not yet parse PDB streams, decode
-//! debug records or write PDB files.
+//! The current API provides sequential I/O, positional byte access, signature
+//! probing and format-specific identity types. It does not yet parse PDB
+//! streams, decode debug records or write PDB files.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
 //! does not imply support for decoding legacy records.
 //!
-//! Disable the default `std` feature to use the library without the standard
-//! library. Slice access, probing and identity operations need no allocator.
+//! Disable the default `std` feature to use `no_std + alloc`. Sequential I/O
+//! comes from `nostdio`; [`io::SeekReader`] adapts seekable streams to [`io::ReadAt`].
+//! Slice reads, probing and fixed-buffer cursor operations do not allocate.
 //!
 //! # Example
 //!

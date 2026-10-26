@@ -1,4 +1,4 @@
-//! Positional, read-only byte access.
+//! Sequential I/O and positional byte access.
 //!
 //! The [`ReadAt`] trait reads bytes at absolute offsets. It does not use a
 //! shared cursor. The crate implements it for `[u8]` and for references to
@@ -6,8 +6,18 @@
 //! `FileReader` implements it for files.
 //!
 //! All offsets are physical byte offsets from the start of the input.
+//!
+//! Sequential traits and cursors come from `nostdio`. [`SeekReader`] adapts
+//! a seekable stream to positional access without requiring `std`.
 
 use crate::{Error, ErrorKind, Result};
+
+pub use nostdio::{
+    BufRead, Cursor, IoError, Read, ReadBe, ReadLe, Seek, SeekFrom, Write, WriteBe, WriteLe,
+};
+
+mod seek;
+pub use seek::SeekReader;
 
 #[cfg(all(feature = "std", any(unix, windows)))]
 mod file;

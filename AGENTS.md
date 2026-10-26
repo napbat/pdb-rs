@@ -29,8 +29,9 @@ name as the area (for example `pdbrs`).
 The repository is a Cargo workspace. Its `pdbrs` library uses edition 2024 and lives in
 `crates/pdbrs/`. The library root is `crates/pdbrs/src/lib.rs`.
 
-The default `std` feature enables standard I/O error integration and file access on Unix and Windows.
-Keep the shared primitives usable with `--no-default-features`.
+The default `std` feature enables `nostdio/std` and file access on Unix and Windows.
+Use `nostdio` for sequential I/O. Keep `ReadAt` for positional access.
+Keep the shared primitives usable with `--no-default-features` (`no_std + alloc`).
 The `inspect` example identifies container signatures; it does not validate PDB contents.
 
 - Keep the standard Cargo package layout.

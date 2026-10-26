@@ -17,6 +17,8 @@ pub enum ErrorKind {
     OffsetOverflow,
     /// An underlying I/O operation failed.
     Io,
+    /// A seekable input is already in use by another read.
+    InputBorrowed,
 }
 
 /// An error with an optional physical byte offset.
@@ -24,8 +26,7 @@ pub enum ErrorKind {
 pub struct Error {
     kind: ErrorKind,
     offset: Option<u64>,
-    #[cfg(feature = "std")]
-    source: Option<std::io::Error>,
+    source: Option<nostdio::IoError>,
 }
 
 impl Error {
@@ -35,17 +36,23 @@ impl Error {
         Self {
             kind,
             offset,
-            #[cfg(feature = "std")]
             source: None,
         }
     }
 
     /// Retain an I/O error and its optional physical byte offset.
-    #[cfg(feature = "std")]
+    ///
+    /// Map an underlying EOF to [`ErrorKind::UnexpectedEof`]. Other I/O
+    /// failures use [`ErrorKind::Io`]. Retain the typed source in both feature modes.
     #[must_use]
-    pub fn from_io(source: std::io::Error, offset: Option<u64>) -> Self {
+    pub fn from_io(source: nostdio::IoError, offset: Option<u64>) -> Self {
+        let kind = if nostdio::is_unexpected_eof(&source) {
+            ErrorKind::UnexpectedEof
+        } else {
+            ErrorKind::Io
+        };
         Self {
-            kind: ErrorKind::Io,
+            kind,
             offset,
             source: Some(source),
         }
@@ -71,12 +78,12 @@ impl fmt::Display for Error {
             ErrorKind::InvalidSignature => "unrecognized container signature",
             ErrorKind::OffsetOverflow => "byte offset overflow",
             ErrorKind::Io => "I/O operation failed",
+            ErrorKind::InputBorrowed => "seekable input is already borrowed",
         };
         formatter.write_str(message)?;
         if let Some(offset) = self.offset {
             write!(formatter, " at file offset {offset:#x}")?;
         }
-        #[cfg(feature = "std")]
         if let Some(source) = &self.source {
             write!(formatter, ": {source}")?;
         }
@@ -86,7 +93,6 @@ impl fmt::Display for Error {
 
 impl core::error::Error for Error {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        #[cfg(feature = "std")]
         if let Some(source) = &self.source {
             return Some(source);
         }

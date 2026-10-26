@@ -6,6 +6,9 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.dependencies]
+nostdio = { version = "0.2", default-features = false }
+
 [workspace.lints.rust]
 warnings = { level = "deny", priority = -2 }
 unused = { level = "deny", priority = -1 }

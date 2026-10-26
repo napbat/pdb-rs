@@ -5,17 +5,22 @@ No public API claims to parse complete PDBs or write them yet.
 
 ## Implemented primitives
 
-The `pdbrs` package is a library, with no default executable and no external dependencies.
-Its default `std` feature enables standard I/O error sources and file adapters.
-With `--no-default-features`, the implemented primitives use `core` without an allocator.
+The `pdbrs` package is a library with no default executable. It uses `nostdio` for sequential I/O.
+Its default `std` feature enables `nostdio/std` and native file adapters.
+With `--no-default-features`, the library supports `no_std + alloc`.
+Slice reads, signature probing and fixed-buffer cursor operations do not allocate.
 
 - `io::ReadAt` provides checked positional reads and little-endian integer decoding for slices and references.
+- `io` re-exports `nostdio` reading, writing, seeking, cursor and endian helpers.
+- `io::SeekReader` adapts `Read + Seek` inputs to `ReadAt` in both feature modes.
+  It captures the input length and restores the original cursor during successful construction.
+  Subsequent reads move the cursor. The adapter is not `Sync`.
 - `io::FileReader` provides bounded file access on Unix and Windows under `std`.
   It captures the file length and owns the handle. Windows positional reads can change the underlying cursor.
 - `format::probe` identifies modern MSF, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
   It examines a bounded prefix, not container or record validity.
   `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
-- `Error` retains an error kind, a physical offset when known and an underlying I/O error under `std`.
+- `Error` retains an error kind, a physical offset when known and a typed `nostdio::IoError` in both feature modes.
 - `native::Identity` distinguishes modern GUID-and-age from legacy signature-and-age.
 - `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
 
@@ -23,6 +28,13 @@ Run signature inspection on Unix or Windows with:
 
 ```sh
 cargo run -p pdbrs --example inspect -- path/to/input.pdb
+```
+
+Exercise sequential output and positional input in either feature mode:
+
+```sh
+cargo run -p pdbrs --example streams
+cargo run -p pdbrs --example streams --no-default-features
 ```
 
 The example reports its limited validation scope. The stream parsers, record codecs, editors,

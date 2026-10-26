@@ -6,7 +6,10 @@ description = "Format identification and I/O primitives for native and Portable 
 
 [features]
 default = ["std"]
-std = []
+std = ["nostdio/std"]
+
+[dependencies]
+nostdio.workspace = true
 
 [lints]
 workspace = true
