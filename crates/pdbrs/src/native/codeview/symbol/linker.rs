@@ -7,6 +7,8 @@
 //! of `BUILDINFOSYM`: one ID index.
 
 use super::super::Fields;
+use super::SymbolData;
+use crate::native::codeview::Records;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
@@ -236,6 +238,20 @@ pub enum ModuleTypeSource {
     Other(ModuleTypeReference),
 }
 
+impl ModuleTypeSource {
+    /// Return the streams that hold the records: the stream of
+    /// [`ModuleTypeSource::TypeRecords`], the type and the ID stream of
+    /// [`ModuleTypeSource::TypeServer`], and no stream for the other sources.
+    pub fn streams(&self) -> impl Iterator<Item = StreamId> {
+        let pair = match *self {
+            Self::TypeRecords { stream } => [Some(stream), None],
+            Self::TypeServer { types, ids } => [Some(types), Some(ids)],
+            Self::NoTypes | Self::OtherModule { .. } | Self::Other(_) => [None, None],
+        };
+        pair.into_iter().flatten()
+    }
+}
+
 impl ModuleTypeReference {
     /// Return where the type records of the module are.
     ///
@@ -257,6 +273,59 @@ impl ModuleTypeReference {
             0x20 => ModuleTypeSource::OtherModule { module: self.word0 },
             _ => ModuleTypeSource::Other(*self),
         }
+    }
+
+    /// Replace each stream number of the record with `map(stream)`.
+    ///
+    /// The record names streams only for [`ModuleTypeSource::TypeRecords`]
+    /// and [`ModuleTypeSource::TypeServer`]. The words of the other sources
+    /// do not change. Use this function when a writer gives the streams new
+    /// numbers.
+    ///
+    /// # Errors
+    ///
+    /// - The errors of `map`.
+    /// - [`ErrorKind::LimitExceeded`] if a new stream number does not fit in
+    ///   16 bits.
+    pub fn map_streams(&mut self, mut map: impl FnMut(StreamId) -> Result<StreamId>) -> Result<()> {
+        let mut word = |stream: u16| {
+            let mapped = map(StreamId(u32::from(stream)))?;
+            u16::try_from(mapped.0).map_err(|_| {
+                Error::new(ErrorKind::LimitExceeded, None)
+                    .with_context("S_MOD_TYPEREF stream number does not fit in 16 bits")
+            })
+        };
+        match self.source() {
+            ModuleTypeSource::TypeRecords { .. } => self.word0 = word(self.word0)?,
+            ModuleTypeSource::TypeServer { .. } => {
+                self.word0 = word(self.word0)?;
+                self.word1 = word(self.word1)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Return the first `S_MOD_TYPEREF` record of the module symbol records
+    /// `symbols`, or `None` if they have none.
+    ///
+    /// `symbols` holds the records without the signature, for example
+    /// [`ModuleStream::symbol_data`](crate::native::dbi::ModuleStream::symbol_data).
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of the record framing and of the decoding of the
+    /// `S_MOD_TYPEREF` record.
+    pub fn find(symbols: &[u8]) -> Result<Option<Self>> {
+        for record in Records::new(symbols) {
+            let record = record?;
+            if record.kind == S_MOD_TYPEREF
+                && let SymbolData::ModuleTypeReference(reference) = record.symbol()?.data()
+            {
+                return Ok(Some(*reference));
+            }
+        }
+        Ok(None)
     }
 
     /// Read the fields.

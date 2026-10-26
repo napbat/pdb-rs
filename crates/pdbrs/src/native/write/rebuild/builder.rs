@@ -12,8 +12,8 @@ use crate::native::auxiliary::{
 use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdRecord;
 use crate::native::codeview::symbol::{
-    ProcedureReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_PROCREF, S_TOKENREF, Symbol,
-    SymbolData,
+    ModuleTypeReference, ProcedureReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_MOD_TYPEREF,
+    S_PROCREF, S_TOKENREF, Symbol, SymbolData,
 };
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::dbi::OwnedModule;
@@ -27,13 +27,21 @@ use crate::native::names::{StringTable, StringTableBuilder};
 use crate::native::symbols::{IndexProducer, SymbolOffset, ThunkTable};
 use crate::native::types::{HashLayout, TypeHashes, TypeStream};
 use crate::native::write::{
-    BuildOptions, IdHandle, ModuleSymbolHandle, PdbBuilder, StreamHandle, SymbolHandle, TypeHandle,
+    BuildOptions, IdHandle, ModuleSymbolHandle, PdbBuilder, Resolver, StreamHandle, SymbolHandle,
+    TypeHandle,
 };
 use crate::{Error, ErrorKind, Result};
 
 /// The handles of the module symbol records by module index and module
 /// stream offset.
 type ModuleSymbols = BTreeMap<(u16, u32), ModuleSymbolHandle>;
+
+/// The handles of the module type streams by source stream ID.
+type TypeStreams = Vec<(StreamId, StreamHandle)>;
+
+/// The source stream and the handle of each stream of an `S_MOD_TYPEREF`
+/// record.
+type StreamPairs = [Option<(StreamId, StreamHandle)>; 2];
 
 /// Return the error for data that the rebuild cannot decode.
 fn unsupported(context: &'static str) -> Error {
@@ -112,7 +120,8 @@ impl PdbContents {
         });
         self.add_types(&mut builder)?;
         self.add_dbi(&mut builder)?;
-        let module_symbols = self.add_modules(&mut builder)?;
+        let type_streams = self.add_module_types(&mut builder)?;
+        let module_symbols = self.add_modules(&mut builder, &type_streams)?;
         let shared = self.add_shared_symbols(&mut builder, &module_symbols)?;
         self.add_global_refs(&mut builder, &shared)?;
         self.add_indexes(&mut builder, &shared)?;
@@ -167,8 +176,39 @@ impl PdbContents {
         Ok(())
     }
 
+    /// Decode the records of each module type stream, encode them again and
+    /// add the stream. Return the handle of each stream by source stream ID.
+    fn add_module_types(&self, builder: &mut PdbBuilder<'_>) -> Result<TypeStreams> {
+        let mut handles = Vec::new();
+        handles
+            .try_reserve_exact(self.module_types.len())
+            .map_err(|_| crate::native::output::no_memory())?;
+        for (id, bytes) in &self.module_types {
+            let mut encoded = Vec::new();
+            encoded
+                .try_reserve_exact(bytes.len())
+                .map_err(|_| crate::native::output::no_memory())?;
+            for record in Records::new(bytes) {
+                let record = record?;
+                match IdRecord::decode(record)? {
+                    IdRecord::Unsupported(_) => TypeLeaf::decode(record)?.encode(&mut encoded)?,
+                    id => id.encode(&mut encoded)?,
+                }
+            }
+            handles.push((*id, builder.add_stream(encoded)?));
+        }
+        Ok(handles)
+    }
+
     /// Add the modules with their symbols, subsections and source files.
-    fn add_modules<'a>(&'a self, builder: &mut PdbBuilder<'a>) -> Result<ModuleSymbols> {
+    ///
+    /// An `S_MOD_TYPEREF` record gets the new numbers of the streams in
+    /// `type_streams`.
+    fn add_modules<'a>(
+        &'a self,
+        builder: &mut PdbBuilder<'a>,
+        type_streams: &TypeStreams,
+    ) -> Result<ModuleSymbols> {
         let mut handles = ModuleSymbols::new();
         let sources = self.dbi.source_info()?;
         let mut files = sources.map(|info| info.modules());
@@ -195,7 +235,15 @@ impl PdbContents {
             let base = u32::try_from(stream.symbol_offset()).unwrap_or(u32::MAX);
             for record in stream.symbols() {
                 let record = record?;
-                let handle = target.push_symbol(record.symbol()?)?;
+                let symbol = record.symbol()?;
+                let handle = match module_type_reference(&symbol, type_streams)? {
+                    Some((reference, streams)) => {
+                        target.push_symbol_with(move |resolver, out| {
+                            encode_module_type_reference(reference, &streams, resolver, out)
+                        })?
+                    }
+                    None => target.push_symbol(symbol)?,
+                };
                 handles.insert((index, record.offset + base), handle);
             }
             for subsection in ModuleLines::parse(stream)?.subsections() {
@@ -376,6 +424,53 @@ fn module_target<'a>(
     let module = reference.module_index()?;
     let target = *modules.get(&(module, reference.offset))?;
     Some((reference, target))
+}
+
+/// Return the record and the stream handles of an `S_MOD_TYPEREF` record
+/// that names streams.
+///
+/// Return `None` for another record and for a record without streams.
+fn module_type_reference(
+    symbol: &Symbol<'_>,
+    type_streams: &TypeStreams,
+) -> Result<Option<(ModuleTypeReference, StreamPairs)>> {
+    let SymbolData::ModuleTypeReference(reference) = *symbol.data() else {
+        return Ok(None);
+    };
+    let mut handles = [None; 2];
+    for (slot, id) in handles.iter_mut().zip(reference.source().streams()) {
+        let handle = type_streams
+            .iter()
+            .find(|(source, _)| *source == id)
+            .map(|&(_, handle)| handle)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidReference, None)
+                    .with_context("S_MOD_TYPEREF names a stream that the rebuild did not read")
+            })?;
+        *slot = Some((id, handle));
+    }
+    Ok(handles[0].is_some().then_some((reference, handles)))
+}
+
+/// Encode an `S_MOD_TYPEREF` record with the new numbers of its streams.
+fn encode_module_type_reference(
+    mut reference: ModuleTypeReference,
+    handles: &StreamPairs,
+    resolver: &Resolver<'_>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    reference.map_streams(|id| {
+        let (_, handle) = handles
+            .iter()
+            .flatten()
+            .find(|(source, _)| *source == id)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidReference, None)
+                    .with_context("S_MOD_TYPEREF stream has no handle")
+            })?;
+        resolver.stream(*handle)
+    })?;
+    SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
 }
 
 /// Return the handle of the shared record at `offset` of the source.

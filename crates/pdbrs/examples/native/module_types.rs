@@ -6,10 +6,9 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
-use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::TypeIndex;
-use pdbrs::native::codeview::symbol::{ModuleTypeSource, S_MOD_TYPEREF, Symbol, SymbolData};
+use pdbrs::native::codeview::symbol::{ModuleTypeReference, ModuleTypeSource};
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::msf::StreamId;
@@ -30,15 +29,7 @@ pub(crate) struct ModuleTypeStreams {
 
 /// Return the source of the type records of a module stream.
 fn source(stream: &ModuleStream) -> Outcome<Option<ModuleTypeSource>> {
-    for record in Records::new(stream.symbol_data()) {
-        let record = record?;
-        if record.kind == S_MOD_TYPEREF
-            && let SymbolData::ModuleTypeReference(reference) = Symbol::decode(record)?.data()
-        {
-            return Ok(Some(reference.source()));
-        }
-    }
-    Ok(None)
+    Ok(ModuleTypeReference::find(stream.symbol_data())?.map(|reference| reference.source()))
 }
 
 /// Read one stream of module type records, and decode its records once.

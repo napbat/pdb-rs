@@ -14,6 +14,7 @@ use crate::native::symbols::IndexProducer;
 use crate::native::types::{DEFAULT_HASH_BUCKETS, HashLayout};
 use crate::{Error, ErrorKind, Result};
 
+mod module_types;
 mod streams;
 mod symbols;
 mod types;
