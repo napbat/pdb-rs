@@ -5,8 +5,8 @@ use pdbrs::native::codeview::Record;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{
-    CallingConvention, ClassKind, ClassOptions, FunctionOptions, HfaKind, LF_ARGLIST, LF_ARRAY,
-    LF_BITFIELD, LF_CLASS, LF_ENUM, LF_INTERFACE, LF_LABEL, LF_METHODLIST, LF_MFUNCTION,
+    BasedPointer, CallingConvention, ClassKind, ClassOptions, FunctionOptions, HfaKind, LF_ARGLIST,
+    LF_ARRAY, LF_BITFIELD, LF_CLASS, LF_ENUM, LF_INTERFACE, LF_LABEL, LF_METHODLIST, LF_MFUNCTION,
     LF_MODIFIER, LF_POINTER, LF_PROCEDURE, LF_STRUCTURE, LF_UNION, LF_VFTABLE, LF_VTSHAPE,
     LabelMode, MemberAccess, MemberAttributes, MemberPointerRepresentation, MethodKind, MocomKind,
     PointerAttributes, PointerKind, PointerMode, TypeLeaf, VtableSlotKind,
@@ -108,7 +108,7 @@ fn decodes_member_pointer_information() {
 }
 
 #[test]
-fn keeps_based_pointer_data_raw() {
+fn decodes_segment_based_pointer_data() {
     let attributes: u32 = 0x03 | (4 << 13);
     let data = bytes(&[
         &0x0074_u32.to_le_bytes(),
@@ -119,7 +119,7 @@ fn keeps_based_pointer_data_raw() {
         panic!("not a pointer");
     };
     assert_eq!(pointer.attributes.kind(), PointerKind::BasedOnSegment);
-    assert_eq!(pointer.based, Some(&[0x12, 0x34, 0xf2, 0xf1][..]));
+    assert_eq!(pointer.based, Some(BasedPointer::Segment(0x3412)));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn decodes_procedure_and_member_function() {
 fn rejects_unknown_calling_convention() {
     let data = bytes(&[
         &0x0003_u32.to_le_bytes(),
-        &[0x06, 0x00],
+        &[0x1a, 0x00],
         &0_u16.to_le_bytes(),
         &0x1004_u32.to_le_bytes(),
     ]);
@@ -269,17 +269,29 @@ fn decodes_array_with_numeric_leaf_size() {
     };
     assert_eq!(array.element_type, TypeIndex(0x70));
     assert_eq!(array.index_type, TypeIndex(0x23));
-    assert_eq!(array.size, Integer::Unsigned(0x0001_0000));
+    assert_eq!(array.size.integer(), Some(Integer::Unsigned(0x0001_0000)));
     assert_eq!(array.name, b"");
 }
 
 #[test]
-fn rejects_non_integer_numeric_leaf() {
-    // `LF_REAL32` is not an integer.
+fn decodes_real_size_and_rejects_unknown_numeric_tag() {
+    // `LF_REAL32` decodes and keeps its bytes.
     let data = bytes(&[
         &0x0070_u32.to_le_bytes(),
         &0x0023_u32.to_le_bytes(),
         &0x8005_u16.to_le_bytes(),
+        &1.5_f32.to_le_bytes(),
+        &[0],
+    ]);
+    let TypeLeaf::Array(array) = decode(LF_ARRAY, &data) else {
+        panic!("not an array");
+    };
+    assert_eq!(array.size.real32(), Some(1.5));
+    // Tag 0x8011 is not defined.
+    let data = bytes(&[
+        &0x0070_u32.to_le_bytes(),
+        &0x0023_u32.to_le_bytes(),
+        &0x8011_u16.to_le_bytes(),
         &[0; 4],
         &[0],
     ]);
@@ -318,7 +330,7 @@ fn decodes_class_kinds_and_unique_names() {
         assert_eq!(class.field_list, TypeIndex(0x1002));
         assert_eq!(class.derivation_list, TypeIndex::NONE);
         assert_eq!(class.vtable_shape, TypeIndex(0x1003));
-        assert_eq!(class.size, Integer::Unsigned(24));
+        assert_eq!(class.size.integer(), Some(Integer::Unsigned(24)));
         assert_eq!(class.name, b"a::B");
         assert_eq!(class.unique_name, Some(&b".?AUB@a@@"[..]));
         let tag = decode(kind, &data).tag().unwrap();
@@ -347,7 +359,7 @@ fn decodes_union_and_enum() {
     };
     assert_eq!(union.member_count, 3);
     assert!(union.options.is_forward_reference());
-    assert_eq!(union.size, Integer::Unsigned(0));
+    assert_eq!(union.size.integer(), Some(Integer::Unsigned(0)));
     assert_eq!(union.name, b"U");
     assert_eq!(union.unique_name, None);
 

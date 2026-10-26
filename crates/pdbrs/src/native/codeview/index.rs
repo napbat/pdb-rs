@@ -42,9 +42,14 @@ impl TypeIndex {
         let kind = PrimitiveKind::from_raw(kind);
         let mode = PrimitiveMode::from_raw(mode);
         match (kind, mode) {
-            (Some(kind), Some(mode)) => Ok(Some(Primitive { kind, mode })),
-            _ => Err(Error::new(ErrorKind::InvalidFormat, None)
+            (
+                Some(PrimitiveKind::CvPointer),
+                Some(PrimitiveMode::Direct | PrimitiveMode::NearPointer128),
+            )
+            | (None, _)
+            | (_, None) => Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("primitive type index has an unknown kind or mode")),
+            (Some(kind), Some(mode)) => Ok(Some(Primitive { kind, mode })),
         }
     }
 }
@@ -65,6 +70,26 @@ pub struct Primitive {
     pub kind: PrimitiveKind,
     /// Direct use or the pointer form.
     pub mode: PrimitiveMode,
+}
+
+impl Primitive {
+    /// Return the type index of the primitive type.
+    #[must_use]
+    pub fn index(self) -> TypeIndex {
+        TypeIndex(u32::from(self.mode.raw()) << 8 | u32::from(self.kind.raw()))
+    }
+
+    /// Return the size of a value of the type in bytes.
+    ///
+    /// A pointer mode gives the size of the pointer. The direct mode gives
+    /// [`PrimitiveKind::size`].
+    #[must_use]
+    pub const fn size(self) -> Option<u32> {
+        match self.mode.pointer_size() {
+            Some(size) => Some(size),
+            None => self.kind.size(),
+        }
+    }
 }
 
 /// The pointer mode of a primitive type index (`CV_prmode_e`).
@@ -89,6 +114,35 @@ pub enum PrimitiveMode {
 }
 
 impl PrimitiveMode {
+    /// Return the value in bits 8 to 11 of a primitive type index.
+    #[must_use]
+    pub const fn raw(self) -> u8 {
+        match self {
+            Self::Direct => 0,
+            Self::NearPointer16 => 1,
+            Self::FarPointer16 => 2,
+            Self::HugePointer16 => 3,
+            Self::NearPointer32 => 4,
+            Self::FarPointer32 => 5,
+            Self::NearPointer64 => 6,
+            Self::NearPointer128 => 7,
+        }
+    }
+
+    /// Return the size of a pointer of this mode in bytes, or `None` for
+    /// [`PrimitiveMode::Direct`].
+    #[must_use]
+    pub const fn pointer_size(self) -> Option<u32> {
+        Some(match self {
+            Self::Direct => return None,
+            Self::NearPointer16 => 2,
+            Self::FarPointer16 | Self::HugePointer16 | Self::NearPointer32 => 4,
+            Self::FarPointer32 => 6,
+            Self::NearPointer64 => 8,
+            Self::NearPointer128 => 16,
+        })
+    }
+
     /// Decode bits 8 to 11 of a primitive type index.
     const fn from_raw(raw: u8) -> Option<Self> {
         Some(match raw {
@@ -247,4 +301,111 @@ primitive_kinds! {
     Character32 = 0x7b,
     /// An 8-bit Unicode character (`T_CHAR8`).
     Character8 = 0x7c,
+    /// A pointer that `CodeView` created (`T_NCVPTR`, `T_32NCVPTR` and the
+    /// other `CVPTR` indices). Only the pointer modes 1 to 6 are valid.
+    CvPointer = 0xf0,
+}
+
+impl PrimitiveKind {
+    /// Return the size of a value of the kind in bytes.
+    ///
+    /// Returns `None` for kinds without a value size: no type, absolute
+    /// symbols, segments, `void`, BASIC strings, types that were not
+    /// translated, bits, Pascal characters and `CodeView` pointers.
+    #[must_use]
+    pub const fn size(self) -> Option<u32> {
+        Some(match self {
+            Self::SignedCharacter
+            | Self::UnsignedCharacter
+            | Self::Boolean8
+            | Self::SByte
+            | Self::Byte
+            | Self::NarrowCharacter
+            | Self::Character8 => 1,
+            Self::Int16Short
+            | Self::UInt16Short
+            | Self::Boolean16
+            | Self::Float16
+            | Self::WideCharacter
+            | Self::Int16
+            | Self::UInt16
+            | Self::Character16 => 2,
+            Self::HResult
+            | Self::Int32Long
+            | Self::UInt32Long
+            | Self::Boolean32
+            | Self::Float32
+            | Self::Float32PartialPrecision
+            | Self::Complex16
+            | Self::Boolean32FF
+            | Self::Int32
+            | Self::UInt32
+            | Self::Character32 => 4,
+            Self::Float48 => 6,
+            Self::Currency
+            | Self::Int64Quad
+            | Self::UInt64Quad
+            | Self::Boolean64
+            | Self::Float64
+            | Self::Complex32
+            | Self::Complex32PartialPrecision
+            | Self::Int64
+            | Self::UInt64 => 8,
+            Self::Float80 => 10,
+            Self::Complex48 => 12,
+            Self::Int128Oct
+            | Self::UInt128Oct
+            | Self::Boolean128
+            | Self::Float128
+            | Self::Complex64
+            | Self::Int128
+            | Self::UInt128 => 16,
+            Self::Complex80 => 20,
+            Self::Complex128 => 32,
+            Self::NoType
+            | Self::Absolute
+            | Self::Segment
+            | Self::Void
+            | Self::NearBasicString
+            | Self::FarBasicString
+            | Self::NotTranslated
+            | Self::Bit
+            | Self::PascalCharacter
+            | Self::CvPointer => return None,
+        })
+    }
+
+    /// Return `Some(true)` for a signed integer or character kind,
+    /// `Some(false)` for an unsigned one, and `None` for other kinds.
+    #[must_use]
+    pub const fn is_signed_integer(self) -> Option<bool> {
+        match self {
+            Self::SignedCharacter
+            | Self::Int16Short
+            | Self::Int32Long
+            | Self::Int64Quad
+            | Self::Int128Oct
+            | Self::SByte
+            | Self::NarrowCharacter
+            | Self::Int16
+            | Self::Int32
+            | Self::Int64
+            | Self::Int128 => Some(true),
+            Self::UnsignedCharacter
+            | Self::UInt16Short
+            | Self::UInt32Long
+            | Self::UInt64Quad
+            | Self::UInt128Oct
+            | Self::Byte
+            | Self::WideCharacter
+            | Self::UInt16
+            | Self::UInt32
+            | Self::UInt64
+            | Self::UInt128
+            | Self::Character8
+            | Self::Character16
+            | Self::Character32 => Some(false),
+            _ => None,
+        }
+    }
 }
