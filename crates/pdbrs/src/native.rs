@@ -15,6 +15,7 @@ pub mod injected_source;
 pub mod lines;
 pub mod msf;
 pub mod names;
+mod output;
 pub mod section;
 pub mod symbols;
 pub mod types;

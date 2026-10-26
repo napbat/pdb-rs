@@ -33,6 +33,7 @@ use alloc::vec::Vec;
 use super::hash::hash_buffer_v8;
 use super::hash_table::{Cursor, HashTable, HashTableEntry, HashTableValue};
 use super::msf::StreamId;
+use super::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The name of the stream that describes the injected source files.
@@ -83,6 +84,19 @@ impl SourceCompression {
             3 => Self::Lz,
             101 => Self::DotNet,
             other => Self::Unknown(other),
+        }
+    }
+
+    /// Return the raw compression byte.
+    #[must_use]
+    pub const fn to_raw(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::RunLength => 1,
+            Self::Huffman => 2,
+            Self::Lz => 3,
+            Self::DotNet => 101,
+            Self::Unknown(value) => value,
         }
     }
 }
@@ -167,6 +181,26 @@ impl HashTableValue<'_> for InjectedSource {
             is_virtual: flags == 1,
             reserved,
         })
+    }
+
+    fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let mut output = Output::new(out);
+        output.reserve(Self::SIZE)?;
+        for word in [
+            ENTRY_SIZE,
+            SOURCE_VERSION_ONE,
+            self.crc,
+            self.file_size,
+            self.file_name_offset,
+            self.object_name_offset,
+            self.virtual_file_name_offset,
+        ] {
+            output.u32(word)?;
+        }
+        output.u8(self.compression.to_raw())?;
+        output.u8(u8::from(self.is_virtual))?;
+        output.u16(0)?;
+        output.bytes(&self.reserved)
     }
 }
 
@@ -361,6 +395,30 @@ impl<'a> SourceHeaderBlock<'a> {
     pub const fn table(&self) -> &HashTable<'a, InjectedSource> {
         &self.table
     }
+
+    /// Append the serialized stream to `out`.
+    ///
+    /// The output keeps the header and the hash table, so a decoded stream gives the same
+    /// bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        encode_header(self.header, out)?;
+        self.table.encode(out)
+    }
+}
+
+/// Append the 64-byte `/src/headerblock` header.
+fn encode_header(header: SourceBlockHeader, out: &mut Vec<u8>) -> Result<()> {
+    let mut output = Output::new(out);
+    output.reserve(HEADER_SIZE)?;
+    output.u32(SOURCE_VERSION_ONE)?;
+    output.u32(header.size)?;
+    output.u64(header.file_time)?;
+    output.u32(header.age)?;
+    output.zeros(HEADER_PADDING)
 }
 
 /// Return the named-stream name of the contents of a file with `virtual_file_name`.

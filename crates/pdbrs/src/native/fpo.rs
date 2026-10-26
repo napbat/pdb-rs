@@ -142,21 +142,53 @@ impl FrameData {
     pub const fn is_function_start(&self) -> bool {
         self.flags & 4 != 0
     }
+}
 
-    /// Decode one record of 8 words.
-    fn decode(record: &[[u8; 4]; 8]) -> Self {
-        let (prolog_size, saved_registers_size) = halves(record, 6);
+impl FrameData {
+    /// Decode one 32-byte `FRAMEDATA` record.
+    pub(crate) fn from_bytes(bytes: [u8; FRAME_DATA_SIZE]) -> Self {
+        let half = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let word = |index: usize| {
+            let at = index * 4;
+            u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+        };
         Self {
-            start: word(record, 0),
-            size: word(record, 1),
-            locals_size: word(record, 2),
-            params_size: word(record, 3),
-            max_stack_size: word(record, 4),
-            program: word(record, 5),
-            prolog_size,
-            saved_registers_size,
-            flags: word(record, 7),
+            start: word(0),
+            size: word(1),
+            locals_size: word(2),
+            params_size: word(3),
+            max_stack_size: word(4),
+            program: word(5),
+            prolog_size: half(24),
+            saved_registers_size: half(26),
+            flags: word(7),
         }
+    }
+
+    /// Append the 32-byte `FRAMEDATA` record to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        out.try_reserve(FRAME_DATA_SIZE).map_err(|_| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("frame data output cannot be allocated")
+        })?;
+        for value in [
+            self.start,
+            self.size,
+            self.locals_size,
+            self.params_size,
+            self.max_stack_size,
+            self.program,
+        ] {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out.extend_from_slice(&self.prolog_size.to_le_bytes());
+        out.extend_from_slice(&self.saved_registers_size.to_le_bytes());
+        out.extend_from_slice(&self.flags.to_le_bytes());
+        Ok(())
     }
 }
 
@@ -296,7 +328,7 @@ impl FrameDataStream {
     #[must_use]
     pub fn iter(&self) -> FrameDataIter<'_> {
         FrameDataIter {
-            records: self.bytes.as_chunks::<4>().0.as_chunks::<8>().0.iter(),
+            records: self.bytes.as_chunks::<FRAME_DATA_SIZE>().0.iter(),
         }
     }
 }
@@ -313,15 +345,15 @@ impl<'a> IntoIterator for &'a FrameDataStream {
 /// An iterator over `FRAMEDATA` records.
 #[derive(Clone, Debug)]
 pub struct FrameDataIter<'a> {
-    /// The records of 8 words each.
-    records: core::slice::Iter<'a, [[u8; 4]; 8]>,
+    /// The 32-byte records.
+    records: core::slice::Iter<'a, [u8; FRAME_DATA_SIZE]>,
 }
 
 impl Iterator for FrameDataIter<'_> {
     type Item = FrameData;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.records.next().map(FrameData::decode)
+        self.records.next().copied().map(FrameData::from_bytes)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -331,7 +363,7 @@ impl Iterator for FrameDataIter<'_> {
 
 impl DoubleEndedIterator for FrameDataIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.records.next_back().map(FrameData::decode)
+        self.records.next_back().copied().map(FrameData::from_bytes)
     }
 }
 
