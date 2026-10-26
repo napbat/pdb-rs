@@ -57,11 +57,11 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks | Free-page-map allocation consistency |
 | PDB Info | Identity, named streams, feature codes and named-stream reference checks | Older Info layouts |
-| TPI and IPI | Modern headers, type-indexed record iteration and hash-stream references | Leaf decoding, type graphs and hash lookup |
+| TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references and raw substream views | Source tables, section contributions, section maps and address translation |
 | Symbols | Record framing and common data, public and procedure symbol decoding | Remaining symbol families and global/public index lookup |
 | Module lines | Region bounds and C13 subsection framing | Lines, checksums and inline information |
-| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding | Non-integer leaves and integration into typed records |
+| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
 Header validation does not validate every record payload. Iterate records to check their framing.

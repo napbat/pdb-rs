@@ -3,19 +3,30 @@
 //! Both streams start with the same 56-byte header. A sequence of `CodeView`
 //! records follows the header. The first record has the index
 //! [`TypeHeader::index_begin`], and each next record has the next index.
-//! Indices below [`FIRST_TYPE_INDEX`] identify primitive types. They do not
+//! Indices below [`FIRST_RECORD_INDEX`] identify primitive types. They do not
 //! have records.
 //!
-//! [`TypeStream`] validates the header and frames the records on demand. It
-//! does not build a type graph and it does not decode leaf payloads. It does
-//! not read the hash stream.
+//! [`TypeStream`] validates the header and frames the records on demand.
+//! [`TypeTable`] finds records by index, and [`ForwardRefs`] resolves
+//! forward references to their definitions. [`TypeHashes`] decodes the
+//! hash stream and verifies it against the records. Use
+//! [`crate::native::codeview::type_record::TypeLeaf`] to decode a TPI record.
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
+use crate::native::codeview::index::FIRST_RECORD_INDEX;
 use crate::native::codeview::{Fields, Record, Records};
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
+
+mod forward;
+mod hash;
+mod lookup;
+
+pub use forward::ForwardRefs;
+pub use hash::{HashAdjuster, IndexOffset, TypeHashes, type_record_hash};
+pub use lookup::{FieldMembers, TypeTable};
 
 /// The TPI and IPI version that this crate supports (`PdbTpiV80`).
 pub const TPI_V80: u32 = 20_040_203;
@@ -23,13 +34,11 @@ pub const TPI_V80: u32 = 20_040_203;
 /// The size of the version 8.0 stream header in bytes.
 pub const HEADER_SIZE: usize = 56;
 
-/// The first index that can identify a type record.
-///
-/// Lower indices identify primitive types.
-pub const FIRST_TYPE_INDEX: u32 = 0x1000;
-
 /// The hash key size that version 8.0 requires.
 const HASH_KEY_SIZE: u32 = 4;
+
+/// The size of the length field and the kind field of a record.
+const RECORD_PREFIX_SIZE: usize = 4;
 
 /// The smallest valid hash bucket count.
 const MIN_HASH_BUCKETS: u32 = 0x1000;
@@ -63,7 +72,7 @@ pub struct HashBuffer {
 /// [`TypeStream::parse`] validates these values:
 ///
 /// - `version` is [`TPI_V80`] and `header_size` is [`HEADER_SIZE`].
-/// - `index_begin` is at least [`FIRST_TYPE_INDEX`] and at most `index_end`.
+/// - `index_begin` is at least [`FIRST_RECORD_INDEX`] and at most `index_end`.
 /// - The stream contains exactly `record_bytes` bytes after the header.
 /// - The hash key size and the hash bucket count are valid.
 /// - If `hash_stream` is present, each non-empty hash buffer has a
@@ -162,6 +171,56 @@ impl TypeStream {
             index_end: self.header.index_end,
             done: false,
         }
+    }
+
+    /// Return the complete bytes of a record of this stream.
+    ///
+    /// The bytes are the length field, the kind field and the payload with
+    /// its padding. Type hashes cover these bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidReference`] if `record` does not borrow
+    /// its payload from this stream at [`Record::offset`].
+    pub fn full_record(&self, record: &Record<'_>) -> Result<&[u8]> {
+        let bytes = self.record_bytes();
+        let full = usize::try_from(record.offset).ok().and_then(|start| {
+            let end = start
+                .checked_add(RECORD_PREFIX_SIZE)?
+                .checked_add(record.data.len())?;
+            bytes.get(start..end)
+        });
+        match full {
+            Some(full)
+                if core::ptr::eq(full[RECORD_PREFIX_SIZE..].as_ptr(), record.data.as_ptr()) =>
+            {
+                Ok(full)
+            }
+            _ => Err(Error::new(ErrorKind::InvalidReference, None)
+                .with_context("record is not a record of this type stream")),
+        }
+    }
+
+    /// Frame the record at `offset` in the record bytes and give it `index`.
+    ///
+    /// The caller makes sure that `index` is the index of that record.
+    pub(crate) fn record_at(&self, offset: u32, index: u32) -> Result<TypeRecord<'_>> {
+        let rest = usize::try_from(offset)
+            .ok()
+            .and_then(|start| self.record_bytes().get(start..))
+            .filter(|rest| !rest.is_empty())
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidReference, None)
+                    .with_context("type record offset is past the record bytes")
+            })?;
+        let record = Records::new(rest).next().ok_or_else(|| {
+            Error::new(ErrorKind::InvalidReference, None)
+                .with_context("type record offset is past the record bytes")
+        })??;
+        Ok(TypeRecord {
+            index,
+            record: Record { offset, ..record },
+        })
     }
 }
 
@@ -298,7 +357,7 @@ fn parse_header(bytes: &[u8]) -> Result<TypeHeader> {
 
 /// Validate the index range against the record bytes.
 fn validate_indices(header: &TypeHeader) -> Result<()> {
-    if header.index_begin < FIRST_TYPE_INDEX {
+    if header.index_begin < FIRST_RECORD_INDEX {
         return Err(invalid("first type index is a primitive type index"));
     }
     if header.index_end < header.index_begin {
