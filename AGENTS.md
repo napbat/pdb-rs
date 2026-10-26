@@ -94,6 +94,10 @@ Put each crate in `crates/<crate-name>/`. The paths below are relative to each c
   repository.
 - Put the scope and acceptance criteria of each work area in its issue. Link a sub-issue to its
   parent issue.
+- Put each work area under the epic of its format family: #1 (native MSF 7.0), #17 (Portable
+  PDB) or #16 (legacy MSF 2.0). These epics are children of the root epic #18. Put shared work,
+  such as the `compression` and `crypto` modules, directly under #18. Give an epic the `epic`
+  label.
 - Record verification evidence as an issue comment. Close an issue only when all its acceptance
   criteria pass.
 - Refer to issues by number, for example `#1`, in documentation and commit messages.

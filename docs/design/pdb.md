@@ -3,8 +3,8 @@
 Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
 Formats and record kinds outside those samples remain incomplete. Portable PDB parsing and PDB writing are not implemented.
 
-GitHub issue [#1](https://github.com/napbat/pdbrs/issues/1) and its sub-issues track native implementation work.
-GitHub issue [#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
+The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
+[#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
 The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
 
 ## Implemented primitives

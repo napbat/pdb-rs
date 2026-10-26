@@ -12,8 +12,10 @@ pdbrs is a Rust library for Program Database (PDB) files. It reads native Window
 | Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
-GitHub issue [#1](https://github.com/napbat/pdbrs/issues/1) and its sub-issues track native work.
-GitHub issue [#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
+The root epic [#18](https://github.com/napbat/pdbrs/issues/18) has one epic for each format family:
+[#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0),
+[#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and
+[#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
 The [design](docs/design/pdb.md) lists each implemented area and its limits.
 
 ## Use
