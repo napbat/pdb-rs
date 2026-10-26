@@ -268,6 +268,7 @@ It reuses the encoders of each record family. The module documentation of `nativ
 `Pdb::contents` and `PdbContents::to_builder` give a semantic rebuild: every record is decoded and encoded again.
 The rebuild keeps the record order, so type indices, ID indices and `/names` offsets stay the same. Stream IDs change.
 It drops stream 0 and streams that no other stream names (`PdbContents::unclaimed_streams`).
+`PdbContents::build_options` keeps the page size of the source; change `BuildOptions::msf` to select another page size.
 The rebuild puts each public symbol in the bucket of its name; LLD 22.1.3 puts some 8-byte names in another bucket.
 
 ```sh

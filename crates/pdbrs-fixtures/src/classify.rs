@@ -1,5 +1,7 @@
 //! Classify build outputs by their contents, not by their file names.
 
+use std::ops::Range;
+
 /// The signature at the start of an MSF 7.0 file.
 pub const MSF7_SIGNATURE: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";
 
@@ -9,8 +11,15 @@ pub const METADATA_SIGNATURE: &[u8] = b"BSJB";
 /// The signature at the start of an embedded Portable PDB debug payload.
 pub const EMBEDDED_SIGNATURE: &[u8] = b"MPDB";
 
+/// The debug directory type of a `CodeView` record.
+const DEBUG_TYPE_CODEVIEW: u32 = 2;
+
 /// The debug directory type of an embedded Portable PDB.
 const DEBUG_TYPE_EMBEDDED_PORTABLE_PDB: u32 = 17;
+
+/// The offset of the PDB path in an `RSDS` `CodeView` record, after the signature, the GUID and
+/// the age.
+const RSDS_PATH_OFFSET: usize = 24;
 
 /// The kind of a build output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +85,31 @@ pub fn embedded_pdb_payload(image: &[u8]) -> Option<&[u8]> {
         let payload = to_usize(read_u32(image, entry + 24)?)?;
         let data = image.get(payload..payload.checked_add(size)?)?;
         data.starts_with(EMBEDDED_SIGNATURE).then_some(data)
+    })
+}
+
+/// Find the PDB path of the `RSDS` `CodeView` record of an image through the PE debug directory.
+///
+/// Return the file offsets of the path bytes, without the terminating NUL byte. The record is
+/// the data of the first debug directory entry of type 2 that starts with `RSDS` and has a NUL
+/// byte after the path.
+pub fn codeview_pdb_path(image: &[u8]) -> Option<Range<usize>> {
+    let (debug_offset, debug_size) = data_directory(image, 6)?;
+    (0..debug_size / 28).find_map(|index| {
+        let entry = debug_offset + index * 28;
+        if read_u32(image, entry + 12)? != DEBUG_TYPE_CODEVIEW {
+            return None;
+        }
+        let size = to_usize(read_u32(image, entry + 16)?)?;
+        let start = to_usize(read_u32(image, entry + 24)?)?;
+        let record = image.get(start..start.checked_add(size)?)?;
+        let path = record.get(RSDS_PATH_OFFSET..)?;
+        if !record.starts_with(b"RSDS") {
+            return None;
+        }
+        let length = path.iter().position(|&byte| byte == 0)?;
+        let path_start = start + RSDS_PATH_OFFSET;
+        Some(path_start..path_start + length)
     })
 }
 
@@ -161,7 +195,9 @@ fn to_usize(value: u32) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, classify, embedded_pdb_payload};
+    use super::{
+        EMBEDDED_SIGNATURE, Kind, MSF7_SIGNATURE, classify, codeview_pdb_path, embedded_pdb_payload,
+    };
 
     fn put_u16(image: &mut [u8], offset: usize, value: u16) {
         image[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -238,5 +274,22 @@ mod tests {
         truncated.truncate(0x304);
         assert_eq!(embedded_pdb_payload(&truncated), None);
         assert_eq!(classify(&truncated), Kind::Image);
+    }
+
+    #[test]
+    fn finds_the_pdb_path_of_the_codeview_record() {
+        let mut record = b"RSDS".to_vec();
+        record.extend_from_slice(&[0x11; 20]);
+        record.extend_from_slice(b"C:\\b\\demo.pdb\0");
+        let mut codeview = image(2, &record);
+        let size = u32::try_from(record.len()).unwrap();
+        put_u32(&mut codeview, 0x210 + 16, size);
+        let path = codeview_pdb_path(&codeview).unwrap();
+        assert_eq!(&codeview[path], b"C:\\b\\demo.pdb");
+
+        // The size field cuts the path before its NUL byte.
+        put_u32(&mut codeview, 0x210 + 16, size - 1);
+        assert_eq!(codeview_pdb_path(&codeview), None);
+        assert_eq!(codeview_pdb_path(&image(17, &record)), None);
     }
 }

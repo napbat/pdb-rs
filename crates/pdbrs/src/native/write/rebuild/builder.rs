@@ -22,6 +22,7 @@ use crate::native::info::IdentityPolicy;
 use crate::native::injected_source::SourceHeaderBlock;
 use crate::native::lines::ModuleLines;
 use crate::native::msf::StreamId;
+use crate::native::msf::WriteOptions;
 use crate::native::names::{StringTable, StringTableBuilder};
 use crate::native::symbols::{IndexProducer, SymbolOffset, ThunkTable};
 use crate::native::types::{HashLayout, TypeHashes, TypeStream};
@@ -52,7 +53,12 @@ impl PdbContents {
     ///
     /// The TPI header selects the hash layout and the bucket count. A source
     /// with the LLVM hash layout also gets the LLVM conventions for the
-    /// symbol indexes and the named-stream map.
+    /// symbol indexes and the named-stream map. The container keeps the page
+    /// size of the source.
+    ///
+    /// To select another page size, change the `msf` field, for example with
+    /// [`WriteOptions::with_page_size`]. The plan rejects a source page size
+    /// of 65536 bytes (see [`WriteOptions::with_page_size`]).
     #[must_use]
     pub fn build_options(&self) -> BuildOptions {
         let header = self.tpi.0.header();
@@ -62,11 +68,18 @@ impl PdbContents {
             HashLayout::Microsoft => (IndexProducer::Microsoft, HashTableProducer::Microsoft),
         };
         BuildOptions {
+            msf: WriteOptions::default().with_page_size(self.page_size),
             hash_layout: layout,
             hash_buckets: header.hash_bucket_count,
             index_producer,
             info_producer,
-            ..BuildOptions::default()
+            // A source without a hash stream keeps none, for example the
+            // .NET fixture of #14.
+            type_hash_stream: header.hash_stream.is_some(),
+            id_hash_stream: self
+                .ipi
+                .as_ref()
+                .is_none_or(|(ipi, _)| ipi.header().hash_stream.is_some()),
         }
     }
 

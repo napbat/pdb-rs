@@ -104,6 +104,8 @@ pub struct PdbContents {
     type_maps: Vec<(StreamId, Vec<u8>)>,
     /// The present streams that no other stream names.
     unclaimed: Vec<StreamId>,
+    /// The page size of the source container.
+    page_size: u32,
 }
 
 impl PdbContents {
@@ -247,6 +249,7 @@ impl<S: ReadAt> Pdb<S> {
             named,
             type_maps,
             unclaimed,
+            page_size: self.msf().block_size(),
         })
     }
 

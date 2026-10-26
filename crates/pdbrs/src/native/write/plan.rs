@@ -34,6 +34,10 @@ pub struct BuildOptions {
     pub index_producer: IndexProducer,
     /// The conventions of the named-stream map of the Info stream.
     pub info_producer: HashTableProducer,
+    /// `true` to write the TPI hash stream. Microsoft and LLVM linkers write it.
+    pub type_hash_stream: bool,
+    /// `true` to write the IPI hash stream.
+    pub id_hash_stream: bool,
 }
 
 impl Default for BuildOptions {
@@ -44,6 +48,8 @@ impl Default for BuildOptions {
             hash_buckets: DEFAULT_HASH_BUCKETS,
             index_producer: IndexProducer::Microsoft,
             info_producer: HashTableProducer::Microsoft,
+            type_hash_stream: true,
+            id_hash_stream: true,
         }
     }
 }
@@ -157,10 +163,10 @@ impl ReadAt for StreamBytes<'_> {
 /// The stream IDs that the plan assigns.
 #[derive(Clone, Debug)]
 pub(super) struct StreamIds {
-    /// The TPI hash stream.
-    pub(super) tpi_hash: StreamId,
-    /// The IPI hash stream.
-    pub(super) ipi_hash: StreamId,
+    /// The TPI hash stream, if the options select one.
+    pub(super) tpi_hash: Option<StreamId>,
+    /// The IPI hash stream, if the options select one.
+    pub(super) ipi_hash: Option<StreamId>,
     /// The global symbol index.
     pub(super) globals: StreamId,
     /// The public symbol index.
@@ -207,11 +213,14 @@ impl Counter {
 
 impl PdbBuilder<'_> {
     /// Assign the stream IDs in the order of the module documentation.
-    fn assign_streams(&self) -> Result<StreamIds> {
+    fn assign_streams(&self, options: &BuildOptions) -> Result<StreamIds> {
         // Streams 0 to 4: previous directory, Info, TPI, DBI and IPI.
         let mut counter = Counter(5);
-        let tpi_hash = counter.next()?;
-        let ipi_hash = counter.next()?;
+        let tpi_hash = options
+            .type_hash_stream
+            .then(|| counter.next())
+            .transpose()?;
+        let ipi_hash = options.id_hash_stream.then(|| counter.next()).transpose()?;
         let globals = counter.next()?;
         let publics = counter.next()?;
         let symbols = counter.next()?;
@@ -281,7 +290,7 @@ impl PdbBuilder<'_> {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("PDB Info stream has no GUID identity"));
         };
-        let ids = self.assign_streams()?;
+        let ids = self.assign_streams(options)?;
         let resolver = self.base_resolver(&ids)?;
         let tpi = self.type_stream(&resolver, options, ids.tpi_hash)?;
         let ipi = self.id_stream(&resolver, options, ids.ipi_hash, &tpi)?;
@@ -302,15 +311,10 @@ impl PdbBuilder<'_> {
         let info = self.info_stream(&ids, options)?;
         let mut msf = MsfBuilder::new();
         // Stream 0 is the previous stream directory. A new PDB has none.
-        for stream in [
-            Vec::new(),
-            info,
-            tpi.stream,
-            dbi,
-            ipi.stream,
-            tpi.hash,
-            ipi.hash,
-        ] {
+        for stream in [Vec::new(), info, tpi.stream, dbi, ipi.stream] {
+            msf.push(StreamBytes::Owned(stream))?;
+        }
+        for stream in [tpi.hash, ipi.hash].into_iter().flatten() {
             msf.push(StreamBytes::Owned(stream))?;
         }
         for stream in [encoded.globals, encoded.publics, encoded.symbols] {

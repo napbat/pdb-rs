@@ -5,10 +5,10 @@
 //! fixture build copies these records into the `consumer_tools` section of its manifest. A
 //! missing tool never changes the result of the fixture build.
 
-mod dia2dump;
+pub mod dia2dump;
 pub mod file_version;
 mod patch;
-mod pdbtool;
+pub mod pdbtool;
 pub mod verifier;
 
 use std::fs::{self, File};

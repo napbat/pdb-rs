@@ -580,3 +580,63 @@ cargo run -p pdbrs --example native -- --input seek target/fixtures/msvc-x64-deb
 For an `MPDB` payload, the `portable` example writes the decoded PDB to a temporary file. Then
 it reads that file in the selected mode and deletes it. All modes must give the same output
 (#36).
+
+## Native build check
+
+The `verify-native-build` command checks the native PDB builder of pdbrs (#33) with each
+`native-pdb` output of `manifest.json`:
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-native-build [--fixtures <dir>]
+```
+
+The command skips `hlsl-dxc-debug`, because `pdbtool`, `llvm-pdbutil` and `DIA2Dump` reject
+its original PDBs. For each other PDB, it does these steps:
+
+1. Rebuild the PDB with `Pdb::contents`, `PdbContents::to_builder` (`IdentityPolicy::Preserve`)
+   and `PdbBuilder::plan` with `PdbContents::build_options`. A second plan must give the same
+   bytes. The rebuilt PDB has the file name of the original, in
+   `target/verify-native-build/<fixture>/<PDB file stem>/rebuilt/`.
+2. Run `pdbtool check` on the rebuilt PDB. The line `Number of PDBs with errors` must show 0.
+   Run `pdbtool compare` on both PDBs to get the stream counts.
+3. Run `llvm-pdbutil dump --all` on both PDBs. Remove the container layout before the
+   comparison: the `Number of blocks` and `Blocks:` lines and the stream directory entries
+   `Stream N (...)`. Replace the stream numbers of `Stream N, M bytes`, `debug stream: N` and
+   `Stream Index: N` with `<n>`.
+4. Run `DIA2Dump -all` on both PDBs. Replace each word of 16 hexadecimal digits (a pointer)
+   with `<ptr>` before the comparison.
+5. Select a sample from the `DIA2Dump -all` output of the original. The addresses are the start
+   and the middle of each `Function` and `Data` range and each `PublicSymbol` address. While
+   the sample has fewer than 200 addresses and the ranges have more, a pseudo-random generator
+   with a fixed seed adds one address in each range. The sample keeps a maximum of 600
+   addresses. The type names come from the `UserDefinedType:` lines, with a maximum of 250.
+6. Run `DIA2Dump -sym 0x<rva>` and `-lines 0x<rva>` for each address and `-type <name>` for
+   each type name on both PDBs, in parallel. The masked outputs must be the same.
+7. For a fixture with an `image` output, run `llvm-symbolizer --inlines --relative-address
+   --functions=linkage` with the sample addresses for each PDB. The command copies the PDB and
+   the image into one directory for each PDB. It replaces the PDB path of the `RSDS` record of
+   the image copy with a path that does not exist, so `llvm-symbolizer` loads the PDB next to
+   the image. The frames of each address must be the same.
+
+The command reads `pdbtool` and `DIA2Dump` from `target/tools/manifest.json` of the workspace.
+If the workspace has no built tool, it reads the `consumer_tools` records of the fixture
+manifest. It reads `llvm-pdbutil` and `llvm-symbolizer` from `%ProgramFiles%\LLVM\bin`. A
+missing tool makes its checks fail; the other checks still run.
+
+These differences are explained and do not make a check fail:
+
+- Container layout: the `Number of streams` and `Block Size` lines. The rebuild drops nil
+  streams and streams that nothing names.
+- LLD public bucket order: `S_PUB32` lines of the `Public Symbols` section and `PublicSymbol:`
+  lines that both outputs have at other positions. LLD puts some 8-byte names in another hash
+  bucket; the rebuild uses the bucket of the name.
+- The same failure: both `llvm-pdbutil` runs fail with the same exit code, for example for
+  `msvc-x64-fastlink` and for `S_MANCONSTANT` in `dotnet-csharp-full`.
+
+The command prints one line for each PDB. The line shows the rebuild, the `pdbtool` errors,
+the classified `llvm-pdbutil` and `DIA2Dump -all` differences, the sample size, the mismatch
+counts of the DIA queries and the symbolizer, and the source streams that the rebuild drops
+(`PdbContents::unclaimed_streams`). A sample with fewer than 200 addresses tells why. The
+command writes the dumps (`*.original.txt`, `*.rebuilt.txt`) and the differences (`*.diff`) to
+the directory of the PDB. It exits with a failure code if a rebuild fails, a check cannot run
+or a difference is unexplained.
