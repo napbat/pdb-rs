@@ -264,6 +264,7 @@ pdbrs uses these layouts and rules, and no imported document states them:
 - The trampoline join: thunk index `(thunk offset - thunk_table_offset) / thunk_size`, and the thunk map entry is the section start of the target plus the target offset (#13).
 - Scope links are module stream offsets that include the 4-byte signature (#5).
 - `link.exe` writes `LF_UDT_MOD_SRC_LINE` without padding, and the MSVC fixtures split field lists at `0xfb00` bytes (LLVM uses `0xff00`) (#29).
+- MASM (`ml64` 14.50) ends some `LF_STRUCTURE` records with `f1` and two stale bytes instead of `f3 f2 f1`; the static runtime libraries contain them (`clang-lld-x64-static`, #29).
 - The hash table growth rules of Microsoft `map.h` and LLVM `HashTable.h` (#32), and the hash stream forms of Microsoft and LLVM (`HashLayout`, #29).
 - `link /PDBSTRIPPED` output: the rules of `strip_private` come from `msvc-x64-stripped/demo.stripped.pdb` (#34).
 - The `S_OEM` attributes of the managed OEM ID `c6ea3fc9-59b3-49d6-bc25-0902bbabb460` (`MD2`, `asyncMethodInfo`) follow Roslyn and Mono.Cecil, not a PDB document (#14).

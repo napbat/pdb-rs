@@ -426,6 +426,7 @@ fn forward(name: &[u8]) -> TypeLeaf<'_> {
         size: number(0),
         name,
         unique_name: None,
+        producer_padding: &[],
     })
 }
 

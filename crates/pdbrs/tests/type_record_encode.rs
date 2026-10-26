@@ -488,6 +488,7 @@ fn class<'a>(name: &'a [u8], unique_name: Option<&'a [u8]>, options: u16) -> Typ
         size: Numeric::from_integer(Integer::Unsigned(0)),
         name,
         unique_name,
+        producer_padding: &[],
     })
 }
 

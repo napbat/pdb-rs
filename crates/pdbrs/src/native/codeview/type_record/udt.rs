@@ -8,13 +8,22 @@
 //! The wide kinds `LF_CLASS2`, `LF_STRUCTURE2`, `LF_INTERFACE2` and
 //! `LF_UNION2` have a `u32` property word and a numeric member count (LLVM
 //! `TypeRecordMapping.cpp`). `cvinfo.h` does not define them.
+//!
+//! Microsoft Macro Assembler (`ml64` 14.50) writes `f1` and two stale bytes
+//! after an odd-length name, instead of the `LF_PAD` run `f3 f2 f1`, for
+//! example `f1 6d 65` after `CsFrameEncoded` in `libvcruntime.lib`. `link.exe`
+//! and `lld-link` copy these records to the PDB. LLVM, DIA and `pdbtool` read
+//! them; LLVM does not check the bytes after the last field
+//! (`CodeViewRecordIO::endRecord`). The decoders keep these bytes in the
+//! `producer_padding` field, and the encoders write them again (#29).
 
 use super::{ClassOptions, fields};
-use crate::Result;
 use crate::native::codeview::Fields;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
+use crate::native::codeview::writer::Padding;
 use crate::native::output::Output;
+use crate::{Error, ErrorKind, Result};
 
 /// The options and the names of a user-defined type.
 ///
@@ -30,40 +39,65 @@ pub struct Tag<'a> {
     pub unique_name: Option<&'a [u8]>,
 }
 
+/// The name, the unique name and the producer padding at the end of a UDT record.
+type Names<'a> = (&'a [u8], Option<&'a [u8]>, &'a [u8]);
+
+/// Return `true` for the MASM padding form: 1 to 3 bytes, and the first byte is an
+/// `LF_PAD` byte (`0xf1` to `0xf3`).
+const fn is_producer_padding(bytes: &[u8]) -> bool {
+    matches!(
+        bytes,
+        [0xf1..=0xf3] | [0xf1..=0xf3, _] | [0xf1..=0xf3, _, _]
+    )
+}
+
 /// Read the name, the optional unique name and the padding at the end of a record.
-fn names<'a>(
-    fields: &mut Fields<'a>,
-    options: ClassOptions,
-) -> Result<(&'a [u8], Option<&'a [u8]>)> {
+///
+/// The standard `LF_PAD` run gives empty producer padding. Bytes in the MASM form give
+/// the producer padding. Other bytes give the error of [`Fields::finish_type_padding`].
+fn names<'a>(fields: &mut Fields<'a>, options: ClassOptions) -> Result<Names<'a>> {
     let name = fields.name()?;
     let unique_name = if options.has_unique_name() {
         Some(fields.name()?)
     } else {
         None
     };
-    fields.finish_type_padding()?;
-    Ok((name, unique_name))
+    let producer_padding = match fields.finish_type_padding() {
+        Ok(()) => &[][..],
+        Err(_) if is_producer_padding(fields.rest()) => fields.rest(),
+        Err(error) => return Err(error),
+    };
+    Ok((name, unique_name, producer_padding))
 }
 
-/// Append the name and the unique name.
+/// Append the name, the unique name and the producer padding, and return the padding rule.
 ///
 /// The unique name must be present exactly if the options have the
-/// unique-name flag.
+/// unique-name flag. Empty producer padding gives the standard `LF_PAD` run.
+/// Other producer padding must be in the MASM form and end the record on a
+/// 4-byte boundary.
 fn encode_names(
     writer: &mut Output<'_>,
     options: ClassOptions,
-    name: &[u8],
-    unique_name: Option<&[u8]>,
-) -> Result<()> {
+    (name, unique_name, producer_padding): Names<'_>,
+) -> Result<Padding> {
     if options.has_unique_name() != unique_name.is_some() {
-        return Err(crate::Error::new(crate::ErrorKind::InvalidFormat, None)
+        return Err(Error::new(ErrorKind::InvalidFormat, None)
             .with_context("unique name does not match the unique-name flag"));
     }
     writer.c_string(name)?;
-    match unique_name {
-        Some(unique_name) => writer.c_string(unique_name),
-        None => Ok(()),
+    if let Some(unique_name) = unique_name {
+        writer.c_string(unique_name)?;
     }
+    if producer_padding.is_empty() {
+        return Ok(Padding::Type);
+    }
+    if !is_producer_padding(producer_padding) {
+        return Err(Error::new(ErrorKind::InvalidFormat, None)
+            .with_context("producer padding is not 1 to 3 bytes that start with LF_PAD"));
+    }
+    writer.bytes(producer_padding)?;
+    Ok(Padding::Aligned)
 }
 
 /// Return the low 16 bits of a wide property word.
@@ -104,6 +138,11 @@ pub struct Class<'a> {
     pub name: &'a [u8],
     /// The unique name bytes, present if the options have the unique-name flag.
     pub unique_name: Option<&'a [u8]>,
+    /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
+    ///
+    /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
+    /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
+    pub producer_padding: &'a [u8],
 }
 
 impl<'a> Class<'a> {
@@ -116,7 +155,7 @@ impl<'a> Class<'a> {
         let derivation_list = fields.type_index()?;
         let vtable_shape = fields.type_index()?;
         let size = fields.numeric()?;
-        let (name, unique_name) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
         Ok(Self {
             kind,
             member_count,
@@ -127,18 +166,24 @@ impl<'a> Class<'a> {
             size,
             name,
             unique_name,
+            producer_padding,
         })
     }
 
-    /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
+    /// Append the payload fields and return the padding rule.
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<Padding> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.field_list)?;
         writer.type_index(self.derivation_list)?;
         writer.type_index(self.vtable_shape)?;
         self.size.encode(writer.out())?;
-        encode_names(writer, self.options, self.name, self.unique_name)
+        encode_names(writer, self.options, self.names())
+    }
+
+    /// Return the names and the producer padding.
+    const fn names(&self) -> Names<'a> {
+        (self.name, self.unique_name, self.producer_padding)
     }
 
     /// Return the options and the names.
@@ -173,6 +218,11 @@ pub struct WideClass<'a> {
     pub name: &'a [u8],
     /// The unique name bytes, present if the options have the unique-name flag.
     pub unique_name: Option<&'a [u8]>,
+    /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
+    ///
+    /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
+    /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
+    pub producer_padding: &'a [u8],
 }
 
 impl<'a> WideClass<'a> {
@@ -185,7 +235,7 @@ impl<'a> WideClass<'a> {
         let vtable_shape = fields.type_index()?;
         let member_count = fields.numeric()?;
         let size = fields.numeric()?;
-        let (name, unique_name) = names(&mut fields, low_options(options))?;
+        let (name, unique_name, producer_padding) = names(&mut fields, low_options(options))?;
         Ok(Self {
             kind,
             options,
@@ -196,23 +246,24 @@ impl<'a> WideClass<'a> {
             size,
             name,
             unique_name,
+            producer_padding,
         })
     }
 
-    /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
+    /// Append the payload fields and return the padding rule.
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<Padding> {
         writer.u32(self.options)?;
         writer.type_index(self.field_list)?;
         writer.type_index(self.derivation_list)?;
         writer.type_index(self.vtable_shape)?;
         self.member_count.encode(writer.out())?;
         self.size.encode(writer.out())?;
-        encode_names(
-            writer,
-            low_options(self.options),
-            self.name,
-            self.unique_name,
-        )
+        encode_names(writer, low_options(self.options), self.names())
+    }
+
+    /// Return the names and the producer padding.
+    const fn names(&self) -> Names<'a> {
+        (self.name, self.unique_name, self.producer_padding)
     }
 
     /// Return the low 16 bits of the options and the names.
@@ -241,6 +292,11 @@ pub struct Union<'a> {
     pub name: &'a [u8],
     /// The unique name bytes, present if the options have the unique-name flag.
     pub unique_name: Option<&'a [u8]>,
+    /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
+    ///
+    /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
+    /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
+    pub producer_padding: &'a [u8],
 }
 
 impl<'a> Union<'a> {
@@ -251,7 +307,7 @@ impl<'a> Union<'a> {
         let options = ClassOptions(fields.u16()?);
         let field_list = fields.type_index()?;
         let size = fields.numeric()?;
-        let (name, unique_name) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
         Ok(Self {
             member_count,
             options,
@@ -259,16 +315,22 @@ impl<'a> Union<'a> {
             size,
             name,
             unique_name,
+            producer_padding,
         })
     }
 
-    /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
+    /// Append the payload fields and return the padding rule.
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<Padding> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.field_list)?;
         self.size.encode(writer.out())?;
-        encode_names(writer, self.options, self.name, self.unique_name)
+        encode_names(writer, self.options, self.names())
+    }
+
+    /// Return the names and the producer padding.
+    const fn names(&self) -> Names<'a> {
+        (self.name, self.unique_name, self.producer_padding)
     }
 
     /// Return the options and the names.
@@ -297,6 +359,11 @@ pub struct WideUnion<'a> {
     pub name: &'a [u8],
     /// The unique name bytes, present if the options have the unique-name flag.
     pub unique_name: Option<&'a [u8]>,
+    /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
+    ///
+    /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
+    /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
+    pub producer_padding: &'a [u8],
 }
 
 impl<'a> WideUnion<'a> {
@@ -307,7 +374,7 @@ impl<'a> WideUnion<'a> {
         let field_list = fields.type_index()?;
         let member_count = fields.numeric()?;
         let size = fields.numeric()?;
-        let (name, unique_name) = names(&mut fields, low_options(options))?;
+        let (name, unique_name, producer_padding) = names(&mut fields, low_options(options))?;
         Ok(Self {
             options,
             field_list,
@@ -315,21 +382,22 @@ impl<'a> WideUnion<'a> {
             size,
             name,
             unique_name,
+            producer_padding,
         })
     }
 
-    /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
+    /// Append the payload fields and return the padding rule.
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<Padding> {
         writer.u32(self.options)?;
         writer.type_index(self.field_list)?;
         self.member_count.encode(writer.out())?;
         self.size.encode(writer.out())?;
-        encode_names(
-            writer,
-            low_options(self.options),
-            self.name,
-            self.unique_name,
-        )
+        encode_names(writer, low_options(self.options), self.names())
+    }
+
+    /// Return the names and the producer padding.
+    const fn names(&self) -> Names<'a> {
+        (self.name, self.unique_name, self.producer_padding)
     }
 
     /// Return the low 16 bits of the options and the names.
@@ -358,6 +426,11 @@ pub struct Enum<'a> {
     pub name: &'a [u8],
     /// The unique name bytes, present if the options have the unique-name flag.
     pub unique_name: Option<&'a [u8]>,
+    /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
+    ///
+    /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
+    /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
+    pub producer_padding: &'a [u8],
 }
 
 impl<'a> Enum<'a> {
@@ -368,7 +441,7 @@ impl<'a> Enum<'a> {
         let options = ClassOptions(fields.u16()?);
         let underlying_type = fields.type_index()?;
         let field_list = fields.type_index()?;
-        let (name, unique_name) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
         Ok(Self {
             member_count,
             options,
@@ -376,16 +449,22 @@ impl<'a> Enum<'a> {
             field_list,
             name,
             unique_name,
+            producer_padding,
         })
     }
 
-    /// Append the payload fields.
-    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
+    /// Append the payload fields and return the padding rule.
+    pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<Padding> {
         writer.u16(self.member_count)?;
         writer.u16(self.options.0)?;
         writer.type_index(self.underlying_type)?;
         writer.type_index(self.field_list)?;
-        encode_names(writer, self.options, self.name, self.unique_name)
+        encode_names(writer, self.options, self.names())
+    }
+
+    /// Return the names and the producer padding.
+    const fn names(&self) -> Names<'a> {
+        (self.name, self.unique_name, self.producer_padding)
     }
 
     /// Return the options and the names.
