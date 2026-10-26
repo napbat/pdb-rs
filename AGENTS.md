@@ -39,6 +39,11 @@ Run it on real PDBs after reader changes, and compare decoded fields with `llvm-
 - Keep the standard Cargo package layout.
 - Do not assume that this repository has docstore's crates, layers or storage engine.
 - Check the manifest and source before you describe project behavior or dependencies.
+- For a new dependency, choose a portable crate that supports `no_std + alloc`. Use it in only
+  one crate-private module, and do not expose its types, traits or errors in the public API.
+  Record the choice in the issue. A later change can replace the crate.
+- Compare reader and writer output with the independent consumers of #21 (`pdbtool`, DIA2Dump)
+  as well as `llvm-pdbutil`.
 
 ## Lints: Clippy pedantic
 
@@ -100,6 +105,10 @@ Put each crate in `crates/<crate-name>/`. The paths below are relative to each c
   an epic the `epic` label.
 - Record verification evidence as an issue comment. Close an issue only when all its acceptance
   criteria pass.
+- If a check needs a file, tool or service that is not available, do not use a weaker check.
+  Record what is missing in an issue comment, add the `external-input` label and leave the
+  criterion open.
+- Follow the goal brief in #18 for the milestone order of an autonomous run.
 - Refer to issues by number, for example `#1`, in documentation and commit messages.
 
 ## Working copies
@@ -108,6 +117,10 @@ Put each crate in `crates/<crate-name>/`. The paths below are relative to each c
 - Use absolute paths for all edits in a worktree. Do not edit the primary checkout from a
   worktree task.
 - Preserve unrelated user changes.
+- Commit completed work on `main` after the checks pass, then push `main` to `origin`. Do not
+  force-push or rewrite pushed history.
+- Merge a worktree branch into `main` after its checks pass. Then delete the branch and the
+  worktree.
 
 ## Checks
 
