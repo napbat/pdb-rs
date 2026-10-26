@@ -39,18 +39,38 @@ to the same value. It does not check that other readers accept the output.
 | `embedded_source` | blob | `EmbeddedSource::parse`, `decode` and `encode` round trips in both formats |
 | `portable_rebuild` | Portable PDB | `copy_exact`, `to_parts`, `PdbParts::plan`, `to_embedded`, `Pdb::edit` round trips |
 | `portable_build` | builder commands | `PdbBuilder` with typed records: `plan`, `to_vec`, read back documents and sequence points |
+| `native_type_encode` | as `native_types` | `TypeLeaf::encode`, `encode_field_list`, `write_type_stream`, `TypeHashes::verify` of the output |
+| `native_id_encode` | as `native_ids` | `IdRecord::encode`, `write_type_stream` |
+| `native_leaf_encode` | as `native_leaf` | `TypeLeaf`, `IdRecord`, `Symbol` and `Numeric` encoders on one record |
+| `native_symbol_encode` | as `native_symbols` | `Symbol::encode`, `SymbolRecordWriter`, `ModuleSymbolWriter` |
+| `native_index_encode` | as `native_indexes` (bit 1 selects LLVM) | `GlobalSymbolIndex::build`, `PublicSymbolIndex::build` |
+| `native_lines_encode` | as `native_lines` | `LineSubsection::encode`, `encode_framed` |
+| `native_module_encode` | as `native_module` | `ModuleStream::encode`, `ModuleLines::encode`, `ModuleStreamParts::encode` |
+| `native_info_encode` | as `native_info` | `Info::encode`, `InfoBuilder::from_info` and `encode` |
+| `native_names_encode` | as `native_names` | `StringTable::encode`, `StringTableBuilder` |
+| `native_dbi_encode` | as `native_dbi` | `Dbi::encode`, `encode_substream`, module records, `OwnedModule`, `DbiBuilder::from_dbi` |
+| `native_debug_stream_encode` | kind selector, stream | FPO, frame data, fixup, function entry, token map, section header, OMAP and `RvaVaBlob` encoders |
+| `native_named_encode` | kind selector, stream | `LinkInfo`, `TmCache` and `TmCacheBuilder`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceServer`, `SourceHeaderBlock` and its builder, `DotNetDocument` |
 
 The MSFZ targets come with #20.
 
-The record encoders of the native streams (#29 to #32) were not on `main` when this work
-started (8b77fb2). Most of them merged during the runs. Add a round-trip target for each of
-them:
+### Round-trip properties of the native encoders
 
-- TPI and IPI record encoders, numeric leaves, and the TPI, IPI and hash stream writers (#29).
-- Symbol record encoders and the GSI and PSI writers (#30).
-- C13 subsection encoders and the module stream writer (#31).
-- The Info, `/names`, DBI substream, optional debug stream, OMAP and auxiliary named stream
-  writers (#32).
+For each decoded value, the encoder must succeed, and the decoder must give the same value
+from the output. Where the documentation of a codec says that a decoded value gives its
+input bytes again, the target also compares the bytes. These rules apply:
+
+- A record offset is a location, not a value. The targets decode records at offset 0
+  before they compare values.
+- `FieldList` and `MethodList` values keep their raw bytes. The encoders write the standard
+  `LF_PAD` bytes between field-list members, so the targets compare the decoded members and
+  entries of these lists, and not their bytes.
+- `TypeLeaf::encode` and `IdRecord::encode` give the input bytes for a record "of a stream
+  that pads its records". The targets compare the bytes only for a record with a length that
+  is a multiple of 4.
+- `write_type_stream` and the GSI and PSI builders can reject decoded contents, for example
+  an LLVM layout with hash adjusters. If they accept the contents, the output must parse
+  with the same records, buckets, thunks and section starts.
 
 ## Seed corpora
 
@@ -149,11 +169,27 @@ runs without a finding. `cov` and `corpus` are from the last run of the target.
 | `portable_metadata` | 901 | 10,681,094 | 724 | 364 | 583 |
 | `portable_pdb` | 902 | 321,390 | 4943 | 1798 | 718 |
 | `portable_rebuild` | 901 | 73,989 | 8179 | 1428 | 587 |
+| `native_type_encode` | 901 | 140,202 | 2035 | 393 | 598 |
+| `native_id_encode` | 901 | 389,372 | 958 | 200 | 550 |
+| `native_leaf_encode` | 901 | 8,065,652 | 7496 | 2949 | 606 |
+| `native_symbol_encode` | 901 | 218,384 | 3707 | 1324 | 674 |
+| `native_index_encode` | 901 | 545,886 | 2285 | 569 | 572 |
+| `native_lines_encode` | 901 | 27,330,779 | 762 | 358 | 960 |
+| `native_module_encode` | 901 | 8,731,834 | 1129 | 288 | 616 |
+| `native_info_encode` | 901 | 28,852,926 | 634 | 156 | 576 |
+| `native_names_encode` | 901 | 10,484,756 | 218 | 53 | 452 |
+| `native_dbi_encode` | 901 | 1,030,786 | 1171 | 263 | 615 |
+| `native_debug_stream_encode` | 901 | 50,452,815 | 369 | 88 | 499 |
+| `native_named_encode` | 901 | 55,190,434 | 1058 | 565 | 959 |
+
+The 12 encoder targets ran on the branch with `main` aa552a7 (2026-10-26). Their seeds are
+the seeds of the reader targets with the same input layout.
 
 No run reported a sanitizer error, a timeout or memory use above the limit.
 
-After the merge of `main` 1f8fd09 into `fuzzing`, each target ran once over its whole corpus
-(`-runs=0`) without a finding. These replays are not new fuzzing time.
+After the merge of `main` 1f8fd09 into `fuzzing`, each reader target ran once over its whole
+corpus (`-runs=0`) without a finding. These replays are not new fuzzing time. After the last
+build, each crash input in `artifacts/` runs without a finding.
 
 ## Findings
 
@@ -164,3 +200,15 @@ After the merge of `main` 1f8fd09 into `fuzzing`, each target ran once over its 
    the row form for each nil row, as the documentation says. Regression test:
    `a_nil_local_signature_token_has_the_row_form` in `crates/pdbrs/tests/portable_debug/sequence.rs`.
    After the fix, the three targets ran for the times in the table without a finding.
+2. `native_leaf_encode`: `Symbol::encode` added alignment padding to a decoded record with a
+   length that is not a multiple of 4, so the output was not the input record. Regression
+   test: `keeps_the_length_of_an_unaligned_record` in `crates/pdbrs/tests/codeview.rs`.
+3. `native_symbol_encode`: a decoded record with the length field `0xffff` did not encode,
+   because the alignment padding made it too long (`LimitExceeded`). Regression test:
+   `encodes_a_record_of_the_largest_length_without_padding` in `crates/pdbrs/tests/codeview.rs`.
+   The fix of findings 2 and 3: `Symbol::encode` writes the fields without alignment padding
+   and then the zero bytes of the original record.
+
+The other first failures of the encoder targets came from the target code, not from the
+library: a comparison of record offsets, of the raw bytes of field lists and method lists,
+and of bytes of unpadded type records (see the round-trip properties above).

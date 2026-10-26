@@ -33,16 +33,35 @@ fn single_record(bytes: &[u8]) -> Record<'_> {
     record
 }
 
+/// Return the members of a field list, or `None` if a member does not decode.
+fn members<'a>(
+    list: &pdbrs::native::codeview::field_list::FieldList<'a>,
+) -> Option<Vec<Member<'a>>> {
+    list.members().collect::<pdbrs::Result<_>>().ok()
+}
+
 /// Encode a type leaf and check that the output decodes to the same leaf.
 ///
-/// Return the encoded record.
+/// A field list and a method list keep their raw bytes, with the padding of the input. The
+/// encoder writes the standard `LF_PAD` bytes, so the round trip compares the decoded members
+/// and entries of these lists. Return the encoded record.
 fn type_leaf(leaf: &TypeLeaf<'_>) -> Vec<u8> {
     let mut out = Vec::new();
     leaf.encode(&mut out).expect("a decoded type leaf encodes");
     let again = TypeLeaf::decode(single_record(&out)).expect("an encoded type leaf decodes");
-    assert_eq!(&again, leaf);
-    if let TypeLeaf::FieldList(list) = leaf {
-        field_list(list.members());
+    match (&again, leaf) {
+        (TypeLeaf::FieldList(left), TypeLeaf::FieldList(right)) => {
+            assert_eq!(members(left), members(right));
+            assert_eq!(left.continuation(), right.continuation());
+            field_list(right.members());
+        }
+        (TypeLeaf::MethodList(left), TypeLeaf::MethodList(right)) => {
+            let entries = |list: &pdbrs::native::codeview::type_record::MethodList<'_>| {
+                list.entries().collect::<pdbrs::Result<Vec<_>>>().ok()
+            };
+            assert_eq!(entries(left), entries(right));
+        }
+        _ => assert_eq!(&again, leaf),
     }
     out
 }
@@ -136,25 +155,33 @@ pub fn leaf(data: &[u8]) {
 fn rebuild(
     stream: &TypeStream,
     hash: &[u8],
-    mut encode: impl FnMut(Record<'_>) -> Option<Vec<u8>>,
+    mut encode: impl FnMut(Record<'_>) -> Option<(Vec<u8>, bool)>,
 ) {
     let mut records = Vec::new();
     for record in stream.records().take(MAX_RECORDS) {
         let Some(record) = ok(record) else {
             return;
         };
-        let Some(encoded) = encode(record.record) else {
+        // A record offset is a location, not a value: decode the record at offset 0.
+        let Some((encoded, exact)) = encode(Record {
+            offset: 0,
+            ..record.record
+        }) else {
             return;
         };
-        // The encoders give the input record again for a decoded record of a padded stream.
+        // The encoders give the input record again for a decoded record of a padded stream
+        // (a record length that is a multiple of 4), except the padding between field-list
+        // members (see `type_leaf`).
         let full = stream
             .full_record(&record.record)
             .expect("a framed record has bytes");
-        assert_eq!(
-            encoded, full,
-            "record {:#x} re-encodes to other bytes",
-            record.index
-        );
+        if exact && full.len().is_multiple_of(4) {
+            assert_eq!(
+                encoded, full,
+                "record {:#x} re-encodes to other bytes",
+                record.index
+            );
+        }
         records.extend_from_slice(&encoded);
     }
     let hashes = ok(TypeHashes::parse(stream.header(), hash));
@@ -188,7 +215,8 @@ pub fn types(data: &[u8]) {
         return;
     };
     rebuild(&stream, hash, |record| {
-        ok(TypeLeaf::decode(record)).map(|leaf| type_leaf(&leaf))
+        ok(TypeLeaf::decode(record))
+            .map(|leaf| (type_leaf(&leaf), !matches!(leaf, TypeLeaf::FieldList(_))))
     });
 }
 
@@ -204,6 +232,6 @@ pub fn ids(data: &[u8]) {
         return;
     };
     rebuild(&stream, hash, |record| {
-        ok(IdRecord::decode(record)).map(|id| id_record(&id))
+        ok(IdRecord::decode(record)).map(|id| (id_record(&id), true))
     });
 }
