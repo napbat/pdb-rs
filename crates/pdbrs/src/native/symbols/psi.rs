@@ -50,10 +50,10 @@ pub struct PublicHeader {
     pub padding: [u8; 2],
     /// The offset of the thunk table in its section.
     pub thunk_table_offset: u32,
-    /// The number of section offset entries.
+    /// The number of section start entries.
     ///
-    /// This value is not reliable when the stream has no section offsets.
-    /// See [`PublicSymbolIndex::section_offsets`].
+    /// This value is not reliable when the stream has no section starts.
+    /// See [`PublicSymbolIndex::section_starts`].
     pub section_count: u32,
 }
 
@@ -72,8 +72,8 @@ pub struct PublicSymbolIndex {
     address_map: Range<usize>,
     /// The thunk map in the stream.
     thunk_map: Range<usize>,
-    /// The section offsets in the stream. The range is empty if they are absent.
-    section_offsets: Range<usize>,
+    /// The section start entries in the stream. The range is empty if they are absent.
+    section_starts: Range<usize>,
 }
 
 impl PublicSymbolIndex {
@@ -143,7 +143,7 @@ impl PublicSymbolIndex {
         })?;
         let thunk_map = region(address_map.end, thunk_bytes, end)
             .map_err(|kind| error(kind, 8, "public thunk map extends past the stream"))?;
-        let section_offsets = if thunk_map.end == end {
+        let section_starts = if thunk_map.end == end {
             end..end
         } else {
             section_range(thunk_map.end, end, header.section_count, stream)?
@@ -155,7 +155,7 @@ impl PublicSymbolIndex {
             table,
             address_map,
             thunk_map,
-            section_offsets,
+            section_starts,
         })
     }
 
@@ -194,17 +194,14 @@ impl PublicSymbolIndex {
         }
     }
 
-    /// Return the section offsets in file order.
+    /// Return the section start entries (`SO` records) in file order.
     ///
     /// The result is empty if no bytes follow the thunk map, also when
     /// [`PublicHeader::section_count`] is not zero.
     #[must_use]
-    pub fn section_offsets(&self) -> SectionOffsets<'_> {
-        SectionOffsets {
-            chunks: self.bytes[self.section_offsets.clone()]
-                .as_chunks()
-                .0
-                .iter(),
+    pub fn section_starts(&self) -> SectionStarts<'_> {
+        SectionStarts {
+            chunks: self.bytes[self.section_starts.clone()].as_chunks().0.iter(),
         }
     }
 
@@ -339,9 +336,9 @@ impl ExactSizeIterator for ThunkMap<'_> {}
 
 impl FusedIterator for ThunkMap<'_> {}
 
-/// One section offset entry (`SO`).
+/// One section start entry (`SO`): the flat address where a section starts.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct SectionOffset {
+pub struct SectionStart {
     /// The flat address where the section starts.
     pub offset: u32,
     /// The section number.
@@ -352,18 +349,18 @@ pub struct SectionOffset {
     pub padding: [u8; 2],
 }
 
-/// An iterator over the section offset entries.
+/// An iterator over the section start entries.
 #[derive(Clone, Debug)]
-pub struct SectionOffsets<'a> {
+pub struct SectionStarts<'a> {
     /// The remaining 8-byte entries.
     chunks: Iter<'a, [u8; SECTION_OFFSET_SIZE]>,
 }
 
-impl SectionOffsets<'_> {
+impl SectionStarts<'_> {
     /// Decode one entry.
-    fn decode(chunk: [u8; SECTION_OFFSET_SIZE]) -> SectionOffset {
+    fn decode(chunk: [u8; SECTION_OFFSET_SIZE]) -> SectionStart {
         let [o0, o1, o2, o3, s0, s1, p0, p1] = chunk;
-        SectionOffset {
+        SectionStart {
             offset: u32::from_le_bytes([o0, o1, o2, o3]),
             section: u16::from_le_bytes([s0, s1]),
             padding: [p0, p1],
@@ -371,8 +368,8 @@ impl SectionOffsets<'_> {
     }
 }
 
-impl Iterator for SectionOffsets<'_> {
-    type Item = SectionOffset;
+impl Iterator for SectionStarts<'_> {
+    type Item = SectionStart;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.chunks.next().copied().map(Self::decode)
@@ -383,12 +380,12 @@ impl Iterator for SectionOffsets<'_> {
     }
 }
 
-impl DoubleEndedIterator for SectionOffsets<'_> {
+impl DoubleEndedIterator for SectionStarts<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.chunks.next_back().copied().map(Self::decode)
     }
 }
 
-impl ExactSizeIterator for SectionOffsets<'_> {}
+impl ExactSizeIterator for SectionStarts<'_> {}
 
-impl FusedIterator for SectionOffsets<'_> {}
+impl FusedIterator for SectionStarts<'_> {}

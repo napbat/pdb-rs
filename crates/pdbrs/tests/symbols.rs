@@ -5,7 +5,7 @@ use pdbrs::native::hash::hash_string_v1;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{
     BucketCount, GlobalSymbolIndex, MINIMAL_DEBUG_INFO_FEATURE, PublicSymbolIndex, RecordOffsets,
-    SectionOffset, SymbolOffset,
+    SectionStart, SymbolOffset,
 };
 
 /// The stream ID of the synthetic index streams.
@@ -470,16 +470,16 @@ fn public_index_decodes_all_parts() {
     assert_eq!(index.address_map().next_back(), Some(SymbolOffset(12)));
     let thunks: Vec<_> = index.thunk_map().collect();
     assert_eq!(thunks, [0x1010, 0x2020]);
-    let sections: Vec<_> = index.section_offsets().collect();
+    let sections: Vec<_> = index.section_starts().collect();
     assert_eq!(
         sections,
         [
-            SectionOffset {
+            SectionStart {
                 offset: 0x1000,
                 section: 1,
                 padding: [0xcd, 0xab],
             },
-            SectionOffset {
+            SectionStart {
                 offset: 0x5000,
                 section: 2,
                 padding: [0xcd, 0xab],
@@ -489,12 +489,12 @@ fn public_index_decodes_all_parts() {
 }
 
 #[test]
-fn absent_section_offsets_ignore_the_section_count() {
+fn absent_section_starts_ignore_the_section_count() {
     let mut parts = public(&[], &[]);
     parts.header[6] = 0xcccc_cccc;
     let index = parts.parse().unwrap();
     assert_eq!(index.header().section_count, 0xcccc_cccc);
-    assert_eq!(index.section_offsets().len(), 0);
+    assert_eq!(index.section_starts().len(), 0);
     assert_eq!(index.thunk_map().len(), 0);
 }
 

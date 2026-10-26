@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use super::{IdRecord, LF_STRING_ID, LF_SUBSTR_LIST};
 use crate::native::codeview::Record;
 use crate::native::codeview::index::{IdIndex, TypeIndex};
-use crate::native::types::{HEADER_SIZE, TypeStream};
+use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable};
 use crate::{Error, ErrorKind, Result};
 
 /// The fixed stream index of the IPI stream.
@@ -19,16 +19,12 @@ pub const MAX_STRING_DEPTH: usize = 8;
 
 /// The framed records of an IPI stream, by ID index.
 ///
-/// The table borrows the records from a [`TypeStream`]. It keeps one
-/// [`Record`] for each index and does not decode payloads in advance.
+/// The table borrows the records from a [`TypeStream`] through a
+/// [`TypeTable`]. It does not decode payloads in advance.
 #[derive(Clone, Debug)]
 pub struct IdTable<'a> {
-    /// The index of the first record.
-    index_begin: u32,
-    /// The index after the last record.
-    index_end: u32,
-    /// The records in index order.
-    records: Vec<Record<'a>>,
+    /// The record offsets in index order.
+    table: TypeTable<'a>,
 }
 
 /// One step of string resolution.
@@ -47,61 +43,41 @@ impl<'a> IdTable<'a> {
     ///
     /// # Errors
     ///
-    /// Returns the framing errors of [`TypeStream::records`] with the IPI
-    /// stream location. Returns [`ErrorKind::LimitExceeded`] if the table
-    /// cannot be allocated.
+    /// Returns the errors of [`TypeTable::new`].
     pub fn new(stream: &'a TypeStream) -> Result<Self> {
-        let header = stream.header();
-        let mut records = Vec::new();
-        let count = header.index_end.saturating_sub(header.index_begin);
-        records
-            .try_reserve_exact(usize::try_from(count).unwrap_or(usize::MAX))
-            .map_err(|_| {
-                Error::new(ErrorKind::LimitExceeded, None)
-                    .with_context("IPI record table cannot be allocated")
-            })?;
-        let mut iter = stream.records();
-        while let Some(result) = iter.next() {
-            let record =
-                result.map_err(|error| error.with_stream(IPI_STREAM, logical(iter.position())))?;
-            records.push(record.record);
-        }
         Ok(Self {
-            index_begin: header.index_begin,
-            index_end: header.index_end,
-            records,
+            table: TypeTable::new(stream)?,
         })
     }
 
     /// Return the index of the first record.
     #[must_use]
     pub const fn index_begin(&self) -> IdIndex {
-        IdIndex(self.index_begin)
+        IdIndex(self.table.stream().header().index_begin)
     }
 
     /// Return the index after the last record.
     #[must_use]
     pub const fn index_end(&self) -> IdIndex {
-        IdIndex(self.index_end)
+        IdIndex(self.table.stream().header().index_end)
     }
 
     /// Return the number of records.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.records.len()
+    pub const fn len(&self) -> usize {
+        self.table.len()
     }
 
     /// Return `true` if the stream has no records.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.records.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.table.is_empty()
     }
 
     /// Return the framed record of `id`, or `None` if `id` is out of range.
     #[must_use]
     pub fn get(&self, id: IdIndex) -> Option<Record<'a>> {
-        let position = usize::try_from(id.0.checked_sub(self.index_begin)?).ok()?;
-        self.records.get(position).copied()
+        self.table.id_record(id).ok().map(|record| record.record)
     }
 
     /// Decode the record of `id`.
@@ -155,7 +131,7 @@ impl<'a> IdTable<'a> {
                 Pending::Id(id, depth) => (id, depth),
             };
             visits += 1;
-            if visits > self.records.len() {
+            if visits > self.len() {
                 return Err(Error::new(ErrorKind::LimitExceeded, None)
                     .with_context("IPI string resolution visits too many records"));
             }
@@ -206,7 +182,8 @@ impl<'a> IdTable<'a> {
     ///   [`IdRecord::decode`] does not support.
     /// - The errors of [`IdRecord::decode`].
     pub fn validate(&self, type_index_end: TypeIndex) -> Result<()> {
-        for &record in &self.records {
+        for record in self.table.stream().records() {
+            let record = record?.record;
             self.validate_record(record, type_index_end)
                 .map_err(|error| error.with_stream(IPI_STREAM, record_offset(record)))?;
         }

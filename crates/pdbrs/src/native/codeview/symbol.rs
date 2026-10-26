@@ -18,6 +18,7 @@
 
 use super::index::{IdIndex, TypeIndex};
 use super::{Fields, Record};
+use crate::native::address::SectionOffset;
 use crate::{ErrorKind, Result};
 
 /// Define a newtype for a bit set with named bits.
@@ -168,16 +169,6 @@ pub const S_DEFRANGE_REGISTER_REL_INDIR: u16 = 0x1177;
 
 /// The error context for a payload that is too short for its fields.
 const SHORT_PAYLOAD: &str = "symbol record payload is shorter than its fields";
-
-/// A section number and an offset in that section.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub struct SectionOffset {
-    /// The section number. Section numbers start at 1. The value 0 can
-    /// identify an absolute or discarded symbol.
-    pub section: u16,
-    /// The offset in the section.
-    pub offset: u32,
-}
 
 impl SectionOffset {
     /// Read a `u32` offset and then a `u16` section number.

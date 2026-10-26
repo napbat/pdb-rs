@@ -1,10 +1,11 @@
 //! Tests for `CodeView` record framing and symbol decoding.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     ProcedureFlags, ProcedureType, PublicFlags, S_GDATA32, S_GPROC32_ID, S_LDATA32, S_LPROC32,
-    S_PUB32, SectionOffset, SymbolData,
+    S_PUB32, SymbolData,
 };
 use pdbrs::native::codeview::{Record, Records};
 

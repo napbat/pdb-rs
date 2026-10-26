@@ -1,7 +1,7 @@
 # PDB reader and writer design
 
-Status: the full reader/writer design remains proposed. The library implements native reading and the shared primitives listed below.
-Native semantic decoding is incomplete. Portable PDB parsing and PDB writing are not implemented.
+Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
+Formats and record kinds outside those samples remain incomplete. Portable PDB parsing and PDB writing are not implemented.
 
 Track native implementation work in [NATIVE-0001](../issues/0001-native-pdb-support.md).
 The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
@@ -55,12 +55,13 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
-| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks | Free-page-map allocation consistency |
-| PDB Info | Identity, named streams, feature codes and named-stream reference checks | Older Info layouts |
+| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot | Writing and repacking |
+| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | Non-empty `/TMCache`, `/LinkInfo` version 1 and compressed injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions | OMAP translation |
+| Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoding of 38 symbol kinds, including every kind in the Rust sample PDBs; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
@@ -70,20 +71,20 @@ Header validation does not validate every record payload. Iterate records to che
 Unsupported container and stream versions return `UnsupportedVersion`; no heuristic fallback parses them as modern data.
 Full native support remains required. This coverage table does not reduce the scope below.
 
-Run native inspection with:
+Read a complete native PDB with:
 
 ```sh
 cargo run -p pdbrs --example native -- path/to/input.pdb
 ```
 
-The example enumerates type, ID, shared symbol, module symbol and C13 subsection records.
-It reports decoded symbol counts separately from total framed record counts.
+The example decodes every stream role and checks the references between streams.
+It joins line and inlinee data to `/names`, procedure references to module symbols and index records to name lookup.
+It translates symbol, contribution and line addresses to RVAs, and counts the absolute addresses that have none.
+It fails if any record kind, subsection kind or stream has no typed decoder.
 
-The [implementation map](../issues/0001-native-pdb-support.md#implementation-map-and-starting-point) defines the next module boundaries and acceptance milestone.
-Start with integer numeric leaves, field lists and typed TPI records before adding lookup acceleration.
-`native::codeview::numeric::Integer::parse_prefix` now supplies the integer decoder without allocation.
-A temporary consumer matched all 40 shared integer constant names and values in the original Rust PDB against LLVM in both feature modes.
-This verifies the numeric decoder, not complete constant-symbol or type decoding.
+`Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
+`Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
+GitHub issues #2 to #10 record the implementation and the evidence for each area.
 
 ## Required formats and scope
 
@@ -604,29 +605,38 @@ Run both default features and `--no-default-features` once the library feature c
 
 ## Research evidence and references
 
-The existing local build produced `target/debug/pdbrs.pdb`.
-The native reader successfully enumerated its streams and records. LLVM `llvm-pdbutil` 22.1.6 agreed on these counts:
+The full-read example decoded four local Rust build outputs with zero undecoded items and zero unread streams:
+`target/debug/pdbrs.pdb` and the `inspect`, `streams` and `native` example PDBs.
+LLVM `llvm-pdbutil` 22.1.6 agreed on these counts:
 
-| Item | pdbrs | llvm-pdbutil |
-| --- | ---: | ---: |
-| TPI records | 811 | 811 |
-| IPI records | 6,281 | 6,281 |
-| Modules | 73 | 73 |
-| Shared symbol records | 993 | 993 |
-| Module symbol records | 10,818 | 10,818 |
+| Item | `pdbrs.pdb` | `inspect.pdb` | `streams.pdb` | `native.pdb` |
+| --- | ---: | ---: | ---: | ---: |
+| TPI records | 811 | 21,279 | 34,217 | 28,273 |
+| Field-list members | 660 | 10,123 | 16,286 | 12,914 |
+| IPI records | 6,281 | 15,754 | 21,736 | 18,963 |
+| Modules | 73 | 90 | 90 | 96 |
+| Module symbol records | 10,818 | 16,561 | 15,193 | 77,153 |
+| Shared symbol records | 993 | 4,415 | 4,393 | 11,022 |
+| Global index records | 567 | 3,856 | 3,849 | 7,913 |
+| Public index records | 426 | 559 | 544 | 3,109 |
+| Section contributions | 1,577 | 2,334 | 2,302 | 10,185 |
+| Named streams | 9 | 9 | 9 | 9 |
 
-The reader reported 4096-byte blocks, 89 streams and 368 C13 subsections.
-All eight displayed symbol names matched LLVM's output.
-LLVM called one module symbol kind unknown; both readers retained that record in their counts.
-The same five counts matched on the generated `inspect`, `streams` and `native` example PDBs.
-A separate consumer used the reader with default features disabled through `SeekReader`.
-It obtained the same type, ID, module and module symbol counts from the original Rust PDB.
+The example PDBs were rebuilt during the work, so their counts differ from earlier per-area runs.
+The per-area comparisons in GitHub issues #2 to #9 compared decoded fields with LLVM, not only counts.
+They covered type leaves, forward references, hashes, IDs, symbols, annotations, line data, string tables,
+DBI substreams, symbol indexes, free-page maps and injected sources.
+LLVM 22.1.6 cannot decode `S_DEFRANGE_REGISTER_REL_INDIR` and hides some def-range gaps;
+issue #5 records the independent checks for those records.
+
+A separate consumer read `pdbrs.pdb` with default features disabled through `SeekReader`.
+It decoded every TPI leaf, module symbol, C13 subsection, shared symbol and global index record.
 A truncated copy of that PDB failed with `UnexpectedEof` and the physical end offset.
 
 These are local Rust build outputs, not redistributed fixtures. Automated tests do not depend on them.
-The tests use synthetic containers for all supported page sizes, fragmentation, directory growth, malformed data and resource limits.
-The current smoke runs establish native reading behavior, not complete semantic decoding or writer interoperability.
-MSVC-only and other producer fixtures remain required by the acceptance plan.
+The tests use synthetic data for boundaries, malformed input and resource limits.
+The smoke runs establish complete reading of these samples, not support for every producer or writer interoperability.
+MSVC C++, clang-cl/LLD and legacy fixtures remain required by the acceptance plan.
 
 The signature probe was also exercised against a .NET-produced Portable PDB, an embedded PDB payload and ordinary CLI assembly metadata.
 A synthetic Small MSF signature was identified. These checks establish signature behavior, not portable or legacy parsing.

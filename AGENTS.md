@@ -33,7 +33,8 @@ The default `std` feature enables `nostdio/std` and file access on Unix and Wind
 Use `nostdio` for sequential I/O. Keep `ReadAt` for positional access.
 Keep the shared primitives usable with `--no-default-features` (`no_std + alloc`).
 The `inspect` example identifies container signatures; it does not validate PDB contents.
-The `native` example reads native metadata and records. It reports decoded and raw record counts separately.
+The `native` example reads every stream and record of a native PDB. It fails if data has no typed decoder.
+Run it on real PDBs after reader changes, and compare decoded fields with `llvm-pdbutil`.
 
 - Keep the standard Cargo package layout.
 - Do not assume that this repository has docstore's crates, layers or storage engine.

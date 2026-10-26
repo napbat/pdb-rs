@@ -32,9 +32,26 @@ Do not add a PE parser, linker, symbol server client or automatic external-file 
 - [x] Match LLVM record/module counts on four local Rust-produced PDBs. Exercise native reading with default features disabled.
 - [x] Decode every TPI leaf and field-list member in the four Rust PDBs. Match LLVM `dump --types` names, sizes, members, enumerators, pointers, signatures, method lists and forward-reference targets.
 - [x] Verify all stored TPI/IPI hash values and index offset pairs against the records.
+- [x] Read every stream, record and C13 subsection of four Rust-produced PDBs with zero undecoded items (`examples/native.rs`).
 
 The [design evidence](../design/pdb.md#research-evidence-and-references) records the smoke results and their limits.
-Counts prove enumeration, not complete semantics. No native writer or semantic editor exists at this baseline.
+No native writer or semantic editor exists at this baseline.
+
+## Rust sample milestone
+
+The GitHub sub-issues of #1 track complete reading of the Rust-produced samples. Each issue holds its evidence comment.
+
+- [x] #2 TPI leaves, field lists, lookup and forward references.
+- [x] #3 TPI/IPI hash values, index offsets and adjusters.
+- [x] #4 IPI ID records.
+- [x] #5 Every Rust symbol kind, scope links, def-ranges and inline annotations.
+- [x] #6 C13 lines, file checksums and inlinee lines.
+- [x] #7 `/names`, DBI substreams, section headers and address translation.
+- [x] #8 Global and public symbol indexes.
+- [x] #9 Free-page map, stream 0 snapshot and auxiliary named streams.
+- [x] #10 Facade integration and the full-read example.
+
+The samples do not contain every format variant. The checklists below stay open for variants outside them.
 
 ## Implementation map and starting point
 
@@ -43,7 +60,7 @@ These expose Rust type sizes, field offsets, enum values and function signatures
 Do not start with hash acceleration or writing: neither adds meaning to opaque records.
 
 All paths below are relative to `crates/pdbrs/src/`.
-Only the numeric component is added by this step. Other new paths are planned, not placeholder modules.
+Steps 1 to 9 are implemented for the record kinds in the Rust samples. Step 10 is not started.
 
 | Order | Module boundary | Deliverable and dependencies |
 | --- | --- | --- |
@@ -51,11 +68,11 @@ Only the numeric component is added by this step. Other new paths are planned, n
 | 2 | `native/codeview/field_list.rs` | Implemented borrowed field-list member iteration, attributes and continuations. Uses numeric leaves; unknown unframed members stop decoding. |
 | 3 | `native/codeview/type_record.rs` | Implemented borrowed typed leaves: modifiers, pointers, arrays, aggregates, enums, procedures, member functions, argument lists, bitfields, method lists and vtable shapes. |
 | 4 | `native/types/lookup.rs`, `native/types/forward.rs`, `native/types/hash.rs` | Implemented offset-table lookup, bounded continuation chains, forward-reference resolution and hash-stream decoding and verification. Keep stream ownership in `TypeStream`. |
-| 5 | `native/codeview/id.rs` | IPI strings, function IDs, build info and UDT source references. Resolve IDs separately from types. |
-| 6 | Existing `native/codeview/symbol.rs` and children | Extend the existing symbol API with constants, locals, ranges, scope links and inline sites. Do not introduce a second symbol API. |
-| 7 | `native/lines.rs` and children | C13 checksums, file names, line/column tables, inlinee lines and annotation programs. Reuse existing module subsection framing. |
-| 8 | Existing `native/dbi.rs` and children; `native/address.rs` | Source tables, section contributions/maps, section headers and OMAP. Join module/section coordinates without assuming every address has an RVA. |
-| 9 | `native/symbols.rs` and children | GSI/PSI lookup and address indexes over the existing shared symbol records. Reuse the semantic decoders. |
+| 5 | `native/codeview/id_record.rs` | Implemented IPI strings, function IDs, build info and UDT source references, with `IdTable` lookup over `TypeTable`. |
+| 6 | Existing `native/codeview/symbol.rs` and children | Implemented 38 symbol kinds, scope links, def-range gaps and inline-site annotations. |
+| 7 | `native/lines.rs` and children | Implemented C13 line blocks, columns, file checksums and inlinee lines. |
+| 8 | Existing `native/dbi.rs` and children; `native/names.rs`, `native/section.rs`, `native/address.rs` | Implemented string tables, section contributions/maps, source files, section headers and RVA translation. OMAP is not decoded. |
+| 9 | `native/symbols.rs` and children | Implemented GSI/PSI hash tables, lookup candidates, address maps and thunk data. |
 | 10 | `native/msf/write.rs`, then native builder/editor modules | Implement checked output plans, container repacking, semantic encoders and dependent-index rebuilds. No public write API before a real output path exists. |
 
 Steps 7 and 8 can proceed separately from full type resolution once their reference contracts are defined.
@@ -108,7 +125,7 @@ Names and values matched LLVM exactly in both feature modes, including `18446744
 
 ## Container and PDB streams
 
-- [ ] Finish MSF validation, including active free-page-map allocation consistency, reserved intervals, boundary sizes and directory growth.
+- [x] Finish MSF validation, including active free-page-map allocation consistency, reserved intervals, boundary sizes and directory growth.
 - [ ] Implement exact copying and stream-preserving repacking. Preserve stream IDs, nil slots, empty streams and unknown stream bytes.
 - [ ] Implement deterministic MSF writing with coherent directory pages and free-page maps. Validate output plans before writing.
 - [ ] Complete Info serialization, named-stream hash tables, feature handling and the native GUID/age identity policy.

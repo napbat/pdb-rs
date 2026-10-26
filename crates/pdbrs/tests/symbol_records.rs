@@ -1,6 +1,7 @@
 //! Tests for the typed decoding of each symbol record kind.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::numeric::Integer;
@@ -11,8 +12,8 @@ use pdbrs::native::codeview::symbol::{
     S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_DEFRANGE_REGISTER_REL,
     S_DEFRANGE_REGISTER_REL_INDIR, S_END, S_ENVBLOCK, S_FRAMEPROC, S_INLINEES, S_INLINESITE,
     S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROCREF, S_OBJNAME, S_PROC_ID_END, S_PROCREF,
-    S_REGREL32, S_SECTION, S_THUNK32, S_UDT, S_UNAMESPACE, SectionOffset, SourceLanguage, Symbol,
-    SymbolData, ThunkOrdinal,
+    S_REGREL32, S_SECTION, S_THUNK32, S_UDT, S_UNAMESPACE, SourceLanguage, Symbol, SymbolData,
+    ThunkOrdinal,
 };
 
 /// A builder for little-endian symbol payloads.

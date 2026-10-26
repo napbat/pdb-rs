@@ -17,10 +17,11 @@ use crate::{Error, ErrorKind, Result};
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Rva(pub u32);
 
-/// An address as a 1-based section number and a byte offset in the section.
+/// An address as a section number and a byte offset in the section.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SectionOffset {
-    /// The 1-based section number.
+    /// The 1-based section number. Symbols can use 0 for an absolute or
+    /// discarded address; such an address has no RVA.
     pub section: u16,
     /// The byte offset from the start of the section.
     pub offset: u32,

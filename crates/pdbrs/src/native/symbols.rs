@@ -31,9 +31,7 @@ mod psi;
 mod table;
 
 pub use gsi::GlobalSymbolIndex;
-pub use psi::{
-    AddressMap, PublicHeader, PublicSymbolIndex, SectionOffset, SectionOffsets, ThunkMap,
-};
+pub use psi::{AddressMap, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap};
 pub use table::{Bucket, Buckets, HashHeader, HashRecord, HashRecords, HashTable};
 
 /// The PDB Info stream feature code for minimal debug information (`MINI`).

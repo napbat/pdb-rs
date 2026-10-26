@@ -1,8 +1,11 @@
 //! Native PDB stream discovery and bounded typed loading.
 
+use alloc::vec::Vec;
+
 use super::dbi::{Dbi, Module, ModuleStream};
 use super::info::Info;
 use super::msf::{Msf, MsfLimits, Stream, StreamId};
+use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
 use super::types::TypeStream;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
@@ -88,6 +91,68 @@ impl<S: ReadAt> Pdb<S> {
         self.info
             .named_stream(name)
             .map_or(Ok(None), |id| self.msf.stream(id))
+    }
+
+    /// Load all bytes of a present stream within the configured stream limit.
+    ///
+    /// Use this function for decoders that borrow their input, for example
+    /// the `/names` string table or the section-header stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidStreamIndex`] for an index outside the
+    /// directory, [`ErrorKind::InvalidReference`] for a nil stream, and
+    /// limit, allocation or I/O errors.
+    pub fn stream_bytes(&self, id: StreamId) -> Result<Vec<u8>> {
+        require_stream(&self.msf, id)?.read_all(self.options.max_stream_bytes)
+    }
+
+    /// Load all bytes of a named stream, if the Info stream names it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`].
+    pub fn named_stream_bytes(&self, name: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.info
+            .named_stream(name)
+            .map(|id| self.stream_bytes(id))
+            .transpose()
+    }
+
+    /// Return the bucket count of the global and public symbol indexes.
+    ///
+    /// The Info stream feature codes select it.
+    #[must_use]
+    pub fn symbol_bucket_count(&self) -> BucketCount {
+        BucketCount::from_features(self.info.features())
+    }
+
+    /// Load the global symbol index that the DBI header names, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`GlobalSymbolIndex::parse`].
+    pub fn global_symbols(&self, dbi: &Dbi) -> Result<Option<GlobalSymbolIndex>> {
+        dbi.header()
+            .global_stream
+            .map(|id| {
+                GlobalSymbolIndex::parse(self.stream_bytes(id)?, id, self.symbol_bucket_count())
+            })
+            .transpose()
+    }
+
+    /// Load the public symbol index that the DBI header names, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`PublicSymbolIndex::parse`].
+    pub fn public_symbols(&self, dbi: &Dbi) -> Result<Option<PublicSymbolIndex>> {
+        dbi.header()
+            .public_stream
+            .map(|id| {
+                PublicSymbolIndex::parse(self.stream_bytes(id)?, id, self.symbol_bucket_count())
+            })
+            .transpose()
     }
 
     /// Load the TPI stream, if present.
