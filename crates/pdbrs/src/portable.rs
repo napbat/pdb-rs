@@ -1,17 +1,25 @@
-//! Identity types and shared codecs for Portable PDB metadata.
+//! The Portable PDB backend: the reader, the identity and shared codecs.
 //!
-//! Portable PDBs use CLI metadata, not MSF. Their 20-byte identity combines
-//! a GUID with a stamp. The stamp is not a native PDB age.
+//! Portable PDBs use CLI metadata, not MSF. [`Pdb`] reads a standalone
+//! Portable PDB: [`metadata`] has the metadata root, the heaps, the `#Pdb`
+//! stream, the `#~` table layout and the raw rows of the eight debug tables.
+//! The 20-byte identity combines a GUID with a stamp. The stamp is not a
+//! native PDB age.
 //!
 //! [`compressed`] decodes and encodes the compressed integers of metadata
 //! blobs. [`custom`] decodes and encodes custom debug information blobs.
 //! [`embedded`] decodes and encodes embedded Portable PDB payloads and
 //! embedded-source blobs. Windows PDB document records use the same
-//! embedded-source blob format.
+//! embedded-source blob format. Decode an `MPDB` payload with
+//! [`embedded::decode_embedded`], then read the result with [`Pdb::parse`].
 
 pub mod compressed;
 pub mod custom;
 pub mod embedded;
+pub mod metadata;
+mod reader;
+
+pub use reader::{Pdb, ReadOptions, Rows};
 
 /// The 20-byte identity stored at the start of a Portable PDB's `#Pdb` stream.
 ///

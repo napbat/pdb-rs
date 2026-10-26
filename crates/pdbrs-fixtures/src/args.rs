@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub const USAGE: &str = "\
 usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- tools
+       cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
+       cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
                  The default is target/fixtures/ below the workspace root.
@@ -14,9 +16,20 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   --list         Print the fixture names and stop.
   --help         Print this text and stop.
 
-  tools          Install pdbtool and build DIA2Dump into target/tools/bin/ below the
-                 workspace root, and write target/tools/manifest.json. The command takes
-                 no other arguments.";
+  tools          Install pdbtool, build DIA2Dump and build the Portable PDB verifier into
+                 target/tools/bin/ below the workspace root, and write
+                 target/tools/manifest.json. The command takes no other arguments.
+
+  verify-portable
+                 Print the canonical dump of each Portable PDB fixture with pdbrs and with
+                 the verifier, write both to target/verify-portable/ and compare them.
+
+  detect         Open each fixture output with pdbrs::Pdb and compare the detected format
+                 with the manifest. The CLI metadata of each image must be rejected.
+
+  --fixtures <dir>
+                 Read manifest.json and the outputs in <dir>. The default is
+                 target/fixtures/ below the workspace root.";
 
 /// What the program must do.
 #[derive(Debug, PartialEq, Eq)]
@@ -29,6 +42,12 @@ pub enum Action {
     Build(Options),
     /// Install and build the consumer tools.
     Tools,
+    /// Compare the pdbrs and verifier dumps of the Portable PDB fixtures. The value is the
+    /// fixture root, if the user gave one.
+    VerifyPortable(Option<PathBuf>),
+    /// Open each fixture output with the format facade. The value is the fixture root, if
+    /// the user gave one.
+    Detect(Option<PathBuf>),
 }
 
 /// The options of a build.
@@ -54,6 +73,14 @@ where
             Some("--help" | "-h") => Ok(Action::Help),
             Some(other) => Err(format!("`tools` takes no arguments; found `{other}`")),
         };
+    }
+    for (command, action) in [
+        ("verify-portable", Action::VerifyPortable as fn(_) -> _),
+        ("detect", Action::Detect),
+    ] {
+        if arguments.next_if(|argument| argument == command).is_some() {
+            return fixture_root(command, &mut arguments).map(action);
+        }
     }
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -81,6 +108,24 @@ fn value(arguments: &mut impl Iterator<Item = String>, option: &str) -> Result<S
         Some(value) if !value.starts_with("--") => Ok(value),
         _ => Err(format!("{option} needs a value")),
     }
+}
+
+/// Parse the options of a command that reads the fixture manifest: `[--fixtures <dir>]`.
+fn fixture_root(
+    command: &str,
+    mut arguments: impl Iterator<Item = String>,
+) -> Result<Option<PathBuf>, String> {
+    let mut fixtures = None;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--fixtures" if fixtures.is_none() => {
+                fixtures = Some(PathBuf::from(value(&mut arguments, "--fixtures")?));
+            }
+            "--fixtures" => return Err("--fixtures is given more than once".to_owned()),
+            other => return Err(format!("`{command}` does not take `{other}`")),
+        }
+    }
+    Ok(fixtures)
 }
 
 #[cfg(test)]
@@ -133,6 +178,23 @@ mod tests {
         assert_eq!(
             run(&["--list", "tools"]),
             Err("unknown argument `tools`".to_owned())
+        );
+    }
+
+    #[test]
+    fn fixture_commands_take_an_optional_fixture_root() {
+        assert_eq!(run(&["verify-portable"]), Ok(Action::VerifyPortable(None)));
+        assert_eq!(
+            run(&["detect", "--fixtures", "D:/f"]),
+            Ok(Action::Detect(Some(PathBuf::from("D:/f"))))
+        );
+        assert_eq!(
+            run(&["detect", "--fixtures", "a", "--fixtures", "b"]),
+            Err("--fixtures is given more than once".to_owned())
+        );
+        assert_eq!(
+            run(&["verify-portable", "--out", "x"]),
+            Err("`verify-portable` does not take `--out`".to_owned())
         );
     }
 

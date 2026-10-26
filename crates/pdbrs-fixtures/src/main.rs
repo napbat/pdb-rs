@@ -5,8 +5,12 @@
 //! each fixture. A run with `--only` keeps the entries of the other fixtures from the earlier
 //! manifest. It exits with a failure code if a fixture with an available toolchain fails.
 //!
-//! The `tools` command installs `pdbtool` and builds `DIA2Dump` into `target/tools/bin`. The
-//! fixture manifest copies the tool records of `target/tools/manifest.json`.
+//! The `tools` command installs `pdbtool` and builds `DIA2Dump` and the Portable PDB verifier
+//! into `target/tools/bin`. The fixture manifest copies the tool records of
+//! `target/tools/manifest.json`.
+//!
+//! The `verify-portable` command compares the pdbrs and verifier dumps of the Portable PDB
+//! fixtures. The `detect` command opens each fixture output with the format facade of pdbrs.
 
 mod args;
 mod classify;
@@ -18,6 +22,7 @@ mod plan;
 mod step;
 mod toolchain;
 mod tools;
+mod verify;
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -48,6 +53,16 @@ fn main() -> ExitCode {
         }
         Ok(Action::Build(options)) => exit_code(build(options)),
         Ok(Action::Tools) => exit_code(tools::run(&workspace_root())),
+        Ok(Action::VerifyPortable(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_portable(&workspace, &fixtures))
+        }
+        Ok(Action::Detect(fixtures)) => {
+            let fixtures =
+                fixtures.unwrap_or_else(|| workspace_root().join("target").join("fixtures"));
+            exit_code(verify::detect(&fixtures))
+        }
         Err(error) => {
             eprintln!("error: {error}\n\n{USAGE}");
             ExitCode::from(2)

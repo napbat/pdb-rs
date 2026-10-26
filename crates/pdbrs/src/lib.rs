@@ -4,9 +4,17 @@
 //! records. It decodes common data, public and procedure symbols. Other record
 //! kinds remain available as raw bytes. Full semantic decoding is not complete.
 //!
+//! [`portable::Pdb`] reads standalone Portable PDBs: the metadata root, the
+//! heaps, the `#Pdb` stream, the `#~` table layout and the raw rows of the
+//! eight debug tables. Semantic decoding of the debug blobs is not complete.
+//!
+//! [`Pdb`] detects the format from the contents and opens the input with the
+//! native or the portable backend. It rejects ordinary CLI metadata (for
+//! example the metadata of an assembly) because it has no `#Pdb` stream.
+//!
 //! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
 //! repacks and new layouts of arbitrary streams. PDB semantic building and
-//! editing and Portable PDB parsing are not implemented.
+//! editing and Portable PDB writing are not implemented.
 //!
 //! [`format::probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
@@ -41,3 +49,4 @@ pub mod portable;
 mod test_support;
 
 pub use error::{Error, ErrorKind, Result};
+pub use format::{Format, Pdb};

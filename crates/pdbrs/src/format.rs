@@ -1,7 +1,10 @@
-//! Container signature identification.
+//! Container signature identification and format dispatch.
 //!
-//! This module identifies a container from the signature at the start of an input. It does not
+//! [`probe`] identifies a container from the signature at the start of an input. It does not
 //! parse or validate the container contents.
+//!
+//! [`Pdb`] detects the PDB format from the contents and opens the input with the matching
+//! backend: [`native::Pdb`] or [`portable::Pdb`]. It does not use the file name.
 //!
 //! # Limits of validation
 //!
@@ -13,9 +16,96 @@
 //!   metadata root in a CLI assembly has the same signature.
 //! - A match does not look at the remaining file. Thus a file that has a signature but no
 //!   payload gets a [`ContainerKind`] result.
+//!
+//! [`Pdb`] reports a Portable PDB only if the metadata has valid `#Pdb` and `#~` streams.
+
+use alloc::boxed::Box;
 
 use crate::io::ReadAt;
-use crate::{Error, ErrorKind, Result};
+use crate::{Error, ErrorKind, Result, native, portable};
+
+/// A PDB format that [`Pdb`] detects from the contents of its input.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum Format {
+    /// A native PDB in an MSF 7.00 container.
+    Native,
+    /// A standalone Portable PDB.
+    Portable,
+}
+
+/// A PDB of either format, opened with the backend that its contents select.
+///
+/// Use the root facade to detect the format. Then match the backend for format-specific
+/// operations. Each variant boxes its reader, so the two readers can have different sizes.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Pdb<S> {
+    /// A native PDB.
+    Native(Box<native::Pdb<S>>),
+    /// A standalone Portable PDB.
+    Portable(Box<portable::Pdb<S>>),
+}
+
+impl<S: ReadAt> Pdb<S> {
+    /// Detect the format of a stable positional source and open it with default limits.
+    ///
+    /// # Errors
+    ///
+    /// - The errors of [`probe`] if the input has no known signature.
+    /// - [`ErrorKind::UnsupportedVersion`] for a legacy MSF 2.00 PDB.
+    /// - [`ErrorKind::InvalidFormat`] for an `MPDB` payload. Decode it with
+    ///   [`portable::embedded::decode_embedded`] first.
+    /// - [`ErrorKind::MissingStream`] for CLI metadata without a `#Pdb` stream, for example
+    ///   the metadata of an assembly. The error context tells that it is not a Portable PDB.
+    /// - The errors of [`native::Pdb::read`] or [`portable::Pdb::read`].
+    pub fn read(source: S) -> Result<Self> {
+        match probe(&source)? {
+            ContainerKind::NativeMsf7 => native::Pdb::read(source)
+                .map(|pdb| Self::Native(Box::new(pdb))),
+            ContainerKind::CliMetadata => portable::Pdb::read(source)
+                .map(|pdb| Self::Portable(Box::new(pdb))),
+            ContainerKind::LegacyMsf2 => Err(Error::new(ErrorKind::UnsupportedVersion, Some(0))
+                .with_context("legacy MSF 2.00 PDBs are recognized but not supported")),
+            ContainerKind::EmbeddedPortablePdb => Err(Error::new(ErrorKind::InvalidFormat, Some(0))
+                .with_context(
+                    "an MPDB payload is an embedded Portable PDB; decode it with portable::embedded::decode_embedded",
+                )),
+        }
+    }
+
+    /// Return the detected format.
+    #[must_use]
+    pub const fn format(&self) -> Format {
+        match self {
+            Self::Native(_) => Format::Native,
+            Self::Portable(_) => Format::Portable,
+        }
+    }
+}
+
+impl<'a> Pdb<&'a [u8]> {
+    /// Detect the format of borrowed bytes and open them.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Pdb::read`].
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
+        Self::read(bytes)
+    }
+}
+
+#[cfg(all(feature = "std", any(unix, windows)))]
+impl Pdb<crate::io::FileReader> {
+    /// Open a file and detect its format from the contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns file I/O errors and the errors of [`Pdb::read`].
+    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::read(crate::io::FileReader::open(path)?)
+    }
+}
 
 /// The signature of a native MSF 7.00 container (32 bytes).
 const NATIVE_MSF7_SIGNATURE: &[u8] = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\0\0\0";

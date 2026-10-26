@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use crate::portable::metadata::{MetadataStream, TableId};
+
 /// A result returned by this crate.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
@@ -33,6 +35,144 @@ pub enum ErrorKind {
     LimitExceeded,
 }
 
+/// The location of an error in Portable PDB metadata.
+///
+/// Each field is optional. The stream is a metadata stream, for example `#~` or `#Blob`. The
+/// table, row and column identify a table cell. The heap offset is an offset into the heap
+/// that the stream names, or into the heap that the column refers to.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PortableLocation {
+    stream: Option<MetadataStream>,
+    table: Option<TableId>,
+    row: Option<u32>,
+    column: Option<&'static str>,
+    heap_offset: Option<u32>,
+}
+
+impl PortableLocation {
+    /// Make a location without fields.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            stream: None,
+            table: None,
+            row: None,
+            column: None,
+            heap_offset: None,
+        }
+    }
+
+    /// Set the metadata stream.
+    #[must_use]
+    pub const fn with_stream(mut self, stream: MetadataStream) -> Self {
+        self.stream = Some(stream);
+        self
+    }
+
+    /// Set the table.
+    #[must_use]
+    pub const fn with_table(mut self, table: TableId) -> Self {
+        self.table = Some(table);
+        self
+    }
+
+    /// Set the 1-based row number in the table.
+    #[must_use]
+    pub const fn with_row(mut self, row: u32) -> Self {
+        self.row = Some(row);
+        self
+    }
+
+    /// Set the column name, as the Portable PDB specification writes it.
+    #[must_use]
+    pub const fn with_column(mut self, column: &'static str) -> Self {
+        self.column = Some(column);
+        self
+    }
+
+    /// Set the heap offset. For the `#GUID` heap, the value is the 1-based GUID index.
+    #[must_use]
+    pub const fn with_heap_offset(mut self, offset: u32) -> Self {
+        self.heap_offset = Some(offset);
+        self
+    }
+
+    /// Return the metadata stream, if known.
+    #[must_use]
+    pub const fn stream(&self) -> Option<MetadataStream> {
+        self.stream
+    }
+
+    /// Return the table, if known.
+    #[must_use]
+    pub const fn table(&self) -> Option<TableId> {
+        self.table
+    }
+
+    /// Return the 1-based row number, if known.
+    #[must_use]
+    pub const fn row(&self) -> Option<u32> {
+        self.row
+    }
+
+    /// Return the column name, if known.
+    #[must_use]
+    pub const fn column(&self) -> Option<&'static str> {
+        self.column
+    }
+
+    /// Return the heap offset or GUID index, if known.
+    #[must_use]
+    pub const fn heap_offset(&self) -> Option<u32> {
+        self.heap_offset
+    }
+
+    /// Keep the fields of `self` and add the fields of `outer` that `self` does not have.
+    const fn merge(self, outer: Self) -> Self {
+        Self {
+            stream: or(self.stream, outer.stream),
+            table: or(self.table, outer.table),
+            row: or(self.row, outer.row),
+            column: or(self.column, outer.column),
+            heap_offset: or(self.heap_offset, outer.heap_offset),
+        }
+    }
+}
+
+/// Return `first` if it has a value, else `second`.
+const fn or<T: Copy>(first: Option<T>, second: Option<T>) -> Option<T> {
+    match first {
+        Some(value) => Some(value),
+        None => second,
+    }
+}
+
+impl fmt::Display for PortableLocation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut separator = "";
+        if let Some(stream) = self.stream {
+            write!(formatter, "stream {}", stream.name())?;
+            separator = ", ";
+        }
+        if let Some(table) = self.table {
+            write!(formatter, "{separator}table {table}")?;
+            separator = ", ";
+        }
+        if let Some(row) = self.row {
+            write!(formatter, "{separator}row {row}")?;
+            separator = ", ";
+        }
+        if let Some(column) = self.column {
+            write!(formatter, "{separator}column {column}")?;
+            separator = ", ";
+        }
+        if let Some(offset) = self.heap_offset {
+            write!(formatter, "{separator}heap offset {offset:#x}")?;
+        }
+        Ok(())
+    }
+}
+
 /// An error with an optional physical byte offset.
 #[derive(Debug)]
 pub struct Error {
@@ -41,6 +181,7 @@ pub struct Error {
     source: Option<nostdio::IoError>,
     context: Option<&'static str>,
     stream: Option<(u32, u64)>,
+    portable: Option<PortableLocation>,
 }
 
 impl Error {
@@ -53,6 +194,7 @@ impl Error {
             source: None,
             context: None,
             stream: None,
+            portable: None,
         }
     }
 
@@ -73,6 +215,7 @@ impl Error {
             source: Some(source),
             context: None,
             stream: None,
+            portable: None,
         }
     }
 
@@ -108,6 +251,25 @@ impl Error {
         self.stream
     }
 
+    /// Add a Portable PDB metadata location.
+    ///
+    /// The fields that the error already has stay. The function adds only the fields that
+    /// are absent, so an outer operation can add the table and row to a heap error.
+    #[must_use]
+    pub const fn with_portable(mut self, location: PortableLocation) -> Self {
+        self.portable = Some(match self.portable {
+            Some(current) => current.merge(location),
+            None => location,
+        });
+        self
+    }
+
+    /// Return the Portable PDB metadata location, if known.
+    #[must_use]
+    pub const fn portable_location(&self) -> Option<&PortableLocation> {
+        self.portable.as_ref()
+    }
+
     /// Return the static structure or operation description, if known.
     #[must_use]
     pub const fn context(&self) -> Option<&'static str> {
@@ -139,6 +301,9 @@ impl fmt::Display for Error {
         }
         if let Some((stream, offset)) = self.stream {
             write!(formatter, " in stream {stream} at {offset:#x}")?;
+        }
+        if let Some(location) = &self.portable {
+            write!(formatter, " in Portable PDB metadata: {location}")?;
         }
         if let Some(source) = &self.source {
             write!(formatter, ": {source}")?;

@@ -2,7 +2,8 @@
 
 Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
 Formats and record kinds outside those samples remain incomplete. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
-Portable PDB parsing and PDB semantic building and editing are not implemented.
+The library reads the metadata of standalone Portable PDBs and the raw rows of their eight debug tables (see [Implemented Portable PDB reading](#implemented-portable-pdb-reading)).
+Portable PDB blob decoding is partial, and Portable PDB writing and PDB semantic building and editing are not implemented.
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
@@ -26,6 +27,7 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
   It examines a bounded prefix, not container or record validity.
   `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
 - `Error` retains an error kind, physical or stream-relative location, operation context and a typed `nostdio::IoError`.
+  `Error::with_portable` adds a `PortableLocation`: metadata stream, table, row, column and heap offset.
 - `native::Identity` distinguishes modern GUID-and-age from legacy signature-and-age.
 - `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
 - `portable::custom` decodes and encodes the custom debug information blobs of all kinds in the Portable PDB specification and Roslyn (#24).
@@ -91,6 +93,38 @@ It reports a decoded stream that no other stream names, with the reason, and doe
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
 GitHub issues #2 to #10 record the implementation and the evidence for each area.
+
+## Implemented Portable PDB reading
+
+`portable::Pdb::open` opens a standalone Portable PDB under `std`. `Pdb::parse` borrows a byte slice.
+`Pdb::read` and `Pdb::with_options` accept any stable `ReadAt` source in both feature modes ([#22](https://github.com/napbat/pdbrs/issues/22)).
+`portable::ReadOptions` limits the stream count (64), the bytes of one heap value (64 MiB) and the bytes of `Pdb::stream_bytes` (64 MiB).
+
+Opening validates the metadata root, the stream headers and ranges, the `#Pdb` stream, the `#~` header, the table schema and the row extents.
+It does not read rows or heap values. `Pdb::row` and `Pdb::rows` read one row at a time from its computed offset.
+`Pdb::string`, `blob`, `user_string` and `guid` read one heap value and check it before allocation.
+
+| Area | Implemented | Not yet implemented |
+| --- | --- | --- |
+| Metadata root | `BSJB`, version 1.1, version string, stream headers, 4-byte alignment of stream offsets and sizes, ranges, overlaps and duplicate names; unknown streams stay in the header list | — |
+| `#Pdb` | PDB ID, entry point (nil or an external `MethodDef` row), referenced type-system tables and their row counts, exact stream size | — |
+| `#~` | Version 2.0, `HeapSizes`, `Valid` and `Sorted` masks, row counts up to `0xFFFFFF`, heap, table and coded index widths from local and external row counts, row extents. A table outside the debug schema with rows gives `InvalidFormat`; `#-` and delta `HeapSizes` flags give `UnsupportedVersion` | Uncompressed `#-` tables |
+| Heaps | `#Strings` termination, `#Blob` and `#US` length prefixes, `#GUID` indexes, the empty first entry and 16-byte GUID boundaries | — |
+| Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked | Blob decoding and ordering rules (#23); typed custom debug information on rows (#24) |
+| Dispatch | `pdbrs::Pdb` and `pdbrs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
+
+Read a complete Portable PDB with:
+
+```sh
+cargo run -p pdbrs --example portable -- path/to/input.pdb
+```
+
+The example reads every row and every heap value that a row refers to. It fails at the first value that it cannot read.
+The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `System.Reflection.Metadata`.
+`cargo run -p pdbrs-fixtures -- verify-portable` compares it with the pdbrs dump; `fixtures/README.md` describes the format.
+Evidence ([#22](https://github.com/napbat/pdbrs/issues/22)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) give dumps without differences.
+`cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
+It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
 
 ## Implemented MSF writing
 

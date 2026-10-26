@@ -154,13 +154,14 @@ generator builds with `--locked`, so Cargo does not change it.
 
 ## Consumer tools
 
-The `tools` command makes two independent consumers of PDB files. Other work compares the
-output of pdbrs with the output of these tools (#21).
+The `tools` command makes three independent consumers of PDB files. Other work compares the
+output of pdbrs with the output of these tools (#21, #22).
 
 | Tool | Source | Use |
 | --- | --- | --- |
 | `pdbtool` | The `pdbtool` crate 0.1.22 from crates.io. This is the version at the pinned `microsoft/pdb-rs` revision `2081a0dd` in `docs/reference/SOURCES.json`. | `check`, `pdz-encode`, `copy`, `compare`, `container` |
 | `DIA2Dump` | The DIA SDK sample of the latest Visual Studio installation with the x64 C++ tools. | Dumps a PDB or an MSFZ file through `msdia140.dll`. |
+| `PortableVerifier` | The C# program in `dotnet/verifier/`. It uses `System.Reflection.Metadata` from the .NET shared framework, so it needs no NuGet package. | Prints the canonical dump of a Portable PDB (see [Portable PDB verifier](#portable-pdb-verifier)). |
 
 Run this command from the workspace root. It takes no other arguments:
 
@@ -185,10 +186,14 @@ The command does these steps:
    platform toolset comes from the `Microsoft.VCToolsVersion.v<NNN>.default.txt` file of the
    installation, for example `v145` for Visual Studio 18.
 8. It copies `<VS>/DIA SDK/bin/amd64/msdia140.dll` next to `DIA2Dump.exe`.
-9. It writes `target/tools/manifest.json`.
+9. It runs `dotnet build fixtures/dotnet/verifier/PortableVerifier.csproj -c Release` with
+   `--artifacts-path target/tools/portable-verifier-build` and
+   `-o target/tools/bin/portable-verifier`. Then it runs the verifier with `--version`.
+10. It writes `target/tools/manifest.json`.
 
-The outputs are in `target/tools/bin/`: `pdbtool.exe`, `DIA2Dump.exe`, `DIA2Dump.pdb` and
-`msdia140.dll`. Each tool writes its command output to `target/tools/<tool>.log`.
+The outputs are in `target/tools/bin/`: `pdbtool.exe`, `DIA2Dump.exe`, `DIA2Dump.pdb`,
+`msdia140.dll` and `portable-verifier/PortableVerifier.dll`. Each tool writes its command
+output to `target/tools/<tool>.log`.
 
 `target/tools/manifest.json` has the generator, the workspace commit, the host and one
 record for each tool. Each record has:
@@ -196,10 +201,11 @@ record for each tool. Each record has:
 - the name, the status (`built`, `failed` or `unavailable`) and the reason
 - the path of the executable and the list of files that the tool needs
 - the version: the crate version and `cargo -V` for `pdbtool`; the Visual Studio version, the
-  platform toolset and the `msdia140.dll` file version for `DIA2Dump`
+  platform toolset and the `msdia140.dll` file version for `DIA2Dump`; the .NET SDK version
+  and the `System.Reflection.Metadata` and runtime versions for `PortableVerifier`
 - the source: the crate, its repository and the pinned revision for `pdbtool`; the Visual
   Studio, sample, `diaguids.lib`, `msdia140.dll`, MSBuild and copy paths and the two changes
-  for `DIA2Dump`
+  for `DIA2Dump`; the project file for `PortableVerifier`
 - each command with its working directory
 
 A tool without a prerequisite, for example Visual Studio or the DIA SDK, is `unavailable`. A
@@ -219,6 +225,75 @@ target/tools/bin/DIA2Dump -m target/scratch/demo-msfz.pdb
 `Number of PDBs with errors` of its output. Give an MSFZ file a name that ends in `.pdb`.
 Otherwise DIA2Dump reads the file as an executable. `llvm-pdbutil` does not read MSFZ files.
 
+## Portable PDB verifier
+
+`PortableVerifier` reads a Portable PDB with `System.Reflection.Metadata` (SRM) and prints a
+canonical text dump. pdbrs prints the same format. Compare the two dumps of each `portable-pdb`
+output of `manifest.json` with this command:
+
+```sh
+cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
+```
+
+The command writes `<fixture>.pdbrs.txt` and `<fixture>.srm.txt` to `target/verify-portable/`.
+It prints the line count and the number of different lines for each fixture, and the first
+different lines. It exits with a failure code if a dump fails or the dumps differ. Run the
+verifier alone with `dotnet target/tools/bin/portable-verifier/PortableVerifier.dll <file.pdb>`.
+
+SRM does not expose the stream headers, the `#~` header fields or the external row counts of
+the `#Pdb` stream. The verifier reads these values from the bytes and checks them against SRM:
+the heap offsets and sizes, the `#Pdb` offset, the PDB ID, the entry point, the local row
+counts and the row size of each table. Each row size depends on the index widths, so this
+check also confirms the widths. SRM does not expose the `VariableList` and `ConstantList`
+columns or the `StateMachineMethod` rows. The verifier reads them from the row bytes and checks
+them against the SRM views of the same data. A failed check stops the verifier with an error.
+
+### Dump format
+
+The dump is UTF-8 text with `\n` line ends. Each line has a keyword and `name=value` fields.
+Counts, row IDs and GUID indexes are decimal. Offsets, sizes, flags, masks and tokens are
+hexadecimal with a `0x` prefix. All offsets are from the start of the metadata root. The lines
+come in this order:
+
+| Keyword | Fields |
+| --- | --- |
+| `portable-dump` | `version`: the format version (1) |
+| `metadata` | `version`: the version string in quotes (bytes outside printable ASCII, `"` and `\` as `\xNN`); `streams`: the stream count |
+| `stream` | `name`, `offset`, `size`, for each stream header in file order |
+| `heap` | `name`, `size`, for `#Strings`, `#US`, `#Blob` and `#GUID`; the size of an absent heap is 0 |
+| `pdb` | `id`: the 20-byte PDB ID in hexadecimal; `entry-point`: the entry point token |
+| `pdb-rows` | `table`, `rows`, for each external table of the `#Pdb` stream |
+| `tables` | `version`, `heap-sizes`, `valid`, `sorted`: the `#~` header |
+| `index` | `heap=<name> width`, `table=<name> width` or `coded=<name> width`: the index widths of the heaps, of `MethodDef`, `Document`, `LocalVariable`, `LocalConstant` and `ImportScope`, and of `HasCustomDebugInformation` |
+| `table` | `name`, `id`, `rows`, `row-size` and `offset` (only if the table has rows), for the eight debug tables |
+| `row` | `table`, `id` and the raw column values, for each row of the eight debug tables in table and row order |
+
+The `row` columns use the names of the Portable PDB specification in lowercase with hyphens:
+heap offsets and tokens are hexadecimal, and row IDs and GUID indexes are decimal (0 is nil).
+
+The heap size is the size of its stream. SRM removes the zero padding after the last string of
+`#Strings` from its heap size. The verifier accepts a smaller SRM size only if zero bytes follow
+it.
+
+To extend the format, add new keywords after the `row` lines, for example decoded documents,
+sequence points or custom debug information. Add each new line type to the verifier and to
+`crates/pdbrs-fixtures/src/verify/dump.rs` together, and increase the version only if an existing
+line changes.
+
+### Format detection
+
+Open each output of `manifest.json` with the format facade `pdbrs::Pdb` with this command:
+
+```sh
+cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
+```
+
+It prints a Markdown table. A native PDB must open as `native`, and a Portable PDB as
+`portable`. An image is not a PDB. The CLI metadata of a .NET image must give the error for
+ordinary assembly metadata. An `MPDB` payload must give the error that names the embedded
+adapter, and its decoded Portable PDB must open as `portable`. The command exits with a failure
+code if a result differs.
+
 ## Read the fixtures
 
 Run the full native reader on each native PDB that `manifest.json` lists:
@@ -230,5 +305,14 @@ cargo run -p pdbrs --example native -- target/fixtures/msvc-x64-debug/demo.pdb
 The reader prints counts, undecoded record kinds and producer inconsistencies. It exits with a
 failure code while any record kind, subsection kind or stream has no typed decoder. GitHub issues
 #13 (MSVC and Clang C/C++) and #14 (.NET Windows PDBs) list the kinds that these fixtures still
-contain. `format::probe` identifies the portable PDBs as CLI metadata; GitHub issue #17 tracks
-Portable PDB parsing.
+contain.
+
+Read every row and heap value of a Portable PDB with:
+
+```sh
+cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-portable/artifacts/bin/CSharpDemo/debug/CSharpDemo.pdb
+```
+
+The example prints the stream headers, the heap sizes, the `#Pdb` fields and the row counts. It
+exits with a failure code at the first row or heap value that it cannot read. It does not decode
+the blob contents yet (#23, #24, #25).

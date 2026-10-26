@@ -1,4 +1,4 @@
-//! The consumer tools: `pdbtool` and `DIA2Dump`.
+//! The consumer tools: `pdbtool`, `DIA2Dump` and the Portable PDB verifier.
 //!
 //! The `tools` command installs or builds each tool into `target/tools/bin/` below the
 //! workspace root. It writes `target/tools/manifest.json` with one record for each tool. The
@@ -9,6 +9,7 @@ mod dia2dump;
 mod file_version;
 mod patch;
 mod pdbtool;
+pub mod verifier;
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -22,13 +23,14 @@ use crate::toolchain::Toolchains;
 type Builder = fn(&Paths, &mut Toolchains) -> Tool;
 
 /// The tool names and their builders, in manifest order.
-const TOOLS: [(&str, Builder); 2] = [
+const TOOLS: [(&str, Builder); 3] = [
     (pdbtool::NAME, pdbtool::build),
     (dia2dump::NAME, dia2dump::build),
+    (verifier::NAME, verifier::build),
 ];
 
 /// The tool names, in manifest order.
-const NAMES: [&str; 2] = [TOOLS[0].0, TOOLS[1].0];
+const NAMES: [&str; 3] = [TOOLS[0].0, TOOLS[1].0, TOOLS[2].0];
 
 /// The command that makes the tools.
 const COMMAND: &str = "cargo run -p pdbrs-fixtures -- tools";
@@ -258,6 +260,32 @@ pub fn consumer_tools(workspace: &Path) -> Value {
     ])
 }
 
+/// Return the main file of a built tool from the tools manifest of the workspace.
+///
+/// Return an error with the reason if the tool is not built or one of its files is missing.
+pub fn built_tool(workspace: &Path, name: &str) -> Result<PathBuf, String> {
+    let records = consumer_tools(workspace);
+    let Some(Value::Array(records)) = records.get("tools") else {
+        return Err("the tools manifest has no tools".to_owned());
+    };
+    let record = records
+        .iter()
+        .find(|record| record.get("name").and_then(Value::as_str) == Some(name))
+        .ok_or_else(|| format!("the tools manifest has no record of {name}"))?;
+    if record.get("status").and_then(Value::as_str) != Some(Status::Built.name()) {
+        let reason = record
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("no reason");
+        return Err(format!("{name} is not available: {reason}"));
+    }
+    record
+        .get("path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("the record of {name} has no path"))
+}
+
 /// Select one record for each tool from the text of a tools manifest.
 ///
 /// `exists` tells if a file exists.
@@ -335,7 +363,14 @@ mod tests {
         let mut failed = Tool::new("DIA2Dump");
         failed.status = Status::Failed;
         failed.reason = Some("MSBuild failed".to_owned());
-        let tools = [built("pdbtool", &["bin/pdbtool.exe"]), failed];
+        let tools = [
+            built("pdbtool", &["bin/pdbtool.exe"]),
+            failed,
+            built(
+                "PortableVerifier",
+                &["bin/portable-verifier/PortableVerifier.dll"],
+            ),
+        ];
         let text = render(&header, &tools);
         let manifest = json::parse(&text).unwrap();
         assert_eq!(
@@ -415,6 +450,10 @@ mod tests {
         let tools = [
             built("pdbtool", &["bin/pdbtool.exe"]),
             built("DIA2Dump", &["bin/DIA2Dump.exe", "bin/msdia140.dll"]),
+            built(
+                "PortableVerifier",
+                &["bin/portable-verifier/PortableVerifier.dll"],
+            ),
         ];
         let records = tool_records(Ok(manifest(&tools)), |_| true);
         assert_eq!(

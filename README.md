@@ -1,8 +1,9 @@
 # pdbrs
 
 pdbrs is a Rust library for Program Database (PDB) files. It reads native Windows PDB files
-(MSF 7.0), writes MSF 7.0 containers and identifies Portable .NET PDB files. The library
-supports `std` and `no_std + alloc`.
+(MSF 7.0), writes MSF 7.0 containers and reads the metadata of standalone Portable .NET PDB
+files. `pdbrs::Pdb` detects the format from the file contents. The library supports `std` and
+`no_std + alloc`.
 
 ## Status
 
@@ -11,7 +12,7 @@ supports `std` and `no_std + alloc`.
 | Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
 | Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. The writer makes no PDB semantic claim about the streams. |
 | Native PDB semantic building and editing | Not implemented. |
-| Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
+| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and the raw rows of the eight debug tables. Results match `System.Reflection.Metadata` for the four standalone fixtures ([#22](https://github.com/napbat/pdbrs/issues/22)). Blob decoding is partial and writing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
 | Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
@@ -81,6 +82,9 @@ Record kinds without a decoder stay available as raw bytes.
 # Read every stream and record of a native PDB and report undecoded data.
 cargo run -p pdbrs --example native -- path/to/file.pdb
 
+# Read every table row and heap value of a standalone Portable PDB.
+cargo run -p pdbrs --example portable -- path/to/file.pdb
+
 # Identify a container signature.
 cargo run -p pdbrs --example inspect -- path/to/file
 
@@ -117,9 +121,10 @@ committed. Automated tests do not read them; they use synthetic data.
 
 ## Consumer tools
 
-Compare the output of pdbrs with two independent consumers: Microsoft's `pdbtool` and
-`DIA2Dump` from the Visual Studio DIA SDK. This command installs `pdbtool` 0.1.22 and builds
-`DIA2Dump` into `target/tools/bin/`:
+Compare the output of pdbrs with three independent consumers: Microsoft's `pdbtool`,
+`DIA2Dump` from the Visual Studio DIA SDK and a .NET verifier that uses
+`System.Reflection.Metadata`. This command installs `pdbtool` 0.1.22 and builds `DIA2Dump`
+and the verifier into `target/tools/bin/`:
 
 ```sh
 cargo run -p pdbrs-fixtures -- tools
@@ -130,13 +135,21 @@ sample. It writes the version, source and path of each tool to `target/tools/man
 The fixture manifest copies these records. [fixtures/README.md](fixtures/README.md#consumer-tools)
 gives the steps and the use of the tools.
 
+Compare the Portable PDB fixtures with the verifier, and check the format detection of all
+fixture outputs:
+
+```sh
+cargo run -p pdbrs-fixtures -- verify-portable
+cargo run -p pdbrs-fixtures -- detect
+```
+
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `crates/pdbrs/` | The library, its examples and its integration tests. |
-| `crates/pdbrs-fixtures/` | The fixture generator and the `tools` command for the consumer tools. |
-| `fixtures/` | Demo program sources for the fixtures. |
+| `crates/pdbrs-fixtures/` | The fixture generator, the `tools` command for the consumer tools and the `verify-portable` and `detect` commands. |
+| `fixtures/` | Demo program sources for the fixtures and the .NET Portable PDB verifier. |
 | `docs/design/` | The reader and writer design and the implementation evidence. |
 | `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
 

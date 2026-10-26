@@ -28,3 +28,7 @@ required-features = ["std"]
 [[example]]
 name = "msf"
 required-features = ["std"]
+
+[[example]]
+name = "portable"
+required-features = ["std"]

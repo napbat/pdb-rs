@@ -66,6 +66,48 @@ pub fn classify(bytes: &[u8]) -> Kind {
 /// The payload is the data of the first debug directory entry of type 17. Its size is the
 /// `SizeOfData` field of the entry.
 pub fn embedded_pdb_payload(image: &[u8]) -> Option<&[u8]> {
+    let (debug_offset, debug_size) = data_directory(image, 6)?;
+    (0..debug_size / 28).find_map(|index| {
+        let entry = debug_offset + index * 28;
+        if read_u32(image, entry + 12)? != DEBUG_TYPE_EMBEDDED_PORTABLE_PDB {
+            return None;
+        }
+        let size = to_usize(read_u32(image, entry + 16)?)?;
+        let payload = to_usize(read_u32(image, entry + 24)?)?;
+        let data = image.get(payload..payload.checked_add(size)?)?;
+        data.starts_with(EMBEDDED_SIGNATURE).then_some(data)
+    })
+}
+
+/// Find the CLI metadata (the `BSJB` metadata root and its streams) of a .NET image.
+///
+/// The CLI header is data directory 14. Its `MetaData` field (offset 8) gives the RVA and the
+/// size of the metadata.
+pub fn cli_metadata(image: &[u8]) -> Option<&[u8]> {
+    let (header, size) = data_directory(image, 14)?;
+    if size < 16 {
+        return None;
+    }
+    let (rva, size) = (read_u32(image, header + 8)?, read_u32(image, header + 12)?);
+    let start = pe_offset(image, rva)?;
+    image.get(start..start.checked_add(to_usize(size)?)?)
+}
+
+/// Return the file offset and the size of data directory `index` of a PE image.
+fn data_directory(image: &[u8], index: usize) -> Option<(usize, usize)> {
+    let (directories, _, _) = pe_layout(image)?;
+    let directory_count = to_usize(read_u32(image, directories - 4)?)?;
+    if directory_count <= index {
+        return None;
+    }
+    let rva = read_u32(image, directories + index * 8)?;
+    let size = to_usize(read_u32(image, directories + index * 8 + 4)?)?;
+    Some((pe_offset(image, rva)?, size))
+}
+
+/// Return the file offsets of the data directories and the section headers, and the
+/// section count.
+fn pe_layout(image: &[u8]) -> Option<(usize, usize, usize)> {
     let pe = to_usize(read_u32(image, 0x3c)?)?;
     if image.get(pe..pe + 4)? != b"PE\0\0" {
         return None;
@@ -78,24 +120,13 @@ pub fn embedded_pdb_payload(image: &[u8]) -> Option<&[u8]> {
         0x20b => optional + 112,
         _ => return None,
     };
-    let directory_count = to_usize(read_u32(image, directories - 4)?)?;
-    if directory_count <= 6 {
-        return None;
-    }
-    let debug_rva = read_u32(image, directories + 6 * 8)?;
-    let debug_size = to_usize(read_u32(image, directories + 6 * 8 + 4)?)?;
-    let sections = optional + optional_size;
-    let debug_offset = rva_to_offset(image, sections, section_count, debug_rva)?;
-    (0..debug_size / 28).find_map(|index| {
-        let entry = debug_offset + index * 28;
-        if read_u32(image, entry + 12)? != DEBUG_TYPE_EMBEDDED_PORTABLE_PDB {
-            return None;
-        }
-        let size = to_usize(read_u32(image, entry + 16)?)?;
-        let payload = to_usize(read_u32(image, entry + 24)?)?;
-        let data = image.get(payload..payload.checked_add(size)?)?;
-        data.starts_with(EMBEDDED_SIGNATURE).then_some(data)
-    })
+    Some((directories, optional + optional_size, section_count))
+}
+
+/// Translate an RVA to a file offset through the section headers.
+fn pe_offset(image: &[u8], rva: u32) -> Option<usize> {
+    let (_, sections, count) = pe_layout(image)?;
+    rva_to_offset(image, sections, count, rva)
 }
 
 fn rva_to_offset(image: &[u8], sections: usize, count: usize, rva: u32) -> Option<usize> {
