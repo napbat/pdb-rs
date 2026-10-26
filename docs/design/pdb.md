@@ -3,7 +3,8 @@
 Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
 Formats and record kinds outside those samples remain incomplete. Portable PDB parsing and PDB writing are not implemented.
 
-Track native implementation work in [NATIVE-0001](../issues/0001-native-pdb-support.md).
+GitHub issue [#1](https://github.com/napbat/pdbrs/issues/1) and its sub-issues track native implementation work.
+GitHub issue [#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
 The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
 
 ## Implemented primitives
@@ -56,7 +57,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot | Writing and repacking |
-| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | Non-empty `/TMCache`, `/LinkInfo` version 1 and compressed injected sources |
+| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | Non-empty `/TMCache`, `/LinkInfo` version 1, .NET document records (compression byte 101) and run-length, Huffman or LZ injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
@@ -156,6 +157,8 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | Module | Responsibility |
 | --- | --- |
 | `io.rs` | Positional sources, slice adapters and feature-gated file adapters |
+| `compression.rs` | Crate-private raw DEFLATE decoding and encoding with size limits; the only user of `miniz_oxide` |
+| `crypto.rs` | Crate-private SHA-2 digests; the only user of `sha2` |
 | `native.rs` and `native/` | Native reader, editor, builder, identity and capability reporting |
 | `native/msf.rs` and `native/msf/` | Superblock, directory, block maps, stream access and container writing |
 | `native/codeview.rs` and `native/codeview/` | Record framing, type records, symbol records and numeric leaves |
@@ -171,7 +174,7 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `portable/metadata.rs` and `portable/metadata/` | Metadata root, tables, heaps, compressed integers and coded indexes |
 | `portable/debug.rs` and `portable/debug/` | Documents, sequence points, scopes, locals, imports and state machines |
 | `portable/custom.rs` and `portable/custom/` | Known custom debug codecs and raw unknown payloads |
-| `portable/embedded.rs` | Embedded PDB envelopes and bounded compression/decompression |
+| `portable/embedded.rs` | Embedded PDB envelopes and embedded-source blobs, also used by native .NET document records |
 | `portable/write.rs` and `portable/write/` | Row assignment, table sorting, heap layout and reference rewriting |
 | `format.rs` | Checked format detection and dispatch to the selected backend |
 | `error.rs` | Error kinds and structured locations |
@@ -349,7 +352,12 @@ Enforce a decompression limit and require the output length to match the declare
 The decompressed result must pass the ordinary portable reader's checks.
 Embedded source is a different custom blob: its format field distinguishes raw bytes from compressed content.
 Apply independent size checks to that blob. Do not confuse it with the embedded PDB envelope.
-Keep compression usable without `std`; choose a codec after checking dependency and safety requirements.
+Use `miniz_oxide` for raw DEFLATE and `sha2` for SHA-2 digests. Both work with `no_std + alloc`.
+Only `compression.rs` names `miniz_oxide`, and only `crypto.rs` names `sha2`. Keep both modules crate-private.
+Do not expose their types, traits or errors in the public API. Map their failures to `Error` with a location.
+Decode into a buffer of the declared size. Fail on short output, extra output or unused input.
+Report checksums in other algorithms, such as SHA-1 or MD5, as not verified. Do not report them as errors.
+Add another digest only when a fixture needs it, and only inside `crypto.rs`.
 
 
 ## Three distinct write guarantees
@@ -650,7 +658,8 @@ The full-read example read all 17 native fixtures to the end. It reported these 
   Incremental links add `S_TRAMPOLINE`, `S_REGREL32_ENCTMP`, a non-empty `/TMCache` and the streams it uses.
   FASTLINK PDBs add `S_FASTLINK` and C13 subsection `0xfd`.
 - .NET Windows PDBs (#14): managed procedures and slots, `S_OEM`, `S_MANCONSTANT`, `S_TOKENREF`,
-  compressed injected sources and the `sourcelink` named stream. `llvm-pdbutil` 22.1.6 cannot dump their symbols.
+  .NET document records in `/src/files/` streams (compression byte 101) and the `sourcelink` named stream.
+  `llvm-pdbutil` 22.1.6 cannot dump their symbols.
 
 The fixtures also exposed two producer defects that pdbrs reports without failing:
 

@@ -1,6 +1,6 @@
 # Native PDB reference snapshots
 
-These are upstream documents, not the pdbrs specification. Read the [design](../design/pdb.md) and the [native support ticket](../issues/0001-native-pdb-support.md) for project requirements.
+These are upstream documents, not the pdbrs specification. Read the [design](../design/pdb.md) and GitHub issues [#1](https://github.com/napbat/pdbrs/issues/1) (native) and [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) for project requirements.
 
 ## Sources
 
@@ -43,5 +43,5 @@ The imported documents retain their upstream license terms. The provenance manif
 2. Enumerate the complete documentation subtree at that commit. Include its license files.
 3. Download the source files without rendering or rewriting them.
 4. Verify each file against its Git blob ID. Record its SHA-256 digest and byte count.
-5. Update `SOURCES.json`, this index and the ticket's document inventory together.
+5. Update `SOURCES.json` and this index together. Record coverage changes in the GitHub issues.
 6. Review new, changed and removed formats. Do not remove coverage requirements merely because upstream removed a document.

@@ -114,5 +114,5 @@ cargo run -p pdbrs --example native -- target/fixtures/msvc-x64-debug/demo.pdb
 The reader prints counts, undecoded record kinds and producer inconsistencies. It exits with a
 failure code while any record kind, subsection kind or stream has no typed decoder. GitHub issues
 #13 (MSVC and Clang C/C++) and #14 (.NET Windows PDBs) list the kinds that these fixtures still
-contain. `format::probe` identifies the portable PDBs as CLI metadata; Portable PDB parsing is
-future work.
+contain. `format::probe` identifies the portable PDBs as CLI metadata; GitHub issue #17 tracks
+Portable PDB parsing.

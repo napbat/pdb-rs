@@ -88,6 +88,16 @@ Put each crate in `crates/<crate-name>/`. The paths below are relative to each c
 - Make sure that tests do not depend on execution order or shared mutable state.
 - Record benchmark measurements with their method and limits in `docs/benchmarks/` when benchmarks are added.
 
+## Tracking
+
+- Track all work in GitHub issues in `napbat/pdbrs`. Do not add ticket or tracking files to the
+  repository.
+- Put the scope and acceptance criteria of each work area in its issue. Link a sub-issue to its
+  parent issue.
+- Record verification evidence as an issue comment. Close an issue only when all its acceptance
+  criteria pass.
+- Refer to issues by number, for example `#1`, in documentation and commit messages.
+
 ## Working copies
 
 - Use one git worktree for each branch when agents work in parallel.

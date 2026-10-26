@@ -12,9 +12,8 @@ pdbrs is a Rust library for Program Database (PDB) files. It reads native Window
 | Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
-[NATIVE-0001](docs/issues/0001-native-pdb-support.md) and GitHub issue
-[#1](https://github.com/napbat/pdbrs/issues/1) track native work; GitHub issue
-[#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
+GitHub issue [#1](https://github.com/napbat/pdbrs/issues/1) and its sub-issues track native work.
+GitHub issue [#17](https://github.com/napbat/pdbrs/issues/17) tracks Portable PDB work.
 The [design](docs/design/pdb.md) lists each implemented area and its limits.
 
 ## Use
@@ -107,7 +106,6 @@ committed. Automated tests do not read them; they use synthetic data.
 | `crates/pdbrs-fixtures/` | The fixture generator. |
 | `fixtures/` | Demo program sources for the fixtures. |
 | `docs/design/` | The reader and writer design and the implementation evidence. |
-| `docs/issues/` | Repository copies of tracking issues. |
 | `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
 
 ## Development
