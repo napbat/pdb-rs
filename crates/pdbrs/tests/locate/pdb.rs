@@ -32,7 +32,7 @@ use pdbrs::native::lines::{
     DEBUG_S_FILECHKSMS, DEBUG_S_INLINEELINES, DEBUG_S_LINES, SubsectionKind,
 };
 use pdbrs::native::locate::{Location, SourceLine, SymbolLocator};
-use pdbrs::native::msf::{MsfBuilder, WriteOptions};
+use pdbrs::native::msf::{MsfBuilder, MsfWriteOptions};
 
 use crate::{annotation, lines_subsection, signed, u32s};
 
@@ -325,7 +325,7 @@ fn pdb_bytes(inlinee_lines: bool, ids: bool, separated: bool) -> Vec<u8> {
         };
     }
     builder
-        .plan(WriteOptions::default())
+        .plan(MsfWriteOptions::default())
         .unwrap()
         .to_vec()
         .unwrap()
@@ -363,7 +363,7 @@ fn notm_pdb_bytes() -> Vec<u8> {
         builder.push(stream.as_slice()).unwrap();
     }
     builder
-        .plan(WriteOptions::default())
+        .plan(MsfWriteOptions::default())
         .unwrap()
         .to_vec()
         .unwrap()

@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 use super::layout::{Fragment, Layout, Span};
-use super::{MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, WriteOptions};
+use super::{MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, MsfzWriteOptions};
 use crate::ErrorKind;
 use crate::native::msfz::MsfzLimits;
 
@@ -19,7 +19,7 @@ fn fragments(layout: &Layout) -> Vec<Option<Vec<Fragment>>> {
 #[test]
 fn a_stream_larger_than_4_gib_has_one_fragment_for_each_chunk() {
     let size = (5_u64 << 30) + 7;
-    let options = WriteOptions::default().with_max_chunk_size(MAX_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MAX_CHUNK_SIZE);
     let layout = Layout::new(&[Some(0), Some(size), None, Some(3)], &options).unwrap();
     assert_eq!(layout.chunk_count(), 6);
     let all = fragments(&layout);
@@ -58,7 +58,7 @@ fn a_stream_larger_than_4_gib_has_one_fragment_for_each_chunk() {
 
 #[test]
 fn one_stream_per_chunk_starts_each_stream_at_offset_0() {
-    let options = WriteOptions::default()
+    let options = MsfzWriteOptions::default()
         .with_max_chunk_size(MIN_CHUNK_SIZE)
         .with_one_stream_per_chunk(true);
     let layout = Layout::new(&[Some(10), Some(0), None, Some(5000), Some(1)], &options).unwrap();
@@ -80,7 +80,7 @@ fn one_stream_per_chunk_starts_each_stream_at_offset_0() {
 
 #[test]
 fn an_empty_stream_inside_a_chunk_has_no_fragments() {
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let layout = Layout::new(&[Some(100), Some(0), Some(100)], &options).unwrap();
     assert_eq!(layout.chunk_count(), 1);
     assert_eq!(fragments(&layout)[1], Some(Vec::new()));
@@ -90,7 +90,7 @@ fn an_empty_stream_inside_a_chunk_has_no_fragments() {
 #[test]
 fn the_chunk_count_is_limited_before_allocation() {
     // 2^40 bytes in 4 KiB chunks need 2^28 chunks: more than a 64 MiB Chunk Table holds.
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let error = Layout::new(&[Some(1 << 40)], &options).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
 
@@ -103,7 +103,7 @@ fn the_chunk_count_is_limited_before_allocation() {
 
 #[test]
 fn the_total_size_must_fit_in_u64() {
-    let options = WriteOptions::default().with_max_chunk_size(MAX_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MAX_CHUNK_SIZE);
     let limits = MsfzLimits::default().with_max_chunk_table_bytes(u32::MAX);
     let error = Layout::new(&[Some(u64::MAX), Some(1)], &options.with_limits(limits)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
@@ -111,7 +111,7 @@ fn the_total_size_must_fit_in_u64() {
 
 #[test]
 fn the_directory_size_is_checked_before_allocation() {
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let layout = Layout::new(&[Some(1 << 20), None], &options).unwrap();
     // 256 fragments of 12 bytes, the end marker and the nil record.
     let size = 256 * 12 + 4 + 4;

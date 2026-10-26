@@ -143,7 +143,8 @@ impl<S: ReadAt> Pdb<S> {
     /// The parts keep the version string, the entry point, the external row counts, the row
     /// IDs and the row order. The `#Blob`, `#US` and `#GUID` heaps get the source entries in
     /// heap order without duplicates. The `#Strings` heap gets the strings that the rows refer
-    /// to. A plan of the parts with [`IdPolicy::ContentDerived`](super::IdPolicy) gives the
+    /// to. A plan of the parts with
+    /// [`IdentityPolicy::ContentDerived`](crate::portable::IdentityPolicy::ContentDerived) gives the
     /// same bytes as a deterministic `System.Reflection.Metadata` build of the same content,
     /// if all strings are ASCII.
     ///

@@ -22,16 +22,6 @@ use crate::native::output::{Output, no_memory, to_u32};
 use crate::native::{Identity, IdentityPolicy, Producer};
 use crate::{Error, ErrorKind, Result};
 
-/// The values that the `RSDS` debug entry of the matching image must hold.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct PeMatch {
-    /// The GUID bytes in their serialized order.
-    pub guid: [u8; 16],
-    /// The age: the DBI age of the PDB.
-    pub age: u32,
-}
-
 /// The hash function and the name equality of the named-stream map.
 struct NameKeys<'s> {
     /// The string buffer.
@@ -278,8 +268,8 @@ impl InfoBuilder {
 
     /// Apply an identity policy to this stream and to the DBI header age `dbi_age`.
     ///
-    /// Return the values for the `RSDS` debug entry of the matching image. Write the
-    /// returned age to the image if the policy changed it.
+    /// Return the identity that the `RSDS` debug entry of the matching image must hold: the
+    /// GUID and the DBI age. Write the returned age to the image if the policy changed it.
     ///
     /// # Errors
     ///
@@ -287,7 +277,11 @@ impl InfoBuilder {
     ///   larger than the Info age.
     /// - [`ErrorKind::LimitExceeded`] for [`IdentityPolicy::IncrementAge`] if the age is
     ///   `u32::MAX`.
-    pub fn apply_identity(&mut self, policy: IdentityPolicy, dbi_age: &mut u32) -> Result<PeMatch> {
+    pub fn apply_identity(
+        &mut self,
+        policy: IdentityPolicy,
+        dbi_age: &mut u32,
+    ) -> Result<Identity> {
         match policy {
             IdentityPolicy::Preserve => {
                 if *dbi_age > self.age {
@@ -312,7 +306,7 @@ impl InfoBuilder {
                 *dbi_age = age;
             }
         }
-        Ok(PeMatch {
+        Ok(Identity::Modern {
             guid: self.guid,
             age: *dbi_age,
         })

@@ -10,7 +10,7 @@ mod program;
 
 use std::error::Error;
 
-use pdbrs::native::write::BuildOptions;
+use pdbrs::native::BuildOptions;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -20,8 +20,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(usage.into());
     }
     let options = BuildOptions::default();
-    let bytes = program::build()?.plan(&options)?.to_vec()?;
-    if bytes != program::build()?.plan(&options)?.to_vec()? {
+    let bytes = program::build()?.plan(options)?.to_vec()?;
+    if bytes != program::build()?.plan(options)?.to_vec()? {
         return Err("two plans of the same records give different bytes".into());
     }
     std::fs::write(&output, &bytes)?;

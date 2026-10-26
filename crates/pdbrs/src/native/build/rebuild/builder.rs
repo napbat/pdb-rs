@@ -3,6 +3,10 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use super::super::{
+    BuildOptions, IdHandle, ModuleHandle, ModuleSymbolHandle, PdbBuilder, Resolver, StreamHandle,
+    SymbolHandle, TypeHandle,
+};
 use super::{NamedContent, PdbContents};
 use crate::native::Identity;
 use crate::native::IdentityPolicy;
@@ -12,7 +16,6 @@ use crate::native::auxiliary::{
 };
 use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdRecord;
-use crate::native::codeview::index::{ModuleIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{
     ModuleTypeReference, ProcedureReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_MOD_TYPEREF,
     S_PROCREF, S_TOKENREF, Symbol, SymbolData,
@@ -21,15 +24,10 @@ use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::dbi::OwnedModule;
 use crate::native::injected_source::SourceHeaderBlock;
 use crate::native::lines::ModuleLines;
-use crate::native::msf::StreamId;
-use crate::native::msf::WriteOptions;
+use crate::native::msf::{MsfWriteOptions, StreamId};
 use crate::native::names::{StringTable, StringTableBuilder};
 use crate::native::symbols::{SymbolOffset, ThunkTable};
 use crate::native::types::{TypeHashes, TypeStream};
-use crate::native::write::{
-    BuildOptions, IdHandle, ModuleSymbolHandle, PdbBuilder, Resolver, StreamHandle, SymbolHandle,
-    TypeHandle,
-};
 use crate::{Error, ErrorKind, Result};
 
 /// The handles of the module symbol records by module index and module
@@ -64,34 +62,35 @@ impl PdbContents {
     /// symbol indexes and the named-stream map. The container keeps the page
     /// size of the source.
     ///
-    /// To select another page size, change the `msf` field, for example with
-    /// [`WriteOptions::with_page_size`]. The plan rejects a source page size
-    /// of 65536 bytes (see [`WriteOptions::with_page_size`]).
+    /// To select another page size, replace the container options, for
+    /// example with [`BuildOptions::with_msf`] and
+    /// [`MsfWriteOptions::with_page_size`]. The plan rejects a source page
+    /// size of 65536 bytes (see [`MsfWriteOptions::with_page_size`]).
     #[must_use]
     pub fn build_options(&self) -> BuildOptions {
         let header = self.tpi.0.header();
         let producer = header.producer();
-        BuildOptions {
-            msf: WriteOptions::default().with_page_size(self.page_size),
-            hash_layout: producer,
-            hash_buckets: header.hash_bucket_count,
-            index_producer: producer,
-            info_producer: producer,
+        BuildOptions::default()
+            .with_msf(MsfWriteOptions::default().with_page_size(self.page_size))
+            .with_type_hash_producer(producer)
+            .with_hash_buckets(header.hash_bucket_count)
+            .with_index_producer(producer)
+            .with_info_producer(producer)
             // A source without a hash stream keeps none, for example the
             // .NET fixture of #14.
-            type_hash_stream: header.hash_stream.is_some(),
-            id_hash_stream: self
-                .ipi
-                .as_ref()
-                .is_none_or(|(ipi, _)| ipi.header().hash_stream.is_some()),
-        }
+            .with_type_hash_stream(header.hash_stream.is_some())
+            .with_id_hash_stream(
+                self.ipi
+                    .as_ref()
+                    .is_none_or(|(ipi, _)| ipi.header().hash_stream.is_some()),
+            )
     }
 
     /// Decode every record and give the decoded values to a new builder.
     ///
     /// `policy` sets the identity of the new PDB (see [`IdentityPolicy`]).
-    /// Read the matching values for the image with
-    /// [`PdbWritePlan::pe_match`](crate::native::write::PdbWritePlan::pe_match).
+    /// Read the identity for the image with
+    /// [`PdbWritePlan::identity`](crate::native::PdbWritePlan::identity).
     ///
     /// # Errors
     ///
@@ -136,7 +135,7 @@ impl PdbContents {
         }
         for adjuster in adjusters(tpi, tpi_hash.as_deref())? {
             let handle = TypeHandle(position(adjuster.index, tpi.header().index_begin)?);
-            builder.add_type_hash_adjuster(handle, adjuster.name_offset.0)?;
+            builder.add_type_hash_adjuster(handle, adjuster.name_offset)?;
         }
         if let Some((ipi, ipi_hash)) = &self.ipi {
             for record in ipi.records() {
@@ -144,7 +143,7 @@ impl PdbContents {
             }
             for adjuster in adjusters(ipi, ipi_hash.as_deref())? {
                 let handle = IdHandle(position(adjuster.index, ipi.header().index_begin)?);
-                builder.add_id_hash_adjuster(handle, adjuster.name_offset.0)?;
+                builder.add_id_hash_adjuster(handle, adjuster.name_offset)?;
             }
         }
         Ok(())
@@ -267,12 +266,8 @@ impl PdbContents {
                     let wide = matches!(symbol.data(), SymbolData::SymbolReference(_));
                     builder.add_symbol_with(move |resolver, out| {
                         let mut reference = reference;
-                        reference.offset =
-                            ModuleSymbolOffset(resolver.module_symbol_offset(target)?);
-                        reference.module = resolver
-                            .module_number(target.module())?
-                            .checked_sub(1)
-                            .map(|index| ModuleIndex(u32::from(index)));
+                        reference.offset = resolver.module_symbol_offset(target)?;
+                        reference.module = Some(resolver.module_index(target.module())?);
                         let data = if wide {
                             SymbolData::SymbolReference(reference)
                         } else {
@@ -296,8 +291,7 @@ impl PdbContents {
     ) -> Result<()> {
         for (index, stream) in self.modules.iter().enumerate() {
             let Some(stream) = stream else { continue };
-            let handle =
-                crate::native::write::ModuleHandle(u32::try_from(index).unwrap_or(u32::MAX));
+            let handle = ModuleHandle(u32::try_from(index).unwrap_or(u32::MAX));
             let module = builder.module_mut(handle)?;
             for offset in &stream.global_refs()? {
                 module.push_global_ref(symbol_handle(shared, offset)?)?;
@@ -513,7 +507,7 @@ fn cache_handles(
 fn encode_cache(
     cache: &TmCache<'_>,
     handles: &[Option<StreamHandle>],
-    resolver: &crate::native::write::Resolver<'_>,
+    resolver: &Resolver<'_>,
     out: &mut Vec<u8>,
 ) -> Result<()> {
     let mut builder = TmCacheBuilder::new();

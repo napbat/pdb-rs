@@ -35,7 +35,7 @@ use std::path::Path;
 use pdbrs::io::FileReader;
 use pdbrs::io::copy_exact_file;
 use pdbrs::native::container::Container;
-use pdbrs::native::msf::{OldDirectoryPolicy, StreamId, WriteOptions};
+use pdbrs::native::msf::{MsfWriteOptions, OldDirectoryPolicy, StreamId};
 use pdbrs::native::msfz::{self, Codec};
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
@@ -78,7 +78,7 @@ fn copy(arguments: &[String]) -> Outcome {
 
 /// Write a repacked container.
 fn repack(arguments: &[String]) -> Outcome {
-    let mut options = WriteOptions::default();
+    let mut options = MsfWriteOptions::default();
     let mut source_page_size = false;
     let mut policy = OldDirectoryPolicy::default();
     let mut paths = Vec::new();
@@ -121,7 +121,7 @@ fn repack(arguments: &[String]) -> Outcome {
 
 /// Write an MSFZ container with the options of `pdbtool pdz-encode`.
 fn pdz_encode(arguments: &[String]) -> Outcome {
-    let mut options = msfz::WriteOptions::default();
+    let mut options = msfz::MsfzWriteOptions::default();
     let mut policy = OldDirectoryPolicy::default();
     let mut paths = Vec::new();
     let mut rest = arguments.iter();

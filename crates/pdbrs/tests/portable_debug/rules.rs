@@ -322,13 +322,9 @@ fn document_and_method_rules_are_checked() {
 #[test]
 fn the_method_count_comes_from_the_options_or_the_pdb_stream() {
     let synthetic = Synthetic::valid();
-    let options = ValidateOptions {
-        method_def_count: Some(5),
-    };
+    let options = ValidateOptions::default().with_method_def_count(5);
     let error = validate_with(&synthetic, options).unwrap_err();
     expect(&error, ErrorKind::InvalidFormat, "MethodDef row count");
-    let options = ValidateOptions {
-        method_def_count: Some(4),
-    };
+    let options = ValidateOptions::default().with_method_def_count(4);
     assert!(validate_with(&synthetic, options).is_ok());
 }

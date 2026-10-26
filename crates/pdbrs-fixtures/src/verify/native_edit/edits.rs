@@ -18,9 +18,8 @@ use pdbrs::native::codeview::symbol::{
 use pdbrs::native::codeview::type_record::{
     Class, ClassKind, ClassOptions, MemberAttributes, TypeLeaf,
 };
-use pdbrs::native::info::PeMatch;
 use pdbrs::native::symbols::{HashTable, indexed_name};
-use pdbrs::native::{IdentityPolicy, Pdb, PdbEditor};
+use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);
@@ -138,8 +137,8 @@ pub(crate) struct Edited {
     pub bytes: Vec<u8>,
     /// The streams that the plan changed, removed or added.
     pub changed: Vec<u32>,
-    /// The values for the image.
-    pub pe_match: PeMatch,
+    /// The identity for the image.
+    pub identity: Identity,
     /// The values that the lookups must find.
     pub expect: Expectation,
     /// The parts of the edit that the PDB does not allow, for example a rename without a
@@ -189,7 +188,7 @@ pub(crate) fn apply(edit: Edit, source: &[u8]) -> Result<Outcome, String> {
         }
     };
     prepared.map_err(|error| format!("cannot prepare the edit: {error}"))?;
-    let plan = match editor.plan() {
+    let plan = match editor.plan(EditOptions::default()) {
         Ok(plan) => plan,
         Err(error) => return Ok(Outcome::Rejected(error)),
     };
@@ -199,7 +198,7 @@ pub(crate) fn apply(edit: Edit, source: &[u8]) -> Result<Outcome, String> {
     Ok(Outcome::Edited(Box::new(Edited {
         bytes,
         changed: plan.changed_streams().iter().map(|id| id.0).collect(),
-        pe_match: plan.pe_match(),
+        identity: plan.identity(),
         expect,
         notes,
     })))

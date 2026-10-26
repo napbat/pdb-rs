@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use pdbrs::ErrorKind;
+use pdbrs::io::copy_exact_file;
 use pdbrs::portable::Pdb;
 
 use crate::{parts_with_methods, plan};
@@ -47,7 +48,7 @@ fn copy_exact_file_copies_the_source() {
     let pdb = Pdb::open(&source).unwrap();
     let path = directory.join("copy.pdb");
     assert_eq!(
-        pdb.copy_exact_file(&path).unwrap(),
+        copy_exact_file(pdb.source(), &path).unwrap(),
         u64::try_from(bytes.len()).unwrap()
     );
     assert_eq!(fs::read(&path).unwrap(), bytes);

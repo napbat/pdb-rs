@@ -16,9 +16,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use pdbrs::portable::Pdb;
+use pdbrs::io::copy_exact;
 use pdbrs::portable::embedded::decode_embedded;
-use pdbrs::portable::write::{ChecksumAlgorithm, IdPolicy};
+use pdbrs::portable::write::ChecksumAlgorithm;
+use pdbrs::portable::{IdentityPolicy, Pdb};
 
 use super::{
     Comparison, EMBEDDED_LIMIT, Input, SHOWN_DIFFERENCES, comparisons, differences, outputs, read,
@@ -78,20 +79,20 @@ fn check(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, S
     };
     let pdb = Pdb::parse(&original).map_err(pdbrs)?;
     let mut copy = Vec::new();
-    pdb.copy_exact(&mut copy).map_err(pdbrs)?;
+    copy_exact(pdb.source(), &mut copy).map_err(pdbrs)?;
     let plan = pdb
         .to_parts()
-        .and_then(|parts| parts.plan(IdPolicy::ContentDerived))
+        .and_then(|parts| parts.plan(IdentityPolicy::ContentDerived))
         .map_err(pdbrs)?;
     let rebuilt = plan.to_vec().map_err(pdbrs)?;
     let again = pdb
         .to_parts()
-        .and_then(|parts| parts.plan(IdPolicy::ContentDerived))
+        .and_then(|parts| parts.plan(IdentityPolicy::ContentDerived))
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let explicit = pdb
         .to_parts()
-        .and_then(|parts| parts.plan(IdPolicy::Explicit(pdb.identity())))
+        .and_then(|parts| parts.plan(IdentityPolicy::Explicit(pdb.identity())))
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let embedded = plan

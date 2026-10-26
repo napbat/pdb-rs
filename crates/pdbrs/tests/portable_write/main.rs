@@ -19,11 +19,11 @@ mod widths;
 
 use pdbrs::Error;
 use pdbrs::PortableLocation;
-use pdbrs::portable::Pdb;
 use pdbrs::portable::metadata::{
     BlobOffset, CustomDebugInformationRow, DocumentRow, GuidIndex, MetadataToken, TableId,
 };
-use pdbrs::portable::write::{IdPolicy, PdbParts, WritePlan};
+use pdbrs::portable::write::PdbParts;
+use pdbrs::portable::{IdentityPolicy, Pdb, PdbWritePlan};
 
 /// The ID of the explicit policy in the tests.
 pub(crate) const ID: [u8; 20] = [
@@ -31,11 +31,11 @@ pub(crate) const ID: [u8; 20] = [
 ];
 
 /// Plan `parts` with the explicit test ID and return the plan. Panic on a planning error.
-pub(crate) fn plan(parts: PdbParts) -> WritePlan {
+pub(crate) fn plan(parts: PdbParts) -> PdbWritePlan {
     parts
-        .plan(IdPolicy::Explicit(pdbrs::portable::Identity::from_bytes(
-            ID,
-        )))
+        .plan(IdentityPolicy::Explicit(
+            pdbrs::portable::Identity::from_bytes(ID),
+        ))
         .unwrap_or_else(|error| panic!("the plan failed: {error}"))
 }
 
@@ -46,7 +46,7 @@ pub(crate) fn write(parts: PdbParts) -> Vec<u8> {
 
 /// Plan `parts` and return the error. Panic if the plan succeeds.
 pub(crate) fn plan_error(parts: PdbParts) -> Error {
-    match parts.plan(IdPolicy::ContentDerived) {
+    match parts.plan(IdentityPolicy::ContentDerived) {
         Ok(_) => panic!("the plan succeeded, but an error was expected"),
         Err(error) => error,
     }

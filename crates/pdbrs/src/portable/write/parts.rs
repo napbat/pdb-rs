@@ -17,6 +17,7 @@ pub const PDB_VERSION: &[u8] = b"PDB v1.0";
 /// The row ID of a row is its index in the vector plus 1. Each row refers to the heaps of its
 /// [`PdbParts`] and to rows of these tables or of the external type-system tables.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct DebugTables {
     /// The `Document` table (0x30).
     pub documents: Vec<DocumentRow>,
@@ -106,6 +107,7 @@ impl ExternalRowCounts {
 /// the layout. [`Pdb::to_parts`](crate::portable::Pdb::to_parts) makes the parts of an existing
 /// Portable PDB.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct PdbParts {
     /// The metadata version string without its terminator. The default is
     /// [`PDB_VERSION`] (`PDB v1.0`).

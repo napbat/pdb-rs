@@ -137,7 +137,7 @@ impl<'a> ModuleBuilder<'a> {
     /// Add a symbol record that `encode` appends when the plan resolves handles.
     ///
     /// The resolver of a module symbol record gives type indices, ID
-    /// indices, stream IDs and module numbers. It does not give symbol
+    /// indices, stream IDs and module indexes. It does not give symbol
     /// offsets.
     ///
     /// # Errors

@@ -12,7 +12,7 @@ pub use msfz::msfz_chunk_seeds;
 pub use native::native_pdb;
 pub use portable::portable_pdb;
 
-use pdbrs::native::msf::{Msf, MsfBuilder, WriteOptions};
+use pdbrs::native::msf::{Msf, MsfBuilder, MsfWriteOptions};
 use pdbrs::portable::embedded::{EmbeddedFormat, encode};
 
 use crate::{Corpus, Outcome};
@@ -34,7 +34,7 @@ pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
         }
         builder.push_nil()?;
         let bytes = builder
-            .plan(WriteOptions::default().with_page_size(page_size))?
+            .plan(MsfWriteOptions::default().with_page_size(page_size))?
             .to_vec()?;
         Msf::read(bytes.as_slice())?;
         corpus.add("msf", &bytes)?;

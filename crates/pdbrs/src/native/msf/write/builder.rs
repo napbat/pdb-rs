@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use super::super::StreamId;
 use super::layout::check_page_size;
-use super::{StreamSource, WriteOptions, WritePlan, plan_allocation_failed, plan_sizes};
+use super::{MsfWriteOptions, MsfWritePlan, StreamSource, plan_allocation_failed, plan_sizes};
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
@@ -79,13 +79,13 @@ impl<R: ReadAt> MsfBuilder<R> {
     /// # Errors
     ///
     /// - [`ErrorKind::UnsupportedVersion`] if the page size in `options` is 65536 (see
-    ///   [`WriteOptions::with_page_size`]).
+    ///   [`MsfWriteOptions::with_page_size`]).
     /// - [`ErrorKind::InvalidFormat`] if the builder has no streams or the page size in
     ///   `options` is not valid.
     /// - [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more, the layout
-    ///   exceeds a limit (see [`WritePlan`]) or an allocation fails.
+    ///   exceeds a limit (see [`MsfWritePlan`]) or an allocation fails.
     /// - An error from a source if its length is not available.
-    pub fn plan(&self, options: WriteOptions) -> Result<WritePlan<'_>> {
+    pub fn plan(&self, options: MsfWriteOptions) -> Result<MsfWritePlan<'_>> {
         check_page_size(options.page_size())?;
         let mut sizes = Vec::new();
         sizes

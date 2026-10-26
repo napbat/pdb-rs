@@ -2,7 +2,7 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::msf::{
-    Msf, MsfBuilder, MsfLimits, OldDirectory, OldDirectoryPolicy, StreamId, WriteOptions,
+    Msf, MsfBuilder, MsfLimits, MsfWriteOptions, OldDirectory, OldDirectoryPolicy, StreamId,
 };
 
 use crate::input::Input;
@@ -90,7 +90,7 @@ pub fn repack(data: &[u8]) {
     } else {
         OldDirectoryPolicy::Preserve
     };
-    let options = WriteOptions::default().with_page_size(page_size);
+    let options = MsfWriteOptions::default().with_page_size(page_size);
     let Some(plan) = ok(msf.repack(options, policy)) else {
         return;
     };
@@ -135,7 +135,7 @@ pub fn build(data: &[u8]) {
         }
     }
     assert_eq!(builder.stream_count(), expected.len());
-    let options = WriteOptions::default().with_page_size(page_size);
+    let options = MsfWriteOptions::default().with_page_size(page_size);
     let Some(plan) = ok(builder.plan(options)) else {
         return;
     };

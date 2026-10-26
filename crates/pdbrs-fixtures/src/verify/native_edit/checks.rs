@@ -8,6 +8,8 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use pdbrs::native::Identity;
+
 use super::super::native::consumers::{Run, dia2dump, pdbtool_check, pdbtool_compare, run};
 use super::Tools;
 use super::edits::{Edited, Expectation};
@@ -147,9 +149,9 @@ pub(crate) fn check(
         ));
     }
     if let Some((_, guid, age)) = edited.expect.identity
-        && (edited.pe_match.guid, edited.pe_match.age) != (guid, age)
+        && edited.identity != (Identity::Modern { guid, age })
     {
-        problems.push("PdbEditPlan::pe_match differs from the new identity".to_owned());
+        problems.push("PdbEditPlan::identity differs from the new identity".to_owned());
     }
     lookups(tools, source, path, &edited.expect, &mut findings)?;
     Ok(findings)

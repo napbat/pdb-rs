@@ -13,7 +13,7 @@ use super::debug_stream::{
 };
 use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
-use super::msf::{Msf, StreamId, WriteOptions};
+use super::msf::{Msf, MsfWriteOptions, StreamId};
 use super::section::SectionHeaderStream;
 use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
 use super::types::TypeStream;
@@ -123,11 +123,11 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Return the page size for MSF 7.00 output from this PDB: the page size of an MSF 7.00
-    /// source, or the default page size of [`WriteOptions`] for an MSFZ source.
+    /// source, or the default page size of [`MsfWriteOptions`] for an MSFZ source.
     pub(crate) fn output_page_size(&self) -> u32 {
         self.container
             .msf()
-            .map_or(WriteOptions::default().page_size(), Msf::block_size)
+            .map_or(MsfWriteOptions::default().page_size(), Msf::block_size)
     }
 
     /// Return decoded identity, named streams and feature codes.

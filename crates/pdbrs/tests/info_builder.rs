@@ -1,7 +1,7 @@
 //! Encoding, named-stream changes, feature codes and the identity policy of the PDB Info stream.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::info::{Feature, Info, InfoBuilder, PeMatch};
+use pdbrs::native::info::{Feature, Info, InfoBuilder};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::{Identity, IdentityPolicy, Producer};
 
@@ -155,14 +155,15 @@ fn identity_policies_keep_the_ages_consistent() {
     let matched = builder
         .apply_identity(IdentityPolicy::Preserve, &mut dbi_age)
         .unwrap();
-    assert_eq!((matched.guid, matched.age, dbi_age), (GUID, 1, 1));
+    assert_eq!(matched, Identity::Modern { guid: GUID, age: 1 });
+    assert_eq!(dbi_age, 1);
     let matched = builder
         .apply_identity(IdentityPolicy::IncrementAge, &mut dbi_age)
         .unwrap();
-    assert_eq!((matched.age, dbi_age), (3, 3));
+    assert_eq!((matched.age(), dbi_age), (3, 3));
     assert_eq!(builder.identity(), Identity::Modern { guid: GUID, age: 3 });
     let guid = [7; 16];
-    let matched: PeMatch = builder
+    let matched = builder
         .apply_identity(
             IdentityPolicy::Replace {
                 signature: 77,
@@ -172,7 +173,8 @@ fn identity_policies_keep_the_ages_consistent() {
             &mut dbi_age,
         )
         .unwrap();
-    assert_eq!((matched.guid, matched.age, dbi_age), (guid, 1, 1));
+    assert_eq!(matched, Identity::Modern { guid, age: 1 });
+    assert_eq!(dbi_age, 1);
     assert_eq!(builder.signature(), 77);
     let info = Info::parse(encode(&builder)).unwrap();
     assert_eq!(info.identity(), Identity::Modern { guid, age: 1 });

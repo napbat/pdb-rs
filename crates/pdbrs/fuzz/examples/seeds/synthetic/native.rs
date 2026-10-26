@@ -5,7 +5,7 @@
 
 use pdbrs::native::Pdb;
 use pdbrs::native::hash::hash_string_v1;
-use pdbrs::native::msf::{MsfBuilder, WriteOptions};
+use pdbrs::native::msf::{MsfBuilder, MsfWriteOptions};
 use pdbrs::native::symbols::BucketCount;
 use pdbrs::native::types::{TypeStream, type_record_hash};
 
@@ -603,7 +603,7 @@ pub fn native_pdb() -> Outcome<Vec<u8>> {
     for stream in streams {
         builder.push(stream)?;
     }
-    let bytes = builder.plan(WriteOptions::default())?.to_vec()?;
+    let bytes = builder.plan(MsfWriteOptions::default())?.to_vec()?;
     let pdb = Pdb::parse(&bytes)?;
     pdb.types()?.ok_or("synthetic PDB has no TPI")?;
     pdb.ids()?.ok_or("synthetic PDB has no IPI")?;

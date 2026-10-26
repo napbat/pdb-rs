@@ -21,6 +21,7 @@
 //! and `g_value` at `.data+0x0`.
 
 use pdbrs::Result;
+use pdbrs::native::PdbBuilder;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::field_list::{DataMember, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{FunctionId, IdRecord};
@@ -48,7 +49,7 @@ use pdbrs::native::lines::{
     LineSubsection, LinesHeader, SubsectionKind,
 };
 use pdbrs::native::section::{Machine, SectionHeader};
-use pdbrs::native::write::{ModuleSymbolHandle, PdbBuilder, TypeHandle};
+use pdbrs::native::write::{ModuleSymbolHandle, TypeHandle};
 
 /// The identity of the synthetic PDB.
 pub const GUID: [u8; 16] = *b"pdbrs-synthetic!";
@@ -230,7 +231,7 @@ fn function_id(function_type: TypeIndex, name: &[u8]) -> IdRecord<'_> {
 /// Add the module with its symbols and lines. Return the procedure handles.
 fn add_module(
     builder: &mut PdbBuilder<'_>,
-    file: u32,
+    file: NameOffset,
     functions: [(TypeHandle, TypeHandle); 2],
 ) -> Result<[ModuleSymbolHandle; 2]> {
     let mut record = OwnedModule::default();
@@ -295,7 +296,7 @@ fn add_module(
     }
     module.push_subsection_with(move |_, out| {
         let mut data = Vec::new();
-        FileChecksum::encode_parts(NameOffset(file), ChecksumKind::None, &[], &mut data)?;
+        FileChecksum::encode_parts(file, ChecksumKind::None, &[], &mut data)?;
         frame(DEBUG_S_FILECHKSMS, &data, out)
     })?;
     for function in [SUM, MAIN] {
@@ -345,12 +346,10 @@ fn add_globals(
 ) -> Result<()> {
     for (procedure, name) in procedures.into_iter().zip([SUM.name, MAIN.name]) {
         let reference = builder.add_symbol_with(move |resolver, out| {
-            let number = resolver.module_number(procedure.module())?;
             let mut reference = ProcedureReference::default();
             reference.name_checksum = 0;
-            reference.offset = ModuleSymbolOffset(resolver.module_symbol_offset(procedure)?);
-            // The module number is the module index plus 1.
-            reference.module = Some(ModuleIndex(u32::from(number) - 1));
+            reference.offset = resolver.module_symbol_offset(procedure)?;
+            reference.module = Some(resolver.module_index(procedure.module())?);
             reference.name = name;
             SymbolData::ProcedureReference(reference).encode(S_PROCREF, out)
         })?;

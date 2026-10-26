@@ -37,9 +37,10 @@ pub(super) enum Scope {
     Records,
 }
 
-/// Return the rejection error with `context`.
+/// Return the rejection error with `context`: the editor does not support the
+/// edit for this PDB.
 fn opaque(context: &'static str) -> Error {
-    Error::new(ErrorKind::InvalidReference, None).with_context(context)
+    Error::new(ErrorKind::UnsupportedEdit, None).with_context(context)
 }
 
 /// The streams that the scan found and that a strip removes.

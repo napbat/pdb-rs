@@ -1,9 +1,9 @@
 //! The PDB ID policies, the checksum, the `CodeView` fields, determinism and `MPDB` output.
 
-use pdbrs::portable::Identity;
 use pdbrs::portable::embedded::decode_embedded;
 use pdbrs::portable::metadata::{StreamHeader, TableId};
-use pdbrs::portable::write::{ChecksumAlgorithm, IdPolicy, PdbParts};
+use pdbrs::portable::write::{ChecksumAlgorithm, PdbParts};
+use pdbrs::portable::{Identity, IdentityPolicy, PdbWritePlan};
 
 use crate::{ID, document, information, open, parts_with_methods, plan};
 
@@ -35,7 +35,7 @@ fn explicit_id_is_written_and_returned() {
 
 #[test]
 fn content_derived_id_comes_from_the_sha256_checksum() {
-    let plan = sample(b"x").plan(IdPolicy::ContentDerived).unwrap();
+    let plan = sample(b"x").plan(IdentityPolicy::ContentDerived).unwrap();
     let bytes = plan.to_vec().unwrap();
     let id = plan.identity().to_bytes();
     assert_eq!(open(&bytes).pdb_stream().id(), &id);
@@ -60,13 +60,13 @@ fn content_derived_id_comes_from_the_sha256_checksum() {
     assert!(!differences.is_empty() && differences.len() <= 20);
 
     // A different value gives a different ID.
-    let changed = sample(b"y").plan(IdPolicy::ContentDerived).unwrap();
+    let changed = sample(b"y").plan(IdentityPolicy::ContentDerived).unwrap();
     assert_ne!(changed.identity(), plan.identity());
 }
 
 /// Plan parts with an explicit ID.
-fn plan_with(parts: PdbParts, identity: Identity) -> pdbrs::portable::write::WritePlan {
-    parts.plan(IdPolicy::Explicit(identity)).unwrap()
+fn plan_with(parts: PdbParts, identity: Identity) -> PdbWritePlan {
+    parts.plan(IdentityPolicy::Explicit(identity)).unwrap()
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn checksum_algorithms_have_their_names_and_sizes() {
 
 #[test]
 fn identical_parts_give_identical_bytes() {
-    let first = sample(b"x").plan(IdPolicy::ContentDerived).unwrap();
-    let second = sample(b"x").plan(IdPolicy::ContentDerived).unwrap();
+    let first = sample(b"x").plan(IdentityPolicy::ContentDerived).unwrap();
+    let second = sample(b"x").plan(IdentityPolicy::ContentDerived).unwrap();
     let bytes = first.to_vec().unwrap();
     assert_eq!(bytes, second.to_vec().unwrap());
     assert_eq!(first.identity(), second.identity());

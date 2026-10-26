@@ -17,10 +17,8 @@ fn string_parts(length: usize) -> PdbParts {
     let mut builder = StringHeapBuilder::new();
     builder.add(&long).unwrap();
     builder.add(b"b").unwrap();
-    let mut parts = PdbParts {
-        strings: builder.finish().unwrap(),
-        ..PdbParts::default()
-    };
+    let mut parts = PdbParts::default();
+    parts.strings = builder.finish().unwrap();
     for name in [&long[..], b"b"] {
         let name = parts.strings.offset(name).unwrap();
         parts.tables.local_variables.push(LocalVariableRow {

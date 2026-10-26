@@ -11,14 +11,13 @@ use super::{
 };
 use crate::PortableLocation;
 use crate::io::ReadAt;
-use crate::portable::Pdb;
 use crate::portable::custom::{self, CustomDebugValue};
 use crate::portable::debug::Import;
 use crate::portable::metadata::{BlobOffset, DocumentId, ImportScopeId, MetadataStream, TableId};
 use crate::portable::write::{
-    BlobHeap, ExternalRowCounts, GuidHeap, IdPolicy, PdbParts, StringHeap, UserStringHeap,
-    WritePlan,
+    BlobHeap, ExternalRowCounts, GuidHeap, PdbParts, StringHeap, UserStringHeap,
 };
+use crate::portable::{IdentityPolicy, Pdb, PdbWritePlan};
 use crate::{Error, ErrorKind, Result};
 
 /// The number of source records of the tables whose rows a plan can move.
@@ -131,7 +130,7 @@ impl PdbEditor {
     ///   or local constant a new row ID and a custom debug information value of an unknown
     ///   kind (or a value that does not decode) exists.
     /// - The errors of [`PdbBuilder::plan`].
-    pub fn plan(&self, id: IdPolicy) -> Result<WritePlan> {
+    pub fn plan(&self, id: IdentityPolicy) -> Result<PdbWritePlan> {
         self.to_parts()?.plan(id)
     }
 }

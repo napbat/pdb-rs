@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use super::super::header::HEADER_SIZE;
 use super::layout::{Layout, Span};
-use super::{WriteOptions, WritePlan, plan_allocation_failed};
+use super::{MsfzWriteOptions, MsfzWritePlan, plan_allocation_failed};
 use crate::ContainerKind;
 use crate::io::Write;
 use crate::native::msf::StreamSource;
@@ -26,7 +26,7 @@ const ZERO_BLOCK: usize = 512;
 pub(super) fn measure(
     layout: &Layout,
     source: &dyn StreamSource,
-    options: &WriteOptions,
+    options: &MsfzWriteOptions,
 ) -> Result<Vec<u32>> {
     let limit = options.limits().max_chunk_bytes();
     let mut sizes = Vec::new();
@@ -49,7 +49,7 @@ pub(super) fn measure(
 }
 
 /// Write all parts of `plan` to `output` in file order.
-pub(super) fn write<W: Write + ?Sized>(plan: &WritePlan<'_>, output: &mut W) -> Result<()> {
+pub(super) fn write<W: Write + ?Sized>(plan: &MsfzWritePlan<'_>, output: &mut W) -> Result<()> {
     let mut sink = Sink { output, offset: 0 };
     sink.put(&header(plan))?;
     let mut chunks = ChunkReader::new(&plan.layout, plan.source)?;
@@ -86,7 +86,7 @@ pub(super) fn write<W: Write + ?Sized>(plan: &WritePlan<'_>, output: &mut W) -> 
 }
 
 /// Return the 80-byte header of `plan`.
-fn header(plan: &WritePlan<'_>) -> [u8; 80] {
+fn header(plan: &MsfzWritePlan<'_>) -> [u8; 80] {
     let mut bytes = [0_u8; 80];
     let signature = ContainerKind::NativeMsfz.signature();
     bytes[..signature.len()].copy_from_slice(signature);

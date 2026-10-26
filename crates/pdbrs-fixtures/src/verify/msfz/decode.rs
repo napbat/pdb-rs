@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdbrs::native::container::Container;
-use pdbrs::native::msf::{Msf, WriteOptions};
+use pdbrs::native::msf::{Msf, MsfWriteOptions};
 
 use super::super::native::consumers::{
     Run, StreamDifferences, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check,
@@ -278,7 +278,7 @@ fn decode(bytes: &[u8], page_size: u32) -> Result<Vec<u8>, String> {
         return Err("the PDZ fixture is not an MSFZ container".to_owned());
     }
     container
-        .to_msf(WriteOptions::default().with_page_size(page_size), POLICY)
+        .to_msf(MsfWriteOptions::default().with_page_size(page_size), POLICY)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)
 }

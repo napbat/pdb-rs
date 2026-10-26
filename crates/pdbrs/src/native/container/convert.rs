@@ -23,20 +23,20 @@ impl<S: ReadAt> Container<S> {
     /// - [`OldDirectoryPolicy::Preserve`] copies the bytes of stream 0, or its nil state. MSFZ
     ///   has no pages, so the bytes describe the pages of the source.
     ///
-    /// The plan reads and compresses all stream bytes (see [`msfz::WritePlan`]). It reads the
+    /// The plan reads and compresses all stream bytes (see [`msfz::MsfzWritePlan`]). It reads the
     /// stream bytes from this container again when it writes.
     ///
     /// # Errors
     ///
     /// - The errors of [`Container::stream`] for each stream.
-    /// - The planning errors of [`msfz::WritePlan`], and the errors of the stream reads.
+    /// - The planning errors of [`msfz::MsfzWritePlan`], and the errors of the stream reads.
     pub fn to_msfz(
         &self,
-        options: msfz::WriteOptions,
+        options: msfz::MsfzWriteOptions,
         old_directory: OldDirectoryPolicy,
-    ) -> Result<msfz::WritePlan<'_>> {
+    ) -> Result<msfz::MsfzWritePlan<'_>> {
         let sizes = self.stream_sizes(old_directory)?;
-        msfz::WritePlan::new(options, &sizes, self)
+        msfz::MsfzWritePlan::new(options, &sizes, self)
     }
 
     /// Plan an MSF 7.00 container with the streams of this container.
@@ -51,12 +51,12 @@ impl<S: ReadAt> Container<S> {
     /// - The errors of [`Msf::repack`](msf::Msf::repack) for an MSF 7.00 container.
     /// - The errors of [`Container::stream`] for each stream.
     /// - [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more.
-    /// - The planning errors of [`msf::WritePlan`].
+    /// - The planning errors of [`msf::MsfWritePlan`].
     pub fn to_msf(
         &self,
-        options: msf::WriteOptions,
+        options: msf::MsfWriteOptions,
         old_directory: OldDirectoryPolicy,
-    ) -> Result<msf::WritePlan<'_>> {
+    ) -> Result<msf::MsfWritePlan<'_>> {
         if let Self::Msf(msf) = self {
             return msf.repack(options, old_directory);
         }

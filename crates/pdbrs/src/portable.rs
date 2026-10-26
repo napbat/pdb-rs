@@ -15,13 +15,14 @@
 //! embedded-source blob format. Decode an `MPDB` payload with
 //! [`embedded::decode_embedded`], then read the result with [`Pdb::parse`].
 //!
-//! [`write`](mod@write) writes Portable PDBs: exact copies with [`Pdb::copy_exact`], and
-//! new layouts from raw parts with [`write::PdbParts::plan`]. [`Pdb::to_parts`] reads a
-//! Portable PDB into such parts. [`PdbBuilder`] builds a Portable PDB from records with typed
-//! handles, and [`Pdb::edit`] makes a [`PdbEditor`] that changes an existing one (see
-//! [`build`]).
+//! [`write`](mod@write) has the raw parts and heaps of new layouts: [`write::PdbParts::plan`]
+//! makes a [`PdbWritePlan`]. [`Pdb::to_parts`] reads a Portable PDB into such parts.
+//! [`PdbBuilder`] builds a Portable PDB from records with typed handles (see [`build`]), and
+//! [`Pdb::edit`] makes a [`PdbEditor`] that changes an existing one. For an exact copy, give
+//! [`Pdb::source`] to [`io::copy_exact`](crate::io::copy_exact).
 
 pub mod build;
+mod builder;
 pub mod compressed;
 pub mod custom;
 pub mod debug;
@@ -30,8 +31,26 @@ pub mod metadata;
 mod reader;
 pub mod write;
 
-pub use build::{PdbBuilder, PdbEditor};
+pub use builder::{PdbBuilder, PdbEditor};
 pub use reader::{Pdb, ReadOptions, Rows};
+pub use write::plan::PdbWritePlan;
+
+/// How a write plan sets the 20-byte PDB ID.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum IdentityPolicy {
+    /// Use the given ID.
+    Explicit(Identity),
+    /// Derive the ID from the output, as `System.Reflection.Metadata` does for deterministic
+    /// builds (`BlobContentId.FromHash`).
+    ///
+    /// The hash is SHA-256 over all output bytes with the 20 ID bytes set to zero. The GUID is
+    /// hash bytes 0 to 15, with the high nibble of byte 7 set to 4 (the RFC 4122 version) and
+    /// the two high bits of byte 8 set to `10` (the variant). The stamp is hash bytes 16 to
+    /// 19 as a little-endian value with bit 31 set. A change to the layout or to any byte
+    /// changes the ID, also if the decoded records stay the same.
+    ContentDerived,
+}
 
 /// The 20-byte identity stored at the start of a Portable PDB's `#Pdb` stream.
 ///

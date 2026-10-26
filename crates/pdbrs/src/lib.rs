@@ -14,14 +14,14 @@
 //! native or the portable backend. It rejects ordinary CLI metadata (for
 //! example the metadata of an assembly) because it has no `#Pdb` stream.
 //!
-//! [`native::msf`] writes MSF 7.0 containers: exact copies, stream-preserving
-//! repacks and new layouts of arbitrary streams. [`native::msfz`] writes MSFZ
-//! containers, and [`native::container::Container`] converts between MSF 7.0
-//! and MSFZ. Each native record and stream has an encoder.
-//! [`native::write::PdbBuilder`] builds new native PDBs, and
-//! [`native::PdbEditor`] edits native PDBs and rebuilds the
-//! dependent indexes. [`portable::write`] writes Portable PDBs: exact copies
-//! and new layouts from raw rows and heaps. [`portable::PdbBuilder`] and
+//! [`io::copy_exact`] makes exact copies. [`native::msf`] writes MSF 7.0
+//! containers: stream-preserving repacks and new layouts of arbitrary
+//! streams. [`native::msfz`] writes MSFZ containers, and
+//! [`native::container::Container`] converts between MSF 7.0 and MSFZ. Each
+//! native record and stream has an encoder. [`native::PdbBuilder`] builds new
+//! native PDBs, and [`native::PdbEditor`] edits native PDBs and rebuilds the
+//! dependent indexes. [`portable::write`] writes Portable PDBs in new layouts
+//! from raw rows and heaps. [`portable::PdbBuilder`] and
 //! [`portable::PdbEditor`] build and edit Portable PDBs from typed records.
 //!
 //! [`probe`] identifies containers, not valid PDBs. In particular,

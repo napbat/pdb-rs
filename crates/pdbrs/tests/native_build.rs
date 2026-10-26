@@ -1,4 +1,4 @@
-//! Tests of `native::write::PdbBuilder`: the synthetic program, the rebuild
+//! Tests of `native::PdbBuilder`: the synthetic program, the rebuild
 //! of a built PDB, determinism, handle resolution and width checks (#33).
 
 #[path = "../examples/native_synthetic/program.rs"]
@@ -11,14 +11,13 @@ use pdbrs::native::codeview::symbol::{Data, S_GDATA32, Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
-use pdbrs::native::msf::WriteOptions;
-use pdbrs::native::write::{BuildOptions, PdbBuilder};
-use pdbrs::native::{Identity, IdentityPolicy, Pdb};
+use pdbrs::native::msf::MsfWriteOptions;
+use pdbrs::native::{BuildOptions, Identity, IdentityPolicy, Pdb, PdbBuilder};
 
 /// Build the synthetic program and return the PDB bytes.
 fn synthetic() -> Vec<u8> {
     program::build()
-        .and_then(|builder| builder.plan(&BuildOptions::default())?.to_vec())
+        .and_then(|builder| builder.plan(BuildOptions::default())?.to_vec())
         .expect("the synthetic program builds")
 }
 
@@ -117,28 +116,27 @@ fn synthetic_program_reads_back() {
 
 #[test]
 fn rebuild_keeps_the_source_page_size() {
-    let mut options = BuildOptions::default();
-    options.msf = WriteOptions::default().with_page_size(512);
+    let options = BuildOptions::default().with_msf(MsfWriteOptions::default().with_page_size(512));
     let bytes = program::build()
-        .and_then(|builder| builder.plan(&options)?.to_vec())
+        .and_then(|builder| builder.plan(options)?.to_vec())
         .expect("the synthetic program builds with 512-byte pages");
     let pdb = Pdb::parse(&bytes).expect("parse");
     assert_eq!(pdb.container().msf().expect("MSF 7.00").block_size(), 512);
     let contents = pdb.contents().expect("contents");
-    let mut rebuild_options = contents.build_options();
-    assert_eq!(rebuild_options.msf.page_size(), 512);
+    let rebuild_options = contents.build_options();
+    assert_eq!(rebuild_options.msf().page_size(), 512);
     let builder = contents
         .to_builder(IdentityPolicy::Preserve)
         .expect("builder");
     let rebuilt = builder
-        .plan(&rebuild_options)
+        .plan(rebuild_options)
         .and_then(|plan| plan.to_vec())
         .expect("rebuild");
     assert_eq!(rebuilt, bytes);
     // The caller can select another page size.
-    rebuild_options.msf = WriteOptions::default().with_page_size(4096);
+    let rebuild_options = rebuild_options.with_msf(MsfWriteOptions::default().with_page_size(4096));
     let larger = builder
-        .plan(&rebuild_options)
+        .plan(rebuild_options)
         .and_then(|plan| plan.to_vec())
         .expect("rebuild with 4096-byte pages");
     let larger = Pdb::parse(&larger).expect("parse");
@@ -150,21 +148,21 @@ fn rebuild_keeps_the_source_page_size() {
 
 #[test]
 fn rebuild_keeps_missing_hash_streams() {
-    let mut options = BuildOptions::default();
-    options.type_hash_stream = false;
-    options.id_hash_stream = false;
+    let options = BuildOptions::default()
+        .with_type_hash_stream(false)
+        .with_id_hash_stream(false);
     let bytes = program::build()
-        .and_then(|builder| builder.plan(&options)?.to_vec())
+        .and_then(|builder| builder.plan(options)?.to_vec())
         .expect("the synthetic program builds without hash streams");
     let pdb = Pdb::parse(&bytes).expect("parse");
     let types = pdb.types().expect("TPI").expect("TPI present");
     assert_eq!(types.header().hash_stream, None);
     let contents = pdb.contents().expect("contents");
     let rebuild_options = contents.build_options();
-    assert!(!rebuild_options.type_hash_stream && !rebuild_options.id_hash_stream);
+    assert!(!rebuild_options.type_hash_stream() && !rebuild_options.id_hash_stream());
     let rebuilt = contents
         .to_builder(IdentityPolicy::Preserve)
-        .and_then(|builder| builder.plan(&rebuild_options)?.to_vec())
+        .and_then(|builder| builder.plan(rebuild_options)?.to_vec())
         .expect("rebuild");
     assert_eq!(rebuilt, bytes);
 }
@@ -182,7 +180,7 @@ fn rebuild_of_a_built_pdb_gives_the_same_bytes() {
     assert_eq!(contents.unclaimed_streams(), []);
     let rebuilt = contents
         .to_builder(IdentityPolicy::Preserve)
-        .and_then(|builder| builder.plan(&contents.build_options())?.to_vec())
+        .and_then(|builder| builder.plan(contents.build_options())?.to_vec())
         .expect("rebuild");
     assert_eq!(rebuilt, bytes);
 }
@@ -195,9 +193,14 @@ fn identity_policy_sets_both_ages() {
     let builder = contents
         .to_builder(IdentityPolicy::IncrementAge)
         .expect("builder");
-    let plan = builder.plan(&contents.build_options()).expect("plan");
-    assert_eq!(plan.pe_match().age, 2);
-    assert_eq!(plan.pe_match().guid, program::GUID);
+    let plan = builder.plan(contents.build_options()).expect("plan");
+    assert_eq!(
+        plan.identity(),
+        Identity::Modern {
+            guid: program::GUID,
+            age: 2
+        }
+    );
     let output = plan.to_vec().expect("output");
     let rebuilt = Pdb::parse(&output).expect("parse");
     assert_eq!(rebuilt.info().identity().age(), 2);
@@ -210,7 +213,7 @@ fn reserved_handle_without_record_is_rejected() {
     let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
     builder.reserve_type().expect("reserve");
     let error = builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .expect_err("the plan needs a record");
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }
@@ -236,7 +239,7 @@ fn handle_of_another_builder_is_rejected() {
         })
         .expect("deferred type");
     let error = builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .expect_err("the handle is not in this builder");
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }
@@ -248,7 +251,7 @@ fn reference_past_the_type_stream_is_rejected() {
         .add_symbol_fields(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x1000))))
         .expect("symbol");
     let error = builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .expect_err("the TPI stream has no record 0x1000");
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }
@@ -264,7 +267,7 @@ fn module_count_past_16_bits_is_rejected() {
             .set_stream(false);
     }
     let error = builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .expect_err("the DBI stream has a 16-bit module count");
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
 }
@@ -278,7 +281,7 @@ fn module_without_stream_rejects_symbols() {
         .expect("symbol");
     module.set_stream(false);
     let error = builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .expect_err("a module without a stream has no symbols");
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

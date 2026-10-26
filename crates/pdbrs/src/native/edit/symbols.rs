@@ -58,7 +58,7 @@ impl OffsetMap {
 
 /// Return `true` if the plan rejects a violation of `rule`.
 ///
-/// The rules are the rules of [`PdbBuilder::plan`](crate::native::write::PdbBuilder::plan):
+/// The rules are the rules of [`PdbBuilder::plan`](crate::native::PdbBuilder::plan):
 /// broken framing and references that do not resolve. The other rules
 /// describe producer conventions; the plan keeps such records.
 const fn rejected(rule: Rule) -> bool {
@@ -174,8 +174,7 @@ fn resolve<'r>(
             .insert(offset.0, (rename.index, rename.new.as_slice()))
             .is_some()
         {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("two renames change the same symbol record"));
+            return Err(unsupported("two renames change the same symbol record"));
         }
     }
     Ok(targets)

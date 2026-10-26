@@ -6,8 +6,6 @@
 //! them as streams of the module (#32, #33, #34).
 
 use pdbrs::ErrorKind;
-use pdbrs::native::IdentityPolicy;
-use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
@@ -18,7 +16,7 @@ use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
 use pdbrs::native::info::Feature;
 use pdbrs::native::msf::StreamId;
-use pdbrs::native::write::{BuildOptions, PdbBuilder};
+use pdbrs::native::{BuildOptions, EditOptions, IdentityPolicy, Pdb, PdbBuilder};
 
 /// The flags of a module that owns its type records (`fOwnTMR`).
 const OWN_TYPE_RECORDS: u32 = 0x08;
@@ -138,7 +136,7 @@ fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
 /// Build the PDB with valid module type indices.
 fn notm() -> Vec<u8> {
     builder(TypeIndex(0x1000), TypeIndex(0x1001))
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("the NOTM PDB builds")
 }
@@ -197,7 +195,7 @@ fn module_type_index_past_the_module_records_is_rejected() {
         (TypeIndex(0x1000), TypeIndex(0x1002)),
     ] {
         let error = builder(first, second)
-            .plan(&BuildOptions::default())
+            .plan(BuildOptions::default())
             .expect_err("module 0 has two type records");
         assert_eq!(error.kind(), ErrorKind::InvalidReference);
     }
@@ -213,7 +211,7 @@ fn rebuild_carries_the_module_type_streams() {
         .to_builder(IdentityPolicy::Preserve)
         .expect("builder");
     let rebuilt = builder
-        .plan(&contents.build_options())
+        .plan(contents.build_options())
         .and_then(|plan| plan.to_vec())
         .expect("the rebuild plans");
     let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
@@ -250,7 +248,7 @@ fn precompiled() -> Vec<u8> {
             .expect("local");
     }
     builder
-        .plan(&BuildOptions::default())
+        .plan(BuildOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("indices of precompiled-type modules are not checked")
 }
@@ -288,7 +286,7 @@ fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
     let rebuilt = contents
         .to_builder(IdentityPolicy::Preserve)
         .expect("builder")
-        .plan(&contents.build_options())
+        .plan(contents.build_options())
         .and_then(|plan| plan.to_vec())
         .expect("the rebuild plans");
     let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
@@ -308,7 +306,9 @@ fn edit_that_moves_records_keeps_the_module_type_streams() {
     editor
         .rename_public(b"pub", b"pub_with_a_longer_name")
         .expect("recorded");
-    let plan = editor.plan().expect("the module type stream has an owner");
+    let plan = editor
+        .plan(EditOptions::default())
+        .expect("the module type stream has an owner");
     let own = own_stream(&pdb);
     assert!(!plan.changed_streams().contains(&own));
     let edited = plan.to_vec().expect("output");
@@ -322,7 +322,7 @@ fn strip_removes_the_module_type_streams_and_the_feature() {
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
-    let plan = editor.plan().expect("strip");
+    let plan = editor.plan(EditOptions::default()).expect("strip");
     let own = own_stream(&pdb);
     assert!(plan.changed_streams().contains(&own));
     let stripped = plan.to_vec().expect("output");

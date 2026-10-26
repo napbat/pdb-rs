@@ -32,7 +32,7 @@ fn streams(container: &Container<&[u8]>) -> Option<Streams> {
 /// - Bit 6: padding to 16 KiB.
 /// - Bit 7: [`OldDirectoryPolicy::Preserve`] instead of [`OldDirectoryPolicy::Empty`].
 #[must_use]
-pub fn options(selector: u8) -> (msfz::WriteOptions, OldDirectoryPolicy) {
+pub fn options(selector: u8) -> (msfz::MsfzWriteOptions, OldDirectoryPolicy) {
     let chunk_size = MIN_CHUNK_SIZE << [0, 2, 4, 8][usize::from(selector & 0x03)];
     let codec = if selector & 0x08 == 0 {
         Codec::Zstd
@@ -44,7 +44,7 @@ pub fn options(selector: u8) -> (msfz::WriteOptions, OldDirectoryPolicy) {
         2 => Some(Codec::Deflate),
         _ => None,
     };
-    let options = msfz::WriteOptions::default()
+    let options = msfz::MsfzWriteOptions::default()
         .with_max_chunk_size(chunk_size)
         .with_one_stream_per_chunk(selector & 0x04 != 0)
         .with_codec(codec)
@@ -71,7 +71,10 @@ pub fn round_trip(data: &[u8]) {
     let Some((&selector, data)) = data.split_first() else {
         return;
     };
-    let Some(source) = ok(Container::with_limits(data, ContainerLimits::default().with_msfz(limits()))) else {
+    let Some(source) = ok(Container::with_limits(
+        data,
+        ContainerLimits::default().with_msfz(limits()),
+    )) else {
         return;
     };
     let Some(original) = streams(&source) else {
@@ -99,7 +102,7 @@ pub fn round_trip(data: &[u8]) {
         bytes.as_slice(),
         ContainerLimits::default().with_msfz(limits()),
     )
-        .expect("a written MSFZ container opens");
+    .expect("a written MSFZ container opens");
     assert_eq!(written.kind(), ContainerKind::NativeMsfz);
     assert_eq!(
         streams(&written).expect("written MSFZ streams read"),
@@ -107,7 +110,7 @@ pub fn round_trip(data: &[u8]) {
         "the MSFZ streams changed"
     );
 
-    let Some(plan) = ok(written.to_msf(msf::WriteOptions::default(), policy)) else {
+    let Some(plan) = ok(written.to_msf(msf::MsfWriteOptions::default(), policy)) else {
         return;
     };
     let bytes = plan.to_vec().expect("a planned MSF container writes");

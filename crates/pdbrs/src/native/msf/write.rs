@@ -1,6 +1,6 @@
 //! Big MSF 7.00 container writing.
 //!
-//! [`WritePlan`] documents the write operations, the layout and the error contract.
+//! [`MsfWritePlan`] documents the write operations, the layout and the error contract.
 
 use alloc::vec::Vec;
 
@@ -27,6 +27,7 @@ const DEFAULT_PAGE_SIZE: u32 = 4096;
 /// describe the repacked container. The free page map marks the stream 0 pages as free with
 /// both policies.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum OldDirectoryPolicy {
     /// Write stream 0 as a present stream of length zero. LLD and `ms-pdb-msf` write this
     /// state.
@@ -41,12 +42,12 @@ pub enum OldDirectoryPolicy {
 
 /// Options for a new container layout.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct WriteOptions {
+pub struct MsfWriteOptions {
     page_size: u32,
     limits: MsfLimits,
 }
 
-impl WriteOptions {
+impl MsfWriteOptions {
     /// Return the page size in bytes.
     #[must_use]
     pub const fn page_size(self) -> u32 {
@@ -84,7 +85,7 @@ impl WriteOptions {
     }
 }
 
-impl Default for WriteOptions {
+impl Default for MsfWriteOptions {
     /// Return options with 4096-byte pages and the default [`MsfLimits`].
     fn default() -> Self {
         Self {
@@ -96,8 +97,8 @@ impl Default for WriteOptions {
 
 /// A source of stream bytes for a container plan.
 ///
-/// The MSF 7.00 plan ([`WritePlan`]) and the MSFZ plan
-/// ([`msfz::WritePlan`](crate::native::msfz::WritePlan)) read stream bytes through this trait.
+/// The MSF 7.00 plan ([`MsfWritePlan`]) and the MSFZ plan
+/// ([`msfz::MsfzWritePlan`](crate::native::msfz::MsfzWritePlan)) read stream bytes through this trait.
 pub(crate) trait StreamSource {
     /// Fill `buffer` with the bytes of stream `id` that start at `offset`.
     fn read_stream(&self, id: u32, offset: u64, buffer: &mut [u8]) -> Result<()>;
@@ -111,12 +112,12 @@ pub(crate) trait StreamSource {
 ///
 /// - [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more, the layout
 ///   exceeds a limit or an allocation fails.
-/// - The errors of the layout (see [`WritePlan`]).
+/// - The errors of the layout (see [`MsfWritePlan`]).
 pub(crate) fn plan_sizes<'a>(
-    options: WriteOptions,
+    options: MsfWriteOptions,
     sizes: &[Option<u64>],
     source: &'a dyn StreamSource,
-) -> Result<WritePlan<'a>> {
+) -> Result<MsfWritePlan<'a>> {
     check_page_size(options.page_size)?;
     let mut list = Vec::new();
     list.try_reserve_exact(sizes.len())
@@ -130,7 +131,7 @@ pub(crate) fn plan_sizes<'a>(
                 .ok_or_else(|| stream_too_large(id))?,
         });
     }
-    WritePlan::new(options, list, source)
+    MsfWritePlan::new(options, list, source)
 }
 
 /// Return the error for a stream that does not fit in an MSF stream.
@@ -175,12 +176,12 @@ fn stream_too_large(id: u32) -> Error {
 /// 5. The unused bytes of the header page and of the last page of each stream, the directory
 ///    and the page map are zero.
 ///
-/// The same streams and [`WriteOptions`] thus give the same bytes.
+/// The same streams and [`MsfWriteOptions`] thus give the same bytes.
 ///
 /// # Limits
 ///
 /// Planning returns [`ErrorKind::UnsupportedVersion`] for 65536-byte pages, because DIA, LLVM
-/// and `link.exe` reject them (see [`WriteOptions::with_page_size`]). It writes 512 to 32768.
+/// and `link.exe` reject them (see [`MsfWriteOptions::with_page_size`]). It writes 512 to 32768.
 ///
 /// Planning returns [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more,
 /// the directory is larger than [`MsfLimits::max_directory_bytes`] or `u32`, the page map array
@@ -188,22 +189,26 @@ fn stream_too_large(id: u32) -> Error {
 ///
 /// # Errors and partial output
 ///
-/// A planning error writes nothing. [`WritePlan::write_to`] and
+/// A planning error writes nothing. [`MsfWritePlan::write_to`] and
 /// [`copy_exact`](crate::io::copy_exact) write in file order. A read error or an output error
-/// can leave a partial output in the writer. Under `std`, `WritePlan::write_file` and
+/// can leave a partial output in the writer. Under `std`, `MsfWritePlan::write_file` and
 /// `io::copy_exact_file` write a temporary file and rename it.
 /// On error, they delete the temporary file and do not change the destination.
 ///
 /// Writing over the source file is not supported.
-pub struct WritePlan<'a> {
+pub struct MsfWritePlan<'a> {
     layout: Layout,
     sizes: Vec<u32>,
     source: &'a dyn StreamSource,
 }
 
-impl<'a> WritePlan<'a> {
+impl<'a> MsfWritePlan<'a> {
     /// Make a plan for streams of the sizes `sizes`.
-    fn new(options: WriteOptions, sizes: Vec<u32>, source: &'a dyn StreamSource) -> Result<Self> {
+    fn new(
+        options: MsfWriteOptions,
+        sizes: Vec<u32>,
+        source: &'a dyn StreamSource,
+    ) -> Result<Self> {
         let layout = Layout::new(options.page_size, &sizes, options.limits)?;
         Ok(Self {
             layout,
@@ -269,7 +274,7 @@ impl<'a> WritePlan<'a> {
     ///
     /// - [`ErrorKind::LimitExceeded`] if the file size does not fit in memory or the
     ///   allocation fails. The function checks the size before it writes.
-    /// - The errors of [`WritePlan::write_to`].
+    /// - The errors of [`MsfWritePlan::write_to`].
     pub fn to_vec(&self) -> Result<Vec<u8>> {
         let size = usize::try_from(self.file_size()).map_err(|_| output_too_large())?;
         let mut bytes = Vec::new();
@@ -281,10 +286,10 @@ impl<'a> WritePlan<'a> {
     }
 }
 
-impl core::fmt::Debug for WritePlan<'_> {
+impl core::fmt::Debug for MsfWritePlan<'_> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("WritePlan")
+            .debug_struct("MsfWritePlan")
             .field("page_size", &self.layout.page_size)
             .field("page_count", &self.layout.page_count)
             .field("stream_count", &self.layout.stream_count)
@@ -303,17 +308,17 @@ impl<S: ReadAt> Msf<S> {
     /// # Errors
     ///
     /// - [`ErrorKind::UnsupportedVersion`] if the page size in `options` is 65536 (see
-    ///   [`WriteOptions::with_page_size`]).
+    ///   [`MsfWriteOptions::with_page_size`]).
     /// - [`ErrorKind::InvalidFormat`] if the page size in `options` is not valid, or if
     ///   `old_directory` is [`OldDirectoryPolicy::Preserve`], stream 0 has bytes and the page
     ///   size in `options` is not [`Msf::block_size`].
-    /// - [`ErrorKind::LimitExceeded`] if the new layout exceeds a limit (see [`WritePlan`]) or
+    /// - [`ErrorKind::LimitExceeded`] if the new layout exceeds a limit (see [`MsfWritePlan`]) or
     ///   an allocation fails.
     pub fn repack(
         &self,
-        options: WriteOptions,
+        options: MsfWriteOptions,
         old_directory: OldDirectoryPolicy,
-    ) -> Result<WritePlan<'_>> {
+    ) -> Result<MsfWritePlan<'_>> {
         check_page_size(options.page_size)?;
         let mut sizes = Vec::new();
         sizes
@@ -333,7 +338,7 @@ impl<S: ReadAt> Msf<S> {
             }
             _ => {}
         }
-        WritePlan::new(options, sizes, self)
+        MsfWritePlan::new(options, sizes, self)
     }
 }
 

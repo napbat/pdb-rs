@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use super::{WriteOptions, WritePlan, plan_allocation_failed};
+use super::{MsfzWriteOptions, MsfzWritePlan, plan_allocation_failed};
 use crate::io::ReadAt;
 use crate::native::msf::{StreamId, StreamSource};
 use crate::{Error, ErrorKind, Result};
@@ -76,16 +76,16 @@ impl<R> MsfzBuilder<R> {
 impl<R: ReadAt> MsfzBuilder<R> {
     /// Plan a container with the streams of the builder.
     ///
-    /// The plan reads and compresses all stream bytes (see [`WritePlan`]).
+    /// The plan reads and compresses all stream bytes (see [`MsfzWritePlan`]).
     ///
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`] if the builder has no streams or the maximum chunk size
     ///   in `options` is not valid.
-    /// - [`ErrorKind::LimitExceeded`] if the layout exceeds a limit (see [`WritePlan`]) or an
+    /// - [`ErrorKind::LimitExceeded`] if the layout exceeds a limit (see [`MsfzWritePlan`]) or an
     ///   allocation fails.
     /// - An error from a source if its length or its bytes are not available.
-    pub fn plan(&self, options: WriteOptions) -> Result<WritePlan<'_>> {
+    pub fn plan(&self, options: MsfzWriteOptions) -> Result<MsfzWritePlan<'_>> {
         let mut sizes = Vec::new();
         sizes
             .try_reserve_exact(self.streams.len())
@@ -101,7 +101,7 @@ impl<R: ReadAt> MsfzBuilder<R> {
                     .transpose()?,
             );
         }
-        WritePlan::new(options, &sizes, self)
+        MsfzWritePlan::new(options, &sizes, self)
     }
 }
 

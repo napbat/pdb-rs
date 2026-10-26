@@ -37,7 +37,7 @@ fn msf_bytes(streams: &[Option<Vec<u8>>]) -> Vec<u8> {
         };
     }
     builder
-        .plan(msf::WriteOptions::default())
+        .plan(msf::MsfWriteOptions::default())
         .unwrap()
         .to_vec()
         .unwrap()
@@ -64,8 +64,8 @@ fn expected(streams: &[Option<Vec<u8>>], policy: OldDirectoryPolicy) -> Vec<Opti
     expected
 }
 
-fn small_chunks() -> msfz::WriteOptions {
-    msfz::WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE)
+fn small_chunks() -> msfz::MsfzWriteOptions {
+    msfz::MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE)
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
         assert_eq!(streams(&converted), expected);
 
         let back = converted
-            .to_msf(msf::WriteOptions::default(), policy)
+            .to_msf(msf::MsfWriteOptions::default(), policy)
             .unwrap()
             .to_vec()
             .unwrap();
@@ -109,7 +109,7 @@ fn msf_to_msfz_to_msf_keeps_ids_nil_empty_streams_and_bytes() {
 fn msf_to_msf_is_a_repack() {
     let msf = msf_bytes(&sample_streams());
     let source = Container::read(msf.as_slice()).unwrap();
-    let options = msf::WriteOptions::default().with_page_size(1024);
+    let options = msf::MsfWriteOptions::default().with_page_size(1024);
     let converted = source
         .to_msf(options, OldDirectoryPolicy::Empty)
         .unwrap()
@@ -130,7 +130,10 @@ fn msfz_to_msfz_changes_only_the_layout() {
     let msf = msf_bytes(&original);
     let pdz = Container::read(msf.as_slice())
         .unwrap()
-        .to_msfz(msfz::WriteOptions::default(), OldDirectoryPolicy::Preserve)
+        .to_msfz(
+            msfz::MsfzWriteOptions::default(),
+            OldDirectoryPolicy::Preserve,
+        )
         .unwrap()
         .to_vec()
         .unwrap();
@@ -162,7 +165,7 @@ fn an_msfz_stream_of_4_gib_does_not_convert_to_msf() {
     builder.push(&[7_u8; 16][..]).unwrap();
     builder.push(&[8_u8; 16][..]).unwrap();
     let mut pdz = builder
-        .plan(msfz::WriteOptions::default())
+        .plan(msfz::MsfzWriteOptions::default())
         .unwrap()
         .to_vec()
         .unwrap();
@@ -191,7 +194,7 @@ fn an_msfz_stream_of_4_gib_does_not_convert_to_msf() {
     let stream = source.stream(StreamId(1)).unwrap().unwrap();
     assert_eq!(pdbrs::io::ReadAt::len(&stream).unwrap(), 1 << 32);
     let error = source
-        .to_msf(msf::WriteOptions::default(), OldDirectoryPolicy::Empty)
+        .to_msf(msf::MsfWriteOptions::default(), OldDirectoryPolicy::Empty)
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
     assert_eq!(error.stream_location(), Some((StreamId(1), 0)));

@@ -18,14 +18,32 @@ use crate::portable::Pdb;
 use crate::portable::metadata::{MetadataToken, TableId};
 
 /// The options of [`Pdb::validate_debug`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+///
+/// Set a value with its `with_*` function and read it with the function of the same name.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct ValidateOptions {
-    /// The row count of the `MethodDef` table of the assembly.
+    /// The row count of the `MethodDef` table of the assembly, if the caller gives it.
+    method_def_count: Option<u32>,
+}
+
+impl ValidateOptions {
+    /// Return the row count of the `MethodDef` table of the assembly, or `None` if the
+    /// caller does not give it.
     ///
     /// If it is `None`, the validation uses the external count of the `#Pdb` stream. If the
     /// `#Pdb` stream does not reference `MethodDef` either, the row count rule of
     /// `MethodDebugInformation` is not checked.
-    pub method_def_count: Option<u32>,
+    #[must_use]
+    pub const fn method_def_count(self) -> Option<u32> {
+        self.method_def_count
+    }
+
+    /// Set the row count of the `MethodDef` table of the assembly.
+    #[must_use]
+    pub const fn with_method_def_count(mut self, count: u32) -> Self {
+        self.method_def_count = Some(count);
+        self
+    }
 }
 
 /// A rule that [`Pdb::validate_debug`] checks.

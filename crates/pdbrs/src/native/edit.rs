@@ -1,114 +1,7 @@
 //! Semantic edits of an existing native PDB.
 //!
-//! [`Pdb::edit`] makes a [`PdbEditor`]. The editor borrows the source PDB and
-//! owns only the changes. [`PdbEditor::plan`] checks all changes, encodes the
-//! streams that the changes affect and returns a [`PdbEditPlan`]. The plan
-//! writes the edited PDB.
-//!
-//! # Stream IDs and unchanged streams
-//!
-//! The output keeps the stream ID of each source stream:
-//!
-//! - The plan does not decode or encode a stream that no change affects. It
-//!   reads the source bytes of that stream when it writes. Thus an exact
-//!   stream comparison, for example `pdbtool compare`, shows the stream as
-//!   identical.
-//! - If an encoded stream has the bytes of its source stream, the plan keeps
-//!   the source stream. [`PdbEditPlan::changed_streams`] lists only the
-//!   streams with other bytes, the removed streams and the new streams.
-//! - A removed stream becomes a nil stream, so the IDs of the other streams
-//!   do not change.
-//! - A new stream gets the next stream ID after the last source stream.
-//! - Stream 0, the previous stream directory, is empty, as
-//!   [`OldDirectoryPolicy::Empty`](crate::native::msf::OldDirectoryPolicy::Empty)
-//!   writes it. The default page size is the page size of the source.
-//!
-//! # Supported edits
-//!
-//! | Edit | Functions | Streams that change |
-//! | --- | --- | --- |
-//! | Named streams | [`PdbEditor::set_named_stream`], [`PdbEditor::remove_named_stream`] | Info, the named stream |
-//! | Public and global symbols | [`PdbEditor::add_public`], [`PdbEditor::add_global`], [`PdbEditor::rename_public`], [`PdbEditor::rename_global`] | Symbol records, global index, public index, module streams with moved global references |
-//! | Types and IDs | [`PdbEditor::add_type`], [`PdbEditor::add_id`] | TPI or IPI and its hash stream |
-//! | Identity | [`Pdb::edit`], [`PdbEditor::set_identity`] | Info, DBI if the DBI age changes |
-//! | Strip private symbols | [`PdbEditor::strip_private`] | See below |
-//!
-//! A renamed record stays at its position: the plan encodes it again with
-//! the new name. An added record goes to the end of the symbol record stream.
-//! If the size of a renamed record changes, the offsets of the later records
-//! move. The plan then writes the new offsets into the global and public
-//! indexes and into the global references of the module streams. The global
-//! and public indexes keep the bucket and the reference count of each source
-//! hash record, and the thunk map and the section starts of the source.
-//!
-//! An added type or ID record gets the next index after the last source
-//! record, so the indices of the source records do not change. The hash
-//! stream keeps the source hash values, index offsets and hash adjusters.
-//!
-//! [`PdbEditor::strip_private`] writes the streams that Microsoft
-//! `link /PDBSTRIPPED` writes (MSVC 14.51):
-//!
-//! - The TPI and IPI streams have no records. Their hash streams are empty.
-//! - The global index and the symbol record stream keep only the `S_PUB32`
-//!   records and the `S_LPROCREF` records of the global index. The public
-//!   index keeps all public symbols.
-//! - A module stream keeps the local procedures that an `S_LPROCREF` names,
-//!   each as an `S_LPROC32` record with type 0 and an `S_END` record. Its
-//!   global references are the offsets of these `S_LPROCREF` records. A
-//!   module without such a procedure has no module stream.
-//! - The DBI header has the stripped flag. The modules have no source files,
-//!   no line data and no EC name indices. The EC name table is empty. The
-//!   section contributions have zero CRCs.
-//! - The plan removes `/names` and the `/src/` streams. `/names` stays if the
-//!   PDB has a new FPO stream, because its frame programs refer to `/names`.
-//!   `/TMCache` and `/UDTSRCLINEUNDONE` become empty. The plan removes the
-//!   type map streams that `/TMCache` names and the type map streams that no
-//!   stream names (type maps without an owner).
-//! - In a PDB without type merging (feature `NOTM`, `link /DEBUG:LAZY`), the
-//!   plan removes the module type streams that the `S_MOD_TYPEREF` records
-//!   name, and the Info stream loses the `NOTM` feature code. A stripped
-//!   module stream has no `S_MOD_TYPEREF` record.
-//!
-//! # Rejected edits
-//!
-//! The plan checks all changes before it writes a byte. A planning error
-//! writes nothing, so `PdbEditPlan::write_file` makes no file. The plan
-//! rejects these edits with [`ErrorKind::InvalidReference`]:
-//!
-//! - An edit that moves symbol records, and a strip, if the source has
-//!   opaque data that can refer to symbol offsets or type indices: a present
-//!   stream that no other stream names and that does not decode as a type map
-//!   stream, a named stream of an unknown kind, a symbol record of an unknown
-//!   kind or a C13 subsection of an unknown kind. A type map without an owner
-//!   holds type indices, not symbol offsets, so it does not block an edit. A
-//!   module type stream belongs to the module whose `S_MOD_TYPEREF` record
-//!   names it, so it does not block an edit either.
-//! - A record with a reference that does not resolve.
-//! - A rename of a name that is not in the index or that is not unique.
-//!
-//! The plan rejects these transformations with
-//! [`ErrorKind::UnsupportedVersion`]:
-//!
-//! - A change of `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/`
-//!   stream. Other records refer to their contents by offset, stream ID or
-//!   name.
-//! - A rename of a reference record such as `S_PROCREF`: the module record
-//!   holds the same name.
-//! - An added record of a kind that this crate does not decode.
-//! - A strip together with a symbol, type or ID edit, and a strip of a
-//!   procedure kind that the rules above do not cover.
-//!
-//! # Identity
-//!
-//! The caller gives an [`IdentityPolicy`]. The plan keeps the Info age and
-//! the DBI age consistent. [`PdbEditPlan::pe_match`] returns the values for
-//! the `RSDS` debug entry of the image.
-//!
-//! Caution: [`IdentityPolicy::Preserve`] after a semantic change keeps the
-//! match with the old image. A debugger can then use changed symbols for
-//! that image and misidentify them. For a semantic change, use
-//! [`IdentityPolicy::IncrementAge`] or [`IdentityPolicy::Replace`], and write
-//! the returned values to the image.
+//! [`PdbEditor`] documents the supported edits, the stream rules and the
+//! rejected edits.
 
 use alloc::vec::Vec;
 
@@ -134,7 +27,7 @@ mod strip;
 mod symbols;
 mod types;
 
-pub use plan::PdbEditPlan;
+pub use plan::{EditOptions, PdbEditPlan};
 
 /// The stream ID of the TPI stream.
 const TPI_STREAM: StreamId = StreamId(2);
@@ -194,8 +87,115 @@ struct AddedRecords {
 
 /// An editor of a native PDB.
 ///
-/// See the [module documentation](self) for the supported edits, the stream
-/// rules and the rejected edits.
+/// [`Pdb::edit`] makes the editor. The editor borrows the source PDB and
+/// owns only the changes. [`PdbEditor::plan`] checks all changes, encodes the
+/// streams that the changes affect and returns a [`PdbEditPlan`]. The plan
+/// writes the edited PDB.
+///
+/// # Stream IDs and unchanged streams
+///
+/// The output keeps the stream ID of each source stream:
+///
+/// - The plan does not decode or encode a stream that no change affects. It
+///   reads the source bytes of that stream when it writes. Thus an exact
+///   stream comparison, for example `pdbtool compare`, shows the stream as
+///   identical.
+/// - If an encoded stream has the bytes of its source stream, the plan keeps
+///   the source stream. [`PdbEditPlan::changed_streams`] lists only the
+///   streams with other bytes, the removed streams and the new streams.
+/// - A removed stream becomes a nil stream, so the IDs of the other streams
+///   do not change.
+/// - A new stream gets the next stream ID after the last source stream.
+/// - Stream 0, the previous stream directory, is empty, as
+///   [`OldDirectoryPolicy::Empty`](crate::native::msf::OldDirectoryPolicy::Empty)
+///   writes it. The default page size is the page size of the source (see
+///   [`EditOptions`]).
+///
+/// # Supported edits
+///
+/// | Edit | Functions | Streams that change |
+/// | --- | --- | --- |
+/// | Named streams | [`PdbEditor::set_named_stream`], [`PdbEditor::remove_named_stream`] | Info, the named stream |
+/// | Public and global symbols | [`PdbEditor::add_public`], [`PdbEditor::add_global`], [`PdbEditor::rename_public`], [`PdbEditor::rename_global`] | Symbol records, global index, public index, module streams with moved global references |
+/// | Types and IDs | [`PdbEditor::add_type`], [`PdbEditor::add_id`] | TPI or IPI and its hash stream |
+/// | Identity | [`Pdb::edit`], [`PdbEditor::set_identity`] | Info, DBI if the DBI age changes |
+/// | Strip private symbols | [`PdbEditor::strip_private`] | See below |
+///
+/// A renamed record stays at its position: the plan encodes it again with
+/// the new name. An added record goes to the end of the symbol record stream.
+/// If the size of a renamed record changes, the offsets of the later records
+/// move. The plan then writes the new offsets into the global and public
+/// indexes and into the global references of the module streams. The global
+/// and public indexes keep the bucket and the reference count of each source
+/// hash record, and the thunk map and the section starts of the source.
+///
+/// An added type or ID record gets the next index after the last source
+/// record, so the indices of the source records do not change. The hash
+/// stream keeps the source hash values, index offsets and hash adjusters.
+///
+/// [`PdbEditor::strip_private`] writes the streams that Microsoft
+/// `link /PDBSTRIPPED` writes (MSVC 14.51):
+///
+/// - The TPI and IPI streams have no records. Their hash streams are empty.
+/// - The global index and the symbol record stream keep only the `S_PUB32`
+///   records and the `S_LPROCREF` records of the global index. The public
+///   index keeps all public symbols.
+/// - A module stream keeps the local procedures that an `S_LPROCREF` names,
+///   each as an `S_LPROC32` record with type 0 and an `S_END` record. Its
+///   global references are the offsets of these `S_LPROCREF` records. A
+///   module without such a procedure has no module stream.
+/// - The DBI header has the stripped flag. The modules have no source files,
+///   no line data and no EC name indices. The EC name table is empty. The
+///   section contributions have zero CRCs.
+/// - The plan removes `/names` and the `/src/` streams. `/names` stays if the
+///   PDB has a new FPO stream, because its frame programs refer to `/names`.
+///   `/TMCache` and `/UDTSRCLINEUNDONE` become empty. The plan removes the
+///   type map streams that `/TMCache` names and the type map streams that no
+///   stream names (type maps without an owner).
+/// - In a PDB without type merging (feature `NOTM`, `link /DEBUG:LAZY`), the
+///   plan removes the module type streams that the `S_MOD_TYPEREF` records
+///   name, and the Info stream loses the `NOTM` feature code. A stripped
+///   module stream has no `S_MOD_TYPEREF` record.
+///
+/// # Rejected edits
+///
+/// The plan checks all changes before it writes a byte. A planning error
+/// writes nothing, so `PdbEditPlan::write_file` makes no file. The plan
+/// rejects these edits with [`ErrorKind::UnsupportedEdit`]:
+///
+/// - An edit that moves symbol records, and a strip, if the source has
+///   opaque data that can refer to symbol offsets or type indices: a present
+///   stream that no other stream names and that does not decode as a type map
+///   stream, a named stream of an unknown kind, a symbol record of an unknown
+///   kind or a C13 subsection of an unknown kind. A type map without an owner
+///   holds type indices, not symbol offsets, so it does not block an edit. A
+///   module type stream belongs to the module whose `S_MOD_TYPEREF` record
+///   names it, so it does not block an edit either.
+/// - A change of `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/`
+///   stream. Other records refer to their contents by offset, stream ID or
+///   name.
+/// - A rename of a reference record such as `S_PROCREF`: the module record
+///   holds the same name. Two renames of the same record.
+/// - An added record of a kind that this crate does not decode.
+/// - A strip together with a symbol, type or ID edit, and a strip of a
+///   procedure kind that the rules above do not cover.
+///
+/// The plan rejects these edits with [`ErrorKind::InvalidReference`]:
+///
+/// - A record with a reference that does not resolve.
+/// - A rename of a name that is not in the index or that is not unique.
+///
+/// # Identity
+///
+/// The caller gives an [`IdentityPolicy`]. The plan keeps the Info age and
+/// the DBI age consistent. [`PdbEditPlan::identity`] returns the identity
+/// for the `RSDS` debug entry of the image.
+///
+/// Caution: [`IdentityPolicy::Preserve`] after a semantic change keeps the
+/// match with the old image. A debugger can then use changed symbols for
+/// that image and misidentify them. For a semantic change, use
+/// [`IdentityPolicy::IncrementAge`] or [`IdentityPolicy::Replace`], and write
+/// the returned identity to the image.
 pub struct PdbEditor<'p, S> {
     /// The source PDB.
     source: &'p Pdb<S>,
@@ -230,10 +230,10 @@ impl<S> core::fmt::Debug for PdbEditor<'_, S> {
     }
 }
 
-/// Return an [`ErrorKind::UnsupportedVersion`] error for an edit that the
+/// Return an [`ErrorKind::UnsupportedEdit`] error for an edit that the
 /// editor does not support.
 fn unsupported(context: &'static str) -> Error {
-    Error::new(ErrorKind::UnsupportedVersion, None).with_context(context)
+    Error::new(ErrorKind::UnsupportedEdit, None).with_context(context)
 }
 
 /// Copy `bytes` into a new vector with a checked allocation.
@@ -269,7 +269,7 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// Caution: [`IdentityPolicy::Preserve`] after a semantic change keeps
     /// the match with the old image (see the
-    /// [module documentation](crate::native::edit#identity)).
+    /// [`PdbEditor` documentation](PdbEditor#identity)).
     #[must_use]
     pub const fn edit(&self, identity: IdentityPolicy) -> PdbEditor<'_, S> {
         PdbEditor {
@@ -322,7 +322,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     ///
     /// - [`ErrorKind::InvalidFormat`] if the name is empty or contains a NUL
     ///   byte.
-    /// - [`ErrorKind::UnsupportedVersion`] for `/names`, `/TMCache`,
+    /// - [`ErrorKind::UnsupportedEdit`] for `/names`, `/TMCache`,
     ///   `/UDTSRCLINEUNDONE` or a `/src/` name. Other records refer to the
     ///   contents of these streams.
     /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
@@ -395,7 +395,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::UnsupportedVersion`] for another kind.
+    /// - [`ErrorKind::UnsupportedEdit`] for another kind.
     /// - The errors of [`SymbolData::encode`].
     pub fn add_global(&mut self, kind: SymbolKind, data: &SymbolData<'_>) -> Result<()> {
         if !matches!(
@@ -465,7 +465,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// # Errors
     ///
     /// - [`ErrorKind::MissingStream`] if the PDB has no TPI stream.
-    /// - [`ErrorKind::UnsupportedVersion`] for [`TypeLeaf::Unsupported`].
+    /// - [`ErrorKind::UnsupportedEdit`] for [`TypeLeaf::Unsupported`].
     /// - [`ErrorKind::LimitExceeded`] if the index does not fit in 32 bits.
     /// - The errors of [`TypeLeaf::encode`] and of the stream reader.
     pub fn add_type(&mut self, leaf: &TypeLeaf<'_>) -> Result<TypeIndex> {
@@ -494,7 +494,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
 
     /// Strip the private symbols as `link /PDBSTRIPPED` does.
     ///
-    /// See the [module documentation](self) for the rules. The plan rejects
+    /// See [`PdbEditor`] for the rules. The plan rejects
     /// a strip together with a symbol, type or ID edit.
     pub const fn strip_private(&mut self) {
         self.strip = true;

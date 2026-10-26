@@ -104,7 +104,7 @@ impl PdbBuilder<'_> {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("PDB Info stream has no GUID identity"));
         };
-        let mut info = InfoBuilder::new(options.info_producer, self.info.signature(), guid, age)?;
+        let mut info = InfoBuilder::new(options.info_producer(), self.info.signature(), guid, age)?;
         let mut features = Vec::new();
         features
             .try_reserve_exact(self.info.features().len())

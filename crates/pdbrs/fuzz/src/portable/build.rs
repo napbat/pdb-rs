@@ -14,8 +14,8 @@ use pdbrs::portable::metadata::{
     AssemblyRefId, DocumentId, IlOffset, ImportScopeId, MetadataToken, MethodDefId,
     StandAloneSigId, TableId,
 };
-use pdbrs::portable::write::{ExternalRowCounts, IdPolicy};
-use pdbrs::portable::{Pdb, PdbBuilder};
+use pdbrs::portable::write::ExternalRowCounts;
+use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder};
 
 use crate::input::Input;
 use crate::ok;
@@ -107,12 +107,11 @@ impl Build {
         let selector = input.u8();
         match selector % 7 {
             0 => {
-                let document = DocumentInfo {
-                    name: text(input).to_vec(),
-                    hash_algorithm: (input.u8() & 1 == 1).then_some([input.u8(); 16]),
-                    hash: text(input).to_vec(),
-                    language: (input.u8() & 1 == 1).then_some([input.u8(); 16]),
-                };
+                let mut document = DocumentInfo::default();
+                document.name = text(input).to_vec();
+                document.hash_algorithm = (input.u8() & 1 == 1).then_some([input.u8(); 16]);
+                document.hash = text(input).to_vec();
+                document.language = (input.u8() & 1 == 1).then_some([input.u8(); 16]);
                 ok(self.builder.add_document(document)).map(|id| self.documents.push(id))
             }
             1 => {
@@ -126,48 +125,43 @@ impl Build {
                 } else {
                     LocalSignatureForm::Token
                 };
-                let info = MethodInfo {
-                    local_signature: StandAloneSigId::new(u32::from(input.u8() % 2)),
-                    local_signature_form: form,
-                    sequence_points: points.clone(),
-                };
+                let mut info = MethodInfo::default();
+                info.local_signature = StandAloneSigId::new(u32::from(input.u8() % 2));
+                info.local_signature_form = form;
+                info.sequence_points = points.clone();
                 self.builder.set_method(method, info);
                 self.methods.retain(|(id, _)| *id != method);
                 self.methods.push((method, points));
                 Some(())
             }
             2 => {
-                let scope = LocalScopeInfo {
-                    method: MethodDefId::new(1 + u32::from(input.u8()) % EXTERNAL_ROWS),
-                    import_scope: self.imports.first().copied().unwrap_or_default(),
-                    start_offset: IlOffset::new(u32::from(input.u16())),
-                    length: u32::from(input.u16()),
-                };
+                let mut scope = LocalScopeInfo::default();
+                scope.method = MethodDefId::new(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
+                scope.import_scope = self.imports.first().copied().unwrap_or_default();
+                scope.start_offset = IlOffset::new(u32::from(input.u16()));
+                scope.length = u32::from(input.u16());
                 ok(self.builder.add_local_scope(scope)).map(|handle| self.scopes.push(handle))
             }
             3 => {
                 let scope = *self.scopes.last()?;
-                let variable = LocalVariableInfo {
-                    attributes: input.u16(),
-                    index: input.u16(),
-                    name: text(input).to_vec(),
-                };
+                let mut variable = LocalVariableInfo::default();
+                variable.attributes = input.u16();
+                variable.index = input.u16();
+                variable.name = text(input).to_vec();
                 ok(self.builder.add_local_variable(scope, variable)).map(|_| ())
             }
             4 => {
                 let scope = *self.scopes.last()?;
-                let constant = LocalConstantInfo {
-                    name: text(input).to_vec(),
-                    signature: text(input).to_vec(),
-                };
+                let mut constant = LocalConstantInfo::default();
+                constant.name = text(input).to_vec();
+                constant.signature = text(input).to_vec();
                 ok(self.builder.add_local_constant(scope, constant)).map(|_| ())
             }
             5 => {
                 let count = usize::from(input.u8() % 4);
-                let scope = ImportScopeInfo {
-                    parent: self.imports.last().copied().unwrap_or_default(),
-                    imports: (0..count).map(|_| import(input)).collect(),
-                };
+                let mut scope = ImportScopeInfo::default();
+                scope.parent = self.imports.last().copied().unwrap_or_default();
+                scope.imports = (0..count).map(|_| import(input)).collect();
                 ok(self.builder.add_import_scope(scope)).map(|id| self.imports.push(id))
             }
             _ => {
@@ -181,11 +175,9 @@ impl Build {
                     ),
                     _ => CustomDebugParent::LocalScope(*self.scopes.first()?),
                 };
-                let information = CustomDebugInfo {
-                    parent,
-                    kind: CustomDebugKind([input.u8(); 16]),
-                    value: text(input).to_vec(),
-                };
+                let mut information =
+                    CustomDebugInfo::new(parent, CustomDebugKind([input.u8(); 16]));
+                information.value = text(input).to_vec();
                 ok(self.builder.add_custom_debug_information(information)).map(|_| ())
             }
         }
@@ -224,7 +216,7 @@ pub fn build(data: &[u8]) {
         }
         let _ = build.command(&mut input);
     }
-    let Some(plan) = ok(build.builder.plan(IdPolicy::ContentDerived)) else {
+    let Some(plan) = ok(build.builder.plan(IdentityPolicy::ContentDerived)) else {
         return;
     };
     let bytes = plan.to_vec().expect("a planned PDB writes");

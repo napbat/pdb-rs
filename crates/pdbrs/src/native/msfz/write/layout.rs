@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use super::super::CHUNK_ENTRY_SIZE;
 use super::super::directory::{COMPRESSED_BIT, NIL_STREAM_SIZE};
-use super::{WriteOptions, directory_too_large, plan_allocation_failed};
+use super::{MsfzWriteOptions, directory_too_large, plan_allocation_failed};
 use crate::{Error, ErrorKind, Result};
 
 /// The number of chunks that the 31-bit chunk index of a fragment location can name.
@@ -90,7 +90,7 @@ impl Layout {
     /// - [`ErrorKind::LimitExceeded`] if the stream count does not fit in `u32`, the total
     ///   size does not fit in `u64`, the chunk count does not fit in the chunk index, the Chunk
     ///   Table is larger than its limit, or an allocation fails.
-    pub(super) fn new(sizes: &[Option<u64>], options: &WriteOptions) -> Result<Self> {
+    pub(super) fn new(sizes: &[Option<u64>], options: &MsfzWriteOptions) -> Result<Self> {
         if sizes.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("MSFZ stream directory has no streams"));

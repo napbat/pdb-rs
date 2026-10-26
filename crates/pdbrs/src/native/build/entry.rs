@@ -22,7 +22,7 @@ use crate::{Error, ErrorKind, Result};
 ///
 /// The item is one record for a type, an ID or a symbol, one complete C13
 /// subsection with its header and padding, or the bytes of a stream.
-pub type Deferred<'a> = Box<dyn Fn(&Resolver<'_>, &mut Vec<u8>) -> Result<()> + 'a>;
+pub(super) type Deferred<'a> = Box<dyn Fn(&Resolver<'_>, &mut Vec<u8>) -> Result<()> + 'a>;
 
 /// A decoded value or a deferred encoder.
 pub(super) enum Entry<'a, T> {

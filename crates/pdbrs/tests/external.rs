@@ -5,7 +5,7 @@ use pdbrs::native::Producer;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::dbi::{DbiBuilder, DbiHeader, OwnedModule, SectionContribution, TypeServer};
 use pdbrs::native::info::{Feature, InfoBuilder};
-use pdbrs::native::msf::{MsfBuilder, StreamId, WriteOptions};
+use pdbrs::native::msf::{MsfBuilder, MsfWriteOptions, StreamId};
 
 /// Append one symbol record.
 fn record(out: &mut Vec<u8>, kind: u16, payload: &[u8]) {
@@ -107,7 +107,7 @@ fn pdb() -> Vec<u8> {
         builder.push(stream.as_slice()).unwrap();
     }
     builder
-        .plan(WriteOptions::default())
+        .plan(MsfWriteOptions::default())
         .unwrap()
         .to_vec()
         .unwrap()

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pdbrs::native::container::Container;
-use pdbrs::native::msfz::{Codec, WriteOptions};
+use pdbrs::native::msfz::{Codec, MsfzWriteOptions};
 
 use super::super::native::NativeFixture;
 use super::super::native::consumers::{
@@ -214,7 +214,7 @@ fn source(fixture: &NativeFixture, fixtures: &Path, tools: &Tools<'_>) -> Result
 fn check(
     fixture: &NativeFixture,
     source: &Source,
-    options: WriteOptions,
+    options: MsfzWriteOptions,
     tools: &Tools<'_>,
     directory: &Path,
 ) -> Report {
@@ -300,7 +300,7 @@ fn dia_check(
 }
 
 /// Write the container in `bytes` as MSFZ. Return the bytes and the chunk count.
-pub(super) fn encode(bytes: &[u8], options: WriteOptions) -> Result<(Vec<u8>, u32), String> {
+pub(super) fn encode(bytes: &[u8], options: MsfzWriteOptions) -> Result<(Vec<u8>, u32), String> {
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
     let container = Container::read(bytes).map_err(pdbrs)?;
     let plan = container.to_msfz(options, POLICY).map_err(pdbrs)?;

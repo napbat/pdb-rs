@@ -5,7 +5,9 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::io::copy_exact;
-use pdbrs::native::msf::{Msf, MsfBuilder, MsfLimits, OldDirectoryPolicy, StreamId, WriteOptions};
+use pdbrs::native::msf::{
+    Msf, MsfBuilder, MsfLimits, MsfWriteOptions, OldDirectoryPolicy, StreamId,
+};
 use pdbrs::{Error, ErrorKind, Result};
 
 /// The page sizes that the writer writes. The reader also accepts 65536.
@@ -54,8 +56,8 @@ fn bytes(length: usize, seed: u8) -> Vec<u8> {
         .collect()
 }
 
-fn options(page_size: u32) -> WriteOptions {
-    WriteOptions::default().with_page_size(page_size)
+fn options(page_size: u32) -> MsfWriteOptions {
+    MsfWriteOptions::default().with_page_size(page_size)
 }
 
 /// Return streams with nil, empty, short, page-sized and multi-page contents.
@@ -330,14 +332,14 @@ fn streams_that_are_too_large_are_rejected() {
         let mut builder = MsfBuilder::new();
         builder.push(Pattern(0)).unwrap();
         builder.push(Pattern(size)).unwrap();
-        let error = builder.plan(WriteOptions::default()).unwrap_err();
+        let error = builder.plan(MsfWriteOptions::default()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded);
         assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
     }
     let mut builder = MsfBuilder::new();
     builder.push(Pattern(0)).unwrap();
     builder.push(Pattern(u64::from(u32::MAX - 1))).unwrap();
-    let plan = builder.plan(WriteOptions::default()).unwrap();
+    let plan = builder.plan(MsfWriteOptions::default()).unwrap();
     assert_eq!(plan.directory_size(), 4 * (3 + 1_048_576));
 }
 
@@ -349,7 +351,7 @@ fn invalid_options_and_inputs_fail_before_output() {
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     }
     let error = MsfBuilder::<&[u8]>::new()
-        .plan(WriteOptions::default())
+        .plan(MsfWriteOptions::default())
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }
@@ -380,7 +382,7 @@ fn source_read_errors_stop_the_write() {
     let mut builder = MsfBuilder::new();
     builder.push(Failing(0)).unwrap();
     builder.push(Failing(10)).unwrap();
-    let plan = builder.plan(WriteOptions::default()).unwrap();
+    let plan = builder.plan(MsfWriteOptions::default()).unwrap();
     let error = plan.to_vec().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Io);
     assert_eq!(error.stream_location(), Some((StreamId(1), 0)));
@@ -471,7 +473,7 @@ fn repack_of_a_repack_is_identical() {
         .unwrap();
     let first = Msf::read(source.as_slice()).unwrap();
     for (options, policy) in [
-        (WriteOptions::default(), OldDirectoryPolicy::Empty),
+        (MsfWriteOptions::default(), OldDirectoryPolicy::Empty),
         (options(2048), OldDirectoryPolicy::Preserve),
     ] {
         let once = first.repack(options, policy).unwrap().to_vec().unwrap();
@@ -504,7 +506,7 @@ mod file {
     use pdbrs::ErrorKind;
     use pdbrs::io::FileReader;
     use pdbrs::io::copy_exact_file;
-    use pdbrs::native::msf::{Msf, MsfBuilder, OldDirectoryPolicy, WriteOptions};
+    use pdbrs::native::msf::{Msf, MsfBuilder, MsfWriteOptions, OldDirectoryPolicy};
 
     use super::{Failing, Pattern, builder, sample_streams};
 
@@ -548,7 +550,7 @@ mod file {
         let temp = TempDir::new("write");
         let streams = sample_streams(4096);
         let source = builder(&streams);
-        let plan = source.plan(WriteOptions::default()).unwrap();
+        let plan = source.plan(MsfWriteOptions::default()).unwrap();
         let path = temp.0.join("new.pdb");
         plan.write_file(&path).unwrap();
         let written = fs::read(&path).unwrap();
@@ -562,7 +564,7 @@ mod file {
 
         let repacked = temp.0.join("repacked.pdb");
         let msf = Msf::read(FileReader::open(&copy).unwrap()).unwrap();
-        msf.repack(WriteOptions::default(), OldDirectoryPolicy::Preserve)
+        msf.repack(MsfWriteOptions::default(), OldDirectoryPolicy::Preserve)
             .unwrap()
             .write_file(&repacked)
             .unwrap();
@@ -577,7 +579,7 @@ mod file {
         let mut builder = MsfBuilder::new();
         builder.push(Failing(0)).unwrap();
         builder.push(Failing(10)).unwrap();
-        let plan = builder.plan(WriteOptions::default()).unwrap();
+        let plan = builder.plan(MsfWriteOptions::default()).unwrap();
         assert_eq!(plan.write_file(&path).unwrap_err().kind(), ErrorKind::Io);
         assert_eq!(temp.entries(), Vec::<String>::new());
 
@@ -604,7 +606,7 @@ mod file {
             builder.push(Pattern(0)).unwrap();
             builder.push(Pattern(size)).unwrap();
             let result = builder
-                .plan(WriteOptions::default().with_page_size(page_size))
+                .plan(MsfWriteOptions::default().with_page_size(page_size))
                 .and_then(|plan| plan.write_file(&path));
             assert_eq!(result.unwrap_err().kind(), kind);
             assert_eq!(temp.entries(), Vec::<String>::new());

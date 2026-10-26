@@ -9,7 +9,7 @@ use pdbrs::io::ReadAt;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::msfz::{
     Codec, DEFAULT_MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, Msfz, MsfzBuilder, MsfzLimits,
-    PAD_16K_SIZE, WriteOptions,
+    MsfzWriteOptions, PAD_16K_SIZE,
 };
 use pdbrs::{Error, ErrorKind, Result};
 
@@ -119,7 +119,7 @@ fn builder(streams: &[Option<Vec<u8>>]) -> MsfzBuilder<&[u8]> {
 }
 
 /// Write `streams` with `options`.
-fn write(streams: &[Option<Vec<u8>>], options: WriteOptions) -> Vec<u8> {
+fn write(streams: &[Option<Vec<u8>>], options: MsfzWriteOptions) -> Vec<u8> {
     let builder = builder(streams);
     let plan = builder.plan(options).unwrap();
     let bytes = plan.to_vec().unwrap();
@@ -220,7 +220,7 @@ fn check_layout(bytes: &[u8], code: u32) -> Header {
 fn written_streams_read_back_with_each_codec() {
     let streams = sample_streams();
     for codec in [Codec::Zstd, Codec::Deflate] {
-        let options = WriteOptions::default()
+        let options = MsfzWriteOptions::default()
             .with_max_chunk_size(MIN_CHUNK_SIZE)
             .with_codec(codec);
         let bytes = write(&streams, options);
@@ -232,7 +232,7 @@ fn written_streams_read_back_with_each_codec() {
 #[test]
 fn nil_and_empty_streams_stay_distinct() {
     let streams = vec![None, Some(Vec::new()), None, Some(Vec::new())];
-    let bytes = write(&streams, WriteOptions::default());
+    let bytes = write(&streams, MsfzWriteOptions::default());
     let msfz = check_streams(&bytes, &streams);
     assert_eq!(msfz.chunk_count(), 0);
     assert_eq!(msfz.fragment_count(), 0);
@@ -243,7 +243,7 @@ fn nil_and_empty_streams_stay_distinct() {
 #[test]
 fn identical_input_and_options_give_identical_bytes() {
     let streams = sample_streams();
-    let options = WriteOptions::default()
+    let options = MsfzWriteOptions::default()
         .with_max_chunk_size(MIN_CHUNK_SIZE)
         .with_directory_codec(Some(Codec::Deflate));
     let source = builder(&streams);
@@ -261,7 +261,7 @@ fn chunks_have_the_maximum_size_except_the_last() {
     let total: usize = streams.iter().flatten().map(Vec::len).sum();
     let bytes = write(
         &streams,
-        WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE),
+        MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE),
     );
     let header = check_layout(&bytes, 1);
     let max = usize::try_from(MIN_CHUNK_SIZE).unwrap();
@@ -279,7 +279,7 @@ fn one_stream_per_chunk_starts_a_chunk_for_each_stream() {
     let streams = sample_streams();
     let bytes = write(
         &streams,
-        WriteOptions::default()
+        MsfzWriteOptions::default()
             .with_max_chunk_size(MIN_CHUNK_SIZE)
             .with_one_stream_per_chunk(true),
     );
@@ -310,7 +310,7 @@ fn fragments_end_at_chunk_boundaries() {
     ];
     let bytes = write(
         &streams,
-        WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE),
+        MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE),
     );
     let msfz = check_streams(&bytes, &streams);
     assert_eq!(msfz.chunk_count(), 3);
@@ -335,13 +335,13 @@ fn fragments_end_at_chunk_boundaries() {
 fn the_stream_directory_can_be_compressed() {
     let streams = sample_streams();
     for codec in [Codec::Zstd, Codec::Deflate] {
-        let options = WriteOptions::default().with_directory_codec(Some(codec));
+        let options = MsfzWriteOptions::default().with_directory_codec(Some(codec));
         let bytes = write(&streams, options);
         let msfz = check_streams(&bytes, &streams);
         assert!(msfz.is_directory_compressed());
         assert_eq!(check_layout(&bytes, 1).directory_code, codec.code());
     }
-    let bytes = write(&streams, WriteOptions::default());
+    let bytes = write(&streams, MsfzWriteOptions::default());
     assert!(
         !Msfz::read(bytes.as_slice())
             .unwrap()
@@ -353,20 +353,20 @@ fn the_stream_directory_can_be_compressed() {
 #[test]
 fn pad_16k_pads_only_small_files() {
     let small = vec![Some(Vec::new()), Some(bytes(10, 1))];
-    let bytes = write(&small, WriteOptions::default().with_pad_16k(true));
+    let bytes = write(&small, MsfzWriteOptions::default().with_pad_16k(true));
     assert_eq!(u64::try_from(bytes.len()).unwrap(), PAD_16K_SIZE);
     check_streams(&bytes, &small);
     check_layout(&bytes, 1);
 
     let large = vec![Some(Vec::new()), Some(noise(1 << 16))];
-    let padded = write(&large, WriteOptions::default().with_pad_16k(true));
-    assert_eq!(padded, write(&large, WriteOptions::default()));
+    let padded = write(&large, MsfzWriteOptions::default().with_pad_16k(true));
+    assert_eq!(padded, write(&large, MsfzWriteOptions::default()));
     assert!(u64::try_from(padded.len()).unwrap() > PAD_16K_SIZE);
 }
 
 #[test]
 fn the_defaults_match_pdz_encode() {
-    let options = WriteOptions::default();
+    let options = MsfzWriteOptions::default();
     assert_eq!(options.max_chunk_size(), DEFAULT_MAX_CHUNK_SIZE);
     assert_eq!(DEFAULT_MAX_CHUNK_SIZE, 1 << 20);
     assert!(!options.one_stream_per_chunk());
@@ -382,17 +382,17 @@ fn invalid_options_and_inputs_fail_before_output() {
     let source = builder(&streams);
     for size in [0, MIN_CHUNK_SIZE - 1, MAX_CHUNK_SIZE + 1, u32::MAX] {
         let error = source
-            .plan(WriteOptions::default().with_max_chunk_size(size))
+            .plan(MsfzWriteOptions::default().with_max_chunk_size(size))
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "{size}");
     }
     let empty: MsfzBuilder<&[u8]> = MsfzBuilder::new();
     assert_eq!(
-        empty.plan(WriteOptions::default()).unwrap_err().kind(),
+        empty.plan(MsfzWriteOptions::default()).unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
     let small_chunks = MsfzLimits::default().with_max_chunk_bytes(MIN_CHUNK_SIZE);
-    let options = WriteOptions::default().with_limits(small_chunks);
+    let options = MsfzWriteOptions::default().with_limits(small_chunks);
     assert_eq!(
         source.plan(options).unwrap_err().kind(),
         ErrorKind::LimitExceeded
@@ -403,7 +403,7 @@ fn invalid_options_and_inputs_fail_before_output() {
 fn limits_of_the_options_are_enforced() {
     let streams = sample_streams();
     let source = builder(&streams);
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let plan = source.plan(options).unwrap();
     let directory = plan.directory_size();
     let table = plan.chunk_count() * 20;
@@ -441,7 +441,7 @@ fn large_streams_need_no_large_buffers() {
     let mut builder = MsfzBuilder::new();
     builder.push(Pattern(0)).unwrap();
     builder.push(Pattern(40 << 20)).unwrap();
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let plan = builder.plan(options).unwrap();
     assert_eq!(plan.chunk_count(), 10_240);
     assert_eq!(plan.fragment_count(), 10_240);
@@ -466,7 +466,7 @@ fn streams_larger_than_4_gib_are_planned() {
     builder.push(Failing(0)).unwrap();
     builder.push(Failing((5 << 30) + 7)).unwrap();
     // 4 KiB chunks keep the chunk buffer small: 1 310 721 chunks, a 25 MiB Chunk Table.
-    let options = WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
     let error = builder.plan(options).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Io);
     // The default chunk limit (256 MiB) rejects 1 GiB chunks before any read.
@@ -480,7 +480,7 @@ fn source_read_errors_stop_the_plan() {
     let mut builder = MsfzBuilder::new();
     builder.push(Failing(0)).unwrap();
     builder.push(Failing(10)).unwrap();
-    let error = builder.plan(WriteOptions::default()).unwrap_err();
+    let error = builder.plan(MsfzWriteOptions::default()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Io);
     assert_eq!(
         error.stream_location().map(|(stream, _)| stream),
@@ -498,7 +498,7 @@ fn a_changed_source_stops_the_write() {
             len: 50_000,
         })
         .unwrap();
-    let plan = builder.plan(WriteOptions::default()).unwrap();
+    let plan = builder.plan(MsfzWriteOptions::default()).unwrap();
     changed.set(true);
     let error = plan.to_vec().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
@@ -513,7 +513,7 @@ mod file {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use pdbrs::ErrorKind;
-    use pdbrs::native::msfz::{MsfzBuilder, WriteOptions};
+    use pdbrs::native::msfz::{MsfzBuilder, MsfzWriteOptions};
 
     use super::{Changing, Pattern, builder, sample_streams};
 
@@ -557,7 +557,7 @@ mod file {
         let temp = TempDir::new("write");
         let streams = sample_streams();
         let source = builder(&streams);
-        let plan = source.plan(WriteOptions::default()).unwrap();
+        let plan = source.plan(MsfzWriteOptions::default()).unwrap();
         let path = temp.0.join("new.pdb");
         plan.write_file(&path).unwrap();
         assert_eq!(fs::read(&path).unwrap(), plan.to_vec().unwrap());
@@ -576,7 +576,7 @@ mod file {
                 len: 50_000,
             })
             .unwrap();
-        let plan = builder.plan(WriteOptions::default()).unwrap();
+        let plan = builder.plan(MsfzWriteOptions::default()).unwrap();
         changed.set(true);
         let error = plan.write_file(&path).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);
@@ -598,7 +598,7 @@ mod file {
         let mut builder = MsfzBuilder::new();
         builder.push(Pattern(10)).unwrap();
         let result = builder
-            .plan(WriteOptions::default().with_max_chunk_size(100))
+            .plan(MsfzWriteOptions::default().with_max_chunk_size(100))
             .and_then(|plan| plan.write_file(&path));
         assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidFormat);
         assert_eq!(temp.entries(), Vec::<String>::new());

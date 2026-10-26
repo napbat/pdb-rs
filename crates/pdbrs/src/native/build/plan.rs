@@ -4,60 +4,17 @@ use alloc::vec::Vec;
 
 use super::PdbBuilder;
 use super::handle::Resolver;
+use super::options::BuildOptions;
 use crate::io::{ReadAt, Write};
 use crate::native::Identity;
-use crate::native::Producer;
-use crate::native::info::PeMatch;
-use crate::native::msf::{MsfBuilder, StreamId, WriteOptions, WritePlan};
+use crate::native::msf::{MsfBuilder, MsfWriteOptions, MsfWritePlan, StreamId};
 use crate::native::output::no_memory;
-use crate::native::types::DEFAULT_HASH_BUCKETS;
 use crate::{Error, ErrorKind, Result};
 
 mod module_types;
 mod streams;
 mod symbols;
 mod types;
-
-/// The options of a write plan.
-///
-/// [`Default`] gives the conventions of Microsoft `link.exe`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct BuildOptions {
-    /// The container options: page size and limits.
-    pub msf: WriteOptions,
-    /// The producer whose layout of the TPI and IPI hash streams the writer
-    /// follows (see [`crate::native::types::TypeStreamOptions::with_producer`]).
-    pub hash_layout: Producer,
-    /// The hash bucket count of the TPI and IPI streams.
-    pub hash_buckets: u32,
-    /// The producer whose conventions of the global and public symbol indexes
-    /// the writer follows (see
-    /// [`crate::native::symbols::PublicSymbolIndex::encode_parts`]).
-    pub index_producer: Producer,
-    /// The producer whose conventions of the named-stream map of the Info
-    /// stream the writer follows (see
-    /// [`crate::native::hash_table::OwnedHashTable`]).
-    pub info_producer: Producer,
-    /// `true` to write the TPI hash stream. Microsoft and LLVM linkers write it.
-    pub type_hash_stream: bool,
-    /// `true` to write the IPI hash stream.
-    pub id_hash_stream: bool,
-}
-
-impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            msf: WriteOptions::default(),
-            hash_layout: Producer::Microsoft,
-            hash_buckets: DEFAULT_HASH_BUCKETS,
-            index_producer: Producer::Microsoft,
-            info_producer: Producer::Microsoft,
-            type_hash_stream: true,
-            id_hash_stream: true,
-        }
-    }
-}
 
 /// A frozen native PDB: all stream bytes and the checked container layout.
 ///
@@ -76,24 +33,27 @@ pub struct PdbWritePlan<'b> {
     /// The streams in stream ID order. `None` is a nil stream.
     streams: MsfBuilder<StreamBytes<'b>>,
     /// The container options.
-    options: WriteOptions,
-    /// The values for the `RSDS` debug entry of the image.
-    pe_match: PeMatch,
+    options: MsfWriteOptions,
+    /// The identity for the `RSDS` debug entry of the image.
+    identity: Identity,
+    /// The number of streams.
+    stream_count: u32,
     /// The size of the output in bytes.
     file_size: u64,
 }
 
 impl PdbWritePlan<'_> {
-    /// Return the values for the `RSDS` debug entry of the matching image.
+    /// Return the identity for the `RSDS` debug entry of the matching image:
+    /// the GUID and the DBI age.
     #[must_use]
-    pub const fn pe_match(&self) -> PeMatch {
-        self.pe_match
+    pub const fn identity(&self) -> Identity {
+        self.identity
     }
 
-    /// Return the number of streams.
+    /// Return the number of streams, including nil streams.
     #[must_use]
-    pub fn stream_count(&self) -> usize {
-        self.streams.stream_count()
+    pub const fn stream_count(&self) -> u32 {
+        self.stream_count
     }
 
     /// Return the size of the output in bytes.
@@ -103,7 +63,7 @@ impl PdbWritePlan<'_> {
     }
 
     /// Return the MSF plan of the streams.
-    fn msf(&self) -> Result<WritePlan<'_>> {
+    fn msf(&self) -> Result<MsfWritePlan<'_>> {
         self.streams.plan(self.options)
     }
 
@@ -111,7 +71,7 @@ impl PdbWritePlan<'_> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::write_to`].
+    /// Returns the errors of [`MsfWritePlan::write_to`].
     pub fn write_to<W: Write + ?Sized>(&self, output: &mut W) -> Result<()> {
         self.msf()?.write_to(output)
     }
@@ -120,16 +80,17 @@ impl PdbWritePlan<'_> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::to_vec`].
+    /// Returns the errors of [`MsfWritePlan::to_vec`].
     pub fn to_vec(&self) -> Result<Vec<u8>> {
         self.msf()?.to_vec()
     }
 
     /// Write the PDB to the file `path` through a temporary sibling file.
+    /// Requires the `std` feature.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::write_file`].
+    /// Returns the errors of [`MsfWritePlan::write_file`].
     #[cfg(feature = "std")]
     pub fn write_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.msf()?.write_file(path)
@@ -222,10 +183,13 @@ impl PdbBuilder<'_> {
         // Streams 0 to 4: previous directory, Info, TPI, DBI and IPI.
         let mut counter = Counter(5);
         let tpi_hash = options
-            .type_hash_stream
+            .type_hash_stream()
             .then(|| counter.next())
             .transpose()?;
-        let ipi_hash = options.id_hash_stream.then(|| counter.next()).transpose()?;
+        let ipi_hash = options
+            .id_hash_stream()
+            .then(|| counter.next())
+            .transpose()?;
         let globals = counter.next()?;
         let publics = counter.next()?;
         let symbols = counter.next()?;
@@ -278,7 +242,7 @@ impl PdbBuilder<'_> {
 
     /// Encode all streams, check all references and plan the container.
     ///
-    /// See the [module documentation](super) for the steps.
+    /// See [`PdbBuilder`] for the steps.
     ///
     /// # Errors
     ///
@@ -290,11 +254,12 @@ impl PdbBuilder<'_> {
     /// - [`ErrorKind::InvalidFormat`] if a record or a stream breaks a rule
     ///   of its encoder.
     /// - The errors of [`MsfBuilder::plan`].
-    pub fn plan(&self, options: &BuildOptions) -> Result<PdbWritePlan<'_>> {
+    pub fn plan(&self, options: BuildOptions) -> Result<PdbWritePlan<'_>> {
         let Identity::Modern { guid, .. } = self.info.identity() else {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("PDB Info stream has no GUID identity"));
         };
+        let options = &options;
         let ids = self.assign_streams(options)?;
         let resolver = self.base_resolver(&ids)?;
         let tpi = self.type_stream(&resolver, options, ids.tpi_hash)?;
@@ -338,14 +303,15 @@ impl PdbBuilder<'_> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("planned stream count differs from the assigned stream IDs"));
         }
-        let file_size = msf.plan(options.msf)?.file_size();
+        let file_size = msf.plan(options.msf())?.file_size();
         Ok(PdbWritePlan {
             streams: msf,
-            options: options.msf,
-            pe_match: PeMatch {
+            options: options.msf(),
+            identity: Identity::Modern {
                 guid,
                 age: self.dbi_age,
             },
+            stream_count: ids.count,
             file_size,
         })
     }

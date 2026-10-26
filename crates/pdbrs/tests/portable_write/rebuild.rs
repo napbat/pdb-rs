@@ -1,11 +1,11 @@
 //! Exact copies and the rebuild of an existing Portable PDB with `Pdb::to_parts`.
 
-use pdbrs::portable::Pdb;
+use pdbrs::io::copy_exact;
 use pdbrs::portable::debug::Import;
 use pdbrs::portable::metadata::{
     CustomDebugInformationRow, DocumentId, ImportScopeId, LocalVariableRow, MethodDefId, TableId,
 };
-use pdbrs::portable::write::IdPolicy;
+use pdbrs::portable::{IdentityPolicy, Pdb};
 
 use crate::builder::{Builder, row, value};
 use crate::{location, open};
@@ -44,7 +44,7 @@ fn exact_copy_keeps_every_byte() {
     let pdb = Pdb::parse(&bytes).unwrap();
     let mut copy = Vec::new();
     assert_eq!(
-        pdb.copy_exact(&mut copy).unwrap(),
+        copy_exact(pdb.source(), &mut copy).unwrap(),
         u64::try_from(bytes.len()).unwrap()
     );
     assert_eq!(copy, bytes);
@@ -58,7 +58,7 @@ fn rebuild_keeps_rows_and_values() {
     // The duplicate blob gets the offset of its first copy.
     assert_eq!(parts.tables.custom_debug_information[0].value.get(), 1);
     let output = parts
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -97,7 +97,7 @@ fn rebuild_keeps_rows_and_values() {
     // A rebuild of the rebuilt file gives the same bytes.
     let again = rebuilt
         .to_parts()
-        .and_then(|parts| parts.plan(IdPolicy::ContentDerived))
+        .and_then(|parts| parts.plan(IdentityPolicy::ContentDerived))
         .and_then(|plan| plan.to_vec())
         .unwrap();
     assert_eq!(again, output);
@@ -128,7 +128,7 @@ fn rebuild_rewrites_document_names_and_imports_if_blob_offsets_change() {
     // encoded name ("/", 1, 1) and imports (1, 1) with the new offset of "x".
     assert_ne!(parts.tables.documents[0].name.get(), 5);
     let output = parts
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();

@@ -18,7 +18,7 @@
 
 mod builder;
 
-pub use builder::{InfoBuilder, PeMatch};
+pub use builder::InfoBuilder;
 
 use alloc::vec::Vec;
 use core::ops::Range;

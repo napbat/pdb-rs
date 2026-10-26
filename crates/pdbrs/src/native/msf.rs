@@ -5,7 +5,7 @@
 //! [`Stream`] reads stream bytes on demand through [`ReadAt`].
 //!
 //! [`copy_exact`](crate::io::copy_exact), [`Msf::repack`] and [`MsfBuilder`] write containers.
-//! The documentation of [`WritePlan`] gives the layout and the guarantee of each operation.
+//! The documentation of [`MsfWritePlan`] gives the layout and the guarantee of each operation.
 //!
 //! # Validation
 //!
@@ -49,7 +49,7 @@ mod write;
 
 pub use free_page_map::FreePageMapReport;
 pub use old_directory::{OldDirectory, OldStream, OldStreams};
-pub use write::{MsfBuilder, OldDirectoryPolicy, WriteOptions, WritePlan};
+pub use write::{MsfBuilder, MsfWriteOptions, MsfWritePlan, OldDirectoryPolicy};
 pub(crate) use write::{StreamSource, plan_sizes};
 
 /// The file offset of the page size field.

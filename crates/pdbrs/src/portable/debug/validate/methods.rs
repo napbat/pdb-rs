@@ -46,7 +46,7 @@ pub(super) fn method_count<S: ReadAt>(
     let header = pdb.pdb_stream();
     let referenced = header.referenced_tables() & (1 << TableId::METHOD_DEF.number()) != 0;
     let expected = options
-        .method_def_count
+        .method_def_count()
         .or_else(|| referenced.then(|| header.external_row_count(TableId::METHOD_DEF)));
     let Some(expected) = expected else {
         report.not_checked(

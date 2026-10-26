@@ -1,6 +1,6 @@
 //! MSFZ container writing.
 //!
-//! [`WritePlan`] documents the layout, the limits and the error contract.
+//! [`MsfzWritePlan`] documents the layout, the limits and the error contract.
 
 use alloc::vec::Vec;
 
@@ -23,18 +23,18 @@ pub use builder::MsfzBuilder;
 
 use layout::Layout;
 
-/// The default value of [`WriteOptions::max_chunk_size`] (1 MiB).
+/// The default value of [`MsfzWriteOptions::max_chunk_size`] (1 MiB).
 ///
 /// `pdbtool pdz-encode` uses the same default (`DEFAULT_CHUNK_THRESHOLD` of `ms-pdb-msfz`).
 pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1 << 20;
 
-/// The smallest value of [`WriteOptions::max_chunk_size`] (4 KiB).
+/// The smallest value of [`MsfzWriteOptions::max_chunk_size`] (4 KiB).
 pub const MIN_CHUNK_SIZE: u32 = 4 << 10;
 
-/// The largest value of [`WriteOptions::max_chunk_size`] (1 GiB).
+/// The largest value of [`MsfzWriteOptions::max_chunk_size`] (1 GiB).
 pub const MAX_CHUNK_SIZE: u32 = 1 << 30;
 
-/// The smallest file size with [`WriteOptions::with_pad_16k`] (16 KiB).
+/// The smallest file size with [`MsfzWriteOptions::with_pad_16k`] (16 KiB).
 pub const PAD_16K_SIZE: u64 = 16 << 10;
 
 /// The alignment of the stream directory and of the Chunk Table in the file.
@@ -76,7 +76,7 @@ impl Codec {
 /// chunk, stream directory compression and padding to 16 KiB. The chunk codec selects zstd or
 /// raw DEFLATE chunks.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct WriteOptions {
+pub struct MsfzWriteOptions {
     max_chunk_size: u32,
     one_stream_per_chunk: bool,
     codec: Codec,
@@ -85,7 +85,7 @@ pub struct WriteOptions {
     limits: MsfzLimits,
 }
 
-impl WriteOptions {
+impl MsfzWriteOptions {
     /// Return the maximum number of decompressed bytes in one chunk.
     #[must_use]
     pub const fn max_chunk_size(self) -> u32 {
@@ -95,7 +95,7 @@ impl WriteOptions {
     /// Set the maximum number of decompressed bytes in one chunk.
     ///
     /// Each chunk holds exactly this number of bytes, except the last chunk (and, with
-    /// [`WriteOptions::with_one_stream_per_chunk`], the last chunk of each stream). The plan
+    /// [`MsfzWriteOptions::with_one_stream_per_chunk`], the last chunk of each stream). The plan
     /// accepts [`MIN_CHUNK_SIZE`] to [`MAX_CHUNK_SIZE`]. `pdbtool pdz-encode` changes other
     /// values to the nearest limit; the plan rejects them.
     #[must_use]
@@ -182,7 +182,7 @@ impl WriteOptions {
     }
 }
 
-impl Default for WriteOptions {
+impl Default for MsfzWriteOptions {
     /// Return the defaults of `pdbtool pdz-encode`: 1 MiB chunks, streams that share chunks,
     /// zstd chunks, a stored stream directory and no padding. The limits are the default
     /// [`MsfzLimits`].
@@ -218,22 +218,22 @@ impl Default for WriteOptions {
 /// 2. The chunks in Chunk Table order, from offset 80, without gaps.
 /// 3. The stream directory at the next multiple of 16.
 /// 4. The Chunk Table at the next multiple of 16.
-/// 5. With [`WriteOptions::with_pad_16k`], zero bytes to [`PAD_16K_SIZE`] bytes.
+/// 5. With [`MsfzWriteOptions::with_pad_16k`], zero bytes to [`PAD_16K_SIZE`] bytes.
 ///
 /// The bytes of the streams with data, in stream ID order, form one sequence. Each chunk holds
-/// the next [`WriteOptions::max_chunk_size`] bytes of the sequence; only the last chunk can be
-/// smaller. With [`WriteOptions::with_one_stream_per_chunk`], each stream with data starts a
+/// the next [`MsfzWriteOptions::max_chunk_size`] bytes of the sequence; only the last chunk can be
+/// smaller. With [`MsfzWriteOptions::with_one_stream_per_chunk`], each stream with data starts a
 /// new chunk. A fragment never crosses a chunk boundary, so a stream has one fragment for each
 /// chunk that holds its bytes. All stream bytes are in compressed chunks: the plan writes no
 /// uncompressed fragments. The gaps before the directory and the Chunk Table are zero.
 ///
-/// The same streams and [`WriteOptions`] thus give the same bytes.
+/// The same streams and [`MsfzWriteOptions`] thus give the same bytes.
 ///
 /// # Cost
 ///
 /// The header holds the offsets of the directory and the Chunk Table, and these depend on the
 /// compressed chunk sizes. The writer writes in file order, so planning reads all stream
-/// bytes and compresses each chunk to get its size. [`WritePlan::write_to`] reads and
+/// bytes and compresses each chunk to get its size. [`MsfzWritePlan::write_to`] reads and
 /// compresses each chunk again. The memory is one chunk, its compressed bytes, the stream
 /// directory and the Chunk Table.
 ///
@@ -247,14 +247,14 @@ impl Default for WriteOptions {
 ///
 /// # Errors and partial output
 ///
-/// A planning error writes nothing. [`WritePlan::write_to`] writes in file order. A read error,
+/// A planning error writes nothing. [`MsfzWritePlan::write_to`] writes in file order. A read error,
 /// a changed source or an output error can leave a partial output in the writer. Under `std`,
-/// `WritePlan::write_file` writes a temporary file and renames it. On error, it deletes the
+/// `MsfzWritePlan::write_file` writes a temporary file and renames it. On error, it deletes the
 /// temporary file and does not change the destination.
 ///
 /// Writing over the source file is not supported.
-pub struct WritePlan<'a> {
-    options: WriteOptions,
+pub struct MsfzWritePlan<'a> {
+    options: MsfzWriteOptions,
     layout: Layout,
     /// The stored size of each chunk, in Chunk Table order.
     stored_sizes: Vec<u32>,
@@ -268,10 +268,10 @@ pub struct WritePlan<'a> {
     source: &'a dyn StreamSource,
 }
 
-impl<'a> WritePlan<'a> {
+impl<'a> MsfzWritePlan<'a> {
     /// Make a plan for streams with the sizes `sizes`. `None` marks a nil stream.
     pub(crate) fn new(
-        options: WriteOptions,
+        options: MsfzWriteOptions,
         sizes: &[Option<u64>],
         source: &'a dyn StreamSource,
     ) -> Result<Self> {
@@ -325,7 +325,7 @@ impl<'a> WritePlan<'a> {
 
     /// Return the options of the plan.
     #[must_use]
-    pub const fn options(&self) -> WriteOptions {
+    pub const fn options(&self) -> MsfzWriteOptions {
         self.options
     }
 
@@ -389,7 +389,7 @@ impl<'a> WritePlan<'a> {
     ///
     /// - [`ErrorKind::LimitExceeded`] if the file size does not fit in memory or the
     ///   allocation fails. The function checks the size before it writes.
-    /// - The errors of [`WritePlan::write_to`].
+    /// - The errors of [`MsfzWritePlan::write_to`].
     pub fn to_vec(&self) -> Result<Vec<u8>> {
         let size = usize::try_from(self.file_size).map_err(|_| output_too_large())?;
         let mut bytes = Vec::new();
@@ -401,10 +401,10 @@ impl<'a> WritePlan<'a> {
     }
 }
 
-impl core::fmt::Debug for WritePlan<'_> {
+impl core::fmt::Debug for MsfzWritePlan<'_> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("WritePlan")
+            .debug_struct("MsfzWritePlan")
             .field("options", &self.options)
             .field("stream_count", &self.stream_count())
             .field("chunk_count", &self.chunk_count())
@@ -415,7 +415,7 @@ impl core::fmt::Debug for WritePlan<'_> {
 }
 
 /// Check the options that do not depend on the streams.
-fn check_options(options: WriteOptions) -> Result<()> {
+fn check_options(options: MsfzWriteOptions) -> Result<()> {
     if !(MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&options.max_chunk_size) {
         return Err(Error::new(ErrorKind::InvalidFormat, None)
             .with_context("maximum MSFZ chunk size is not from 4 KiB to 1 GiB"));

@@ -5,12 +5,12 @@
 
 use std::path::Path;
 
-use super::WritePlan;
+use super::MsfzWritePlan;
 use crate::Result;
 use crate::io::write_new_file;
 
-impl WritePlan<'_> {
-    /// Write the container to the file `path`.
+impl MsfzWritePlan<'_> {
+    /// Write the container to the file `path`. Requires the `std` feature.
     ///
     /// The function writes a temporary file in the same directory and renames it to `path`.
     /// The rename replaces an existing file.
@@ -21,11 +21,11 @@ impl WritePlan<'_> {
     ///
     /// - [`ErrorKind::Io`](crate::ErrorKind::Io) if the temporary file does not open, a write
     ///   fails, or the rename fails.
-    /// - The errors of [`WritePlan::write_to`].
+    /// - The errors of [`MsfzWritePlan::write_to`].
     ///
     /// After an error, the function deletes the temporary file. The file at `path` does not
     /// change.
-    pub fn write_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    pub fn write_file(&self, path: impl AsRef<Path>) -> Result<()> {
         write_new_file(path.as_ref(), |output| self.write_to(output))
     }
 }

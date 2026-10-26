@@ -31,7 +31,7 @@ use std::process::Command;
 
 use pdbrs::native::container::Container;
 use pdbrs::native::msf::{OldDirectoryPolicy, StreamId};
-use pdbrs::native::msfz::{Codec, MIN_CHUNK_SIZE, WriteOptions};
+use pdbrs::native::msfz::{Codec, MIN_CHUNK_SIZE, MsfzWriteOptions};
 
 use super::native::consumers::{Consumers, Run, run};
 use super::native::diff::{Side, line_diff};
@@ -39,26 +39,26 @@ use super::native::native_fixtures;
 use crate::verify::SHOWN_DIFFERENCES;
 
 /// A named option set: a name and a function that gives the options.
-pub(crate) type OptionSet = (&'static str, fn() -> WriteOptions);
+pub(crate) type OptionSet = (&'static str, fn() -> MsfzWriteOptions);
 
 /// The option sets of the encode checks.
 ///
 /// The names match the `pdz-*` fixtures of the same options. `small-chunks` uses the smallest
 /// chunk size (4 KiB), as the `pdz-small-chunks` fixture does.
 pub(crate) const OPTION_SETS: [OptionSet; 6] = [
-    ("default", WriteOptions::default),
+    ("default", MsfzWriteOptions::default),
     ("compress-stream-dir", || {
-        WriteOptions::default().with_directory_codec(Some(Codec::Zstd))
+        MsfzWriteOptions::default().with_directory_codec(Some(Codec::Zstd))
     }),
     ("one-stream-per-chunk", || {
-        WriteOptions::default().with_one_stream_per_chunk(true)
+        MsfzWriteOptions::default().with_one_stream_per_chunk(true)
     }),
     ("small-chunks", || {
-        WriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE)
+        MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE)
     }),
-    ("pad16k", || WriteOptions::default().with_pad_16k(true)),
+    ("pad16k", || MsfzWriteOptions::default().with_pad_16k(true)),
     ("deflate", || {
-        WriteOptions::default().with_codec(Codec::Deflate)
+        MsfzWriteOptions::default().with_codec(Codec::Deflate)
     }),
 ];
 

@@ -1,8 +1,8 @@
 //! The strip of private symbols, as Microsoft `link /PDBSTRIPPED` does.
 //!
 //! The rules come from the stripped PDB that `link.exe` 14.51 writes next to
-//! the full PDB of the `msvc-x64-stripped` fixture (#27, #34). The module
-//! documentation of [`crate::native::edit`] lists them.
+//! the full PDB of the `msvc-x64-stripped` fixture (#27, #34). The
+//! documentation of [`PdbEditor`](super::PdbEditor) lists them.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;

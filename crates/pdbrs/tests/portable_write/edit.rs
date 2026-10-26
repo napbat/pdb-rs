@@ -1,21 +1,20 @@
 //! The editor: unchanged output, kept heap entries, edits and unknown custom debug information.
 
 use pdbrs::ErrorKind;
-use pdbrs::portable::build::{CustomDebugInfo, CustomDebugParent, LocalScopeHandle};
+use pdbrs::portable::build::{CustomDebugParent, LocalScopeHandle};
 use pdbrs::portable::custom::CustomDebugKind;
 use pdbrs::portable::metadata::{
     DocumentId, LocalConstantId, MetadataStream, MethodDefId, TableId,
 };
-use pdbrs::portable::write::IdPolicy;
-use pdbrs::portable::{Pdb, PdbBuilder};
+use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder};
 
-use crate::build::{UNKNOWN, constant, point, sample, scope};
+use crate::build::{UNKNOWN, constant, information, point, sample, scope};
 use crate::{location, open};
 
 /// Write a builder with the content-derived ID.
 fn write(builder: &PdbBuilder) -> Vec<u8> {
     builder
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap()
@@ -54,7 +53,7 @@ fn edit_without_a_change_keeps_the_bytes() {
     let bytes = write(&sample());
     let editor = Pdb::parse(&bytes).unwrap().edit().unwrap();
     let output = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -84,7 +83,7 @@ fn edit_keeps_the_source_heap_entries() {
         }
     }
     let output = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -139,7 +138,7 @@ fn edit_that_moves_rows_fails_with_unknown_custom_debug_information() {
     editor
         .add_local_constant(outer, constant(b"First", 1))
         .unwrap();
-    let error = editor.plan(IdPolicy::ContentDerived).unwrap_err();
+    let error = editor.plan(IdentityPolicy::ContentDerived).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     let location = location(&error);
     assert_eq!(location.table(), Some(TableId::CUSTOM_DEBUG_INFORMATION));
@@ -154,7 +153,7 @@ fn edit_that_moves_rows_fails_with_unknown_custom_debug_information() {
         editor.remove_custom_debug_information(handle).unwrap();
     }
     let output = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -177,11 +176,11 @@ fn edit_that_moves_rows_rewrites_known_custom_debug_information_parents() {
         .add_local_constant(later, constant(b"Pi", 3))
         .unwrap();
     source
-        .add_custom_debug_information(CustomDebugInfo {
-            parent: CustomDebugParent::LocalConstant(pi),
-            kind: CustomDebugKind::DYNAMIC_LOCAL_VARIABLES,
-            value: vec![0x01],
-        })
+        .add_custom_debug_information(information(
+            CustomDebugParent::LocalConstant(pi),
+            CustomDebugKind::DYNAMIC_LOCAL_VARIABLES,
+            vec![0x01],
+        ))
         .unwrap();
     let bytes = write(&source);
     assert_eq!(
@@ -201,7 +200,7 @@ fn edit_that_moves_rows_rewrites_known_custom_debug_information_parents() {
         .add_local_constant(first, constant(b"First", 1))
         .unwrap();
     let output = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -228,14 +227,14 @@ fn edit_that_keeps_rows_keeps_unknown_custom_debug_information() {
         .add_local_constant(added, constant(b"Last", 9))
         .unwrap();
     editor
-        .add_custom_debug_information(CustomDebugInfo {
-            parent: CustomDebugParent::LocalScope(added),
-            kind: UNKNOWN,
-            value: b"new".to_vec(),
-        })
+        .add_custom_debug_information(information(
+            CustomDebugParent::LocalScope(added),
+            UNKNOWN,
+            b"new".to_vec(),
+        ))
         .unwrap();
     let output = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();

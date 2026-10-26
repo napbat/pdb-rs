@@ -10,8 +10,7 @@
 
 use std::error::Error;
 
-use pdbrs::native::IdentityPolicy;
-use pdbrs::native::Pdb;
+use pdbrs::native::{Identity, IdentityPolicy, Pdb};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -25,11 +24,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let contents = pdb.contents()?;
     let options = contents.build_options();
     let builder = contents.to_builder(IdentityPolicy::Preserve)?;
-    let plan = builder.plan(&options)?;
+    let plan = builder.plan(options)?;
     let bytes = plan.to_vec()?;
     let again = contents
         .to_builder(IdentityPolicy::Preserve)?
-        .plan(&options)?
+        .plan(options)?
         .to_vec()?;
     if bytes != again {
         return Err("two plans of the same input give different bytes".into());
@@ -47,8 +46,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         "unclaimed input streams: {:?}",
         contents.unclaimed_streams()
     );
-    let pe = plan.pe_match();
-    println!("PE match: guid {:02x?}, age {}", pe.guid, pe.age);
+    if let Identity::Modern { guid, age } = plan.identity() {
+        println!("PE match: guid {guid:02x?}, age {age}");
+    }
     println!("deterministic: same bytes in two plans");
     Ok(())
 }

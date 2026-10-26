@@ -1,8 +1,6 @@
 //! Tests of `PdbEditor::strip_private` (#34).
 
 use pdbrs::ErrorKind;
-use pdbrs::native::IdentityPolicy;
-use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
@@ -12,7 +10,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::OwnedModule;
-use pdbrs::native::write::PdbBuilder;
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbBuilder};
 
 use super::{T_INT4, build, differing_streams, symbols, synthetic};
 
@@ -77,12 +75,10 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
     module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
     let reference = builder.add_symbol_with(move |resolver, out| {
-        let number = resolver.module_number(procedure.module())?;
         let mut reference = ProcedureReference::default();
         reference.name_checksum = 0;
-        reference.offset = ModuleSymbolOffset(resolver.module_symbol_offset(procedure)?);
-        // The module number is the module index plus 1.
-        reference.module = Some(ModuleIndex(u32::from(number) - 1));
+        reference.offset = resolver.module_symbol_offset(procedure)?;
+        reference.module = Some(resolver.module_index(procedure.module())?);
         reference.name = LOCAL;
         SymbolData::ProcedureReference(reference).encode(S_LPROCREF, out)
     })?;
@@ -96,7 +92,7 @@ fn strip_keeps_publics_and_local_procedures() {
     let source_identity = pdb.info().identity();
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
-    let plan = editor.plan().expect("plan");
+    let plan = editor.plan(EditOptions::default()).expect("plan");
     let edited = plan.to_vec().expect("output");
     let changed: Vec<u32> = plan.changed_streams().iter().map(|id| id.0).collect();
     assert_eq!(differing_streams(&source, &edited), changed);
@@ -167,11 +163,15 @@ fn strip_of_a_stripped_pdb_changes_nothing() {
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
-    let once = editor.plan().expect("plan").to_vec().expect("output");
+    let once = editor
+        .plan(EditOptions::default())
+        .expect("plan")
+        .to_vec()
+        .expect("output");
     let pdb = Pdb::parse(once.as_slice()).expect("stripped");
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
-    let plan = editor.plan().expect("plan");
+    let plan = editor.plan(EditOptions::default()).expect("plan");
     assert_eq!(plan.changed_streams(), []);
 }
 
@@ -194,8 +194,11 @@ fn strip_with_another_edit_is_unsupported() {
         })
         .expect("recorded");
     assert_eq!(
-        editor.plan().expect_err("combined edit").kind(),
-        ErrorKind::UnsupportedVersion
+        editor
+            .plan(EditOptions::default())
+            .expect_err("combined edit")
+            .kind(),
+        ErrorKind::UnsupportedEdit
     );
 }
 
@@ -206,8 +209,11 @@ fn strip_with_an_opaque_stream_is_rejected() {
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
     assert_eq!(
-        editor.plan().expect_err("opaque stream").kind(),
-        ErrorKind::InvalidReference
+        editor
+            .plan(EditOptions::default())
+            .expect_err("opaque stream")
+            .kind(),
+        ErrorKind::UnsupportedEdit
     );
 }
 
@@ -222,7 +228,7 @@ fn strip_removes_an_unowned_type_map() {
     let last = pdb.container().stream_count() - 1;
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
-    let plan = editor.plan().expect("type map");
+    let plan = editor.plan(EditOptions::default()).expect("type map");
     assert!(
         plan.changed_streams()
             .contains(&pdbrs::native::msf::StreamId(last))

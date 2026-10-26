@@ -14,8 +14,8 @@ use pdbrs::portable::metadata::{
     CodedIndex, DocumentId, IlOffset, ImportScopeId, LocalScopeId, MetadataToken, MethodDefId,
     StandAloneSigId, TableId,
 };
-use pdbrs::portable::write::{ExternalRowCounts, IdPolicy};
-use pdbrs::portable::{Pdb, PdbBuilder};
+use pdbrs::portable::write::ExternalRowCounts;
+use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder};
 
 use crate::{location, open};
 
@@ -47,24 +47,58 @@ pub(crate) fn point(il: u32, document: u32, line: u32) -> SequencePoint {
 
 /// Make a local scope record.
 pub(crate) fn scope(method: u32, start: u32, length: u32) -> LocalScopeInfo {
-    LocalScopeInfo {
-        method: MethodDefId::new(method),
-        import_scope: ImportScopeId::new(0),
-        start_offset: IlOffset::new(start),
-        length,
-    }
+    let mut scope = LocalScopeInfo::default();
+    scope.method = MethodDefId::new(method);
+    scope.import_scope = ImportScopeId::new(0);
+    scope.start_offset = IlOffset::new(start);
+    scope.length = length;
+    scope
 }
 
 /// Make a local constant record with an `I4` value.
 pub(crate) fn constant(name: &[u8], value: i32) -> LocalConstantInfo {
-    LocalConstantInfo {
-        name: name.to_vec(),
-        signature: LocalConstantSignature::encode(
-            &[],
-            &ConstantValue::Primitive(PrimitiveConstant::I4(value)),
-        )
-        .unwrap(),
-    }
+    let mut constant = LocalConstantInfo::default();
+    constant.name = name.to_vec();
+    constant.signature = LocalConstantSignature::encode(
+        &[],
+        &ConstantValue::Primitive(PrimitiveConstant::I4(value)),
+    )
+    .unwrap();
+    constant
+}
+
+/// Make a custom debug information record with `value`.
+pub(crate) fn information(
+    parent: CustomDebugParent,
+    kind: CustomDebugKind,
+    value: Vec<u8>,
+) -> CustomDebugInfo {
+    let mut information = CustomDebugInfo::new(parent, kind);
+    information.value = value;
+    information
+}
+
+/// Make a document record with `name` and `language`.
+fn document(name: &[u8], language: Option<[u8; 16]>) -> DocumentInfo {
+    let mut document = DocumentInfo::default();
+    document.name = name.to_vec();
+    document.language = language;
+    document
+}
+
+/// Make an import scope record.
+fn import_scope(parent: ImportScopeId, imports: Vec<ImportInfo>) -> ImportScopeInfo {
+    let mut scope = ImportScopeInfo::default();
+    scope.parent = parent;
+    scope.imports = imports;
+    scope
+}
+
+/// Make the sequence points of a method.
+fn method(sequence_points: Vec<SequencePoint>) -> MethodInfo {
+    let mut method = MethodInfo::default();
+    method.sequence_points = sequence_points;
+    method
 }
 
 /// Make a builder with two documents, three methods with sequence points, unsorted local
@@ -74,62 +108,48 @@ pub(crate) fn sample() -> PdbBuilder {
     let mut builder = PdbBuilder::new(external(4));
     builder.set_entry_point(Some(MethodDefId::new(1)));
     let first = builder
-        .add_document(DocumentInfo {
-            name: b"C:\\src\\Program.cs".to_vec(),
-            language: Some(Language::CSharp.guid()),
-            ..DocumentInfo::default()
-        })
+        .add_document(document(
+            b"C:\\src\\Program.cs",
+            Some(Language::CSharp.guid()),
+        ))
         .unwrap();
-    let second = builder
-        .add_document(DocumentInfo {
-            name: b"/src/Other.cs".to_vec(),
-            hash_algorithm: Some([3; 16]),
-            hash: vec![0xAB; 32],
-            language: None,
-        })
-        .unwrap();
+    let mut other = document(b"/src/Other.cs", None);
+    other.hash_algorithm = Some([3; 16]);
+    other.hash = vec![0xAB; 32];
+    let second = builder.add_document(other).unwrap();
     assert_eq!((first.get(), second.get()), (1, 2));
-    builder.set_method(
-        MethodDefId::new(1),
-        MethodInfo {
-            local_signature: StandAloneSigId::new(1),
-            local_signature_form: LocalSignatureForm::Row,
-            sequence_points: vec![point(0, 1, 10), point(4, 2, 3), point(9, 1, 12)],
-        },
-    );
-    builder.set_method(
-        MethodDefId::new(3),
-        MethodInfo {
-            sequence_points: vec![point(0, 2, 20)],
-            ..MethodInfo::default()
-        },
-    );
+    let mut first_method = method(vec![point(0, 1, 10), point(4, 2, 3), point(9, 1, 12)]);
+    first_method.local_signature = StandAloneSigId::new(1);
+    first_method.local_signature_form = LocalSignatureForm::Row;
+    builder.set_method(MethodDefId::new(1), first_method);
+    builder.set_method(MethodDefId::new(3), method(vec![point(0, 2, 20)]));
     let imports = builder
-        .add_import_scope(ImportScopeInfo {
-            parent: ImportScopeId::new(0),
-            imports: vec![ImportInfo::Namespace {
+        .add_import_scope(import_scope(
+            ImportScopeId::new(0),
+            vec![ImportInfo::Namespace {
                 namespace: b"System".to_vec(),
             }],
-        })
+        ))
         .unwrap();
     builder
-        .add_import_scope(ImportScopeInfo {
-            parent: imports,
-            imports: vec![ImportInfo::AliasNamespace {
+        .add_import_scope(import_scope(
+            imports,
+            vec![ImportInfo::AliasNamespace {
                 alias: b"IO".to_vec(),
                 namespace: b"System.IO".to_vec(),
             }],
-        })
+        ))
         .unwrap();
     // Added out of order: method 3 first, then the inner scope of method 1, then its outer
     // scope.
     let late = builder.add_local_scope(scope(3, 0, 8)).unwrap();
     let inner = builder.add_local_scope(scope(1, 2, 4)).unwrap();
     let outer = builder.add_local_scope(scope(1, 0, 12)).unwrap();
-    let variable = |name: &[u8], index| LocalVariableInfo {
-        attributes: 0,
-        index,
-        name: name.to_vec(),
+    let variable = |name: &[u8], index| {
+        let mut variable = LocalVariableInfo::default();
+        variable.index = index;
+        variable.name = name.to_vec();
+        variable
     };
     builder
         .add_local_variable(late, variable(b"late", 0))
@@ -157,11 +177,7 @@ pub(crate) fn sample() -> PdbBuilder {
     ];
     for (value, parent) in (1_u8..).zip(parents) {
         builder
-            .add_custom_debug_information(CustomDebugInfo {
-                parent,
-                kind: UNKNOWN,
-                value: vec![value],
-            })
+            .add_custom_debug_information(information(parent, UNKNOWN, vec![value]))
             .unwrap();
     }
     builder
@@ -170,7 +186,7 @@ pub(crate) fn sample() -> PdbBuilder {
 #[test]
 fn builder_sorts_rows_and_resolves_handles() {
     let bytes = sample()
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -275,12 +291,12 @@ fn builder_sorts_rows_and_resolves_handles() {
 #[test]
 fn identical_builders_give_identical_bytes() {
     let first = sample()
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
     let second = sample()
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .unwrap()
         .to_vec()
         .unwrap();
@@ -294,21 +310,18 @@ fn builder_widens_the_coded_parent_for_many_documents() {
         let mut last = DocumentId::default();
         for index in 0..count {
             last = builder
-                .add_document(DocumentInfo {
-                    name: format!("/src/{index}.cs").into_bytes(),
-                    ..DocumentInfo::default()
-                })
+                .add_document(document(format!("/src/{index}.cs").as_bytes(), None))
                 .unwrap();
         }
         builder
-            .add_custom_debug_information(CustomDebugInfo {
-                parent: CustomDebugParent::Document(last),
-                kind: UNKNOWN,
-                value: b"last".to_vec(),
-            })
+            .add_custom_debug_information(information(
+                CustomDebugParent::Document(last),
+                UNKNOWN,
+                b"last".to_vec(),
+            ))
             .unwrap();
         let bytes = builder
-            .plan(IdPolicy::ContentDerived)
+            .plan(IdentityPolicy::ContentDerived)
             .unwrap()
             .to_vec()
             .unwrap();
@@ -328,14 +341,8 @@ fn builder_widens_the_coded_parent_for_many_documents() {
 #[test]
 fn builder_rejects_unknown_handles_before_output() {
     let mut builder = sample();
-    builder.set_method(
-        MethodDefId::new(2),
-        MethodInfo {
-            sequence_points: vec![point(0, 3, 1)],
-            ..MethodInfo::default()
-        },
-    );
-    let error = builder.plan(IdPolicy::ContentDerived).unwrap_err();
+    builder.set_method(MethodDefId::new(2), method(vec![point(0, 3, 1)]));
+    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(
         location(&error).table(),
@@ -345,18 +352,17 @@ fn builder_rejects_unknown_handles_before_output() {
 
     let mut builder = sample();
     builder.set_method(MethodDefId::new(5), MethodInfo::default());
-    let error = builder.plan(IdPolicy::ContentDerived).unwrap_err();
+    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 
     let mut builder = sample();
     builder
-        .add_custom_debug_information(CustomDebugInfo {
-            parent: CustomDebugParent::Document(DocumentId::new(3)),
-            kind: UNKNOWN,
-            value: Vec::new(),
-        })
+        .add_custom_debug_information(CustomDebugInfo::new(
+            CustomDebugParent::Document(DocumentId::new(3)),
+            UNKNOWN,
+        ))
         .unwrap();
-    let error = builder.plan(IdPolicy::ContentDerived).unwrap_err();
+    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(
         location(&error).table(),

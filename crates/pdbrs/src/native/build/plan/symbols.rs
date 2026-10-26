@@ -29,27 +29,27 @@ use crate::{Error, ErrorKind, Result};
 const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
 
 /// A planned module: its record and its stream.
-pub(in crate::native::write) struct PlannedModule {
+pub(in crate::native::build) struct PlannedModule {
     /// The module record with the stream and the region sizes.
-    pub(in crate::native::write) record: OwnedModule,
+    pub(in crate::native::build) record: OwnedModule,
     /// The module stream, or `None`.
-    pub(in crate::native::write) bytes: Option<Vec<u8>>,
+    pub(in crate::native::build) bytes: Option<Vec<u8>>,
 }
 
 /// The encoded symbol data of a plan.
-pub(in crate::native::write) struct EncodedSymbols {
+pub(in crate::native::build) struct EncodedSymbols {
     /// The modules in module order.
-    pub(in crate::native::write) modules: Vec<PlannedModule>,
+    pub(in crate::native::build) modules: Vec<PlannedModule>,
     /// The module stream offset of each symbol record of each module.
-    pub(in crate::native::write) module_offsets: Vec<Vec<u32>>,
+    pub(in crate::native::build) module_offsets: Vec<Vec<u32>>,
     /// The offset of each record of the symbol record stream.
-    pub(in crate::native::write) symbol_offsets: Vec<SymbolOffset>,
+    pub(in crate::native::build) symbol_offsets: Vec<SymbolOffset>,
     /// The symbol record stream.
-    pub(in crate::native::write) symbols: Vec<u8>,
+    pub(in crate::native::build) symbols: Vec<u8>,
     /// The global symbol index stream.
-    pub(in crate::native::write) globals: Vec<u8>,
+    pub(in crate::native::build) globals: Vec<u8>,
     /// The public symbol index stream.
-    pub(in crate::native::write) publics: Vec<u8>,
+    pub(in crate::native::build) publics: Vec<u8>,
 }
 
 /// The symbol records and the C13 region of one module before its global
@@ -337,7 +337,7 @@ impl PdbBuilder<'_> {
             records,
             &globals,
             buckets,
-            options.index_producer,
+            options.index_producer(),
             &mut global_bytes,
         )?;
         let mut public_bytes = Vec::new();
@@ -345,7 +345,7 @@ impl PdbBuilder<'_> {
             records,
             &publics,
             buckets,
-            options.index_producer,
+            options.index_producer(),
             self.thunks,
             &self.section_starts,
             &mut public_bytes,

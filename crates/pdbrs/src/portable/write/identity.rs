@@ -1,25 +1,9 @@
-//! The PDB ID policy, the content-derived ID, the PDB checksum and the PE matching fields.
+//! The content-derived ID, the PDB checksum and the PE matching fields.
 
 use alloc::vec::Vec;
 
 use crate::crypto::{Sha256Hasher, Sha384Hasher, Sha512Hasher};
 use crate::portable::Identity;
-
-/// How a write plan sets the 20-byte PDB ID.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IdPolicy {
-    /// Use the given ID.
-    Explicit(Identity),
-    /// Derive the ID from the output, as `System.Reflection.Metadata` does for deterministic
-    /// builds (`BlobContentId.FromHash`).
-    ///
-    /// The hash is SHA-256 over all output bytes with the 20 ID bytes set to zero. The GUID is
-    /// hash bytes 0 to 15, with the high nibble of byte 7 set to 4 (the RFC 4122 version) and
-    /// the two high bits of byte 8 set to `10` (the variant). The stamp is hash bytes 16 to
-    /// 19 as a little-endian value with bit 31 set. A change to the layout or to any byte
-    /// changes the ID, also if the decoded records stay the same.
-    ContentDerived,
-}
 
 /// Make the content-derived ID from the SHA-256 hash of the output with a zero ID.
 pub(super) fn content_id(hash: &[u8; 32]) -> Identity {
@@ -37,6 +21,7 @@ pub(super) fn content_id(hash: &[u8; 32]) -> Identity {
 /// age and the PDB path. The stamp goes into the `TimeDateStamp` field of the debug directory
 /// entry. The embedded Portable PDB entry (type 17) has the stamp 0, not this stamp.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CodeViewFields {
     /// The GUID in its serialized byte order.
     pub guid: [u8; 16],
@@ -58,6 +43,7 @@ impl From<Identity> for CodeViewFields {
 
 /// A hash algorithm of the PDB checksum debug directory entry (type 19).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ChecksumAlgorithm {
     /// SHA-256 (32 bytes).
     Sha256,

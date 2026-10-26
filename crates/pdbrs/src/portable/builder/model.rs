@@ -47,6 +47,7 @@ handle!(
 
 /// A source document.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct DocumentInfo {
     /// The document name, for example a path. The plan splits it into parts as Roslyn does.
     pub name: Vec<u8>,
@@ -60,6 +61,7 @@ pub struct DocumentInfo {
 
 /// The sequence points of a method.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct MethodInfo {
     /// The local signature of the method, or nil.
     pub local_signature: StandAloneSigId,
@@ -72,6 +74,7 @@ pub struct MethodInfo {
 
 /// A local scope of a method.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LocalScopeInfo {
     /// The method.
     pub method: MethodDefId,
@@ -85,6 +88,7 @@ pub struct LocalScopeInfo {
 
 /// A local variable of a local scope.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LocalVariableInfo {
     /// The `LocalVariableAttributes` flags.
     pub attributes: u16,
@@ -96,6 +100,7 @@ pub struct LocalVariableInfo {
 
 /// A local constant of a local scope.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LocalConstantInfo {
     /// The name.
     pub name: Vec<u8>,
@@ -109,6 +114,7 @@ pub struct LocalConstantInfo {
 /// The variants are the import kinds 1 to 9 of
 /// [`Import`](crate::portable::debug::Import). The plan adds each name to the `#Blob` heap.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ImportInfo {
     /// Kind 1: import the members of a namespace.
     Namespace {
@@ -173,6 +179,7 @@ pub enum ImportInfo {
 
 /// An import scope.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct ImportScopeInfo {
     /// The parent import scope, or nil.
     pub parent: ImportScopeId,
@@ -182,6 +189,7 @@ pub struct ImportScopeInfo {
 
 /// The parent of a custom debug information record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum CustomDebugParent {
     /// A row of a type-system table of the assembly, for example a `MethodDef` or the
     /// `Module` row. The table must be in the `HasCustomDebugInformation` coded index.
@@ -200,6 +208,7 @@ pub enum CustomDebugParent {
 
 /// A custom debug information record.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct CustomDebugInfo {
     /// The parent.
     pub parent: CustomDebugParent,
@@ -208,4 +217,19 @@ pub struct CustomDebugInfo {
     /// The value blob. Encode a known kind with its codec in
     /// [`custom`](crate::portable::custom).
     pub value: Vec<u8>,
+}
+
+impl CustomDebugInfo {
+    /// Make a record of the kind `kind` for `parent` with an empty value blob.
+    ///
+    /// Set the value with the codec of the kind, for example
+    /// [`CustomDebugValue::encode`](crate::portable::custom::CustomDebugValue::encode).
+    #[must_use]
+    pub const fn new(parent: CustomDebugParent, kind: CustomDebugKind) -> Self {
+        Self {
+            parent,
+            kind,
+            value: Vec::new(),
+        }
+    }
 }

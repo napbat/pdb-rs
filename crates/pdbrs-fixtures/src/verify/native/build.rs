@@ -95,7 +95,7 @@ struct Rebuilt {
     /// The stream count of the original.
     streams_before: u32,
     /// The stream count of the rebuilt PDB.
-    streams_after: usize,
+    streams_after: u32,
     /// The source streams that the rebuild drops.
     unclaimed: Vec<u32>,
 }
@@ -387,9 +387,9 @@ fn rebuild(original: &Path, directory: &Path, file_name: &str) -> Result<Rebuilt
     let pdb = Pdb::parse(&bytes).map_err(pdbrs)?;
     let contents = pdb.contents().map_err(pdbrs)?;
     let options = contents.build_options();
-    let plan = || -> Result<(Vec<u8>, usize), pdbrs::Error> {
+    let plan = || -> Result<(Vec<u8>, u32), pdbrs::Error> {
         let builder = contents.to_builder(IdentityPolicy::Preserve)?;
-        let plan = builder.plan(&options)?;
+        let plan = builder.plan(options)?;
         Ok((plan.to_vec()?, plan.stream_count()))
     };
     let (first, streams_after) = plan().map_err(pdbrs)?;

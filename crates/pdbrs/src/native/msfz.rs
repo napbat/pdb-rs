@@ -15,7 +15,7 @@
 //!
 //! [`MsfzBuilder::plan`] and `Container::to_msfz` (see
 //! [`Container`](crate::native::container::Container)) write new containers through a
-//! [`WritePlan`]. The decisions of the writer are recorded in #38.
+//! [`MsfzWritePlan`]. The decisions of the writer are recorded in #38.
 //!
 //! # Validation
 //!
@@ -69,8 +69,8 @@ mod tests;
 mod write;
 
 pub use write::{
-    Codec, DEFAULT_MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, MsfzBuilder, PAD_16K_SIZE,
-    WriteOptions, WritePlan,
+    Codec, DEFAULT_MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, MsfzBuilder, MsfzWriteOptions,
+    MsfzWritePlan, PAD_16K_SIZE,
 };
 
 use cache::ChunkCache;

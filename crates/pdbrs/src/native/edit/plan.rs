@@ -5,14 +5,46 @@ use alloc::vec::Vec;
 
 use super::{PdbEditor, named, strip, symbols, types, unsupported};
 use crate::io::{ReadAt, Write};
-use crate::native::Producer;
 use crate::native::container::Stream;
 use crate::native::dbi::{Dbi, DbiBuilder};
-use crate::native::info::{InfoBuilder, PeMatch};
-use crate::native::msf::{MsfBuilder, StreamId, WriteOptions, WritePlan};
+use crate::native::info::InfoBuilder;
+use crate::native::msf::{MsfBuilder, MsfWriteOptions, MsfWritePlan, StreamId};
 use crate::native::output::no_memory;
 use crate::native::types::TypeStream;
+use crate::native::{Identity, Producer};
 use crate::{Error, ErrorKind, Result};
+
+/// The options of the plan of a [`PdbEditor`].
+///
+/// [`Default`] keeps the page size of an MSF 7.00 source. Set a value with
+/// its `with_*` function and read it with the function of the same name. A
+/// later version can add options, for example the output container or an
+/// output profile, without a change for callers.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct EditOptions {
+    /// The container options, or `None` for the page size of the source.
+    msf: Option<MsfWriteOptions>,
+}
+
+impl EditOptions {
+    /// Return the container options, or `None` if the plan uses the page
+    /// size of the source.
+    ///
+    /// With `None`, the plan uses the default [`MsfWriteOptions`] with the
+    /// page size of an MSF 7.00 source. For an MSFZ source, it uses the
+    /// default page size of [`MsfWriteOptions`].
+    #[must_use]
+    pub const fn msf(self) -> Option<MsfWriteOptions> {
+        self.msf
+    }
+
+    /// Set the container options: the page size and the limits.
+    #[must_use]
+    pub const fn with_msf(mut self, msf: MsfWriteOptions) -> Self {
+        self.msf = Some(msf);
+        self
+    }
+}
 
 /// The new contents of one source stream.
 #[derive(Clone, Debug)]
@@ -130,9 +162,11 @@ pub struct PdbEditPlan<'p, S> {
     /// The streams in stream ID order.
     streams: MsfBuilder<EditedStream<'p, S>>,
     /// The container options.
-    options: WriteOptions,
-    /// The values for the `RSDS` debug entry of the image.
-    pe_match: PeMatch,
+    options: MsfWriteOptions,
+    /// The identity for the `RSDS` debug entry of the image.
+    identity: Identity,
+    /// The number of streams.
+    stream_count: u32,
     /// The size of the output in bytes.
     file_size: u64,
     /// The streams after stream 0 that have new bytes, are removed or are new.
@@ -143,9 +177,9 @@ impl<S> core::fmt::Debug for PdbEditPlan<'_, S> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("PdbEditPlan")
-            .field("streams", &self.streams.stream_count())
+            .field("streams", &self.stream_count)
             .field("options", &self.options)
-            .field("pe_match", &self.pe_match)
+            .field("identity", &self.identity)
             .field("file_size", &self.file_size)
             .field("changed", &self.changed)
             .finish()
@@ -153,10 +187,11 @@ impl<S> core::fmt::Debug for PdbEditPlan<'_, S> {
 }
 
 impl<S: ReadAt> PdbEditPlan<'_, S> {
-    /// Return the values for the `RSDS` debug entry of the matching image.
+    /// Return the identity for the `RSDS` debug entry of the matching image:
+    /// the GUID and the DBI age.
     #[must_use]
-    pub const fn pe_match(&self) -> PeMatch {
-        self.pe_match
+    pub const fn identity(&self) -> Identity {
+        self.identity
     }
 
     /// Return the streams after stream 0 that the plan changes: the streams
@@ -167,10 +202,10 @@ impl<S: ReadAt> PdbEditPlan<'_, S> {
         &self.changed
     }
 
-    /// Return the number of streams.
+    /// Return the number of streams, including nil streams.
     #[must_use]
-    pub fn stream_count(&self) -> usize {
-        self.streams.stream_count()
+    pub const fn stream_count(&self) -> u32 {
+        self.stream_count
     }
 
     /// Return the size of the output in bytes.
@@ -180,7 +215,7 @@ impl<S: ReadAt> PdbEditPlan<'_, S> {
     }
 
     /// Return the MSF plan of the streams.
-    fn msf(&self) -> Result<WritePlan<'_>> {
+    fn msf(&self) -> Result<MsfWritePlan<'_>> {
         self.streams.plan(self.options)
     }
 
@@ -188,7 +223,7 @@ impl<S: ReadAt> PdbEditPlan<'_, S> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::write_to`].
+    /// Returns the errors of [`MsfWritePlan::write_to`].
     pub fn write_to<W: Write + ?Sized>(&self, output: &mut W) -> Result<()> {
         self.msf()?.write_to(output)
     }
@@ -197,16 +232,17 @@ impl<S: ReadAt> PdbEditPlan<'_, S> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::to_vec`].
+    /// Returns the errors of [`MsfWritePlan::to_vec`].
     pub fn to_vec(&self) -> Result<Vec<u8>> {
         self.msf()?.to_vec()
     }
 
     /// Write the PDB to the file `path` through a temporary sibling file.
+    /// Requires the `std` feature.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`WritePlan::write_file`].
+    /// Returns the errors of [`MsfWritePlan::write_file`].
     #[cfg(feature = "std")]
     pub fn write_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         self.msf()?.write_file(path)
@@ -251,33 +287,27 @@ fn same_bytes<S: ReadAt>(reader: &Stream<'_, S>, bytes: &[u8]) -> Result<bool> {
 
 impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// Check all changes, encode the changed streams and plan the container
-    /// with the page size of an MSF 7.00 source. For an MSFZ source, the plan
-    /// uses the default page size of [`WriteOptions`].
+    /// with the container options of `options`.
     ///
-    /// See the [module documentation](super) for the rules.
+    /// See [`PdbEditor`] for the rules.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidReference`] for an edit that can make an opaque
-    ///   reference invalid, a reference that does not resolve or a name that
-    ///   is not found or not unique.
-    /// - [`ErrorKind::UnsupportedVersion`] for an unsupported transformation
-    ///   or a source page size that the writer does not support.
+    /// - [`ErrorKind::UnsupportedEdit`] for an edit that the editor does not
+    ///   support, for example an edit that can make an opaque reference
+    ///   invalid.
+    /// - [`ErrorKind::InvalidReference`] for a reference that does not
+    ///   resolve or a name that is not found or not unique.
+    /// - [`ErrorKind::UnsupportedVersion`] for a source page size that the
+    ///   writer does not support.
     /// - [`ErrorKind::MissingStream`] if the PDB has no TPI or DBI stream, or
     ///   no stream that an edit needs.
     /// - The errors of the stream readers, the record encoders and
     ///   [`MsfBuilder::plan`].
-    pub fn plan(&self) -> Result<PdbEditPlan<'p, S>> {
-        let options = WriteOptions::default().with_page_size(self.source.output_page_size());
-        self.plan_with(options)
-    }
-
-    /// Plan the edit with the container options `options`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`PdbEditor::plan`].
-    pub fn plan_with(&self, options: WriteOptions) -> Result<PdbEditPlan<'p, S>> {
+    pub fn plan(&self, options: EditOptions) -> Result<PdbEditPlan<'p, S>> {
+        let options = options.msf().unwrap_or_else(|| {
+            MsfWriteOptions::default().with_page_size(self.source.output_page_size())
+        });
         let pdb = self.source;
         if self.strip
             && (!self.symbols.is_empty()
@@ -304,7 +334,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
         let source_info = InfoBuilder::from_info_with(pdb.info(), producer)?;
         let mut info = source_info.clone();
         let mut dbi_age = context.dbi.header().age;
-        let pe_match = info.apply_identity(self.identity, &mut dbi_age)?;
+        let identity = info.apply_identity(self.identity, &mut dbi_age)?;
         let mut changes = Changes::new(pdb.container().stream_count());
         let mut dbi_builder = None;
         if self.strip {
@@ -334,15 +364,15 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
             info.encode(&mut bytes)?;
             changes.replace(StreamId(1), bytes)?;
         }
-        self.freeze(changes, options, pe_match)
+        self.freeze(changes, options, identity)
     }
 
     /// Put the source streams and the changes in a container plan.
     fn freeze(
         &self,
         changes: Changes,
-        options: WriteOptions,
-        pe_match: PeMatch,
+        options: MsfWriteOptions,
+        identity: Identity,
     ) -> Result<PdbEditPlan<'p, S>> {
         let container = self.source.container();
         let mut streams = MsfBuilder::new();
@@ -383,11 +413,13 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
                 None => streams.push_nil()?,
             };
         }
-        let file_size = streams.plan(options)?.file_size();
+        let msf = streams.plan(options)?;
+        let (stream_count, file_size) = (msf.stream_count(), msf.file_size());
         Ok(PdbEditPlan {
             streams,
             options,
-            pe_match,
+            identity,
+            stream_count,
             file_size,
             changed: edited,
         })

@@ -30,8 +30,7 @@ use pdbrs::portable::custom::CustomDebugKind;
 use pdbrs::portable::debug::{ConstantValue, LocalConstantSignature, PrimitiveConstant};
 use pdbrs::portable::embedded::decode_embedded;
 use pdbrs::portable::metadata::{DocumentId, MetadataToken, TableId};
-use pdbrs::portable::write::IdPolicy;
-use pdbrs::portable::{Pdb, PdbBuilder, PdbEditor};
+use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder, PdbEditor};
 
 use super::rebuild::{hex, yes};
 use super::{
@@ -156,12 +155,12 @@ fn check(
     };
     let theirs = dump(&mut command)?;
     let pdb = Pdb::parse(&original).map_err(pdbrs)?;
-    let identity = IdPolicy::Explicit(pdb.identity());
+    let identity = IdentityPolicy::Explicit(pdb.identity());
     println!("{fixture}:");
 
     let editor = pdb.edit().map_err(pdbrs)?;
     let unchanged = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let mut passed = unchanged == original;
@@ -191,13 +190,13 @@ fn check(
     let mut editor = pdb.edit().map_err(pdbrs)?;
     apply(&mut editor, true).map_err(pdbrs)?;
     let edited = editor
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let mut again = pdb.edit().map_err(pdbrs)?;
     apply(&mut again, true).map_err(pdbrs)?;
     let repeated = again
-        .plan(IdPolicy::ContentDerived)
+        .plan(IdentityPolicy::ContentDerived)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     println!(
@@ -316,19 +315,14 @@ fn apply(editor: &mut PdbEditor, all: bool) -> pdbrs::Result<()> {
             &[],
             &ConstantValue::Primitive(PrimitiveConstant::I4(ADDED_VALUE)),
         )?;
-        editor.add_local_constant(
-            scope,
-            LocalConstantInfo {
-                name: ADDED_CONSTANT.to_vec(),
-                signature,
-            },
-        )?;
+        let mut constant = LocalConstantInfo::default();
+        constant.name = ADDED_CONSTANT.to_vec();
+        constant.signature = signature;
+        editor.add_local_constant(scope, constant)?;
     }
     let method = MetadataToken::new(TableId::METHOD_DEF, 1).unwrap_or_default();
-    editor.add_custom_debug_information(CustomDebugInfo {
-        parent: CustomDebugParent::Metadata(method),
-        kind: ADDED_KIND,
-        value: ADDED_INFORMATION.to_vec(),
-    })?;
+    let mut information = CustomDebugInfo::new(CustomDebugParent::Metadata(method), ADDED_KIND);
+    information.value = ADDED_INFORMATION.to_vec();
+    editor.add_custom_debug_information(information)?;
     Ok(())
 }

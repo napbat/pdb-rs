@@ -4,7 +4,9 @@
 //! an on-disk value. The write plan assigns the on-disk values and gives a
 //! [`Resolver`] to each deferred record.
 
-use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use crate::native::codeview::index::{
+    FIRST_RECORD_INDEX, IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex,
+};
 use crate::native::msf::StreamId;
 use crate::native::symbols::SymbolOffset;
 use crate::{Error, ErrorKind, Result};
@@ -129,27 +131,20 @@ impl Resolver<'_> {
             .ok_or_else(|| unresolved("stream handle has no stream in the builder"))
     }
 
-    /// Return the module number of `handle`: the module index plus 1.
+    /// Return the index of the module `handle` in the DBI module list.
     ///
-    /// Symbol records such as `S_PROCREF` store this number.
+    /// Symbol records such as `S_PROCREF` store the index plus 1. Their
+    /// encoders check that this number fits in 16 bits.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidReference`] if the builder has no module with
-    ///   this handle.
-    /// - [`ErrorKind::LimitExceeded`] if the number does not fit in 16 bits.
-    pub fn module_number(&self, handle: ModuleHandle) -> Result<u16> {
+    /// Returns [`ErrorKind::InvalidReference`] if the builder has no module
+    /// with this handle.
+    pub fn module_index(&self, handle: ModuleHandle) -> Result<ModuleIndex> {
         if handle.0 >= self.module_count {
             return Err(unresolved("module handle has no module in the builder"));
         }
-        handle
-            .0
-            .checked_add(1)
-            .and_then(|number| u16::try_from(number).ok())
-            .ok_or_else(|| {
-                Error::new(ErrorKind::LimitExceeded, None)
-                    .with_context("module number does not fit in 16 bits")
-            })
+        Ok(ModuleIndex(handle.0))
     }
 
     /// Return the module stream offset of a module symbol record.
@@ -160,7 +155,7 @@ impl Resolver<'_> {
     ///
     /// Returns [`ErrorKind::InvalidReference`] if the builder has no such
     /// record, or if the plan did not encode the module streams yet.
-    pub fn module_symbol_offset(&self, handle: ModuleSymbolHandle) -> Result<u32> {
+    pub fn module_symbol_offset(&self, handle: ModuleSymbolHandle) -> Result<ModuleSymbolOffset> {
         let offsets = self.module_offsets.ok_or_else(|| {
             unresolved("module symbol offsets are not available in this planning step")
         })?;
@@ -168,7 +163,7 @@ impl Resolver<'_> {
             .ok()
             .and_then(|module| offsets.get(module))
             .and_then(|module| module.get(usize::try_from(handle.position).ok()?))
-            .copied()
+            .map(|&offset| ModuleSymbolOffset(offset))
             .ok_or_else(|| unresolved("module symbol handle has no record in the builder"))
     }
 
