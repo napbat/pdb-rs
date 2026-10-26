@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use super::blob::{Reader, Writer, invalid, too_large, truncated};
 use super::{Entries, count_to_end};
 use crate::Result;
+use crate::portable::metadata::{IlOffset, MethodDefId};
 
 /// The first value that a hoisted scope offset or length cannot have.
 const SCOPE_LIMIT: u32 = 0x8000_0000;
@@ -25,7 +26,7 @@ const SCOPE_SIZE: usize = 8;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AsyncMethodSteppingInformation<'a> {
     /// The catch handler IL offset.
-    catch_handler_offset: Option<u32>,
+    catch_handler_offset: Option<IlOffset>,
     /// The steps. [`AsyncMethodSteppingInformation::parse`] checked them.
     steps: &'a [u8],
     /// The number of steps.
@@ -36,11 +37,11 @@ pub struct AsyncMethodSteppingInformation<'a> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AsyncStep {
     /// The IL offset of the yield point in the `MoveNext` method.
-    pub yield_offset: u32,
-    /// The IL offset of the resume point.
-    pub resume_offset: u32,
-    /// The `MethodDef` row ID of the method that has the resume point.
-    pub move_next_method: u32,
+    pub yield_offset: IlOffset,
+    /// The IL offset of the resume point in [`AsyncStep::move_next_method`].
+    pub resume_offset: IlOffset,
+    /// The method that has the resume point. It is not nil.
+    pub move_next_method: MethodDefId,
 }
 
 impl<'a> AsyncMethodSteppingInformation<'a> {
@@ -58,7 +59,7 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
         let steps = reader.rest();
         let len = count_to_end(steps, 0, read_step)?;
         Ok(Self {
-            catch_handler_offset: catch.checked_sub(1),
+            catch_handler_offset: catch.checked_sub(1).map(IlOffset::new),
             steps,
             len,
         })
@@ -66,7 +67,7 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
 
     /// Return the IL offset of the catch handler, if there is one.
     #[must_use]
-    pub const fn catch_handler_offset(&self) -> Option<u32> {
+    pub const fn catch_handler_offset(&self) -> Option<IlOffset> {
         self.catch_handler_offset
     }
 
@@ -96,26 +97,27 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
     ///   catch handler offset is `u32::MAX`, if a method row ID does not fit
     ///   in a compressed integer, or if an allocation fails.
     /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if a
-    ///   method row ID is 0.
+    ///   method is nil.
     pub fn encode(
-        catch_handler_offset: Option<u32>,
+        catch_handler_offset: Option<IlOffset>,
         steps: impl IntoIterator<Item = AsyncStep>,
     ) -> Result<Vec<u8>> {
         let catch = match catch_handler_offset {
             None => 0,
             Some(offset) => offset
+                .get()
                 .checked_add(1)
                 .ok_or_else(|| too_large("async stepping catch handler offset is too large"))?,
         };
         let mut writer = Writer::new();
         writer.u32(catch)?;
         for step in steps {
-            if step.move_next_method == 0 {
+            if step.move_next_method.is_nil() {
                 return Err(invalid("async stepping method row ID is 0"));
             }
-            writer.u32(step.yield_offset)?;
-            writer.u32(step.resume_offset)?;
-            writer.unsigned(step.move_next_method)?;
+            writer.u32(step.yield_offset.get())?;
+            writer.u32(step.resume_offset.get())?;
+            writer.unsigned(step.move_next_method.get())?;
         }
         Ok(writer.finish())
     }
@@ -126,10 +128,10 @@ iterable!(AsyncMethodSteppingInformation => Entries<'a, AsyncStep>);
 /// Read one async step.
 fn read_step(reader: &mut Reader<'_>, _: i32) -> Result<AsyncStep> {
     const SHORT: &str = "async stepping step is truncated";
-    let yield_offset = reader.u32(SHORT)?;
-    let resume_offset = reader.u32(SHORT)?;
-    let move_next_method = reader.unsigned()?;
-    if move_next_method == 0 {
+    let yield_offset = IlOffset::new(reader.u32(SHORT)?);
+    let resume_offset = IlOffset::new(reader.u32(SHORT)?);
+    let move_next_method = MethodDefId::new(reader.unsigned()?);
+    if move_next_method.is_nil() {
         return Err(invalid("async stepping method row ID is 0"));
     }
     Ok(AsyncStep {
@@ -154,7 +156,7 @@ pub struct HoistedLocalScopes<'a> {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct HoistedLocalScope {
     /// The first IL offset of the scope, smaller than `0x80000000`.
-    pub start: u32,
+    pub start: IlOffset,
     /// The length of the scope in bytes, smaller than `0x80000000`.
     pub length: u32,
 }
@@ -212,7 +214,7 @@ impl<'a> HoistedLocalScopes<'a> {
         let mut writer = Writer::new();
         for scope in scopes {
             check_scope(scope)?;
-            writer.u32(scope.start)?;
+            writer.u32(scope.start.get())?;
             writer.u32(scope.length)?;
         }
         Ok(writer.finish())
@@ -225,7 +227,7 @@ iterable!(HoistedLocalScopes => Entries<'a, HoistedLocalScope>);
 fn read_scope(reader: &mut Reader<'_>, _: i32) -> Result<HoistedLocalScope> {
     const SHORT: &str = "hoisted local scope is truncated";
     let scope = HoistedLocalScope {
-        start: reader.u32(SHORT)?,
+        start: IlOffset::new(reader.u32(SHORT)?),
         length: reader.u32(SHORT)?,
     };
     check_scope(scope)?;
@@ -234,7 +236,7 @@ fn read_scope(reader: &mut Reader<'_>, _: i32) -> Result<HoistedLocalScope> {
 
 /// Check the ranges of a hoisted local scope.
 fn check_scope(scope: HoistedLocalScope) -> Result<()> {
-    if scope.start >= SCOPE_LIMIT || scope.length >= SCOPE_LIMIT {
+    if scope.start.get() >= SCOPE_LIMIT || scope.length >= SCOPE_LIMIT {
         return Err(invalid("hoisted local scope offset or length is too large"));
     }
     Ok(())

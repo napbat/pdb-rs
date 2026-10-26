@@ -5,6 +5,10 @@
 //! that this module does not know gives [`CustomDebugValue::Unknown`] with the
 //! raw bytes. The decoder does not drop or interpret such a value.
 //!
+//! [`Pdb::custom_debug_information`](crate::portable::Pdb::custom_debug_information)
+//! reads a row with its GUID and its blob as a [`CustomDebugInformation`], and
+//! [`CustomDebugInformation::decode`] decodes it.
+//!
 //! The layouts come from these sources:
 //!
 //! - The "Language Specific Custom Debug Information Records" section of
@@ -45,8 +49,9 @@
 //! codecs of this module (see
 //! [`crate::native::codeview::symbol::CustomDebugInfoData`]).
 //!
-//! The errors have no location; the caller adds it. A blob that ends inside a
-//! field gives [`ErrorKind::UnexpectedEof`](crate::ErrorKind::UnexpectedEof).
+//! The codec errors have no location; [`CustomDebugInformation::decode`] adds
+//! the row, the blob offset and the kind GUID. A blob that ends inside a field
+//! gives [`ErrorKind::UnexpectedEof`](crate::ErrorKind::UnexpectedEof).
 
 /// Implement `IntoIterator` for a codec type and its reference through its
 /// `iter` method.
@@ -77,6 +82,7 @@ mod compilation;
 mod documents;
 mod enc;
 mod locals;
+mod rows;
 mod state_machine;
 
 use alloc::vec::Vec;
@@ -92,6 +98,7 @@ pub use enc::{
     LocalSlot, MAX_LOCAL_SLOT_KIND, StateMachineState,
 };
 pub use locals::{DynamicFlagIter, DynamicLocalVariables, TupleElementNames};
+pub use rows::{CustomDebugInformation, CustomDebugInformationIter};
 pub use state_machine::{
     AsyncMethodSteppingInformation, AsyncStep, HoistedLocalScope, HoistedLocalScopes,
 };

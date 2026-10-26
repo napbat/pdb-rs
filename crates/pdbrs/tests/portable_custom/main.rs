@@ -1,13 +1,17 @@
 //! Tests for the custom debug information codecs of Portable PDBs.
 
+#[path = "../portable_metadata/builder.rs"]
+mod builder;
 mod compilation;
 mod enc;
 mod locals;
+mod rows;
 mod state_machine;
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{self, CustomDebugKind, CustomDebugValue, TypeDefinitionDocuments};
 use pdbrs::portable::embedded::EmbeddedSource;
+use pdbrs::portable::metadata::DocumentId;
 
 /// Decode `blob` as `kind` and check that the value encodes to `blob` again.
 fn round_trip(kind: CustomDebugKind, blob: &[u8]) -> CustomDebugValue<'_> {
@@ -177,7 +181,10 @@ fn decodes_type_definition_documents() {
         panic!("expected type definition documents");
     };
     assert_eq!(documents.len(), 3);
-    assert_eq!(documents.iter().collect::<Vec<_>>(), [1, 128, 0x4000]);
+    assert_eq!(
+        documents.iter().map(DocumentId::get).collect::<Vec<_>>(),
+        [1, 128, 0x4000]
+    );
     assert_eq!(documents.as_bytes(), blob);
 
     assert!(TypeDefinitionDocuments::parse(&[]).unwrap().is_empty());
@@ -188,17 +195,19 @@ fn decodes_type_definition_documents() {
     assert_eq!(error(kind, &[0xe0]), ErrorKind::InvalidFormat);
 
     assert_eq!(
-        TypeDefinitionDocuments::encode([0x1fff_ffff]).unwrap(),
+        TypeDefinitionDocuments::encode([DocumentId::new(0x1fff_ffff)]).unwrap(),
         [0xdf, 0xff, 0xff, 0xff]
     );
     assert_eq!(
-        TypeDefinitionDocuments::encode([0x2000_0000])
+        TypeDefinitionDocuments::encode([DocumentId::new(0x2000_0000)])
             .unwrap_err()
             .kind(),
         ErrorKind::LimitExceeded
     );
     assert_eq!(
-        TypeDefinitionDocuments::encode([1, 0]).unwrap_err().kind(),
+        TypeDefinitionDocuments::encode([DocumentId::new(1), DocumentId::default()])
+            .unwrap_err()
+            .kind(),
         ErrorKind::InvalidFormat
     );
 }
@@ -209,7 +218,7 @@ fn reads_values_through_into_iterator() {
     let documents = TypeDefinitionDocuments::parse(&blob).unwrap();
     let mut rows = Vec::new();
     for row in &documents {
-        rows.push(row);
+        rows.push(row.get());
     }
     assert_eq!(rows, [1, 2]);
     let mut iter = documents.into_iter();

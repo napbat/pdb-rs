@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use super::blob::{Reader, Writer, invalid};
 use super::{Entries, count_to_end};
 use crate::Result;
+use crate::portable::metadata::DocumentId;
 
 /// The documents of a type that has no other document information, for
 /// example an enumeration or a type without methods.
@@ -56,9 +57,9 @@ impl<'a> TypeDefinitionDocuments<'a> {
         self.len == 0
     }
 
-    /// Return an iterator over the `Document` row IDs.
+    /// Return an iterator over the documents.
     #[must_use]
-    pub const fn iter(&self) -> Entries<'a, u32> {
+    pub const fn iter(&self) -> Entries<'a, DocumentId> {
         Entries::new(self.bytes, self.len, 0, read_document)
     }
 
@@ -67,27 +68,27 @@ impl<'a> TypeDefinitionDocuments<'a> {
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`](crate::ErrorKind::InvalidFormat) if a
-    ///   row ID is 0.
+    ///   document is nil.
     /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if a
     ///   row ID does not fit in a compressed integer, or if an allocation fails.
-    pub fn encode(documents: impl IntoIterator<Item = u32>) -> Result<Vec<u8>> {
+    pub fn encode(documents: impl IntoIterator<Item = DocumentId>) -> Result<Vec<u8>> {
         let mut writer = Writer::new();
         for document in documents {
-            if document == 0 {
+            if document.is_nil() {
                 return Err(invalid("type definition document row ID is 0"));
             }
-            writer.unsigned(document)?;
+            writer.unsigned(document.get())?;
         }
         Ok(writer.finish())
     }
 }
 
-iterable!(TypeDefinitionDocuments => Entries<'a, u32>);
+iterable!(TypeDefinitionDocuments => Entries<'a, DocumentId>);
 
 /// Read one `Document` row ID.
-fn read_document(reader: &mut Reader<'_>, _: i32) -> Result<u32> {
-    let document = reader.unsigned()?;
-    if document == 0 {
+fn read_document(reader: &mut Reader<'_>, _: i32) -> Result<DocumentId> {
+    let document = DocumentId::new(reader.unsigned()?);
+    if document.is_nil() {
         return Err(invalid("type definition document row ID is 0"));
     }
     Ok(document)
