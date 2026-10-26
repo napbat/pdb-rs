@@ -9,11 +9,14 @@
 //! 2. Reference (see [`reference`](mod@reference)): the command writes each `pdz-*` fixture source again
 //!    with the pdbrs options that match the `pdz-encode` options of the fixture, and reports
 //!    whether the bytes are the same. Different bytes do not make the command fail.
-//! 3. Decode (see [`decode`]): the command converts each `pdz-*` fixture to MSF 7.0, twice.
-//!    Both outputs must be the same bytes. `pdbtool check` must report 0 errors,
-//!    `llvm-pdbutil dump --all` and `DIA2Dump -all` must give the same result as for the
-//!    original MSF 7.0 fixture, and the streams must be equal to the streams of the PDZ file
-//!    and, from stream 1, of the original.
+//! 3. Decode (see [`decode`]): the command converts each PDZ fixture (`pdz-*` of
+//!    `pdbtool pdz-encode` and `msfz-*` of `msfz-encode`) to MSF 7.0, twice. Both outputs
+//!    must be the same bytes. `pdbtool check` must report 0 errors, `llvm-pdbutil dump --all`
+//!    and `DIA2Dump -all` must give the same result as for the original MSF 7.0 fixture, and
+//!    the streams must be equal to the streams of the PDZ file and, from stream 1, of the
+//!    original. `pdbtool compare` of the original and the PDZ file must report no different
+//!    stream, and the `native` example must give the same output for both, apart from the
+//!    lines that start with `container:`.
 //!
 //! The command writes the outputs and the different dumps to `target/verify-msfz/`.
 

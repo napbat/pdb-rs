@@ -1,0 +1,36 @@
+[package]
+name = "msfz-encode"
+version = "0.1.0"
+edition = "2024"
+description = "Write an MSFZ (PDZ) file from an MSF 7.0 PDB with the ms-pdb-msfz writer"
+publish = false
+
+# An empty workspace table keeps this project out of the root workspace.
+[workspace]
+
+# The crates of the pinned `microsoft/pdb-rs` revision `2081a0dd`
+# (`docs/reference/SOURCES.json`). The tool does not use pdbrs.
+[dependencies]
+ms-pdb-msf = "=0.1.7"
+ms-pdb-msfz = "=0.1.10"
+
+# The same levels as `[workspace.lints]` of the root workspace.
+[lints.rust]
+warnings = { level = "deny", priority = -2 }
+unused = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+future_incompatible = { level = "deny", priority = -1 }
+missing_docs = "deny"
+unsafe_code = "deny"
+
+[lints.clippy]
+allow_attributes = { level = "deny", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+mod_module_files = "deny"
