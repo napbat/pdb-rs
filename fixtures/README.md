@@ -82,6 +82,17 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `msvc-x64-srcsrv` | `cl` + `link` + `pdbstr` | x64 | `/Zi /Od`, `/DEBUG:FULL`, then `pdbstr -w -s:srcsrv` on a copy |
 | `msvc-x64-pch-z7` | `cl` + `link` | x64 | `/Z7 /Od /Yc /Yu`, `/DEBUG:FULL` |
 | `msvc-x64-pch-zi` | `cl` + `link` | x64 | `/Zi /Od /Yc /Yu`, `/DEBUG:FULL` |
+| `msvc-x64-page8192` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:8192` |
+| `msvc-x64-page16384` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:16384` |
+| `msvc-x64-page32768` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:32768` |
+| `clang-lld-x64-page8192` | `clang-cl` + `lld-link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:8192` |
+| `clang-lld-x64-page16384` | `clang-cl` + `lld-link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:16384` |
+| `clang-lld-x64-page32768` | `clang-cl` + `lld-link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBPAGESIZE:32768` |
+| `msvc-x64-large` | `cl` + `link` | x64 | `/Zi /Od /MP` on generated sources, `/DEBUG:FULL` |
+| `msvc-x64-sha1` | `cl` + `link` | x64 | `/Zi /Od /ZH:SHA1`, `/DEBUG:FULL` |
+| `msvc-x64-annotation` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL` |
+| `msvc-x64-vc120` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL,VC120` |
+| `msvc-x64-lazy` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:LAZY` |
 | `rust-link-x64-debug` | `rustc` + `link` | x86_64 | debug profile |
 | `rust-link-x64-release` | `rustc` + `link` | x86_64 | release profile with full debug information |
 | `rust-lld-x64-debug` | `rustc` + `lld-link` | x86_64 | debug profile |
@@ -104,10 +115,11 @@ and write a full PDB. For this reason, `msvc-x64-fastlink` uses the tools of a V
 
 ### Native variants
 
-The `msvc-*` variants after `clang-link-x64-debug` give the native reader record kinds and
-streams that the other fixtures do not contain (#27). Each variant is small. Most variants use
-the sources of `native/`. The table gives the outputs and the items that only the variant
-contains. The issue in the last column decodes these items.
+The native variants after `clang-link-x64-debug` give the native reader record kinds, streams
+and layouts that the other fixtures do not contain (#1, #27). Each variant except
+`msvc-x64-large` is small. Most variants use the sources of `native/`. The table gives the
+outputs and the items that only the variant contains. The issue in the last column decodes
+these items.
 
 | Fixture | Outputs | Items that only this fixture contains | Issue |
 | --- | --- | --- | --- |
@@ -122,6 +134,13 @@ contains. The issue in the last column decodes these items.
 | `msvc-x64-srcsrv` | `demo.exe`, `demo.pdb`, `demo.srcsrv.pdb` | The `srcsrv` named stream. `pdbstr` also increments the age in the PDB Info stream, but not in the DBI stream. | #32 |
 | `msvc-x64-pch-z7` | `demo.exe`, `demo.pdb` | None in the PDB. The object files have `LF_ENDPRECOMP` (`obj/main.obj`) and `LF_PRECOMP` (the other C++ objects). | #29 |
 | `msvc-x64-pch-zi` | `demo.exe`, `demo.pdb` | None in the PDB. The objects refer to `obj/compile.pdb` with `LF_TYPESERVER2`. | #29 |
+| `msvc-x64-page8192`, `msvc-x64-page16384`, `msvc-x64-page32768` | `demo.exe`, `demo.pdb` | An MSF page size of 8192, 16384 or 32768 bytes from `link`. | #1 |
+| `clang-lld-x64-page8192`, `clang-lld-x64-page16384`, `clang-lld-x64-page32768` | `demo.exe`, `demo.pdb` | The same page sizes from `lld-link`. The superblock of `lld-link` selects free page map 2, the superblock of `link` selects free page map 1. | #1 |
+| `msvc-x64-large` | `demo.exe`, `demo.pdb` | More than 4096 pages of 4096 bytes, so the free page map has a second interval. | #1 |
+| `msvc-x64-sha1` | `demo.exe`, `demo.pdb` | SHA-1 file checksums (`DEBUG_S_FILECHKSMS` kind 2) for the demo sources. The runtime library sources keep SHA-256. | #31 |
+| `msvc-x64-annotation` | `demo.exe`, `demo.pdb` | `S_ANNOTATION` module symbols and `S_ANNOTATIONREF` global symbols. | #30 |
+| `msvc-x64-vc120` | `demo.exe`, `demo.pdb` | The PDB Info feature `VC110` (20091201) instead of `VC140`. | #32 |
+| `msvc-x64-lazy` | `demo.exe`, `demo.pdb` | The PDB Info feature `NOTM` (no type merge). The TPI and IPI streams are empty. The module streams have `S_MOD_TYPEREF`, `S_GPROC32_ID`, `S_LPROC32_ID` and `S_PROC_ID_END` records. The type and ID indices of the module symbols refer to the records in the object files. | #30, #32 |
 
 Some notes about the variants:
 
@@ -143,6 +162,16 @@ Some notes about the variants:
 - The precompiled header variants compile `main.cpp` with `/Ycdemo.h` and the other C++ files
   with `/Yudemo.h`. The linker resolves the precompiled types, so the PDB records are the same
   kinds as in `msvc-x64-z7` and `msvc-x64-debug`.
+- `link` and `lld-link` accept only the page sizes 4096, 8192, 16384 and 32768 for
+  `/PDBPAGESIZE` (`link` error LNK1399; `lld-link` "invalid argument"). An MSF free page map
+  interval covers as many pages as a page has bytes. Thus the smallest PDB with a second
+  interval is larger than 16 MiB. The generator writes the sources of `msvc-x64-large` into
+  `src/` in the fixture directory: 28000 structures and functions in 8 files and `main.cpp`.
+- `/DEBUG:VC120` and `/DEBUG:LAZY` are options of `link` 14.51 that its help text does not
+  show. `msvc-x64-lazy` keeps the type records in the object files, so keep the `obj/` directory
+  with the PDB.
+- `link /DEBUG:CTYPES` is accepted, but the DBI header flag `fCTypes` stays 0 with C and C++
+  objects from `/Zi` and `/Z7`.
 
 A missing component or tool makes the fixture `unavailable` with the reason. The generator
 checks for `msvcmrt.lib` in the `LIB` directories, for `pgort140.dll` on the `PATH` and for

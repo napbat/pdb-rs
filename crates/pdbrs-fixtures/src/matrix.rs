@@ -106,13 +106,18 @@ pub enum Variant {
     Dll,
     /// The C++/CLI program `clr/managed.cpp`.
     Clr,
+    /// The program `annotation/annotation.cpp`, which calls the `__annotation` intrinsic.
+    Annotation,
+    /// A large program from C++ sources that the generator writes. Its PDB has more pages than
+    /// one free page map interval covers.
+    Generated,
 }
 
 impl Variant {
     /// The source languages.
     pub const fn language(self) -> &'static str {
         match self {
-            Self::Dll => "c++20",
+            Self::Dll | Self::Annotation | Self::Generated => "c++20",
             Self::Clr => "c++/cli",
             _ => "c++20, c17",
         }
@@ -218,6 +223,10 @@ const DEBUG: &[&str] = &["/Zi", "/Od", "/MDd"];
 const RELEASE: &[&str] = &["/Zi", "/O2", "/MD"];
 const LINK_DEBUG: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO"];
 const LINK_RELEASE: &[&str] = &["/DEBUG:FULL", "/OPT:REF", "/OPT:ICF", "/INCREMENTAL:NO"];
+// `link` and `lld-link` accept the page sizes 4096, 8192, 16384 and 32768 only.
+const LINK_PAGE_8192: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:8192"];
+const LINK_PAGE_16384: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:16384"];
+const LINK_PAGE_32768: &[&str] = &["/DEBUG:FULL", "/INCREMENTAL:NO", "/PDBPAGESIZE:32768"];
 
 const fn native(
     name: &'static str,
@@ -546,6 +555,78 @@ pub static FIXTURES: &[Fixture] = &[
             Variant::PrecompiledHeader,
             msvc(Arch::X64, DEBUG, LINK_DEBUG),
         ),
+    ),
+    native(
+        "msvc-x64-page8192",
+        "msvc",
+        "debug, pdb page size 8192",
+        msvc(Arch::X64, DEBUG, LINK_PAGE_8192),
+    ),
+    native(
+        "msvc-x64-page16384",
+        "msvc",
+        "debug, pdb page size 16384",
+        msvc(Arch::X64, DEBUG, LINK_PAGE_16384),
+    ),
+    native(
+        "msvc-x64-page32768",
+        "msvc",
+        "debug, pdb page size 32768",
+        msvc(Arch::X64, DEBUG, LINK_PAGE_32768),
+    ),
+    native(
+        "clang-lld-x64-page8192",
+        "clang-cl + lld-link",
+        "debug, pdb page size 8192",
+        clang(Linker::Lld, Arch::X64, DEBUG, LINK_PAGE_8192),
+    ),
+    native(
+        "clang-lld-x64-page16384",
+        "clang-cl + lld-link",
+        "debug, pdb page size 16384",
+        clang(Linker::Lld, Arch::X64, DEBUG, LINK_PAGE_16384),
+    ),
+    native(
+        "clang-lld-x64-page32768",
+        "clang-cl + lld-link",
+        "debug, pdb page size 32768",
+        clang(Linker::Lld, Arch::X64, DEBUG, LINK_PAGE_32768),
+    ),
+    native(
+        "msvc-x64-large",
+        "msvc",
+        "debug, generated sources, more than one free page map interval",
+        with_variant(
+            Variant::Generated,
+            msvc(Arch::X64, &["/Zi", "/Od", "/MDd", "/MP"], LINK_DEBUG),
+        ),
+    ),
+    native(
+        "msvc-x64-sha1",
+        "msvc",
+        "debug, sha1 source checksums",
+        msvc(Arch::X64, &["/Zi", "/Od", "/MDd", "/ZH:SHA1"], LINK_DEBUG),
+    ),
+    native(
+        "msvc-x64-annotation",
+        "msvc",
+        "debug, __annotation",
+        with_variant(Variant::Annotation, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-vc120",
+        "msvc",
+        "debug, vc120 pdb format",
+        // The undocumented option /DEBUG:VC120 writes the Info feature VC110 instead of VC140.
+        msvc(Arch::X64, DEBUG, &["/DEBUG:FULL,VC120", "/INCREMENTAL:NO"]),
+    ),
+    native(
+        "msvc-x64-lazy",
+        "msvc",
+        "debug, lazy (no type merge)",
+        // The undocumented option /DEBUG:LAZY writes the Info feature NOTM. The PDB has no type
+        // records; the module symbols keep the type indices of the object files.
+        msvc(Arch::X64, DEBUG, &["/DEBUG:LAZY", "/INCREMENTAL:NO"]),
     ),
     rust("rust-link-x64-debug", Linker::Msvc, Arch::X64, false),
     rust("rust-link-x64-release", Linker::Msvc, Arch::X64, true),

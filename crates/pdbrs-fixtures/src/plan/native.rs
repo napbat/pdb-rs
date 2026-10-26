@@ -1,5 +1,6 @@
 //! Plans for the MSVC and `clang-cl` builds of `fixtures/native`.
 
+mod generated;
 mod variant;
 
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ pub fn plan(recipe: &Native, paths: &Paths, toolchains: &mut Toolchains) -> Resu
         Variant::ProfileGuided => variant::profile_guided(&build, &mut plan)?,
         Variant::Dll => variant::dll(&build, &mut plan),
         Variant::Clr => variant::clr(&build, &mut plan)?,
+        Variant::Annotation => variant::annotation(&build, &mut plan),
+        Variant::Generated => generated::generated(&build, &mut plan),
     }
     Ok(plan)
 }
