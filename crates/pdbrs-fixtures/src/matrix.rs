@@ -189,10 +189,40 @@ pub struct Hlsl {
     pub options: &'static [&'static str],
 }
 
-/// A conversion of the MSF 7.0 PDBs of other fixtures to MSFZ with `pdbtool pdz-encode`.
+/// The program that writes the MSFZ file of a [`Pdz`] fixture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoder {
+    /// `pdbtool pdz-encode`.
+    PdzEncode,
+    /// `msfz-encode` in `fixtures/tools/msfz-encode/`: Microsoft's `ms-pdb-msfz` writer with
+    /// options that `pdz-encode` does not give.
+    MsfzEncode,
+}
+
+impl Encoder {
+    /// The tool name in the tools manifest.
+    pub fn tool(self) -> &'static str {
+        match self {
+            Self::PdzEncode => "pdbtool",
+            Self::MsfzEncode => "msfz-encode",
+        }
+    }
+
+    /// The arguments before the options of the recipe.
+    pub fn command(self) -> &'static [&'static str] {
+        match self {
+            Self::PdzEncode => &["--quiet", "pdz-encode"],
+            Self::MsfzEncode => &[],
+        }
+    }
+}
+
+/// A conversion of the MSF 7.0 PDBs of other fixtures to MSFZ.
 #[derive(Debug)]
 pub struct Pdz {
-    /// The `pdz-encode` options.
+    /// The program that writes the MSFZ files.
+    pub encoder: Encoder,
+    /// The options of the encoder.
     pub options: &'static [&'static str],
     /// The source fixtures. An empty list selects each fixture with an MSF 7.0 PDB output,
     /// except [`PDZ_EXCLUDED`].
@@ -211,6 +241,16 @@ const PDZ_SAMPLE: &[&str] = &[
     "clang-lld-x64-debug",
     "rust-link-x64-debug",
     "dotnet-csharp-full",
+];
+
+/// The sources of the `msfz-*` fixtures: [`PDZ_SAMPLE`] and a large PDB, whose streams cross
+/// chunks also with the default chunk size.
+const MSFZ_SAMPLE: &[&str] = &[
+    "msvc-x64-debug",
+    "clang-lld-x64-debug",
+    "rust-link-x64-debug",
+    "dotnet-csharp-full",
+    "msvc-x64-large",
 ];
 
 /// The sources of the `--pad16k` fixture: PDBs that give a PDZ file smaller than 16 KiB.
@@ -412,7 +452,30 @@ const fn pdz(
         language: "native PDB in MSFZ",
         arch: "any",
         configuration,
-        recipe: Recipe::Pdz(Pdz { options, sources }),
+        recipe: Recipe::Pdz(Pdz {
+            encoder: Encoder::PdzEncode,
+            options,
+            sources,
+        }),
+    }
+}
+
+const fn msfz(
+    name: &'static str,
+    configuration: &'static str,
+    options: &'static [&'static str],
+) -> Fixture {
+    Fixture {
+        name,
+        producer: "msfz-encode",
+        language: "native PDB in MSFZ",
+        arch: "any",
+        configuration,
+        recipe: Recipe::Pdz(Pdz {
+            encoder: Encoder::MsfzEncode,
+            options,
+            sources: MSFZ_SAMPLE,
+        }),
     }
 }
 
@@ -769,6 +832,18 @@ pub static FIXTURES: &[Fixture] = &[
         PDZ_SAMPLE,
     ),
     pdz("pdz-pad16k", "--pad16k", &["--pad16k"], PDZ_SMALL),
+    // `msfz-encode` writes the forms of Microsoft's writer that `pdz-encode` does not write.
+    msfz(
+        "msfz-deflate",
+        "--chunk-codec deflate",
+        &["--chunk-codec", "deflate"],
+    ),
+    msfz(
+        "msfz-deflate-dir",
+        "--stream-dir-codec deflate",
+        &["--stream-dir-codec", "deflate"],
+    ),
+    msfz("msfz-uncompressed", "--uncompressed", &["--uncompressed"]),
 ];
 
 /// Select fixtures by name. An empty list selects every fixture.

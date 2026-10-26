@@ -20,6 +20,7 @@ exception handling and .NET async state machines.
 | `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
 | `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
 | `hlsl/` | HLSL shaders for `fxc` and `dxc`: `vertex.hlsl`, `pixel.hlsl`, `compute.hlsl` and the shared header `common.hlsli`. |
+| `tools/msfz-encode/` | Not a demo program: the standalone Cargo project of `msfz-encode`, the producer of the `msfz-*` fixtures (see [Consumer tools](#consumer-tools)). It uses Microsoft's `ms-pdb-msf` and `ms-pdb-msfz` crates, not pdbrs. |
 
 Each program runs without arguments, prints a checksum and exits with code 0. MSVC-only
 constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m128` and
@@ -238,6 +239,39 @@ The manifest gives the kind `native-pdz`, the option set as the configuration an
 so no PDZ fixture converts them. `pdz-encode` writes stream 0 (the previous MSF stream
 directory) as an empty stream; compare streams from stream 1, as `pdbtool compare` does.
 
+### MSFZ forms of Microsoft's writer
+
+The `msfz-*` fixtures hold MSFZ forms that `pdz-encode` does not write (#1). The `msfz-encode`
+tool writes them with Microsoft's `MsfzWriter` of `ms-pdb-msfz` 0.1.10 (see
+[Consumer tools](#consumer-tools)). The fixtures need `msfz-encode` in the tools manifest. The
+output paths and the manifest entries are the same as for the `pdz-*` fixtures; the producer is
+`msfz-encode`. `msfz-encode` copies each stream from stream 1 and writes stream 0 as an empty
+stream, as `pdz-encode` does. It fills each chunk to the maximum chunk size (1 MiB by default).
+Thus the streams of `msvc-x64-large` cross chunks.
+
+| Fixture | `msfz-encode` options | Form |
+| --- | --- | --- |
+| `msfz-deflate` | `--chunk-codec deflate` | Raw DEFLATE chunks (code 2) and an uncompressed stream directory |
+| `msfz-deflate-dir` | `--stream-dir-codec deflate` | zstd chunks and a raw DEFLATE stream directory (code 2) |
+| `msfz-uncompressed` | `--uncompressed` | Each stream as uncompressed fragments; the file has no chunks and an empty Chunk Table |
+
+Each fixture converts `msvc-x64-debug`, `clang-lld-x64-debug`, `rust-link-x64-debug`,
+`dotnet-csharp-full` and `msvc-x64-large`.
+
+DIA rejects the `msfz-deflate` and `msfz-deflate-dir` files (`loadDataFromPdb failed -
+HRESULT = 806D000C`). DIA reads the `msfz-uncompressed` files and gives the same
+`DIA2Dump -all` output as for the source. `pdbtool` and pdbrs read all three forms.
+
+Microsoft's writer cannot make these forms of the MSFZ specification. Thus no fixture has them:
+
+- A stored chunk (compression code 0). The `Compression` enum has only `Zstd` and `Deflate`,
+  and `MsfzWriterFile::finish_current_chunk` compresses each chunk with one of them.
+- A compressed fragment across chunk boundaries. `MsfzWriterFile::write_to_chunks` puts all
+  bytes of one write call into one chunk, and `add_fragment_compressed` joins two fragments only
+  in the same chunk. The reader of `ms-pdb-msfz` also rejects such a fragment.
+- A stream larger than 4 GiB. `StreamWriter::write` limits a stream to less than
+  `NIL_STREAM_SIZE` (`0xffffffff`) bytes.
+
 ## Run the generator
 
 Run these commands from the workspace root. You do not need a developer command prompt.
@@ -306,20 +340,21 @@ or a file of a built tool is missing, the section records the tool as `unavailab
 reason. The consumer tools never change the result of the fixture build. The section always
 reads `target/tools/` below the workspace root, also with `--out`.
 
-Do not commit generated files. The `target/` directory is ignored by git. The only build
-input in this directory that Cargo writes is `rust/Cargo.lock`. It is committed, and the
-generator builds with `--locked`, so Cargo does not change it.
+Do not commit generated files. The `target/` directory is ignored by git. The build inputs in
+this directory that Cargo writes are `rust/Cargo.lock` and `tools/msfz-encode/Cargo.lock`.
+They are committed, and the generator builds with `--locked`, so Cargo does not change them.
 
 ## Consumer tools
 
-The `tools` command makes three independent consumers of PDB files. Other work compares the
-output of pdbrs with the output of these tools (#21, #22).
+The `tools` command makes three independent consumers of PDB files and one MSFZ producer.
+Other work compares the output of pdbrs with the output of the consumers (#21, #22).
 
 | Tool | Source | Use |
 | --- | --- | --- |
 | `pdbtool` | The `pdbtool` crate 0.1.22 from crates.io. This is the version at the pinned `microsoft/pdb-rs` revision `2081a0dd` in `docs/reference/SOURCES.json`. | `check`, `pdz-encode`, `copy`, `compare`, `container` |
 | `DIA2Dump` | The DIA SDK sample of the latest Visual Studio installation with the x64 C++ tools. | Dumps a PDB or an MSFZ file through `msdia140.dll`. |
 | `PortableVerifier` | The C# program in `dotnet/verifier/`. It uses `System.Reflection.Metadata` from the .NET shared framework, so it needs no NuGet package. | Prints the canonical dump of a Portable PDB (see [Portable PDB verifier](#portable-pdb-verifier)). |
+| `msfz-encode` | The Cargo project in `tools/msfz-encode/`. It uses `ms-pdb-msf` 0.1.7 and `ms-pdb-msfz` 0.1.10 of the pinned `microsoft/pdb-rs` revision `2081a0dd`, not pdbrs. Its empty `[workspace]` table keeps it out of the root workspace, and its `Cargo.lock` is committed. | Writes an MSFZ file from an MSF 7.0 PDB with Microsoft's `MsfzWriter` (see [MSFZ forms of Microsoft's writer](#msfz-forms-of-microsofts-writer)). |
 
 Run this command from the workspace root. It takes no other arguments:
 
@@ -347,11 +382,16 @@ The command does these steps:
 9. It runs `dotnet build fixtures/dotnet/verifier/PortableVerifier.csproj -c Release` with
    `--artifacts-path target/tools/portable-verifier-build` and
    `-o target/tools/bin/portable-verifier`. Then it runs the verifier with `--version`.
-10. It writes `target/tools/manifest.json`.
+10. It runs `cargo install --path fixtures/tools/msfz-encode --locked --force` with
+    `--root target/tools` and `--target-dir target/tools/msfz-encode-build`. Before the build, it
+    reads the versions of `ms-pdb-msfz` and `ms-pdb-msf` from `Cargo.lock` of the project; other
+    versions make the tool `failed`. Then it runs `msfz-encode --version`. If the project
+    directory does not exist, the tool is `unavailable`.
+11. It writes `target/tools/manifest.json`.
 
 The outputs are in `target/tools/bin/`: `pdbtool.exe`, `DIA2Dump.exe`, `DIA2Dump.pdb`,
-`msdia140.dll` and `portable-verifier/PortableVerifier.dll`. Each tool writes its command
-output to `target/tools/<tool>.log`.
+`msdia140.dll`, `portable-verifier/PortableVerifier.dll` and `msfz-encode.exe`. Each tool
+writes its command output to `target/tools/<tool>.log`.
 
 `target/tools/manifest.json` has the generator, the workspace commit, the host and one
 record for each tool. Each record has:
@@ -361,10 +401,12 @@ record for each tool. Each record has:
 - the SHA-256 digest of each file (`sha256`, an object with the file path as the key)
 - the version: the crate version and `cargo -V` for `pdbtool`; the Visual Studio version, the
   platform toolset and the `msdia140.dll` file version for `DIA2Dump`; the .NET SDK version
-  and the `System.Reflection.Metadata` and runtime versions for `PortableVerifier`
+  and the `System.Reflection.Metadata` and runtime versions for `PortableVerifier`; the crate
+  version, `cargo -V` and the `ms-pdb-msfz` and `ms-pdb-msf` versions for `msfz-encode`
 - the source: the crate, its repository and the pinned revision for `pdbtool`; the Visual
   Studio, sample, `diaguids.lib`, `msdia140.dll`, MSBuild and copy paths and the two changes
-  for `DIA2Dump`; the project file for `PortableVerifier`
+  for `DIA2Dump`; the project file for `PortableVerifier`; the project file, the repository
+  and the pinned revision for `msfz-encode`
 - each command with its working directory
 
 A tool without a prerequisite, for example Visual Studio or the DIA SDK, is `unavailable`. A
@@ -378,7 +420,17 @@ Use the tools like this:
 target/tools/bin/pdbtool check target/fixtures/msvc-x64-debug/demo.pdb
 target/tools/bin/pdbtool pdz-encode target/fixtures/msvc-x64-debug/demo.pdb target/scratch/demo-msfz.pdb
 target/tools/bin/DIA2Dump -m target/scratch/demo-msfz.pdb
+target/tools/bin/msfz-encode --chunk-codec deflate target/fixtures/msvc-x64-debug/demo.pdb target/scratch/demo-deflate.pdb
 ```
+
+`msfz-encode` has these options:
+
+- `--chunk-codec zstd|deflate`: the codec of the chunks (default `zstd`)
+- `--stream-dir-codec none|zstd|deflate`: the codec of the stream directory (default `none`)
+- `--uncompressed`: write each stream as uncompressed fragments, without chunks
+- `--max-chunk-size <bytes>`: the maximum uncompressed chunk size, with an optional `K` or `M`
+  suffix (default 1M; the writer clamps the value to 4K..1G)
+- `--pad16k`: make the file at least 16 KiB long
 
 `pdbtool check` exits with code 0 also when a PDB has errors. Read the line
 `Number of PDBs with errors` of its output. Give an MSFZ file a name that ends in `.pdb`.
@@ -778,9 +830,9 @@ example of pdbrs first. It has three parts.
 2. Reference. The command writes the source of each `pdz-*` fixture with the matching option
    set and compares the bytes with the `pdz-encode` file. It prints the sizes and the chunk and
    fragment counts of both files, and the reasons for different bytes. Different bytes do not
-   make the command fail.
-3. Decode. The command converts each `pdz-*` fixture to MSF 7.0 with `Container::to_msf` and the
-   page size of the original. The output is
+   make the command fail. The part skips the `msfz-*` fixtures.
+3. Decode. The command converts each PDZ fixture (`pdz-*` and `msfz-*`) to MSF 7.0 with
+   `Container::to_msf` and the page size of the original. The output is
    `target/verify-msfz/decode/<PDZ fixture>/<source fixture>/<file stem>/<file name>`. Each
    output must pass these checks:
    - A second conversion gives the same bytes.
@@ -788,11 +840,16 @@ example of pdbrs first. It has three parts.
    - The normalized `llvm-pdbutil dump --all` output and the masked `DIA2Dump -all` output are
      the same as for the original MSF 7.0 fixture.
    - The streams are equal to the streams of the PDZ file, and from stream 1 to the original.
+   - `pdbtool compare <original> <PDZ file>` reports no stream with differences.
+   - The `native` example gives the same output for the PDZ file and the original, apart from
+     the lines that start with `container:`.
 
 Two `DIA2Dump` results are explained and do not make the command fail:
 
 - DIA rejects each file with raw DEFLATE chunks (`loadDataFromPdb failed - HRESULT =
-  806D000C`). DIA reads only zstd chunks. `pdbtool` and pdbrs read the DEFLATE files.
+  806D000C`). DIA reads only zstd chunks. `pdbtool` and pdbrs read the DEFLATE files. DIA also
+  rejects the `msfz-deflate` and `msfz-deflate-dir` files of Microsoft's writer. The decode part
+  runs DIA on the MSF 7.0 output, not on the PDZ file, so these files pass.
 - For `msvc-x64-incremental`, DIA prints function names with their signatures for each MSFZ
   file, also for the `pdz-encode` file. The check accepts the output if it is the same as for
   the `pdz-default` fixture of the same source.

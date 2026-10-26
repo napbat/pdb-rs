@@ -1,4 +1,5 @@
-//! Plans for the conversion of MSF 7.0 PDB fixtures to MSFZ with `pdbtool pdz-encode`.
+//! Plans for the conversion of MSF 7.0 PDB fixtures to MSFZ with `pdbtool pdz-encode` or
+//! `msfz-encode`.
 //!
 //! A PDZ fixture reads the outputs of other fixtures in the same output root. Thus the matrix
 //! puts the PDZ fixtures after their sources. The output of each source PDB is
@@ -17,13 +18,14 @@ use crate::tools;
 
 /// Make the plan of a PDZ fixture.
 ///
-/// The fixture is unavailable if `pdbtool` is not built or if the toolchain of a source
+/// The fixture is unavailable if its encoder is not built or if the toolchain of a source
 /// fixture is not available.
 pub fn plan(recipe: &Pdz, paths: &Paths, toolchains: &mut Toolchains) -> Result<Plan, String> {
-    let record = tools::built_record(&paths.workspace, "pdbtool")?;
-    let pdbtool = tools::built_tool(&paths.workspace, "pdbtool")?;
+    let name = recipe.encoder.tool();
+    let record = tools::built_record(&paths.workspace, name)?;
+    let encoder = tools::built_tool(&paths.workspace, name)?;
     let mut plan = Plan::default();
-    plan.tools.push(("pdbtool".to_owned(), version(&record)));
+    plan.tools.push((name.to_owned(), version(name, &record)));
     let root = paths
         .fixture
         .parent()
@@ -44,8 +46,8 @@ pub fn plan(recipe: &Pdz, paths: &Paths, toolchains: &mut Toolchains) -> Result<
         {
             let output = directory.join(file_name(&input.path)?);
             plan.steps.push(
-                Step::new(&pdbtool, &paths.fixture)
-                    .args(["--quiet", "pdz-encode"])
+                Step::new(&encoder, &paths.fixture)
+                    .args(recipe.encoder.command().iter().copied())
                     .args(recipe.options.iter().copied())
                     .args([
                         input.path.display().to_string(),
@@ -99,20 +101,32 @@ fn file_name(path: &Path) -> Result<&std::ffi::OsStr, String> {
         .ok_or_else(|| format!("{} has no file name", path.display()))
 }
 
-/// Return the version line of the `pdbtool` record of the tools manifest.
-fn version(record: &Value) -> String {
+/// Return the version line of the encoder record of the tools manifest.
+///
+/// The line has the crate version and the versions of the Microsoft libraries that the
+/// record lists, for example `msfz-encode 0.1.0, ms-pdb-msfz 0.1.10, ms-pdb-msf 0.1.7`.
+fn version(name: &str, record: &Value) -> String {
     let field = |object: &str, name: &str| {
         record
             .get(object)
             .and_then(|value| value.get(name))
             .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_owned()
+            .map(str::to_owned)
     };
+    let unknown = || "unknown".to_owned();
+    let mut parts = vec![format!(
+        "{name} {}",
+        field("version", "crate").unwrap_or_else(unknown)
+    )];
+    parts.extend(
+        ["ms-pdb-msfz", "ms-pdb-msf"]
+            .into_iter()
+            .filter_map(|library| Some(format!("{library} {}", field("version", library)?))),
+    );
     format!(
-        "pdbtool {} ({} at {})",
-        field("version", "crate"),
-        field("source", "repository"),
-        field("source", "pinned_revision")
+        "{} ({} at {})",
+        parts.join(", "),
+        field("source", "repository").unwrap_or_else(unknown),
+        field("source", "pinned_revision").unwrap_or_else(unknown)
     )
 }

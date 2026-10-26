@@ -23,13 +23,19 @@ pdbrs fills each chunk to the maximum chunk size.
 ruzstd (the \"Fastest\" level), so the pdbrs files are larger.
   - The different chunks give a different stream directory and Chunk Table.";
 
-/// Write the source of each PDZ fixture with the matching pdbrs options and compare the bytes.
-pub(super) fn run(list: &[PdzFixture]) {
+/// Write the source of each `pdz-*` fixture with the matching pdbrs options and compare the
+/// bytes. The part skips the other PDZ fixtures, because `pdz-encode` did not write them.
+pub(super) fn run(all: &[PdzFixture]) {
+    let list: Vec<PdzFixture> = all
+        .iter()
+        .filter(|fixture| fixture.fixture.starts_with("pdz-"))
+        .cloned()
+        .collect();
     println!(
         "== reference: pdbrs and pdbtool pdz-encode for {} PDZ fixtures",
         list.len()
     );
-    let results = parallel_map(list, compare);
+    let results = parallel_map(&list, compare);
     let mut identical = 0;
     let mut compared = 0;
     for (fixture, result) in list.iter().zip(&results) {

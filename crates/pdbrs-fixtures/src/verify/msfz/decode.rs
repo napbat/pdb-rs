@@ -1,4 +1,4 @@
-//! The decode part of `verify-msfz`: each `pdz-*` fixture to MSF 7.0.
+//! The decode part of `verify-msfz`: each PDZ fixture (`pdz-*` and `msfz-*`) to MSF 7.0.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,18 +7,19 @@ use pdbrs::native::container::Container;
 use pdbrs::native::msf::{Msf, WriteOptions};
 
 use super::super::native::consumers::{
-    Run, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check, pdbutil_dump,
+    Run, StreamDifferences, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check,
+    pdbtool_compare, pdbutil_dump,
 };
 use super::super::outputs;
 use super::{
-    POLICY, Tools, available, describe, empty_stream_0, file_name, not_run, read_streams,
-    same_output, stream_differences, write_file,
+    POLICY, Tools, available, describe, empty_stream_0, file_name, native_output, not_run,
+    read_streams, same_output, stream_differences, write_file,
 };
 
 /// One PDZ fixture with its MSF 7.0 original.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PdzFixture {
-    /// The name of the PDZ fixture, for example `pdz-default`.
+    /// The name of the PDZ fixture, for example `pdz-default` or `msfz-deflate`.
     pub fixture: String,
     /// The name of the fixture of the original, for example `msvc-x64-debug`.
     pub source: String,
@@ -82,6 +83,10 @@ struct Report {
     pdbutil: Result<usize, String>,
     dia: Result<usize, String>,
     streams: Result<(), String>,
+    /// `pdbtool compare` of the original and the PDZ file.
+    compare: Result<StreamDifferences, String>,
+    /// The `native` example output of the PDZ file and of the original.
+    native: Result<usize, String>,
 }
 
 impl Report {
@@ -94,6 +99,8 @@ impl Report {
             pdbutil: not_run(),
             dia: not_run(),
             streams: not_run(),
+            compare: not_run(),
+            native: not_run(),
         }
     }
 
@@ -105,6 +112,11 @@ impl Report {
             && self.pdbutil.is_ok()
             && self.dia.is_ok()
             && self.streams.is_ok()
+            && self
+                .compare
+                .as_ref()
+                .is_ok_and(|differences| *differences == StreamDifferences::default())
+            && self.native.is_ok()
     }
 
     /// Describe the results.
@@ -131,6 +143,19 @@ impl Report {
             }),
             describe("pdbrs streams", &self.streams, |()| {
                 "equal to the PDZ file and the original".to_owned()
+            }),
+            describe("pdbtool compare", &self.compare, |differences| {
+                if *differences == StreamDifferences::default() {
+                    "PDZ file identical to the original".to_owned()
+                } else {
+                    format!(
+                        "DIFFERENT: counts {:?}, streams {:?}",
+                        differences.counts, differences.streams
+                    )
+                }
+            }),
+            describe("native example", &self.native, |lines| {
+                format!("PDZ file same as the original ({lines} lines)")
             }),
         ]
         .join("; ")
@@ -207,6 +232,13 @@ fn check(fixture: &PdzFixture, tools: &Tools<'_>, directory: &Path) -> Report {
         same_output([&original?, &converted?], &directory, "dia-all")
     });
     let streams = streams(fixture, &pdz, &first);
+    let compare = available(&tools.consumers.pdbtool)
+        .and_then(|tool| pdbtool_compare(tool, &fixture.original, &fixture.pdz));
+    let native = tools.example.map_err(Clone::clone).and_then(|example| {
+        let original = native_output(example, &fixture.original)?;
+        let pdz = native_output(example, &fixture.pdz)?;
+        same_output([&original, &pdz], &directory, "native")
+    });
     Report {
         converted: Ok(u64::try_from(first.len()).unwrap_or(u64::MAX)),
         deterministic: first == second,
@@ -214,6 +246,8 @@ fn check(fixture: &PdzFixture, tools: &Tools<'_>, directory: &Path) -> Report {
         pdbutil,
         dia,
         streams,
+        compare,
+        native,
     }
 }
 

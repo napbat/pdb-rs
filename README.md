@@ -144,7 +144,8 @@ committed. Automated tests do not read them; they use synthetic data.
 Compare the output of pdbrs with three independent consumers: Microsoft's `pdbtool`,
 `DIA2Dump` from the Visual Studio DIA SDK and a .NET verifier that uses
 `System.Reflection.Metadata`. This command installs `pdbtool` 0.1.22 and builds `DIA2Dump`
-and the verifier into `target/tools/bin/`:
+and the verifier into `target/tools/bin/`. It also installs `msfz-encode`, a producer of MSFZ
+files with Microsoft's `ms-pdb-msfz` writer, for the `msfz-*` fixtures:
 
 ```sh
 cargo run -p pdbrs-fixtures -- tools

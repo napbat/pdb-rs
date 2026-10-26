@@ -1,4 +1,5 @@
-//! The consumer tools: `pdbtool`, `DIA2Dump` and the Portable PDB verifier.
+//! The consumer tools: `pdbtool`, `DIA2Dump` and the Portable PDB verifier, and the producer
+//! tool `msfz-encode`.
 //!
 //! The `tools` command installs or builds each tool into `target/tools/bin/` below the
 //! workspace root. It writes `target/tools/manifest.json` with one record for each tool. The
@@ -7,6 +8,7 @@
 
 pub mod dia2dump;
 pub mod file_version;
+pub mod msfz_encode;
 mod patch;
 pub mod pdbtool;
 pub mod verifier;
@@ -24,14 +26,15 @@ use crate::toolchain::Toolchains;
 type Builder = fn(&Paths, &mut Toolchains) -> Tool;
 
 /// The tool names and their builders, in manifest order.
-const TOOLS: [(&str, Builder); 3] = [
+const TOOLS: [(&str, Builder); 4] = [
     (pdbtool::NAME, pdbtool::build),
     (dia2dump::NAME, dia2dump::build),
     (verifier::NAME, verifier::build),
+    (msfz_encode::NAME, msfz_encode::build),
 ];
 
 /// The tool names, in manifest order.
-const NAMES: [&str; 3] = [TOOLS[0].0, TOOLS[1].0, TOOLS[2].0];
+const NAMES: [&str; 4] = [TOOLS[0].0, TOOLS[1].0, TOOLS[2].0, TOOLS[3].0];
 
 /// The command that makes the tools.
 const COMMAND: &str = "cargo run -p pdbrs-fixtures -- tools";
@@ -383,9 +386,19 @@ mod tests {
     use super::{Missing, NAMES, Status, Tool, render, tool_records};
     use crate::json::{self, Value};
     use crate::manifest::Header;
+    use crate::matrix::{FIXTURES, Recipe};
     use crate::step::Step;
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn the_tools_command_makes_the_encoder_of_each_pdz_fixture() {
+        for fixture in FIXTURES {
+            if let Recipe::Pdz(recipe) = &fixture.recipe {
+                assert!(NAMES.contains(&recipe.encoder.tool()), "{}", fixture.name);
+            }
+        }
+    }
 
     #[test]
     fn the_fixture_build_reads_the_rendered_tools_manifest() {
@@ -404,6 +417,7 @@ mod tests {
                 "PortableVerifier",
                 &["bin/portable-verifier/PortableVerifier.dll"],
             ),
+            built("msfz-encode", &["bin/msfz-encode.exe"]),
         ];
         let text = render(&header, &tools);
         let manifest = json::parse(&text).unwrap();
@@ -529,6 +543,7 @@ mod tests {
                 "PortableVerifier",
                 &["bin/portable-verifier/PortableVerifier.dll"],
             ),
+            built("msfz-encode", &["bin/msfz-encode.exe"]),
         ];
         let records = tool_records(Ok(manifest(&tools)), |_| true);
         assert_eq!(

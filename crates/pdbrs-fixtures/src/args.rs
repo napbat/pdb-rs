@@ -21,8 +21,8 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   --list         Print the fixture names and stop.
   --help         Print this text and stop.
 
-  tools          Install pdbtool, build DIA2Dump and build the Portable PDB verifier into
-                 target/tools/bin/ below the workspace root, and write
+  tools          Install pdbtool, build DIA2Dump, build the Portable PDB verifier and install
+                 msfz-encode into target/tools/bin/ below the workspace root, and write
                  target/tools/manifest.json. The command takes no other arguments.
 
   verify-portable
@@ -52,8 +52,9 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   verify-msfz    Write each native PDB fixture as MSFZ with the pdbrs writer and six option
                  sets, and check each output with pdbtool compare, DIA2Dump, the pdbrs reader
                  and the native example. Compare the outputs with the pdz-* fixtures of
-                 pdbtool pdz-encode. Convert each pdz-* fixture to MSF 7.0 and check it with
-                 pdbtool check, llvm-pdbutil and DIA2Dump. Write the results to
+                 pdbtool pdz-encode. Convert each pdz-* and msfz-* fixture to MSF 7.0 and
+                 check it with pdbtool check, llvm-pdbutil and DIA2Dump; check the PDZ file
+                 with pdbtool compare and the native example. Write the results to
                  target/verify-msfz/.
 
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
