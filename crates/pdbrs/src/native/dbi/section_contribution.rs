@@ -9,9 +9,11 @@
 //! value as headerless VC++ 4.0 `SC40` records (`PDB/include/dbicommon.h`).
 //! This decoder does the same and reports [`SectionContributionVersion::V40`].
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::words::{halves, word};
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The `DBISCImpv` version value (`0xeffe0000 + 19970605`).
@@ -39,11 +41,31 @@ impl SectionContributionVersion {
             Self::V2 => 8,
         }
     }
+
+    /// Return the size of one record in bytes.
+    #[must_use]
+    pub const fn record_size(self) -> usize {
+        self.words() * 4
+    }
+
+    /// Return the version value at the start of the substream.
+    ///
+    /// [`SectionContributionVersion::V40`] has no version value.
+    #[must_use]
+    pub const fn value(self) -> Option<u32> {
+        match self {
+            Self::V40 => None,
+            Self::V60 => Some(SECTION_CONTRIBUTION_V60),
+            Self::V2 => Some(SECTION_CONTRIBUTION_V2),
+        }
+    }
 }
 
 /// One section contribution.
+///
+/// The record of a module info record uses the
+/// [`SectionContributionVersion::V60`] layout.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub struct SectionContribution {
     /// The 1-based section number.
     pub section: u16,
@@ -69,7 +91,7 @@ pub struct SectionContribution {
 
 impl SectionContribution {
     /// Decode one record of `version`.
-    fn decode(version: SectionContributionVersion, record: &[[u8; 4]]) -> Self {
+    pub(super) fn decode(version: SectionContributionVersion, record: &[[u8; 4]]) -> Self {
         let (section, padding1) = halves(record, 0);
         let (module, padding2) = halves(record, 4);
         let has_crc = version != SectionContributionVersion::V40;
@@ -86,6 +108,74 @@ impl SectionContribution {
             coff_section: (version == SectionContributionVersion::V2).then(|| word(record, 7)),
         }
     }
+
+    /// Append the record in the layout of `version` to `out`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the optional fields do not match
+    ///   `version`: [`SectionContributionVersion::V40`] has no CRCs, and only
+    ///   [`SectionContributionVersion::V2`] has a COFF section index.
+    /// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, version: SectionContributionVersion, out: &mut Vec<u8>) -> Result<()> {
+        let has_crc = version != SectionContributionVersion::V40;
+        let has_coff = version == SectionContributionVersion::V2;
+        if self.data_crc.is_some() != has_crc
+            || self.reloc_crc.is_some() != has_crc
+            || self.coff_section.is_some() != has_coff
+        {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("section contribution fields do not match the version"));
+        }
+        let mut output = Output::new(out);
+        output.reserve(version.record_size())?;
+        output.u16(self.section)?;
+        output.u16(self.padding1)?;
+        output.bytes(&self.offset.to_le_bytes())?;
+        output.bytes(&self.size.to_le_bytes())?;
+        output.u32(self.characteristics)?;
+        output.u16(self.module)?;
+        output.u16(self.padding2)?;
+        for value in [self.data_crc, self.reloc_crc, self.coff_section]
+            .into_iter()
+            .flatten()
+        {
+            output.u32(value)?;
+        }
+        Ok(())
+    }
+}
+
+/// Append a section contribution substream to `out`.
+///
+/// # Errors
+///
+/// - The errors of [`SectionContribution::encode`].
+/// - [`ErrorKind::InvalidFormat`] if the first
+///   [`SectionContributionVersion::V40`] record starts with a version value,
+///   because a reader would then select another layout.
+pub(super) fn encode_section_contributions(
+    version: SectionContributionVersion,
+    records: impl ExactSizeIterator<Item = SectionContribution>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    let size = records.len().saturating_mul(version.record_size());
+    let mut output = Output::new(out);
+    output.reserve(size.saturating_add(4))?;
+    if let Some(value) = version.value() {
+        output.u32(value)?;
+    }
+    for (index, record) in records.enumerate() {
+        if index == 0 && version == SectionContributionVersion::V40 {
+            let first = u32::from(record.section) | (u32::from(record.padding1) << 16);
+            if first == SECTION_CONTRIBUTION_V60 || first == SECTION_CONTRIBUTION_V2 {
+                return Err(Error::new(ErrorKind::InvalidFormat, None)
+                    .with_context("first V40 section contribution starts with a version value"));
+            }
+        }
+        record.encode(version, out)?;
+    }
+    Ok(())
 }
 
 /// A decoded section contribution substream.
@@ -123,6 +213,15 @@ impl<'a> SectionContributions<'a> {
                 .with_context("DBI section contributions do not fill the substream"));
         }
         Ok(Self { version, words })
+    }
+
+    /// Append the substream to `out`: the version value, if any, and the records.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        encode_section_contributions(self.version, self.iter(), out)
     }
 
     /// Return the record layout.

@@ -4,35 +4,52 @@
 //! seven substreams. Each substream stays available as raw bytes through
 //! [`Dbi::substream`]. [`Dbi::modules`] decodes the module info substream
 //! lazily. [`Dbi::section_contributions`], [`Dbi::section_map`],
-//! [`Dbi::source_info`], [`Dbi::verify_type_server_map`] and [`Dbi::ec_names`]
-//! decode the other substreams on request.
+//! [`Dbi::source_info`], [`Dbi::type_server_map`], [`Dbi::ec_names`] and
+//! [`Dbi::debug_streams`] decode the other substreams on request.
+//!
+//! Each substream has an encoder next to its decoder. [`Dbi::encode`] writes
+//! a decoded stream again with the same bytes. [`DbiBuilder`] holds an owned
+//! form of all substreams for a PDB writer.
 //!
 //! [`ModuleStream`] splits one module stream into its symbol, C11 line, C13
 //! line and global reference regions. This module does not decode the C11 or
 //! C13 line formats. It only frames the C13 region into [`Subsection`] items.
 //!
-//! The layouts follow <https://llvm.org/docs/PDB/DbiStream.html> and
-//! <https://llvm.org/docs/PDB/ModiStream.html>.
+//! The layouts follow <https://llvm.org/docs/PDB/DbiStream.html>,
+//! <https://llvm.org/docs/PDB/ModiStream.html> and Microsoft `PDB/dbi/dbi.h`.
 
 use alloc::vec::Vec;
-use core::iter::FusedIterator;
 use core::ops::Range;
 
 use super::msf::StreamId;
 use super::names::StringTable;
+use super::output::no_memory;
 use crate::{Error, ErrorKind, Result};
 
+mod builder;
+mod debug_header;
+mod header;
 mod module;
+mod module_info;
 mod section_contribution;
 mod section_map;
 mod sources;
+mod type_server;
+mod write;
+pub use builder::DbiBuilder;
+pub use debug_header::{DebugStream, DebugStreams, encode_debug_streams};
+pub use header::DbiHeader;
 pub use module::{ModuleStream, Subsection, Subsections};
+pub use module_info::{Module, Modules, OwnedModule};
 pub use section_contribution::{
     SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
     SectionContributionIter, SectionContributionVersion, SectionContributions,
 };
-pub use section_map::{SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
-pub use sources::{ModuleSourceIter, ModuleSources, SourceInfo};
+pub use section_map::{OwnedSectionMap, SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
+pub use sources::{
+    ModuleSourceIter, ModuleSources, OwnedModuleSources, OwnedSourceInfo, SourceInfo,
+};
+pub use type_server::TypeServer;
 
 /// The fixed MSF stream index of the DBI stream.
 const DBI_STREAM: u32 = 3;
@@ -72,7 +89,7 @@ pub enum Substream {
     SectionMap,
     /// The source file info for all modules. [`Dbi::source_info`] decodes it.
     SourceInfo,
-    /// The type server map. [`Dbi::verify_type_server_map`] checks it.
+    /// The type server map. [`Dbi::type_server_map`] decodes it.
     TypeServerMap,
     /// The EC substream, a string table of names. [`Dbi::ec_names`] decodes it.
     Ec,
@@ -80,67 +97,17 @@ pub enum Substream {
     OptionalDebugHeader,
 }
 
-/// A slot in the optional debug header.
-///
-/// Each slot holds the index of a stream with one kind of debug data.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DebugStream {
-    /// Old frame pointer omission data.
-    Fpo,
-    /// Exception data.
-    Exception,
-    /// Fixup data.
-    Fixup,
-    /// The address map from the image to the source image.
-    OmapToSource,
-    /// The address map from the source image to the image.
-    OmapFromSource,
-    /// The section headers of the image.
-    SectionHeader,
-    /// The token to RID map.
-    TokenRidMap,
-    /// The `.xdata` section contents.
-    Xdata,
-    /// The `.pdata` section contents.
-    Pdata,
-    /// New frame pointer omission data.
-    NewFpo,
-    /// The section headers of the image before address remapping.
-    OriginalSectionHeader,
-}
-
-impl DebugStream {
-    /// Return the slot index of this kind in the optional debug header.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self as usize
-    }
-}
-
-/// The decoded fields of a modern DBI header.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct DbiHeader {
-    /// The PDB revision counter.
-    pub age: u32,
-    /// The global symbol stream, if present.
-    pub global_stream: Option<StreamId>,
-    /// The bit field with the toolchain version.
-    pub build_number: u16,
-    /// The public symbol stream, if present.
-    pub public_stream: Option<StreamId>,
-    /// The version of the PDB writer library.
-    pub pdb_dll_version: u16,
-    /// The symbol record stream, if present.
-    pub symbol_stream: Option<StreamId>,
-    /// The rebuild number of the PDB writer library.
-    pub pdb_dll_rebuild: u16,
-    /// The index of the MFC type server in the type server map.
-    pub mfc_type_server_index: u32,
-    /// The build flags, for example incremental linking.
-    pub flags: u16,
-    /// The `IMAGE_FILE_MACHINE` value.
-    pub machine: u16,
+impl Substream {
+    /// All substreams in disk order.
+    pub const ALL: [Self; SUBSTREAM_COUNT] = [
+        Self::ModuleInfo,
+        Self::SectionContributions,
+        Self::SectionMap,
+        Self::SourceInfo,
+        Self::TypeServerMap,
+        Self::Ec,
+        Self::OptionalDebugHeader,
+    ];
 }
 
 /// A decoded modern DBI stream with owned serialized bytes.
@@ -190,18 +157,7 @@ impl Dbi {
                 "DBI version is not V70",
             ));
         }
-        let header = DbiHeader {
-            age: u32_at(fixed, 8),
-            global_stream: stream_id(u16_at(fixed, 12)),
-            build_number: u16_at(fixed, 14),
-            public_stream: stream_id(u16_at(fixed, 16)),
-            pdb_dll_version: u16_at(fixed, 18),
-            symbol_stream: stream_id(u16_at(fixed, 20)),
-            pdb_dll_rebuild: u16_at(fixed, 22),
-            mfc_type_server_index: u32_at(fixed, 44),
-            flags: u16_at(fixed, 56),
-            machine: u16_at(fixed, 58),
-        };
+        let header = DbiHeader::decode(fixed);
         let substreams = substream_ranges(fixed, bytes.len())?;
         let debug = &substreams[Substream::OptionalDebugHeader as usize];
         if !debug.len().is_multiple_of(2) {
@@ -324,24 +280,19 @@ impl Dbi {
         Ok(Some(info))
     }
 
-    /// Check the type server map substream.
+    /// Decode the type server map substream.
     ///
-    /// Linkers that do not use type servers write an empty map. No pinned
-    /// reference documents the layout of a non-empty map.
+    /// Linkers that do not use type servers write an empty map. The function
+    /// returns an empty vector for it.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedVersion`] if the map is not empty.
-    pub fn verify_type_server_map(&self) -> Result<()> {
-        if self.substream(Substream::TypeServerMap).is_empty() {
-            Ok(())
-        } else {
-            Err(dbi_error(
-                ErrorKind::UnsupportedVersion,
-                self.substream_offset(Substream::TypeServerMap),
-                "DBI type server map is not empty",
-            ))
-        }
+    /// Returns the errors of [`TypeServer::parse_map`], located at the start
+    /// of the substream in stream 3.
+    pub fn type_server_map(&self) -> Result<Vec<TypeServer>> {
+        Ok(self
+            .decode(Substream::TypeServerMap, TypeServer::parse_map)?
+            .unwrap_or_default())
     }
 
     /// Decode the EC substream as a string table.
@@ -371,163 +322,6 @@ impl Dbi {
             .map_err(|error| error.with_stream(DBI_STREAM, logical(self.substream_offset(kind))))
     }
 }
-
-/// An iterator over the slots of the optional debug header.
-///
-/// Each item is `None` for a slot that holds the nil stream index.
-#[derive(Clone, Debug)]
-pub struct DebugStreams<'a> {
-    slots: core::slice::Iter<'a, [u8; 2]>,
-}
-
-impl Iterator for DebugStreams<'_> {
-    type Item = Option<StreamId>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let slot = self.slots.next()?;
-        Some(stream_id(u16::from_le_bytes(*slot)))
-    }
-
-    fn nth(&mut self, count: usize) -> Option<Self::Item> {
-        let slot = self.slots.nth(count)?;
-        Some(stream_id(u16::from_le_bytes(*slot)))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slots.size_hint()
-    }
-}
-
-impl ExactSizeIterator for DebugStreams<'_> {}
-
-impl FusedIterator for DebugStreams<'_> {}
-
-/// One module info record from the DBI stream.
-///
-/// Names stay raw bytes. They are often paths in an unspecified code page.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct Module<'a> {
-    /// The zero-based position of the record in the module info substream.
-    pub index: u32,
-    /// The logical offset of the record in the DBI stream.
-    pub offset: u32,
-    /// The module flags.
-    pub flags: u16,
-    /// The module stream, or `None` if the module has no debug data.
-    pub stream: Option<StreamId>,
-    /// The size of the symbol region in the module stream, with its signature.
-    pub symbol_bytes: u32,
-    /// The size of the C11 line region in the module stream.
-    pub c11_bytes: u32,
-    /// The size of the C13 line region in the module stream.
-    pub c13_bytes: u32,
-    /// The number of source files that contributed to the module.
-    pub source_file_count: u16,
-    /// The module name without its terminating NUL.
-    pub name: &'a [u8],
-    /// The object file name without its terminating NUL.
-    pub object_file: &'a [u8],
-}
-
-/// An iterator over the module info records of a DBI stream.
-///
-/// The iterator returns one error for a malformed record and then stops.
-#[derive(Clone, Debug)]
-pub struct Modules<'a> {
-    /// The module info substream.
-    bytes: &'a [u8],
-    /// The logical offset of the substream in the DBI stream.
-    base: usize,
-    /// The offset of the next record in `bytes`.
-    position: usize,
-    /// The index of the next record.
-    index: u32,
-}
-
-impl<'a> Modules<'a> {
-    /// Decode the record at the current position.
-    fn read(&self) -> Result<(Module<'a>, usize)> {
-        let start = self.position;
-        let location = |offset: usize| self.base.saturating_add(offset);
-        let rest = &self.bytes[start..];
-        let fixed = rest.first_chunk::<FIXED_SIZE>().ok_or_else(|| {
-            dbi_error(
-                ErrorKind::UnexpectedEof,
-                location(self.bytes.len()),
-                "DBI module info prefix is truncated",
-            )
-        })?;
-        let (name, after_name) = c_string(rest, FIXED_SIZE).ok_or_else(|| {
-            dbi_error(
-                ErrorKind::UnexpectedEof,
-                location(self.bytes.len()),
-                "DBI module name has no terminating NUL",
-            )
-        })?;
-        let (object_file, after_object) = c_string(rest, after_name).ok_or_else(|| {
-            dbi_error(
-                ErrorKind::UnexpectedEof,
-                location(self.bytes.len()),
-                "DBI object file name has no terminating NUL",
-            )
-        })?;
-        // The record starts at a 4-byte boundary, so the record length aligns the end.
-        let padded = align4(after_object)
-            .filter(|&end| end <= rest.len())
-            .ok_or_else(|| {
-                dbi_error(
-                    ErrorKind::UnexpectedEof,
-                    location(self.bytes.len()),
-                    "DBI module info padding is truncated",
-                )
-            })?;
-        let offset = u32::try_from(location(start)).map_err(|_| {
-            dbi_error(
-                ErrorKind::OffsetOverflow,
-                location(start),
-                "DBI module offset does not fit in 32 bits",
-            )
-        })?;
-        let module = Module {
-            index: self.index,
-            offset,
-            flags: u16_at(fixed, 32),
-            stream: stream_id(u16_at(fixed, 34)),
-            symbol_bytes: u32_at(fixed, 36),
-            c11_bytes: u32_at(fixed, 40),
-            c13_bytes: u32_at(fixed, 44),
-            source_file_count: u16_at(fixed, 48),
-            name,
-            object_file,
-        };
-        Ok((module, start + padded))
-    }
-}
-
-impl<'a> Iterator for Modules<'a> {
-    type Item = Result<Module<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.bytes.len() {
-            return None;
-        }
-        match self.read() {
-            Ok((module, next)) => {
-                self.position = next;
-                // Each record has at least 64 bytes, so the count fits when offsets fit.
-                self.index = self.index.saturating_add(1);
-                Some(Ok(module))
-            }
-            Err(error) => {
-                self.position = self.bytes.len();
-                Some(Err(error))
-            }
-        }
-    }
-}
-
-impl FusedIterator for Modules<'_> {}
 
 /// Compute the substream ranges from the header and the stream length.
 fn substream_ranges(
@@ -590,6 +384,43 @@ fn logical(offset: usize) -> u64 {
 /// Convert a serialized 16-bit stream index; the nil index becomes `None`.
 fn stream_id(value: u16) -> Option<StreamId> {
     (value != NIL_STREAM).then_some(StreamId(u32::from(value)))
+}
+
+/// Convert a stream to its serialized 16-bit index; `None` becomes the nil index.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::LimitExceeded`] if the index is larger than `0xfffe`.
+fn stream_index(stream: Option<StreamId>) -> Result<u16> {
+    let Some(stream) = stream else {
+        return Ok(NIL_STREAM);
+    };
+    u16::try_from(stream.0)
+        .ok()
+        .filter(|&index| index != NIL_STREAM)
+        .ok_or_else(|| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("stream index does not fit in 16 bits")
+        })
+}
+
+/// Convert a count to a `u16` field.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::LimitExceeded`] with `context` if the value does not fit.
+fn to_u16(value: usize, context: &'static str) -> Result<u16> {
+    u16::try_from(value)
+        .map_err(|_| Error::new(ErrorKind::LimitExceeded, None).with_context(context))
+}
+
+/// Copy bytes into a new vector.
+fn copy_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(bytes.len())
+        .map_err(|_| no_memory())?;
+    copy.extend_from_slice(bytes);
+    Ok(copy)
 }
 
 /// Copy `N` bytes at a fixed offset of a fixed-size prefix.

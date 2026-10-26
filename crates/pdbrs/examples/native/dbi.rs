@@ -99,7 +99,7 @@ pub(crate) fn debug_info_tables(
     {
         report.add("EC names", ec.entries().count());
     }
-    report.supported(dbi.verify_type_server_map(), "DBI type server map")?;
+    report.add("type servers", dbi.type_server_map()?.len());
     Ok(module_count)
 }
 
