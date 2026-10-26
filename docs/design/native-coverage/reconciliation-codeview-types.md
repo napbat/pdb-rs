@@ -8,11 +8,11 @@ Each section names one imported document. Paths are relative to `docs/reference/
 - **Conflicts**: each difference between the document and pdbrs, or between the document and another source (`cvinfo.h`, LLVM source, `ms-pdb`, other documents). Errors inside the document are conflicts too.
 - **Undocumented assumptions**: layouts and rules that pdbrs uses but the document does not state, with the issue that records the evidence.
 
-The comparison used `main` at `8dc001c`, `cvinfo.h` at `805655a2`, LLVM at `b9f2235f` and the `ms-codeview` 0.1.7, `ms-pdb` 0.1.22, `ms-pdb-msf` 0.1.7 and `ms-pdb-msfz` 0.1.10 crates. "Inference, not tested" marks a statement that comes from reading source code only.
+The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2235f` and the `ms-codeview` 0.1.7, `ms-pdb` 0.1.22, `ms-pdb-msf` 0.1.7 and `ms-pdb-msfz` 0.1.10 crates. "Inference, not tested" marks a statement that comes from reading source code only.
 
 Common pdbrs facts used below:
 - Record framing: `crates/pdbrs/src/native/codeview.rs` (`Records`). The `u16` length counts the kind and the payload. Length < 2 is `InvalidFormat`. pdbrs does not require an even length or an aligned record start.
-- End padding of TPI and IPI records: `Fields::finish_type_padding` (`codeview.rs:277-296`) accepts 0 to 3 bytes `f3 f2 f1` only. Other trailing bytes are `InvalidFormat`.
+- End padding of TPI and IPI records: `Fields::finish_type_padding` (`codeview.rs:282-296`) accepts 0 to 3 bytes `f3 f2 f1` only. Other trailing bytes are `InvalidFormat`. The one exception is the MASM form at the end of a UDT record (see `lf_class.md`, #29).
 - Encoders: `TypeLeaf::encode` (`codeview/type_record.rs:357-443`), `Member::encode` and `encode_field_list` (`codeview/field_list/encode.rs`) and `IdRecord::encode` (`codeview/id_record/encode.rs`) write each decoded record to the same bytes (#29). They pad to a multiple of 4 bytes with `LF_PAD` bytes. `types::write_type_stream` (`native/types/write.rs`) writes the TPI and IPI streams and their hash streams. `native::PdbBuilder` (#33) and `native::PdbEditor` (#34) use these encoders.
 - Names: NUL-terminated bytes (`Fields::name`), not decoded as text.
 - Numeric leaves in type records, field-list members, `S_CONSTANT` and `S_MANCONSTANT`: `Numeric::parse_prefix` (`codeview/numeric.rs:337-415`) decodes every leaf tag of `cvinfo.h` and keeps the tag and the exact value bytes (#29). An unknown tag is `UnsupportedVersion`.
@@ -69,12 +69,12 @@ Common pdbrs facts used below:
   - 0xf6 `DEBUG_S_INLINEELINES`: `u32` signature 0 or 1 (`CV_INLINEE_SOURCE_LINE_SIGNATURE[_EX]`), entries `inlinee` (IPI index), `fileId`, `sourceLineNum`, and for signature 1 a `u32` count plus that many checksum offsets. Other signatures are `UnsupportedVersion` (`cvinfo.h:4819-4836`, LLVM `DebugInlineeLinesSubsection.cpp`).
   - 0xf1 `DEBUG_S_SYMBOLS`: symbol records without a signature; 0xf3 `DEBUG_S_STRINGTABLE`: NUL-terminated strings, the last byte must be NUL (LLVM `DebugSymbolsSubsection`, `DebugStringTableSubsection`, #31).
   - 0xf5 `DEBUG_S_FRAMEDATA`: an optional `u32` relocation value and 32-byte `FRAMEDATA` records. `cvdump` always reads the relocation value; LLVM reads it only if the size is not a multiple of 32. pdbrs keeps it as `Option<u32>`; a size that is neither 32·n nor 4 + 32·n is `InvalidFormat` (`frame_data.rs:1-66`, #31).
-  - 0xf7 `DEBUG_S_CROSSSCOPEIMPORTS`: entries of a `u32` module name offset, a `u32` count and that many `u32` item IDs (`cvinfo.h` `CrossScopeReferences`). 0xf8 `DEBUG_S_CROSSSCOPEEXPORTS`: 8-byte pairs of local and global ID (`LocalIdAndGlobalIdPair`). The IDs stay raw `u32` values (#31).
+  - 0xf7 `DEBUG_S_CROSSSCOPEIMPORTS`: entries of a `u32` module name offset, a `u32` count and that many `u32` item IDs (`cvinfo.h` `CrossScopeReferences`). 0xf8 `DEBUG_S_CROSSSCOPEEXPORTS`: 8-byte pairs of local and global ID (`LocalIdAndGlobalIdPair`). The IDs stay raw `u32` values (#31). `lines::validate_cross_scope` (`lines/cross_scope/validate.rs`) checks the references and reports findings, not errors: bit 31 of a local ID (`DecoratedItemId`) selects the IPI stream, else the global ID is a TPI index (`ExportGlobalId`, not checked for a `NOTM` or `MINI` PDB); a local ID occurs in one export only (`ExportDuplicate`); the import module name is a `/names` string (`ImportModuleName`) that names a DBI module or object file, ASCII case ignored (`ImportModuleUnknown`); an imported ID is an export of that module if the module has an export subsection (`ImportNotExported`). The rules come from `Mod1::fUpdateTiOrIdReferencedByNonSyms` in `microsoft-pdb`; the document does not state them (#31).
   - 0xf9 `DEBUG_S_IL_LINES` uses the `DEBUG_S_LINES` layout with IL offsets (`DumpModILLines` in `cvdump`, #31).
   - 0xfa `DEBUG_S_FUNC_MDTOKEN_MAP` and 0xfb `DEBUG_S_TYPE_MDTOKEN_MAP`: a `u32` count and `u32` (key, value) pairs; bit 31 of the value marks a metadata token. Bytes after the entries are `InvalidFormat` (`DumpModTokenMap` in `cvdump`, `Mod1::fUpdateTiOrIdReferencedByNonSyms`, #31).
   - 0xfc `DEBUG_S_MERGED_ASSEMBLYINPUT`: time stamp, index (bit 31 = PDB present), `u16` version size that counts itself, version bytes, NUL-terminated name, zero padding to 4 bytes (`DumpModMergedAssemblyInput` in `cvdump`, #31).
   - 0xff `DEBUG_S_XFGHASH_TYPE`: 12-byte entries (`u64` hash, function type index). 0x100 `DEBUG_S_XFGHASH_VIRTUAL`: 16-byte entries (`u64` hash, class type index, `u32` offset). No document defines them; the layouts come from the MSVC 14.44 objects of the `msvc-x64-xfg` fixture (#27, #31). `link.exe` does not copy them to the PDB.
-  - 0xf1, 0xf3, 0xf5, 0xff and 0x100 occur only in object files of the fixtures; 0xf7-0xfc have synthetic tests only (`tests/lines_codec/`, #31).
+  - 0xf1, 0xf3, 0xf5, 0xff and 0x100 occur only in object files of the fixtures; 0xf7-0xfc have synthetic tests only (`tests/lines_codec/`, `tests/cross_scope.rs`, #31). Checksum kinds: `msvc-x64-sha1` (`cl /ZH:SHA1`) has SHA-1 entries (kind 2) next to SHA-256 entries of the runtime sources (#31).
   - pdbrs rejects `DEBUG_S_LINES` header flags other than bit 0 (`UnsupportedVersion`) and requires `block_size` = 12 + count × (8 or 12) exactly.
   - pdbrs names the line values 0xfeefee (always step into) and 0xf00f00 (never step into) (`blocks.rs:10-16`).
   - pdbrs does not decode a kind with bit 31 set, also if the low bits name a known kind. `cvinfo.h` tells readers to ignore the contents; the encoder writes the data again without a change (#31).
@@ -111,12 +111,14 @@ Common pdbrs facts used below:
   - Document vs pdbrs: invariant "`size` is a multiple of 2". pdbrs does not check it. Observed IPI records are not 4-byte aligned: `LF_UDT_MOD_SRC_LINE` records are 18 bytes without padding (example at offset 0x78 in `items/lf_func_id.md`), so the next record starts at 0x8a. pdbrs does not require alignment.
   - Document omissions: the table omits `LF_INTERFACE` (0x1519, described in `lf_class.md`), `LF_LABEL` (0x000e), `LF_VFTABLE` (0x151d) and the other kinds above, which pdbrs decodes, and `LF_CLASS2`..`LF_INTERFACE2` (LLVM only). The sections "Summary of item records" and "Leaf indices referenced from symbols" are empty. The document does not describe `LF_PAD` (0xf0-0xff) end padding.
 - Undocumented assumptions:
-  - pdbrs requires the bytes after the last field to be 0-3 `LF_PAD` bytes in the exact `f3 f2 f1` pattern (`codeview.rs:277-296`).
+  - pdbrs requires the bytes after the last field to be 0-3 `LF_PAD` bytes in the exact `f3 f2 f1` pattern (`codeview.rs:282-296`). Exception: a UDT record can end with the MASM form (see `lf_class.md`, #29).
   - The encoders pad every record to a multiple of 4 bytes, as Microsoft and LLVM do. `LF_OEM`, `LF_OEM2`, `LF_COBOL0`, `LF_SKIP` and unknown kinds keep their producer data at the end and get no padding (`type_record.rs:357-443`, #29).
   - Kind values and layouts follow LLVM `CodeViewTypes.def` and `TypeRecordMapping.cpp` at `b9f2235f`; flag bit layouts follow `cvinfo.h` (`type_record.rs:1-13`). `LF_VFTABLE` and `LF_LABEL` layouts are confirmed against `lld-link` output (#11, https://github.com/napbat/pdbrs/issues/11#issuecomment-6408363519). Fixtures contain `LF_HLSL`, `LF_VECTOR`, `LF_MATRIX`, `LF_MODIFIER_EX` and `LF_STRIDED_ARRAY` (fxc, #27); `LF_PRECOMP`, `LF_ENDPRECOMP` and `LF_TYPESERVER2` occur only in object files. The other added kinds have synthetic tests only (#29).
   - `LF_HLSL`: `cvinfo.h` says that bits 4-15 of the property word are zero. The Windows SDK `fxc` writes `0x07a0`, `0x07b0`, `0x07c0`, `0x4e50` and `0x6260`. pdbrs accepts any value, keeps the raw word and uses only bits 0-3 as the property count (`type_record/hlsl.rs`, #29, https://github.com/napbat/pdbrs/issues/29#issuecomment-6413480651).
   - `validate_type_references` accepts forward references (a reference to the same or a later record). Microsoft and LLVM do not write them. With forward references, it searches for a cycle with depth and work limits (`ReferenceLimits`, #29).
   - The TPI and IPI hash streams follow one producer form (`types::HashLayout`): Microsoft or LLVM block rules for index offsets, and the Microsoft `Map::save` layout for hash adjusters (#29). No fixture has hash adjusters.
+  - In a PDB with the Info feature `NOTM` (`link /DEBUG:LAZY`, fixture `msvc-x64-lazy`), the TPI and IPI streams have 0 records. The module records are in streams that no directory entry, DBI field or named stream gives; `S_MOD_TYPEREF` names them. `TypeStream::from_records` makes a type stream from such a stream: first index 0x1000, no hash stream (#30, #32). The document does not describe this layout.
+  - `types::type_size` (`native/types/size.rs`) gives the byte size of a type: primitive size, the `LF_POINTER` size bits, the numeric size of arrays, `LF_VECTOR`, `LF_MATRIX` and UDTs (a forward reference through `ForwardRefs`), and the size of the referenced type for `LF_MODIFIER`, `LF_ALIAS`, `LF_BITFIELD` and `LF_ENUM`. The symbol validation uses it for subfield def-ranges (`Rule::SubfieldOutsideType`, #30).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_union.md`
 - Documents: `LF_UNION` (0x1506): `count`, `property`, `fields`, `Number length`, `name`, optional `unique_name`.
@@ -126,6 +128,7 @@ Common pdbrs facts used below:
 - Undocumented assumptions:
   - `LF_UNION2` (0x160a, LLVM `CodeViewTypes.def:58`) is not described. pdbrs decodes it as `WideUnion` (`udt.rs:286-344`): a `u32` property word (low 16 bits are `ClassOptions`), the field list, a numeric member count and a numeric size (LLVM `TypeRecordMapping.cpp`; `cvinfo.h` does not define it). No producer is known; only synthetic tests cover it (#29).
   - The encoder rejects a unique name without the unique-name flag, and the flag without a unique name (`udt.rs:52-67`).
+  - `LF_UNION` and `LF_UNION2` accept the MASM end padding and keep it in `producer_padding`, as `lf_class.md` describes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_vtshape.md`
 - Documents: `LF_VTSHAPE` (0x000a): a `u16` count and 4-bit slot descriptors with values 0-6.
@@ -234,6 +237,7 @@ Common pdbrs facts used below:
   - None found against pdbrs.
 - Undocumented assumptions:
   - pdbrs does not check that the underlying type is primitive or that the field list holds only `LF_ENUMERATE`. `validate_type_references` requires the field list to be 0 or an `LF_FIELDLIST` record and accepts any type for the underlying type (`references.rs:161-164`, #29).
+  - `LF_ENUM` accepts the MASM end padding and keeps it in `producer_padding`, as `lf_class.md` describes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_endprecomp.md`
 - Documents: `LF_ENDPRECOMP` (0x0014): a `u32` signature that ends the precompiled types of a creator object.
@@ -252,6 +256,7 @@ Common pdbrs facts used below:
 - Undocumented assumptions:
   - pdbrs does not check that `derivation_list` is zero. `validate_type_references` requires the field list to be 0 or an `LF_FIELDLIST` record and the vshape to be 0 or an `LF_VTSHAPE` record (`references.rs:149-158`, #29).
   - `LF_CLASS2`, `LF_STRUCTURE2` and `LF_INTERFACE2`: a `u32` property word (low 16 bits are `ClassOptions`), field list, derivation list, vshape, a numeric member count and a numeric size (LLVM `TypeRecordMapping.cpp`; `cvinfo.h` does not define them). No producer is known; only synthetic tests cover them (#29).
+  - MASM end padding: `ml64` 14.50 writes `f1` and two stale bytes after a name of odd length (with the NUL) in `LF_STRUCTURE` records of the static CRT (`handlers.obj` in `libvcruntime(d).lib`, for example `00 f1 6d 65` after `CsFrameEncoded`). `link.exe` and `lld-link` copy the record without a change. LLVM (`CodeViewRecordIO::endRecord`), DIA2Dump and `pdbtool` accept it. The UDT decoders (`Class`, `WideClass`, `Union`, `WideUnion`, `Enum`) accept 1 to 3 bytes that start with 0xf1-0xf3 and keep them in `producer_padding` (`udt.rs:43-100`); `TypeLeaf::producer_padding` returns them, and the encoder writes them again. Other records keep the strict check. Fixture `clang-lld-x64-static` (`/MTd`) has these records; `tests/type_record_producer.rs` uses the library bytes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_bitfield.md`
 - Documents: `LF_BITFIELD` (0x1205): type, `u8 length`, `u8 position`.
