@@ -18,7 +18,7 @@ pub use builder::MsfBuilder;
 #[cfg(feature = "std")]
 pub use file::copy_exact_file;
 
-use layout::Layout;
+use layout::{Layout, check_page_size};
 
 /// The default page size of a new container.
 const DEFAULT_PAGE_SIZE: u32 = 4096;
@@ -60,8 +60,11 @@ impl WriteOptions {
 
     /// Set the page size in bytes.
     ///
-    /// The plan accepts a power of two from 512 to 65536. Some consumers accept fewer sizes:
-    /// `link.exe /PDBPAGESIZE` writes 4096 to 32768, and LLVM reads 512 to 32768.
+    /// The plan accepts a power of two from 512 to 32768. It rejects 65536-byte pages with
+    /// [`ErrorKind::UnsupportedVersion`], although the reader accepts them. Independent
+    /// consumers reject 65536-byte pages: DIA fails with `HRESULT 806D000C`, LLVM reports
+    /// "Unsupported block size" and `link.exe /PDBPAGESIZE:65536` fails with `LNK1399`.
+    /// `link.exe /PDBPAGESIZE` writes 4096 to 32768.
     #[must_use]
     pub const fn with_page_size(mut self, page_size: u32) -> Self {
         self.page_size = page_size;
@@ -140,6 +143,9 @@ trait StreamSource {
 /// The same streams and [`WriteOptions`] thus give the same bytes.
 ///
 /// # Limits
+///
+/// Planning returns [`ErrorKind::UnsupportedVersion`] for 65536-byte pages, because DIA, LLVM
+/// and `link.exe` reject them (see [`WriteOptions::with_page_size`]). It writes 512 to 32768.
 ///
 /// Planning returns [`ErrorKind::LimitExceeded`] if a stream has `0xFFFF_FFFF` bytes or more,
 /// the directory is larger than [`MsfLimits::max_directory_bytes`] or `u32`, the page map array
@@ -260,6 +266,8 @@ impl<S: ReadAt> Msf<S> {
     ///
     /// # Errors
     ///
+    /// - [`ErrorKind::UnsupportedVersion`] if the page size in `options` is 65536 (see
+    ///   [`WriteOptions::with_page_size`]).
     /// - [`ErrorKind::InvalidFormat`] if the page size in `options` is not valid, or if
     ///   `old_directory` is [`OldDirectoryPolicy::Preserve`], stream 0 has bytes and the page
     ///   size in `options` is not [`Msf::block_size`].
@@ -270,6 +278,7 @@ impl<S: ReadAt> Msf<S> {
         options: WriteOptions,
         old_directory: OldDirectoryPolicy,
     ) -> Result<WritePlan<'_>> {
+        check_page_size(options.page_size)?;
         let mut sizes = Vec::new();
         sizes
             .try_reserve_exact(self.streams.len())

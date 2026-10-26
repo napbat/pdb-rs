@@ -9,7 +9,8 @@ use pdbrs::native::msf::{
 };
 use pdbrs::{Error, ErrorKind, Result};
 
-const PAGE_SIZES: [u32; 8] = [512, 1024, 2048, 4096, 8192, 16_384, 32_768, 65_536];
+/// The page sizes that the writer writes. The reader also accepts 65536.
+const PAGE_SIZES: [u32; 7] = [512, 1024, 2048, 4096, 8192, 16_384, 32_768];
 
 /// A source of `len` bytes with the value of `offset % 251` at each offset.
 ///
@@ -355,6 +356,27 @@ fn invalid_options_and_inputs_fail_before_output() {
 }
 
 #[test]
+fn page_size_65536_is_not_written() {
+    let streams = sample_streams(512);
+    let error = builder(&streams).plan(options(65_536)).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
+    assert_eq!(
+        error.context(),
+        Some("65536-byte pages are not written: DIA, LLVM and link.exe reject them")
+    );
+    let source = builder(&streams)
+        .plan(options(512))
+        .unwrap()
+        .to_vec()
+        .unwrap();
+    let msf = Msf::open(source.as_slice()).unwrap();
+    for policy in [OldDirectoryPolicy::Empty, OldDirectoryPolicy::Preserve] {
+        let error = msf.repack(options(65_536), policy).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
+    }
+}
+
+#[test]
 fn source_read_errors_stop_the_write() {
     let mut builder = MsfBuilder::new();
     builder.push(Failing(0)).unwrap();
@@ -573,14 +595,19 @@ mod file {
     #[test]
     fn a_planning_error_writes_nothing() {
         let temp = TempDir::new("planning");
-        let mut builder = MsfBuilder::new();
-        builder.push(Pattern(0)).unwrap();
-        builder.push(Pattern(1 << 32)).unwrap();
         let path = temp.0.join("out.pdb");
-        let result = builder
-            .plan(WriteOptions::default())
-            .and_then(|plan| plan.write_file(&path));
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::LimitExceeded);
-        assert_eq!(temp.entries(), Vec::<String>::new());
+        for (page_size, size, kind) in [
+            (4096, 1 << 32, ErrorKind::LimitExceeded),
+            (65_536, 10, ErrorKind::UnsupportedVersion),
+        ] {
+            let mut builder = MsfBuilder::new();
+            builder.push(Pattern(0)).unwrap();
+            builder.push(Pattern(size)).unwrap();
+            let result = builder
+                .plan(WriteOptions::default().with_page_size(page_size))
+                .and_then(|plan| plan.write_file(&path));
+            assert_eq!(result.unwrap_err().kind(), kind);
+            assert_eq!(temp.entries(), Vec::<String>::new());
+        }
     }
 }

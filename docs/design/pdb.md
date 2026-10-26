@@ -57,7 +57,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
-| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot. Writing: exact copies, stream-preserving repacks and new layouts for page sizes 512 to 65536 (see [MSF writing](#implemented-msf-writing)) | Edits in place and incremental commits (not planned) |
+| MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot. Writing: exact copies, stream-preserving repacks and new layouts for page sizes 512 to 32768 (see [MSF writing](#implemented-msf-writing)) | Edits in place and incremental commits (not planned); writing 65536-byte pages (consumers reject them) |
 | PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, `/TMCache` and its type map streams, `/UDTSRCLINEUNDONE`, `/src/headerblock`, verified uncompressed injected sources, .NET document records (compression byte 101) with CRC, size and SHA-256 checks through the shared `portable::embedded` codec, and `sourcelink` JSON bytes | `/LinkInfo` version 1 and run-length, Huffman or LZ injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map, EC names, and FPO and new-FPO (frame data) streams | Non-empty type server maps |
@@ -118,8 +118,11 @@ The layout is deterministic:
    It marks all other pages as allocated. FPM2 has `0xFF` in all bytes.
 4. The unused bytes of the header page and of the last page of each stream, the directory and the page map are zero.
 
-The default page size is 4096. The plan accepts every power of two from 512 to 65536.
-`link.exe` 14.51 writes 4096 to 32768 with `/PDBPAGESIZE`. LLVM and DIA reject 65536-byte pages.
+The default page size is 4096. The plan accepts every power of two from 512 to 32768.
+It rejects 65536-byte pages with `UnsupportedVersion` before planning, because independent consumers reject them
+([#15](https://github.com/napbat/pdbrs/issues/15)): DIA2Dump fails with `loadDataFromPdb failed - HRESULT = 806D000C`,
+`llvm-pdbutil` reports "Unsupported block size." and `link.exe` 14.51 fails on `/PDBPAGESIZE:65536` with `LNK1399`.
+The reader accepts 65536-byte pages. `link.exe` 14.51 writes 4096 to 32768 with `/PDBPAGESIZE`.
 LLVM also rejects a directory that needs more than one page map page.
 
 The plan returns `LimitExceeded` for a stream of `0xFFFFFFFF` bytes or more, a directory larger than `MsfLimits::max_directory_bytes`
@@ -355,9 +358,10 @@ Validate free-page allocation consistency in full validation. Emit consistent ma
 Preserve stream numbers and absent slots during repacking.
 Do not compact stream IDs implicitly.
 
-The reader and the writer support MSF 7.0 page sizes that are powers of two from 512 to 65536, with 4096 as the writer default.
+The reader supports MSF 7.0 page sizes that are powers of two from 512 to 65536.
+The writer supports 512 to 32768, with 4096 as the default. It rejects 65536 with `UnsupportedVersion`,
+because DIA (`HRESULT 806D000C`), LLVM ("Unsupported block size") and `link.exe` (`LNK1399`) reject that size.
 The FPM interval has `page_size` pages for each size (LLVM `getFpmIntervalLength`, `ms-pdb-msf` `interval_to_page`).
-Consumers accept fewer sizes: `link.exe` 14.51 writes 4096 to 32768, and LLVM and DIA reject 65536.
 Test each supported size independently and enforce that variant's limits.
 Reject layouts beyond implemented limits instead of truncating block-directory metadata.
 Cross-check historical documentation against Microsoft and LLVM implementations before encoding limits.

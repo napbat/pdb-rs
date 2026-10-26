@@ -9,7 +9,7 @@ supports `std` and `no_std + alloc`.
 | Area | Status |
 | --- | --- |
 | Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
-| Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 65536 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer makes no PDB semantic claim about the streams. |
+| Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. The writer makes no PDB semantic claim about the streams. |
 | Native PDB semantic building and editing | Not implemented. |
 | Portable PDB | Signature identification only. Parsing is not implemented ([#17](https://github.com/napbat/pdbrs/issues/17)). |
 | Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |

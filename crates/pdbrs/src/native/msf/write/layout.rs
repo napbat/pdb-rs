@@ -12,6 +12,31 @@ use crate::{Error, ErrorKind, Result};
 /// The first page after the header page and the FPM pages of interval 0.
 const FIRST_DATA_PAGE: u32 = 3;
 
+/// The largest page size that the writer writes.
+///
+/// The reader accepts 65536-byte pages, but independent consumers reject them: DIA fails with
+/// `HRESULT 806D000C`, LLVM `isValidBlockSize` reports "Unsupported block size" and
+/// `link.exe /PDBPAGESIZE:65536` fails with `LNK1399`.
+pub(super) const MAX_WRITE_PAGE_SIZE: u32 = 32_768;
+
+/// Make sure that the writer can write pages of `page_size` bytes.
+///
+/// # Errors
+///
+/// - [`ErrorKind::InvalidFormat`] if `page_size` is not a power of two from 512 to 65536.
+/// - [`ErrorKind::UnsupportedVersion`] if `page_size` is larger than [`MAX_WRITE_PAGE_SIZE`].
+pub(super) fn check_page_size(page_size: u32) -> Result<()> {
+    if !is_valid_page_size(page_size) {
+        return Err(Error::new(ErrorKind::InvalidFormat, None)
+            .with_context("page size is not a power of two from 512 to 65536"));
+    }
+    if page_size > MAX_WRITE_PAGE_SIZE {
+        return Err(Error::new(ErrorKind::UnsupportedVersion, None)
+            .with_context("65536-byte pages are not written: DIA, LLVM and link.exe reject them"));
+    }
+    Ok(())
+}
+
 /// The validated page layout of a new container.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct Layout {
@@ -42,13 +67,12 @@ impl Layout {
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`] if `page_size` is not valid or `sizes` is empty.
+    /// - [`ErrorKind::UnsupportedVersion`] if `page_size` is larger than
+    ///   [`MAX_WRITE_PAGE_SIZE`].
     /// - [`ErrorKind::LimitExceeded`] if the directory is larger than `limits` or `u32`, the page
     ///   map array does not fit in the header page or the page count does not fit in `u32`.
     pub(super) fn new(page_size: u32, sizes: &[u32], limits: MsfLimits) -> Result<Self> {
-        if !is_valid_page_size(page_size) {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("page size is not a power of two from 512 to 65536"));
-        }
+        check_page_size(page_size)?;
         let Some(&old_size) = sizes.first() else {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("stream directory has no streams"));
