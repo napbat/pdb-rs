@@ -1,6 +1,6 @@
 //! The DBI substreams, the optional debug streams and address translation.
 
-use pdbrs::io::FileReader;
+use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
 use pdbrs::native::dbi::{Dbi, DbiBuilder, DebugStream, OwnedModule, Substream};
@@ -11,7 +11,7 @@ use crate::{Context, Outcome, Report};
 /// Encode the DBI stream, each substream, each module record and the builder model again.
 ///
 /// Each encoder must give the bytes of the stream.
-pub(crate) fn reencode_dbi(pdb: &Pdb<FileReader>, dbi: &Dbi, report: &mut Report) -> Outcome {
+pub(crate) fn reencode_dbi(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Report) -> Outcome {
     let original = pdb.stream_bytes(StreamId(3))?;
     let mut encoded = Vec::new();
     dbi.encode(&mut encoded)?;
@@ -43,7 +43,7 @@ pub(crate) fn reencode_dbi(pdb: &Pdb<FileReader>, dbi: &Dbi, report: &mut Report
 ///
 /// [`frame_data`] decodes the FPO and new-FPO streams.
 pub(crate) fn section_header_bytes(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
     report: &mut Report,
 ) -> Outcome<Option<Vec<u8>>> {
@@ -67,7 +67,7 @@ pub(crate) fn section_header_bytes(
 /// Decode the optional debug stream in `slot` and encode it again.
 ///
 /// Return `None` for a slot after the slots that [`DebugStream`] names.
-fn encode_debug_stream(pdb: &Pdb<FileReader>, dbi: &Dbi, slot: usize) -> Outcome<Option<Vec<u8>>> {
+fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, slot: usize) -> Outcome<Option<Vec<u8>>> {
     let missing = || "optional debug stream is missing";
     let kinds = [
         DebugStream::Fpo,
@@ -107,7 +107,7 @@ fn encode_debug_stream(pdb: &Pdb<FileReader>, dbi: &Dbi, slot: usize) -> Outcome
 
 /// Decode the FPO and new-FPO streams, and resolve each frame program in `/names`.
 pub(crate) fn frame_data(
-    pdb: &Pdb<FileReader>,
+    pdb: &Pdb<impl ReadAt>,
     dbi: &Dbi,
     context: &Context<'_>,
     report: &mut Report,

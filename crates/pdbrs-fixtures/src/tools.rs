@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::json::{self, Value};
 use crate::manifest::{Header, Status};
+use crate::sha256;
 use crate::step::{Step, StepError};
 use crate::toolchain::Toolchains;
 
@@ -88,6 +89,8 @@ pub struct Tool {
     pub path: Option<PathBuf>,
     /// Every file that the tool needs, with the executable first.
     pub files: Vec<PathBuf>,
+    /// The SHA-256 digest of each file in `files`, in the same order.
+    pub sha256: Vec<String>,
     /// Version facts, for example the crate version or the `msdia140.dll` file version.
     pub version: Vec<(String, String)>,
     /// Source facts, for example the crate and its upstream revision or the DIA SDK paths.
@@ -105,6 +108,7 @@ impl Tool {
             reason: None,
             path: None,
             files: Vec::new(),
+            sha256: Vec::new(),
             version: Vec::new(),
             source: Vec::new(),
             steps: Vec::new(),
@@ -121,9 +125,9 @@ impl Tool {
         self.source.push((name.to_owned(), value.into()));
     }
 
-    /// Record the files of a built tool. The executable comes first.
+    /// Record the files of a built tool and their SHA-256 digests. The executable comes first.
     ///
-    /// Return an error if a file does not exist.
+    /// Return an error if a file does not exist or cannot be read.
     pub fn finish(&mut self, files: Vec<PathBuf>) -> Result<(), Missing> {
         if let Some(missing) = files.iter().find(|file| !file.is_file()) {
             return Err(Missing::Failed(format!(
@@ -131,6 +135,16 @@ impl Tool {
                 missing.display()
             )));
         }
+        self.sha256 = files
+            .iter()
+            .map(|file| {
+                fs::read(file)
+                    .map(|bytes| sha256::hex_digest(&bytes))
+                    .map_err(|error| {
+                        Missing::Failed(format!("cannot read {}: {error}", file.display()))
+                    })
+            })
+            .collect::<Result<_, _>>()?;
         self.path = files.first().cloned();
         self.files = files;
         Ok(())
@@ -158,6 +172,18 @@ impl Tool {
                     self.files
                         .iter()
                         .map(|file| Value::string(file.to_string_lossy()))
+                        .collect(),
+                ),
+            ),
+            (
+                "sha256",
+                Value::Object(
+                    self.files
+                        .iter()
+                        .zip(&self.sha256)
+                        .map(|(file, digest)| {
+                            (file.to_string_lossy().into_owned(), Value::string(digest))
+                        })
                         .collect(),
                 ),
             ),
@@ -347,10 +373,11 @@ fn unavailable(name: &'static str, reason: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{NAMES, Status, Tool, render, tool_records};
+    use super::{Missing, NAMES, Status, Tool, render, tool_records};
     use crate::json::{self, Value};
     use crate::manifest::Header;
     use crate::step::Step;
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -386,6 +413,10 @@ mod tests {
         let mut tool = Tool::new(name);
         tool.status = Status::Built;
         tool.files = files.iter().map(PathBuf::from).collect();
+        tool.sha256 = files
+            .iter()
+            .map(|file| format!("digest of {file}"))
+            .collect();
         tool.path = tool.files.first().cloned();
         tool.version("crate", "1.0");
         tool.source("revision", "abc");
@@ -427,6 +458,16 @@ mod tests {
                     Value::string("bin/extra.dll"),
                 ]),
             ),
+            (
+                "sha256",
+                Value::object([
+                    (
+                        "bin/pdbtool.exe",
+                        Value::string("digest of bin/pdbtool.exe"),
+                    ),
+                    ("bin/extra.dll", Value::string("digest of bin/extra.dll")),
+                ]),
+            ),
             ("version", Value::object([("crate", Value::string("1.0"))])),
             (
                 "source",
@@ -443,6 +484,33 @@ mod tests {
             ),
         ]);
         assert_eq!(tool.to_value(), expected);
+    }
+
+    #[test]
+    fn finish_records_the_digest_of_each_file() {
+        let directory =
+            std::env::temp_dir().join(format!("pdbrs-fixtures-tools-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let program = directory.join("tool.exe");
+        let library = directory.join("tool.dll");
+        fs::write(&program, b"abc").unwrap();
+        fs::write(&library, b"").unwrap();
+        let mut tool = Tool::new("pdbtool");
+        tool.finish(vec![program.clone(), library.clone()]).unwrap();
+        let missing = Tool::new("pdbtool").finish(vec![directory.join("missing.exe")]);
+        fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(tool.path.as_ref(), Some(&program));
+        assert_eq!(
+            tool.sha256,
+            [
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ]
+        );
+        assert!(
+            matches!(missing, Err(Missing::Failed(reason)) if reason.contains("missing.exe")),
+            "a missing file fails the tool"
+        );
     }
 
     #[test]

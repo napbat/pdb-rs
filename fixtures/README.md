@@ -231,7 +231,12 @@ For each fixture the manifest records:
   `dotnet --version`
 - each command with its working directory, environment source and extra variables
 - each output with its kind (`native-pdb`, `portable-pdb`, `embedded-in-image`,
-  `embedded-pdb-payload` or `image`), its path relative to the output root and its size in bytes
+  `embedded-pdb-payload` or `image`), its path relative to the output root, its size in bytes
+  and the SHA-256 digest of its contents (`sha256`, 64 lowercase hexadecimal digits)
+
+The generator calculates the digest with its own SHA-256 code
+(`crates/pdbrs-fixtures/src/sha256.rs`). It does not use the `pdbrs` library or a host tool for
+the digest.
 
 The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature, the
 `MPDB` signature or an `MPDB` payload in the PE debug directory. The manifest also records the
@@ -300,6 +305,7 @@ record for each tool. Each record has:
 
 - the name, the status (`built`, `failed` or `unavailable`) and the reason
 - the path of the executable and the list of files that the tool needs
+- the SHA-256 digest of each file (`sha256`, an object with the file path as the key)
 - the version: the crate version and `cargo -V` for `pdbtool`; the Visual Studio version, the
   platform toolset and the `msdia140.dll` file version for `DIA2Dump`; the .NET SDK version
   and the `System.Reflection.Metadata` and runtime versions for `PortableVerifier`
@@ -555,3 +561,22 @@ The example also reads an embedded PDB payload. It decodes the `MPDB` envelope f
 ```sh
 cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-embedded/artifacts/bin/CSharpDemo/debug/CSharpDemo.mpdb
 ```
+
+### Input modes
+
+The `native` and `portable` examples read the file in one of three modes. Select the mode with
+`--input` before the path:
+
+| Mode | Reader |
+| --- | --- |
+| `file` (default) | `Pdb::open`: positional reads through `pdbrs::io::FileReader` |
+| `slice` | `Pdb::parse`: the example reads all file bytes, and the reader borrows them |
+| `seek` | `Pdb::read` with `pdbrs::io::SeekReader` around `std::fs::File` |
+
+```sh
+cargo run -p pdbrs --example native -- --input seek target/fixtures/msvc-x64-debug/demo.pdb
+```
+
+For an `MPDB` payload, the `portable` example writes the decoded PDB to a temporary file. Then
+it reads that file in the selected mode and deletes it. All modes must give the same output
+(#36).

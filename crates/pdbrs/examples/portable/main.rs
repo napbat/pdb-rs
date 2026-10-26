@@ -20,13 +20,24 @@
 //!
 //! The example also decodes the embedded source of each document and checks it against the
 //! document hash (SHA-256 only).
+//!
+//! The option `--input file|slice|seek` selects the source: `Pdb::open` (the default),
+//! `Pdb::parse` on the file bytes, or `Pdb::read` with `SeekReader` around the file. For an
+//! `MPDB` payload, the example writes the decoded PDB to a temporary file and reads that file
+//! in the selected mode. All three sources give the same output.
 
 mod debug;
+#[path = "../support/input.rs"]
+mod input;
 
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::Write as _;
+use std::fs::{self, File};
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
 
+use pdbrs::io::{ReadAt, SeekReader};
 use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::CustomDebugValue;
 use pdbrs::portable::embedded::{EMBEDDED_PDB_SIGNATURE, decode_embedded};
@@ -35,6 +46,8 @@ use pdbrs::portable::metadata::{
     LocalConstantRow, LocalScopeRow, LocalVariableRow, MetadataStream, MethodDebugInformationRow,
     StateMachineMethodRow, StringOffset, TableId, TableRow,
 };
+
+use input::Input;
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -52,12 +65,12 @@ impl Counts {
 }
 
 /// Read heap values and count them.
-struct Reader<'a> {
-    pdb: &'a Pdb<&'a [u8]>,
+struct Reader<'a, S: ReadAt> {
+    pdb: &'a Pdb<S>,
     counts: Counts,
 }
 
-impl Reader<'_> {
+impl<S: ReadAt> Reader<'_, S> {
     fn string(&mut self, offset: StringOffset) -> Outcome {
         let bytes = self.pdb.string(offset)?;
         self.counts.add("string values", 1);
@@ -134,24 +147,54 @@ impl Reader<'_> {
     }
 }
 
+/// A temporary file that holds a decoded embedded PDB. Dropping the value deletes the file.
+struct Decoded(PathBuf);
+
+impl Drop for Decoded {
+    fn drop(&mut self) {
+        // The file is in the temporary directory, so a failed delete is not an error.
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 fn main() -> Outcome {
-    let mut arguments = std::env::args().skip(1);
-    let (Some(path), None) = (arguments.next(), arguments.next()) else {
-        return Err(
-            "usage: cargo run -p pdbrs --example portable -- <file.pdb | file.mpdb>".into(),
-        );
-    };
-    let mut bytes = std::fs::read(&path)?;
-    if bytes.starts_with(&EMBEDDED_PDB_SIGNATURE) {
-        let payload = bytes.len();
-        bytes = decode_embedded(&bytes, MAX_EMBEDDED_PDB)?;
+    let (input, path) = input::arguments(
+        std::env::args_os().skip(1),
+        "usage: cargo run -p pdbrs --example portable -- [--input file|slice|seek] \
+         <file.pdb | file.mpdb>",
+    )?;
+    let mut signature = Vec::new();
+    File::open(&path)?
+        .take(EMBEDDED_PDB_SIGNATURE.len() as u64)
+        .read_to_end(&mut signature)?;
+    let decoded = if signature == EMBEDDED_PDB_SIGNATURE {
+        let payload = fs::read(&path)?;
+        let bytes = decode_embedded(&payload, MAX_EMBEDDED_PDB)?;
         println!(
-            "embedded PDB payload: {payload} bytes, decoded to {} bytes",
+            "embedded PDB payload: {} bytes, decoded to {} bytes",
+            payload.len(),
             bytes.len()
         );
+        let file =
+            std::env::temp_dir().join(format!("pdbrs-portable-example-{}.pdb", std::process::id()));
+        fs::write(&file, bytes)?;
+        Some(Decoded(file))
+    } else {
+        None
+    };
+    let path = decoded.as_ref().map_or(Path::new(&path), |file| &file.0);
+    match input {
+        Input::File => run(&Pdb::open(path)?),
+        Input::Slice => {
+            let bytes = fs::read(path)?;
+            run(&Pdb::parse(&bytes)?)
+        }
+        Input::Seek => run(&Pdb::read(SeekReader::new(File::open(path)?)?)?),
     }
-    let pdb = Pdb::parse(&bytes)?;
+}
 
+/// Print the headers of `pdb`, then read and check every row and heap value.
+fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     let metadata = pdb.metadata();
     println!(
         "metadata version {}",
@@ -195,12 +238,12 @@ fn main() -> Outcome {
     }
 
     let mut reader = Reader {
-        pdb: &pdb,
+        pdb,
         counts: Counts::default(),
     };
     reader.all_tables()?;
     reader.custom_debug_information()?;
-    debug::debug_tables(&pdb, &mut reader.counts)?;
+    debug::debug_tables(pdb, &mut reader.counts)?;
     for (name, count) in &reader.counts.0 {
         println!("{name}: {count}");
     }
