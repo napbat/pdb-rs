@@ -156,6 +156,28 @@ fn keeps_four_or_more_zero_padding_bytes() {
 }
 
 #[test]
+fn keeps_the_length_of_an_unaligned_record() {
+    // Regression (#35, fuzz target `native_leaf_encode`): a decoded record whose length is
+    // not a multiple of 4 encoded with alignment padding, so the bytes differed from the
+    // input record.
+    for bytes in [
+        record(0x1607, &[0x8e, 0, 0, 0, 0xfd, 0x47, 0, 0, 9, 0]),
+        record(S_PUB32, &public_payload(b"main\0")),
+    ] {
+        assert!(!bytes.len().is_multiple_of(4));
+        let symbol = Records::new(&bytes)
+            .next()
+            .unwrap()
+            .unwrap()
+            .symbol()
+            .unwrap();
+        let mut out = Vec::new();
+        symbol.encode(&mut out).unwrap();
+        assert_eq!(out, bytes);
+    }
+}
+
+#[test]
 fn decodes_data_symbols() {
     for kind in [S_GDATA32, S_LDATA32] {
         let mut payload = Vec::new();
