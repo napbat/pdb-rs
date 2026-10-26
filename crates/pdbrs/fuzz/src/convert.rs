@@ -90,7 +90,8 @@ pub fn round_trip(data: &[u8]) {
     let bytes = plan.to_vec().expect("a planned MSFZ container writes");
     assert_eq!(u64::try_from(bytes.len()).ok(), Some(plan.file_size()));
     assert_eq!(
-        plan.to_vec().expect("a planned MSFZ container writes again"),
+        plan.to_vec()
+            .expect("a planned MSFZ container writes again"),
         bytes,
         "a second write gives other bytes"
     );

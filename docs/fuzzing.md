@@ -19,6 +19,7 @@ to the same value. It does not check that other readers accept the output.
 | `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::open`, stream bytes |
 | `msfz` | MSFZ file | `format::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
 | `msfz_chunks` | selector byte, two declared chunk sizes, fragment offset, stored chunk bytes | an MSFZ container around one or two chunks (stored, zstd or raw DEFLATE) and one fragment across them; reads with and without the chunk cache must agree; stored chunks must give their bytes |
+| `msfz_convert` | selector byte, MSF 7.0 or MSFZ file | `Container::to_msfz` and `Container::to_msf` round trip (#38): the selector gives the chunk size, one stream for each chunk, the chunk and directory codecs, padding and the stream 0 policy; a second write gives the same bytes; both outputs give the input streams; the MSF output has no unreferenced allocated page |
 | `native_pdb` | native PDB file | `native::Pdb` and every stream that it names: Info, named streams, TPI, IPI, hash streams, DBI, FPO, frame data, modules, symbol records, GSI, PSI |
 | `native_info` | Info stream | `Info::parse`, named stream lookup, feature codes |
 | `native_hash_table` | hash table | `HashTable::<u32>::parse`, `check_placement` |
@@ -54,7 +55,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_debug_stream_encode` | kind selector, stream | FPO, frame data, fixup, function entry, token map, section header, OMAP and `RvaVaBlob` encoders |
 | `native_named_encode` | kind selector, stream | `LinkInfo`, `TmCache` and `TmCacheBuilder`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceServer`, `SourceHeaderBlock` and its builder, `DotNetDocument` |
 
-The MSFZ targets (#37) use 16 MiB chunks and a 32 MiB chunk cache (`pdbrs_fuzz::msfz::limits`);
+The MSFZ targets (#37, #38) use 16 MiB chunks and a 32 MiB chunk cache (`pdbrs_fuzz::msfz::limits`);
 `native_pdb` uses the same MSFZ limits. `msfz` does not compare reads without the cache: for
 a whole PDZ file, each uncached read decompresses a chunk again and takes too long.
 
@@ -92,6 +93,8 @@ It builds these inputs with the public API of `pdbrs`:
 - MSFZ inputs: chunks with a zstd frame of one raw block, a raw DEFLATE stored block and stored
   bytes, and the containers around them. A PDZ fixture (MSFZ signature) gives its file to
   `msfz` and `native_pdb` and each chunk of its Chunk Table to `msfz_chunks`.
+- `msfz_convert` gets each MSF 7.0 and MSFZ fixture with three selectors (`0x00`, `0x1d`,
+  `0xe6`) that together select each option, and the small synthetic MSF containers.
 
 The generator splits each PDB into the inputs of the targets: streams, records, subsections,
 blobs and values. It caps the seeds of one PDB to 48 for each target.
@@ -190,11 +193,20 @@ runs without a finding. `cov` and `corpus` are from the last run of the target.
 | `native_named_encode` | 901 | 55,190,434 | 1058 | 565 | 959 |
 | `msfz` | 902 | 47,554 | 1697 | 496 | 659 |
 | `msfz_chunks` | 901 | 43,043 | 1835 | 561 | 837 |
+| `msfz_convert` | 901 | 7,836 | 4787 | 592 | 921 |
 
 The MSFZ targets ran on branch `msfz-reader` (#37) on 2026-10-26, with seeds from the
 synthetic inputs and the 52 PDZ fixtures of the native fixtures of `main` 8dc001c (`msfz`: 56
 seeds, `msfz_chunks`: 631 seeds). The `msfz` row is the run after the fix of finding 4. The
 `msfz_chunks` run used the library before that fix, which does not change its inputs.
+
+The `msfz_convert` target ran on branch `msfz-writer` (#38, based on `main` ceff177) on
+2026-10-26, with 419 seeds from the synthetic inputs and the fixtures of the primary checkout
+(the MSF 7.0 PDBs and the 63 PDZ files). Most seeds are whole PDB files, and libFuzzer took the
+limit of 1 MiB for new inputs. Each run compresses every chunk three times, so the target runs
+about 8 inputs each second.
+After the merge of `main` 64a0a2d into `msfz-writer`, the target ran once over its whole
+corpus (`-runs=0`, 755 inputs) without a finding.
 
 The 12 encoder targets ran on the branch with `main` aa552a7 (2026-10-26). Their seeds are
 the seeds of the reader targets with the same input layout.

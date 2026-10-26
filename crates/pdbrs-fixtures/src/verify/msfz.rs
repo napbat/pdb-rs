@@ -6,7 +6,7 @@
 //!    must give the same masked output as for the source, the pdbrs reader must give the
 //!    same streams (stream 0 is empty), and the `native` example must give the same output
 //!    apart from the lines that start with `container:`.
-//! 2. Reference (see [`reference`]): the command writes each `pdz-*` fixture source again
+//! 2. Reference (see [`reference`](mod@reference)): the command writes each `pdz-*` fixture source again
 //!    with the pdbrs options that match the `pdz-encode` options of the fixture, and reports
 //!    whether the bytes are the same. Different bytes do not make the command fail.
 //! 3. Decode (see [`decode`]): the command converts each `pdz-*` fixture to MSF 7.0, twice.
