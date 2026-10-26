@@ -5,6 +5,8 @@
 //! keyword and `name=value` fields. Counts, row IDs and GUID indexes are decimal. Offsets,
 //! sizes, flags, masks and tokens are hexadecimal.
 
+mod custom;
+
 use std::fmt::Write as _;
 
 use pdbrs::io::ReadAt;
@@ -41,6 +43,7 @@ pub fn dump<S: ReadAt>(pdb: &Pdb<S>) -> pdbrs::Result<String> {
     out.line(format_args!("portable-dump version={VERSION}"));
     headers(pdb, &mut out);
     rows(pdb, &mut out)?;
+    custom::custom(pdb, &mut out)?;
     Ok(out.text)
 }
 

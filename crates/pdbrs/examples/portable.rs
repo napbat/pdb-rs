@@ -5,14 +5,17 @@
 //! Then it reads each row of the eight debug tables and each string, blob and GUID that a row
 //! refers to. It stops with an error at the first value that it cannot read.
 //!
-//! The example does not decode the contents of blobs (document names, sequence points,
-//! imports and custom debug information). It reads their bytes only.
+//! Then it decodes each custom debug information value, encodes it again and compares the
+//! bytes. It stops with an error at a value that does not decode. A value of an unknown kind
+//! is counted, not an error. The example does not decode the other blobs (document names,
+//! sequence points and imports). It reads their bytes only.
 
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::Write as _;
 
 use pdbrs::portable::Pdb;
+use pdbrs::portable::custom::CustomDebugValue;
 use pdbrs::portable::metadata::{
     BlobOffset, CustomDebugInformationRow, DocumentRow, GuidIndex, ImportScopeRow,
     LocalConstantRow, LocalScopeRow, LocalVariableRow, MetadataStream, MethodDebugInformationRow,
@@ -91,6 +94,27 @@ impl Reader<'_> {
             reader.blob(row.value)
         })
     }
+
+    /// Decode each custom debug information value and encode it again.
+    fn custom_debug_information(&mut self) -> Outcome {
+        let pdb = self.pdb;
+        for row in pdb.custom_debug_informations() {
+            let row = row?;
+            let value = row.decode()?;
+            self.counts.add("custom debug values decoded", 1);
+            if matches!(value, CustomDebugValue::Unknown { .. }) {
+                self.counts.add("custom debug values of unknown kinds", 1);
+            }
+            if value.encode()? == row.value() {
+                self.counts
+                    .add("custom debug values encoded to the same bytes", 1);
+            } else {
+                self.counts
+                    .add("custom debug values encoded to other bytes", 1);
+            }
+        }
+        Ok(())
+    }
 }
 
 fn main() -> Outcome {
@@ -147,6 +171,7 @@ fn main() -> Outcome {
         counts: Counts::default(),
     };
     reader.all_tables()?;
+    reader.custom_debug_information()?;
     for (name, count) in &reader.counts.0 {
         println!("{name}: {count}");
     }

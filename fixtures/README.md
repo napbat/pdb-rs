@@ -282,6 +282,32 @@ The heap size is the size of its stream. SRM removes the zero padding after the 
 `#Strings` from its heap size. The verifier accepts a smaller SRM size only if zero bytes follow
 it.
 
+#### Custom debug information lines
+
+The custom debug information section comes last. Each `CustomDebugInformation` row gives a
+`cdi` line: `id`, `parent` (token), `kind` (the GUID as lowercase text) and `codec`. The detail
+lines of its decoded value follow. Each detail line starts with the `id` of the row. pdbrs
+decodes the values with `portable::custom`. The verifier decodes the SRM blobs with
+`BlobReader` in `dotnet/verifier/CustomDebugInfoDump.cs`. IL offsets and sizes are hexadecimal;
+syntax offsets, state numbers, slot kinds, ordinals and row IDs are signed decimal.
+
+| `codec` | Detail lines and fields |
+| --- | --- |
+| `async-stepping` | `cdi-async`: `catch-handler` (or `none`); `cdi-async-step`: `yield`, `resume`, `method` |
+| `hoisted-scopes` | `cdi-hoisted-scope`: `start`, `length` |
+| `dynamic-locals` | `cdi-dynamic`: `flags`, one `0` or `1` for each stored bit, first flag first |
+| `tuple-names` | `cdi-tuple-name`: `name` (quoted; empty for an element without a name) |
+| `default-namespace`, `source-link` | `cdi-text`: `text` (quoted) |
+| `enc-local-slots` | `cdi-enc-slot`: `temporary`, or `kind`, `offset` and `ordinal` (or `none`) |
+| `enc-lambdas` | `cdi-enc-lambda-map`: `method-ordinal`; `cdi-enc-closure`: `offset`; `cdi-enc-lambda`: `offset`, `closure` (`this`, `static` or the closure index) |
+| `enc-states` | `cdi-enc-state`: `number`, `offset` |
+| `embedded-source` | `cdi-embedded-source`: `format` (`raw` or `deflate`), `size` and `fnv1a` (the 64-bit FNV-1a hash of the decoded source) |
+| `metadata-references` | `cdi-reference`: `file`, `aliases` (quoted), `flags`, `time-stamp`, `file-size`, `mvid` (16 bytes in hexadecimal) |
+| `compilation-options` | `cdi-option`: `name`, `value` (quoted) |
+| `type-documents` | `cdi-type-document`: `document` |
+| `primary-constructor` | No detail line |
+| `unknown` | `cdi-raw`: `size`, `bytes` (in hexadecimal) |
+
 To extend the format, add new keywords after the `row` lines, for example decoded documents,
 sequence points or custom debug information. Add each new line type to the verifier and to
 `crates/pdbrs-fixtures/src/verify/dump.rs` together, and increase the version only if an existing
@@ -321,5 +347,6 @@ cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-portable/
 ```
 
 The example prints the stream headers, the heap sizes, the `#Pdb` fields and the row counts. It
-exits with a failure code at the first row or heap value that it cannot read. It does not decode
-the blob contents yet (#23, #24, #25).
+exits with a failure code at the first row or heap value that it cannot read. It decodes each
+custom debug information value, encodes it again and counts the values that give the same
+bytes (#24). It does not decode the other blob contents yet (#23, #25).

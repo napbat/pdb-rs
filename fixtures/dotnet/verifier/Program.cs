@@ -177,6 +177,7 @@ internal sealed class Dump
         WriteImportScopes();
         WriteStateMachineMethods();
         WriteCustomDebugInformation();
+        CustomDebugInfoDump.Write(reader, output);
     }
 
     private void ReadStreamHeaders()
@@ -498,7 +499,7 @@ internal sealed class Dump
 
     private static string Mask(ulong value) => "0x" + value.ToString("x16");
 
-    private static string Quote(byte[] text)
+    internal static string Quote(byte[] text)
     {
         var quoted = new StringBuilder("\"");
         foreach (byte value in text)
