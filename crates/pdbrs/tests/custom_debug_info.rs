@@ -8,6 +8,7 @@ use pdbrs::native::codeview::symbol::{
     CustomDebugInfoData, CustomDebugInfoKind, MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE,
     SymbolAttribute, SymbolData,
 };
+use pdbrs::portable::custom::{Lambda, LambdaClosure, LocalSlot, StateMachineState};
 
 /// The `S_OEM` payload with the `MD2` attribute of `ComputeAsync` in the
 /// `dotnet-csharp-full` fixture (module 0, offset 0x3c).
@@ -133,14 +134,35 @@ fn decodes_the_fixture_md2_attribute() {
     );
     // The alignment size 2 removes the two padding bytes.
     assert_eq!(records[1].alignment, 2);
+    let CustomDebugInfoData::EditAndContinueLocalSlotMap(slots) = records[1].decode().unwrap()
+    else {
+        panic!("expected a local slot map");
+    };
+    assert_eq!(slots.as_bytes(), unhex("010f014c1d54"));
+    let variable = |kind, syntax_offset| LocalSlot::Variable {
+        kind,
+        syntax_offset,
+        ordinal: None,
+    };
     assert_eq!(
-        records[1].decode().unwrap(),
-        CustomDebugInfoData::EditAndContinueLocalSlotMap(&unhex("010f014c1d54"))
+        slots.iter().collect::<Vec<_>>(),
+        [variable(0, 14), variable(0, 75), variable(0x1c, 83)]
     );
+    let CustomDebugInfoData::EditAndContinueStateMachineStateMap(states) =
+        records[2].decode().unwrap()
+    else {
+        panic!("expected a state machine state map");
+    };
+    assert_eq!(states.as_bytes(), unhex("0300002b02530478"));
+    let state = |state_number, syntax_offset| StateMachineState {
+        state_number,
+        syntax_offset,
+    };
     assert_eq!(
-        records[2].decode().unwrap(),
-        CustomDebugInfoData::EditAndContinueStateMachineStateMap(&unhex("0300002b02530478"))
+        states.iter().collect::<Vec<_>>(),
+        [state(0, 43), state(1, 83), state(2, 120)]
     );
+    assert_eq!(states.padding(), []);
 }
 
 #[test]
@@ -536,20 +558,49 @@ fn decodes_tuple_element_names() {
 }
 
 #[test]
-fn keeps_edit_and_continue_payloads_raw() {
-    for (kind, expected) in [
-        (
-            6,
-            CustomDebugInfoData::EditAndContinueLocalSlotMap(&[1, 2, 3]),
-        ),
-        (7, CustomDebugInfoData::EditAndContinueLambdaMap(&[1, 2, 3])),
-        (
-            9,
-            CustomDebugInfoData::EditAndContinueStateMachineStateMap(&[1, 2, 3]),
-        ),
-    ] {
-        decode_one(kind, &[1, 2, 3], |data| assert_eq!(data, expected));
-    }
+fn decodes_edit_and_continue_records_through_the_shared_codecs() {
+    decode_one(6, &[0x01, 0x0f, 0x00, 0x81, 0x05, 0x02], |data| {
+        let CustomDebugInfoData::EditAndContinueLocalSlotMap(slots) = data else {
+            panic!("expected a local slot map");
+        };
+        assert_eq!(
+            slots.iter().collect::<Vec<_>>(),
+            [
+                LocalSlot::Variable {
+                    kind: 0,
+                    syntax_offset: 14,
+                    ordinal: None
+                },
+                LocalSlot::Temporary,
+                LocalSlot::Variable {
+                    kind: 0,
+                    syntax_offset: 4,
+                    ordinal: Some(2)
+                },
+            ]
+        );
+    });
+    decode_one(7, &[3, 1, 1, 0x0b, 0x15, 2], |data| {
+        let CustomDebugInfoData::EditAndContinueLambdaMap(map) = data else {
+            panic!("expected a lambda map");
+        };
+        assert_eq!(map.method_ordinal(), 2);
+        assert_eq!(map.closures().collect::<Vec<_>>(), [10]);
+        assert_eq!(
+            map.lambdas().collect::<Vec<_>>(),
+            [Lambda {
+                syntax_offset: 20,
+                closure: LambdaClosure::Closure(0)
+            }]
+        );
+    });
+    // The shared codecs report their errors through the native record.
+    assert_eq!(decode_error(6, &[0x01]), ErrorKind::UnexpectedEof);
+    assert_eq!(
+        decode_error(7, &[3, 1, 1, 0x0b, 0x15, 3]),
+        ErrorKind::InvalidFormat
+    );
+    assert_eq!(decode_error(9, &[1, 0, 0, 1, 7]), ErrorKind::InvalidFormat);
 }
 
 /// Return an `asyncMethodInfo` value.

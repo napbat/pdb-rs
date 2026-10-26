@@ -19,6 +19,10 @@
 //! (`EditAndContinueStateMachineStateMap`) it keeps the padding bytes in the
 //! data, and `Pdb2Pdb` copies them into the Portable PDB. This decoder follows
 //! the encoder, so its kind 9 data has no padding bytes.
+//!
+//! The Edit and Continue records (kinds 6, 7 and 9) use the blob formats of
+//! the Portable PDB custom debug information. They decode through the shared
+//! codecs in [`crate::portable::custom`].
 
 mod locals;
 
@@ -31,6 +35,7 @@ pub use locals::{
 
 use super::super::super::Fields;
 use super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::portable::custom::{EncLambdaAndClosureMap, EncLocalSlotMap, EncStateMachineStateMap};
 use crate::{Error, ErrorKind, Result};
 
 values! {
@@ -213,6 +218,9 @@ impl<'a> CustomDebugInfoRecord<'a> {
     /// - [`ErrorKind::InvalidFormat`] if the data is shorter than its fields,
     ///   has a negative count, or has bytes other than at most three zero
     ///   padding bytes after its fields.
+    /// - The errors of [`EncLocalSlotMap::parse`],
+    ///   [`EncLambdaAndClosureMap::parse`] and [`EncStateMachineStateMap::parse`]
+    ///   for the Edit and Continue kinds.
     pub fn decode(&self) -> Result<CustomDebugInfoData<'a>> {
         if self.version != CUSTOM_DEBUG_INFO_VERSION {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
@@ -237,16 +245,18 @@ impl<'a> CustomDebugInfoRecord<'a> {
                 CustomDebugInfoData::DynamicLocals(DynamicLocals::parse(data)?)
             }
             CustomDebugInfoKind::EDIT_AND_CONTINUE_LOCAL_SLOT_MAP => {
-                CustomDebugInfoData::EditAndContinueLocalSlotMap(data)
+                CustomDebugInfoData::EditAndContinueLocalSlotMap(EncLocalSlotMap::parse(data)?)
             }
             CustomDebugInfoKind::EDIT_AND_CONTINUE_LAMBDA_MAP => {
-                CustomDebugInfoData::EditAndContinueLambdaMap(data)
+                CustomDebugInfoData::EditAndContinueLambdaMap(EncLambdaAndClosureMap::parse(data)?)
             }
             CustomDebugInfoKind::TUPLE_ELEMENT_NAMES => {
                 CustomDebugInfoData::TupleElementNames(TupleElementNames::parse(data)?)
             }
             CustomDebugInfoKind::EDIT_AND_CONTINUE_STATE_MACHINE_STATE_MAP => {
-                CustomDebugInfoData::EditAndContinueStateMachineStateMap(data)
+                CustomDebugInfoData::EditAndContinueStateMachineStateMap(
+                    EncStateMachineStateMap::parse(data)?,
+                )
             }
             _ => CustomDebugInfoData::Unknown(data),
         })
@@ -274,8 +284,8 @@ impl FusedIterator for CustomDebugInfoRecords<'_> {}
 
 /// The typed data of a custom debug information record.
 ///
-/// The edit-and-continue records keep their raw data: the Portable PDB blob
-/// format of the same information, with compressed integers.
+/// The Edit and Continue records use the codecs of the Portable PDB custom
+/// debug information.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CustomDebugInfoData<'a> {
@@ -292,14 +302,14 @@ pub enum CustomDebugInfoData<'a> {
     StateMachineTypeName(&'a [u8]),
     /// [`CustomDebugInfoKind::DYNAMIC_LOCALS`].
     DynamicLocals(DynamicLocals<'a>),
-    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_LOCAL_SLOT_MAP`], raw.
-    EditAndContinueLocalSlotMap(&'a [u8]),
-    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_LAMBDA_MAP`], raw.
-    EditAndContinueLambdaMap(&'a [u8]),
+    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_LOCAL_SLOT_MAP`].
+    EditAndContinueLocalSlotMap(EncLocalSlotMap<'a>),
+    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_LAMBDA_MAP`].
+    EditAndContinueLambdaMap(EncLambdaAndClosureMap<'a>),
     /// [`CustomDebugInfoKind::TUPLE_ELEMENT_NAMES`].
     TupleElementNames(TupleElementNames<'a>),
-    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_STATE_MACHINE_STATE_MAP`], raw.
-    EditAndContinueStateMachineStateMap(&'a [u8]),
+    /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_STATE_MACHINE_STATE_MAP`].
+    EditAndContinueStateMachineStateMap(EncStateMachineStateMap<'a>),
     /// A kind that this crate does not decode, raw.
     Unknown(&'a [u8]),
 }

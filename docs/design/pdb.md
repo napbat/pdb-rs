@@ -28,6 +28,8 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
 - `Error` retains an error kind, physical or stream-relative location, operation context and a typed `nostdio::IoError`.
 - `native::Identity` distinguishes modern GUID-and-age from legacy signature-and-age.
 - `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
+- `portable::custom` decodes and encodes the custom debug information blobs of all kinds in the Portable PDB specification and Roslyn (#24).
+  It keeps unknown kinds as raw bytes. The native `MD2` Edit and Continue records (kinds 6, 7 and 9) use the same codecs.
 
 Run signature inspection on Unix or Windows with:
 
