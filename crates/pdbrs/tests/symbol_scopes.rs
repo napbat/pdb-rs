@@ -261,14 +261,19 @@ fn enforces_the_depth_limit() {
 
 #[test]
 fn rejects_scope_kinds_that_are_not_decoded() {
-    let mut builder = Builder::default();
-    builder.label();
-    // S_SEPCODE starts a scope, but this crate does not decode it.
-    let separated = builder.push(0x1132, &[0; 24]);
-    assert_eq!(
-        failure(&builder, 4),
-        (ErrorKind::UnsupportedVersion, u64::from(separated))
-    );
+    // S_SEPCODE and the managed procedures S_GMANPROC and S_LMANPROC start a
+    // scope, but this crate does not decode them. A later S_END must not be
+    // reported as a scope end without an open scope.
+    for kind in [0x1132, 0x112a, 0x112b] {
+        let mut builder = Builder::default();
+        builder.label();
+        let opener = builder.push(kind, &[0; 24]);
+        assert_eq!(
+            failure(&builder, 4),
+            (ErrorKind::UnsupportedVersion, u64::from(opener)),
+            "kind {kind:#x}"
+        );
+    }
 }
 
 #[test]

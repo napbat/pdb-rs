@@ -60,7 +60,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
-| Sections and addresses | Section header streams and section-offset to RVA translation in both directions | OMAP translation |
+| Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoding of 39 symbol kinds, including every kind in the Rust sample PDBs and the LLD `S_SKIP` filler; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
@@ -636,7 +636,33 @@ A truncated copy of that PDB failed with `UnexpectedEof` and the physical end of
 These are local Rust build outputs, not redistributed fixtures. Automated tests do not depend on them.
 The tests use synthetic data for boundaries, malformed input and resource limits.
 The smoke runs establish complete reading of these samples, not support for every producer or writer interoperability.
-MSVC C++, clang-cl/LLD and legacy fixtures remain required by the acceptance plan.
+Legacy fixtures remain required by the acceptance plan.
+
+### Producer fixtures
+
+`cargo run -p pdbrs-fixtures` built 22 fixtures from the demo programs in `fixtures/` (see its README):
+MSVC 14.51 and 14.44 (`/DEBUG:FASTLINK`), Clang/LLD 22.1.3 from Visual Studio, rustc 1.99 with `link.exe` and LLD,
+and .NET 10 SDK with portable, embedded and Windows PDB output.
+The full-read example read all 17 native fixtures to the end. It reported these gaps:
+
+- MSVC and Clang C/C++ (#13): `S_HEAPALLOCSITE`, `S_FRAMECOOKIE`, `S_GTHREAD32`, `S_LTHREAD32`, x86 `S_BPREL32`,
+  `S_DEFRANGE_SUBFIELD_REGISTER`, `S_REGISTER`, `S_FILESTATIC`, ARM64 `S_FRAMEREG`, and x86 FPO and new-FPO streams.
+  Incremental links add `S_TRAMPOLINE`, `S_REGREL32_ENCTMP`, a non-empty `/TMCache` and the streams it uses.
+  FASTLINK PDBs add `S_FASTLINK` and C13 subsection `0xfd`.
+- .NET Windows PDBs (#14): managed procedures and slots, `S_OEM`, `S_MANCONSTANT`, `S_TOKENREF`,
+  compressed injected sources and the `sourcelink` named stream. `llvm-pdbutil` 22.1.6 cannot dump their symbols.
+
+The fixtures also exposed two producer defects that pdbrs reports without failing:
+
+- LLD 22.1.3 puts some public symbols (`__chkstk`, `g_c_name`, `___favor`) in the wrong hash bucket.
+  LLD 22.1.6 puts `__chkstk` in the correct bucket.
+- The public index of an MSVC 14.44 FASTLINK PDB uses 0x3ffff buckets, but 642 of its 836 records are in bucket
+  `(hash % 0x3ffff) & 0xffff`. Name lookup cannot find them with the documented rule.
+
+The fixtures found two reader defects, now fixed. Incremental links give end markers and empty COFF groups an
+offset equal to the section size; `AddressMap::rva` now accepts the end of a section. Managed procedures open
+scopes; the scope walker now reports them as undecoded instead of reporting a corrupt scope end.
+An empty `/src/headerblock` stream now means that the PDB has no injected sources.
 
 The signature probe was also exercised against a .NET-produced Portable PDB, an embedded PDB payload and ordinary CLI assembly metadata.
 A synthetic Small MSF signature was identified. These checks establish signature behavior, not portable or legacy parsing.

@@ -121,7 +121,9 @@ fn address_translation_checks_bounds() {
     let at = |section, offset| SectionOffset { section, offset };
     assert_error(map.rva(at(0, 0)), ErrorKind::InvalidReference);
     assert_error(map.rva(at(4, 0)), ErrorKind::InvalidReference);
-    assert_error(map.rva(at(1, 0x1500)), ErrorKind::InvalidReference);
+    // The end of a section has an RVA; addresses after the end do not.
+    assert_eq!(map.rva(at(1, 0x1500)).unwrap(), Rva(0x2500));
+    assert_error(map.rva(at(1, 0x1501)), ErrorKind::InvalidReference);
     assert_error(map.rva(at(3, 0x8)), ErrorKind::OffsetOverflow);
     assert_eq!(map.rva(at(3, 0x7)).unwrap(), Rva(u32::MAX));
     assert_error(map.section_offset(Rva(0xfff)), ErrorKind::InvalidReference);

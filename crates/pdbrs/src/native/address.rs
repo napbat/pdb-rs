@@ -57,7 +57,9 @@ impl<'a> AddressMap<'a> {
 
     /// Convert a section-relative address to an RVA.
     ///
-    /// The offset must be less than the virtual size of the section.
+    /// The offset can be at most the virtual size of the section. An offset
+    /// equal to the virtual size is the end of the section: linkers give it to
+    /// end markers such as `__enc$textbss$end` and to empty COFF groups.
     ///
     /// Section 0 and section numbers past the last header do not name an
     /// image section. For example, linkers give absolute symbols such as
@@ -68,7 +70,7 @@ impl<'a> AddressMap<'a> {
     ///
     /// - [`ErrorKind::UnsupportedVersion`] if the DBI stream names an OMAP stream.
     /// - [`ErrorKind::InvalidReference`] if no section header has the
-    ///   section number, or if the offset is not less than the virtual size.
+    ///   section number, or if the offset is greater than the virtual size.
     /// - [`ErrorKind::OffsetOverflow`] if the RVA does not fit in 32 bits.
     pub fn rva(&self, address: SectionOffset) -> Result<Rva> {
         self.require_direct()?;
@@ -80,9 +82,9 @@ impl<'a> AddressMap<'a> {
             Error::new(ErrorKind::InvalidReference, None)
                 .with_context("section number is past the last section header")
         })?;
-        if address.offset >= header.virtual_size {
+        if address.offset > header.virtual_size {
             return Err(Error::new(ErrorKind::InvalidReference, None)
-                .with_context("section offset is not less than the virtual size"));
+                .with_context("section offset is greater than the virtual size"));
         }
         header
             .virtual_address
@@ -96,8 +98,9 @@ impl<'a> AddressMap<'a> {
 
     /// Convert an RVA to a section-relative address.
     ///
-    /// Return the first section in header order that holds the RVA. Only the
-    /// first 65535 headers have a section number.
+    /// Return the first section in header order that holds the RVA. The end
+    /// of a section does not belong to it. Only the first 65535 headers have
+    /// a section number.
     ///
     /// # Errors
     ///

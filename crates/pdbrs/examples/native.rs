@@ -2,10 +2,11 @@
 //!
 //! The example decodes each stream role, checks the references between
 //! streams and prints counts. It stops at the first malformed structure.
-//! At the end, it fails if a record kind, a subsection kind or a stream has
-//! no typed decoder. It reports producer defects that do not stop reading,
-//! for example an index record outside the bucket of its name, without
-//! failing. The library keeps names as bytes.
+//! A recognized format that this crate does not decode, for example a record
+//! kind without a decoder, is counted as undecoded and reading continues.
+//! At the end, the example fails if anything is undecoded. It reports
+//! producer defects that do not stop reading, for example an index record
+//! outside the bucket of its name, without failing. Names stay bytes.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
@@ -27,6 +28,7 @@ use pdbrs::native::names::StringTable;
 use pdbrs::native::section::SectionHeaders;
 use pdbrs::native::symbols::{HashTable, RecordOffsets};
 use pdbrs::native::types::{ForwardRefs, HEADER_SIZE, TypeHashes, TypeStream, TypeTable};
+use pdbrs::{ErrorKind, Result as PdbResult};
 
 /// The deepest scope nesting that the example accepts in a module.
 const MAX_SCOPE_DEPTH: usize = 256;
@@ -40,8 +42,8 @@ struct Report {
     claimed: BTreeSet<u32>,
     /// Counters in name order.
     counts: BTreeMap<&'static str, usize>,
-    /// Descriptions of data without a typed decoder.
-    undecoded: Vec<String>,
+    /// Data without a typed decoder, with the number of occurrences.
+    undecoded: BTreeMap<String, usize>,
     /// Decoded data that breaks a producer rule but does not stop reading.
     inconsistencies: Vec<String>,
 }
@@ -56,11 +58,26 @@ impl Report {
     }
 
     fn undecoded(&mut self, what: String) {
-        self.undecoded.push(what);
+        *self.undecoded.entry(what).or_default() += 1;
     }
 
     fn inconsistency(&mut self, what: String) {
         self.inconsistencies.push(what);
+    }
+
+    /// Return the value, or count an unsupported format and return `None`.
+    ///
+    /// Errors other than [`ErrorKind::UnsupportedVersion`] stop the read.
+    fn supported<T>(&mut self, result: PdbResult<T>, what: &str) -> Outcome<Option<T>> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.kind() == ErrorKind::UnsupportedVersion => {
+                let reason = error.context().unwrap_or("unsupported format");
+                self.undecoded(format!("{what}: {reason}"));
+                Ok(None)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
@@ -87,11 +104,12 @@ fn main() -> Outcome {
 
     let names_bytes = pdb.named_stream_bytes(b"/names")?.ok_or("missing /names")?;
     let names = StringTable::parse(&names_bytes)?;
-    let placement = names.verify_buckets()?;
-    report.add(
-        "/names strings",
-        usize::try_from(placement.home)? + usize::try_from(placement.probed)?,
-    );
+    if let Some(placement) = report.supported(names.verify_buckets(), "/names hashing")? {
+        report.add(
+            "/names strings",
+            usize::try_from(placement.home)? + usize::try_from(placement.probed)?,
+        );
+    }
     let tpi = pdb.types()?.ok_or("missing TPI stream")?;
     let ipi = pdb.ids()?.ok_or("missing IPI stream")?;
     report.claim(StreamId(2));
@@ -122,10 +140,11 @@ fn main() -> Outcome {
     shared_symbols(&pdb, &dbi, &context, &procedures, &mut report)?;
     unclaimed_streams(&pdb, &mut report)?;
     print(&report);
-    if report.undecoded.is_empty() {
+    let undecoded: usize = report.undecoded.values().sum();
+    if undecoded == 0 {
         Ok(())
     } else {
-        Err(format!("{} items have no typed decoder", report.undecoded.len()).into())
+        Err(format!("{undecoded} items have no typed decoder").into())
     }
 }
 
@@ -165,7 +184,7 @@ fn hash_stream_bytes(
     report.claim(id);
     if let Some(aux) = types.header().hash_aux_stream {
         report.claim(aux);
-        report.undecoded(format!("auxiliary type hash stream {}", aux.0));
+        report.undecoded("auxiliary type hash stream".to_owned());
     }
     Ok(Some(pdb.stream_bytes(id)?))
 }
@@ -177,7 +196,7 @@ fn named_streams(
     tpi: &TypeStream,
     report: &mut Report,
 ) -> Outcome {
-    let mut verified = HashSet::new();
+    let mut handled = HashSet::new();
     let info = pdb.info();
     for named in info.named_streams() {
         report.claim(named.stream);
@@ -185,10 +204,10 @@ fn named_streams(
         match NamedStreamKind::classify(named.name) {
             NamedStreamKind::Names | NamedStreamKind::SourceFile { .. } => {}
             NamedStreamKind::LinkInfo => {
-                LinkInfo::parse(&bytes, named.stream)?;
+                report.supported(LinkInfo::parse(&bytes, named.stream), "/LinkInfo")?;
             }
             NamedStreamKind::TmCache => {
-                TmCache::parse(&bytes, named.stream)?;
+                report.supported(TmCache::parse(&bytes, named.stream), "/TMCache")?;
             }
             NamedStreamKind::UdtSourceLineUndone => {
                 let list = UdtSourceLineUndone::parse(&bytes, named.stream)?;
@@ -202,7 +221,10 @@ fn named_streams(
                 report.add("UDT source lines undone", list.len());
             }
             NamedStreamKind::SourceHeaderBlock => {
-                let block = SourceHeaderBlock::parse(&bytes, named.stream)?;
+                let parsed = SourceHeaderBlock::parse(&bytes, named.stream);
+                let Some(Some(block)) = report.supported(parsed, "/src/headerblock")? else {
+                    continue;
+                };
                 for entry in block.entries() {
                     let source = entry.value;
                     names.get(source.file_name_offset)?;
@@ -212,8 +234,9 @@ fn named_streams(
                     let id = info
                         .named_stream(&stream_name)
                         .ok_or("injected source has no content stream")?;
-                    source.verify_content(&pdb.stream_bytes(id)?, id)?;
-                    verified.insert(id);
+                    let content = pdb.stream_bytes(id)?;
+                    report.supported(source.verify_content(&content, id), "injected source")?;
+                    handled.insert(id);
                 }
                 report.add("injected sources", block.entries().len());
             }
@@ -228,11 +251,8 @@ fn named_streams(
             NamedStreamKind::classify(named.name),
             NamedStreamKind::SourceFile { .. }
         );
-        if content && !verified.contains(&named.stream) {
-            report.undecoded(format!(
-                "injected source stream {} without a header entry",
-                named.stream.0
-            ));
+        if content && !handled.contains(&named.stream) {
+            report.undecoded("injected source stream without a header entry".to_owned());
         }
     }
     Ok(())
@@ -240,28 +260,42 @@ fn named_streams(
 
 /// Decode every TPI record, its field lists and its forward references.
 fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Report) -> Outcome {
-    let hashes = hash_bytes
+    let parsed = hash_bytes
         .map(|bytes| TypeHashes::parse(tpi.header(), bytes))
-        .transpose()?;
+        .transpose();
+    let hashes = report.supported(parsed, "TPI hash stream")?.flatten();
     if let Some(hashes) = &hashes {
-        hashes.verify(tpi)?;
+        report.supported(hashes.verify(tpi), "TPI hash values")?;
     }
     let table = TypeTable::new(tpi)?;
-    let forward = ForwardRefs::new(&table, hashes.as_ref())?;
+    let forward = report.supported(
+        ForwardRefs::new(&table, hashes.as_ref()),
+        "TPI forward-reference index",
+    )?;
     let base = u64::try_from(HEADER_SIZE)?;
     let (mut resolved, mut unresolved) = (0, 0);
     for record in tpi.records() {
         let record = record?;
+        report.add("TPI records", 1);
         let location =
             |error: pdbrs::Error| error.with_stream(2, base + u64::from(record.record.offset));
-        let leaf = TypeLeaf::decode(record.record).map_err(location)?;
+        let decoded = TypeLeaf::decode(record.record).map_err(location);
+        let what = format!("TPI leaf {:#06x}", record.record.kind);
+        let Some(leaf) = report.supported(decoded, &what)? else {
+            continue;
+        };
         match &leaf {
             TypeLeaf::Unsupported(raw) => {
                 report.undecoded(format!("TPI leaf {:#06x}", raw.kind));
             }
             TypeLeaf::FieldList(_) => {
                 for member in table.members(TypeIndex(record.index)).map_err(location)? {
-                    member.map_err(location)?;
+                    if report
+                        .supported(member.map_err(location), "field-list member")?
+                        .is_none()
+                    {
+                        break;
+                    }
                     report.add("field-list members", 1);
                 }
             }
@@ -272,16 +306,15 @@ fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Report) -> Ou
             }
             _ => {}
         }
-        if leaf
+        let forward_reference = leaf
             .tag()
-            .is_some_and(|tag| tag.options.is_forward_reference())
-        {
+            .is_some_and(|tag| tag.options.is_forward_reference());
+        if let (true, Some(forward)) = (forward_reference, &forward) {
             match forward.resolve(TypeIndex(record.index))? {
                 Some(_) => resolved += 1,
                 None => unresolved += 1,
             }
         }
-        report.add("TPI records", 1);
     }
     report.add("forward references resolved", resolved);
     report.add("forward references without definition", unresolved);
@@ -296,15 +329,25 @@ fn identifiers<'a>(
     names: &StringTable<'_>,
     report: &mut Report,
 ) -> Outcome<IdTable<'a>> {
-    if let Some(bytes) = hash_bytes {
-        TypeHashes::parse(ipi.header(), bytes)?.verify(ipi)?;
+    if let Some(bytes) = hash_bytes
+        && let Some(hashes) =
+            report.supported(TypeHashes::parse(ipi.header(), bytes), "IPI hash stream")?
+    {
+        report.supported(hashes.verify(ipi), "IPI hash values")?;
     }
     let ids = IdTable::new(ipi)?;
-    ids.validate(TypeIndex(tpi.header().index_end))?;
+    report.supported(
+        ids.validate(TypeIndex(tpi.header().index_end)),
+        "IPI references",
+    )?;
     let mut text = Vec::new();
     for record in ipi.records() {
         let id = IdIndex(record?.index);
-        match ids.decode(id)? {
+        report.add("IPI records", 1);
+        let Some(decoded) = report.supported(ids.decode(id), "IPI record")? else {
+            continue;
+        };
+        match decoded {
             IdRecord::Unsupported(raw) => {
                 report.undecoded(format!("IPI leaf {:#06x}", raw.kind));
             }
@@ -317,7 +360,6 @@ fn identifiers<'a>(
             }
             _ => {}
         }
-        report.add("IPI records", 1);
     }
     Ok(ids)
 }
@@ -376,11 +418,14 @@ fn debug_info_tables(
             }
         }
     }
-    if let Some(ec) = dbi.ec_names()? {
-        ec.verify_buckets()?;
+    if let Some(ec) = dbi.ec_names()?
+        && report
+            .supported(ec.verify_buckets(), "EC name hashing")?
+            .is_some()
+    {
         report.add("EC names", ec.entries().count());
     }
-    dbi.verify_type_server_map()?;
+    report.supported(dbi.verify_type_server_map(), "DBI type server map")?;
     Ok(module_count)
 }
 
@@ -400,6 +445,10 @@ fn translate(
         // Section 0 and the absolute segment after the last section have no RVA.
         Err(_) if section == 0 || usize::from(section) > map.sections().len() => {
             report.add("addresses without an RVA", 1);
+        }
+        // OMAP translation is not implemented.
+        Err(error) if error.kind() == ErrorKind::UnsupportedVersion => {
+            report.add("addresses not translated (OMAP)", 1);
         }
         Err(error) => return Err(error.into()),
     }
@@ -429,14 +478,23 @@ fn check_symbol(symbol: &Symbol<'_>, context: &Context<'_>, report: &mut Report)
     Ok(())
 }
 
+/// The module procedures that procedure references can name.
+#[derive(Default)]
+struct Procedures {
+    /// The module index and module-stream offset of each decoded procedure.
+    offsets: HashSet<(u16, u32)>,
+    /// Modules whose symbol walk stopped at a scope that is not decoded.
+    incomplete: HashSet<u16>,
+}
+
 /// Decode every module stream and return the procedure offsets per module.
 fn modules(
     pdb: &Pdb<FileReader>,
     dbi: &Dbi,
     context: &Context<'_>,
     report: &mut Report,
-) -> Outcome<HashSet<(u16, u32)>> {
-    let mut procedures = HashSet::new();
+) -> Outcome<Procedures> {
+    let mut procedures = Procedures::default();
     for (index, module) in dbi.modules().enumerate() {
         let module = module?;
         let index = u16::try_from(index)?;
@@ -444,14 +502,19 @@ fn modules(
             continue;
         };
         report.claim(stream.stream());
-        let lines = ModuleLines::parse(&stream)?;
-        lines.validate()?;
-        let checksums = lines.checksums();
+        let lines = report.supported(ModuleLines::parse(&stream), "C13 line data")?;
+        if let Some(lines) = &lines {
+            lines.validate()?;
+        }
+        let checksums = lines.as_ref().and_then(ModuleLines::checksums);
         let base = u32::try_from(stream.symbol_offset())?;
         let symbols =
             ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
         for scoped in symbols {
-            let scoped = scoped?;
+            let Some(scoped) = report.supported(scoped, "module symbol scope")? else {
+                procedures.incomplete.insert(index);
+                break;
+            };
             let symbol = scoped.symbol;
             check_symbol(&symbol, context, report)?;
             match symbol.data() {
@@ -459,7 +522,7 @@ fn modules(
                     report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
                 }
                 SymbolData::Procedure(_) => {
-                    procedures.insert((index, scoped.offset));
+                    procedures.offsets.insert((index, scoped.offset));
                 }
                 SymbolData::InlineSite(site) => {
                     for annotation in &site.annotations {
@@ -474,7 +537,9 @@ fn modules(
             }
             report.add("module symbols", 1);
         }
-        module_lines(&lines, context, report)?;
+        if let Some(lines) = &lines {
+            module_lines(lines, context, report)?;
+        }
     }
     Ok(procedures)
 }
@@ -535,7 +600,7 @@ fn shared_symbols(
     pdb: &Pdb<FileReader>,
     dbi: &Dbi,
     context: &Context<'_>,
-    procedures: &HashSet<(u16, u32)>,
+    procedures: &Procedures,
     report: &mut Report,
 ) -> Outcome {
     let Some(id) = dbi.header().symbol_stream else {
@@ -555,7 +620,9 @@ fn shared_symbols(
                 .module_index()
                 .filter(|&module| usize::from(module) < context.module_count)
                 .ok_or("procedure reference names a missing module")?;
-            if !procedures.contains(&(module, reference.offset)) {
+            if procedures.incomplete.contains(&module) {
+                report.add("procedure references into partly decoded modules", 1);
+            } else if !procedures.offsets.contains(&(module, reference.offset)) {
                 return Err("procedure reference does not name a module procedure".into());
             }
         }
@@ -565,19 +632,21 @@ fn shared_symbols(
         report.add("shared symbols", 1);
     }
     let mut indexed = HashSet::new();
-    if let Some(globals) = pdb.global_symbols(dbi)? {
+    let globals = report.supported(pdb.global_symbols(dbi), "global symbol index")?;
+    if let Some(globals) = globals.flatten() {
         report.claim(dbi.header().global_stream.ok_or("missing global stream")?);
         globals.hash_table().check_records(&offsets)?;
         check_lookup("global", globals.hash_table(), &bytes, &mut indexed, report)?;
         report.add("global index records", globals.hash_table().len());
     }
-    if let Some(publics) = pdb.public_symbols(dbi)? {
+    let publics = report.supported(pdb.public_symbols(dbi), "public symbol index")?;
+    if let Some(publics) = publics.flatten() {
         report.claim(dbi.header().public_stream.ok_or("missing public stream")?);
         publics.check_records(&offsets)?;
         publics.check_address_order(|offset| {
             let symbol = offset.record(&bytes)?.symbol()?;
             let address = symbol.address().ok_or_else(|| {
-                pdbrs::Error::new(pdbrs::ErrorKind::InvalidReference, None)
+                pdbrs::Error::new(ErrorKind::InvalidReference, None)
                     .with_context("public address map names a symbol without an address")
             })?;
             Ok((address.section, address.offset))
@@ -595,7 +664,9 @@ fn shared_symbols(
 /// Make sure that name lookup finds every record of a symbol hash table.
 ///
 /// A record outside the bucket of its name is a producer defect: lookup by
-/// name cannot find it. The example reports it and continues.
+/// name cannot find it. The example reports it and continues. A record of a
+/// kind without a decoder has no known name; the shared symbol pass already
+/// counts it as undecoded.
 fn check_lookup(
     label: &str,
     table: HashTable<'_>,
@@ -604,8 +675,14 @@ fn check_lookup(
     report: &mut Report,
 ) -> Outcome {
     for entry in table.records() {
+        indexed.insert(entry.symbol.0);
         let symbol = entry.symbol.record(bytes)?.symbol()?;
-        let name = symbol.name().ok_or("indexed symbol has no name")?;
+        let Some(name) = symbol.name() else {
+            if matches!(symbol.data(), SymbolData::Unsupported(_)) {
+                continue;
+            }
+            return Err("indexed symbol has no name".into());
+        };
         if !table
             .lookup(name)
             .any(|candidate| candidate.symbol == entry.symbol)
@@ -616,7 +693,6 @@ fn check_lookup(
                 String::from_utf8_lossy(name)
             ));
         }
-        indexed.insert(entry.symbol.0);
     }
     Ok(())
 }
@@ -625,7 +701,7 @@ fn check_lookup(
 fn unclaimed_streams(pdb: &Pdb<FileReader>, report: &mut Report) -> Outcome {
     for index in 0..pdb.msf().stream_count() {
         if pdb.msf().stream(StreamId(index))?.is_some() && !report.claimed.contains(&index) {
-            report.undecoded(format!("stream {index}"));
+            report.undecoded("stream without a known role".to_owned());
         }
     }
     report.add("streams read", report.claimed.len());
@@ -636,9 +712,10 @@ fn print(report: &Report) {
     for (name, count) in &report.counts {
         println!("{name}: {count}");
     }
-    println!("undecoded items: {}", report.undecoded.len());
-    for item in &report.undecoded {
-        println!("  {item}");
+    let undecoded: usize = report.undecoded.values().sum();
+    println!("undecoded items: {undecoded}");
+    for (item, count) in &report.undecoded {
+        println!("  {count} x {item}");
     }
     println!("inconsistencies: {}", report.inconsistencies.len());
     for item in &report.inconsistencies {

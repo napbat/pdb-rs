@@ -82,7 +82,7 @@ fn entry_offset(index: usize, offset: usize) -> usize {
 #[test]
 fn decodes_the_header_and_verifies_each_source() {
     let bytes = sample();
-    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
     let header = block.header();
     assert_eq!(header.size, 260);
     assert_eq!(header.file_time, 0x01dd_64e6_eab4_4902);
@@ -108,7 +108,7 @@ fn decodes_the_header_and_verifies_each_source() {
 #[test]
 fn content_checks_reject_other_sizes_crcs_and_compression() {
     let bytes = sample();
-    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
     let source = block.entries()[1].value;
     for content in [
         &b"<AutoVisualizer/"[..],
@@ -122,7 +122,7 @@ fn content_checks_reject_other_sizes_crcs_and_compression() {
     }
     let mut bytes = sample();
     bytes[entry_offset(1, 28)] = 3;
-    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
     let source = block.entries()[1].value;
     assert_eq!(source.compression, SourceCompression::Lz);
     let error = source
@@ -149,7 +149,7 @@ fn compression_bytes_map_to_the_known_algorithms() {
 fn virtual_flag_is_decoded_and_reserved_flag_bits_are_rejected() {
     let mut bytes = sample();
     bytes[entry_offset(0, 29)] = 1;
-    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
     assert!(block.entries()[0].value.is_virtual);
 
     bytes[entry_offset(0, 29)] = 2;
@@ -183,6 +183,12 @@ fn header_rules_are_enforced() {
 
     let error = SourceHeaderBlock::parse(&sample()[..63], STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+}
+
+#[test]
+fn empty_stream_has_no_injected_sources() {
+    // MSVC link.exe writes an empty `/src/headerblock` stream without injected sources.
+    assert!(SourceHeaderBlock::parse(&[], STREAM).unwrap().is_none());
 }
 
 #[test]
@@ -226,7 +232,11 @@ fn keys_hash_as_sixteen_bit_values() {
     // 0x1_0001 truncates to 1, so its home bucket is 1, not 65537 % 6 = 5.
     let key = 0x1_0001;
     let entries = [(1, key, entry(b"", key))];
-    SourceHeaderBlock::parse(&block(6, &entries), STREAM).unwrap();
+    assert!(
+        SourceHeaderBlock::parse(&block(6, &entries), STREAM)
+            .unwrap()
+            .is_some()
+    );
     let entries = [(5, key, entry(b"", key))];
     assert!(SourceHeaderBlock::parse(&block(6, &entries), STREAM).is_err());
 }

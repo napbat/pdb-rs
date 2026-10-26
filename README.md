@@ -1,0 +1,126 @@
+# pdbrs
+
+pdbrs is a Rust library for Program Database (PDB) files. It reads native Windows PDB files
+(MSF 7.0) and identifies Portable .NET PDB files. The library supports `std` and `no_std + alloc`.
+
+## Status
+
+| Area | Status |
+| --- | --- |
+| Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers can use record kinds that pdbrs keeps raw. |
+| Native PDB writing and editing | Not implemented. |
+| Portable PDB | Signature identification only. Parsing is not implemented. |
+| Legacy native PDB (Small MSF 2.00) | Signature identification only. |
+
+[NATIVE-0001](docs/issues/0001-native-pdb-support.md) and GitHub issue
+[#1](https://github.com/napbat/pdbrs/issues/1) track the remaining work.
+The [design](docs/design/pdb.md) lists each implemented area and its limits.
+
+## Use
+
+Add the library from this repository:
+
+```toml
+[dependencies]
+pdbrs = { git = "https://github.com/napbat/pdbrs" }
+```
+
+Read the identity, the type records and the module symbols of a PDB:
+
+```rust
+use pdbrs::native::Pdb;
+use pdbrs::native::codeview::symbol::ModuleSymbols;
+use pdbrs::native::codeview::type_record::TypeLeaf;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pdb = Pdb::open("app.pdb")?;
+    println!("identity: {:?}", pdb.info().identity());
+
+    if let Some(types) = pdb.types()? {
+        for record in types.records() {
+            let record = record?;
+            if let Some(tag) = TypeLeaf::decode(record.record)?.tag() {
+                println!("{:#x}: {}", record.index, String::from_utf8_lossy(tag.name));
+            }
+        }
+    }
+
+    if let Some(dbi) = pdb.debug_info()? {
+        for module in dbi.modules() {
+            let Some(stream) = pdb.module_stream(&module?)? else { continue };
+            let base = u32::try_from(stream.symbol_offset())?;
+            for symbol in ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, 256) {
+                if let Some(name) = symbol?.symbol.name() {
+                    println!("{}", String::from_utf8_lossy(name));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+The library keeps names as bytes. It does not decode text or demangle names.
+Record kinds without a decoder stay available as raw bytes.
+
+## Features
+
+- `std` (default): file access through `Pdb::open` and standard I/O error integration.
+- Without default features, the library uses `no_std + alloc`. Use `Pdb::parse` for a byte
+  slice, or `Pdb::read` with a `ReadAt` source such as `io::SeekReader`.
+
+## Examples
+
+```sh
+# Read every stream and record of a native PDB and report undecoded data.
+cargo run -p pdbrs --example native -- path/to/file.pdb
+
+# Identify a container signature.
+cargo run -p pdbrs --example inspect -- path/to/file
+
+# Exercise sequential and positional I/O, also without the standard library.
+cargo run -p pdbrs --example streams --no-default-features
+```
+
+The `native` example fails if a record kind, a subsection kind or a stream has no typed decoder.
+It also reports producer defects that do not stop reading.
+
+## Test fixtures
+
+[fixtures/](fixtures/README.md) holds demo programs in C, C++, Rust, C#, Visual Basic and F#.
+The `pdbrs-fixtures` tool builds them with MSVC, Clang/LLD, Rust and .NET and writes PDBs
+and a provenance manifest to `target/fixtures/`:
+
+```sh
+cargo run -p pdbrs-fixtures
+```
+
+The tool finds MSVC and Clang through the Visual Studio installation. Generated files are not
+committed. Automated tests do not read them; they use synthetic data.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `crates/pdbrs/` | The library, its examples and its integration tests. |
+| `crates/pdbrs-fixtures/` | The fixture generator. |
+| `fixtures/` | Demo program sources for the fixtures. |
+| `docs/design/` | The reader and writer design and the implementation evidence. |
+| `docs/issues/` | Repository copies of tracking issues. |
+| `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
+
+## Development
+
+Read [AGENTS.md](AGENTS.md) before you change the repository. Run these checks:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+cargo doc --workspace --no-deps
+cargo doc --workspace --no-deps --no-default-features
+cargo test --workspace
+cargo test --workspace --no-default-features
+```
+
+The repository stores text files with LF line endings (`.gitattributes`).

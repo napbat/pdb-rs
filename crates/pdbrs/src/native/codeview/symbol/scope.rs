@@ -20,8 +20,11 @@ use crate::{Error, ErrorKind, Result};
 /// Kinds that start a scope but that this crate does not decode.
 ///
 /// The list comes from `symbolOpensScope` and `getScopeEndOffset` in LLVM:
-/// `S_SEPCODE`, `S_LPROC32_DPC`, `S_LPROC32_DPC_ID` and `S_INLINESITE2`.
-const UNDECODED_SCOPE_KINDS: [u16; 4] = [0x1132, 0x1155, 0x1156, 0x115d];
+/// `S_SEPCODE`, `S_LPROC32_DPC`, `S_LPROC32_DPC_ID` and `S_INLINESITE2`. It
+/// adds the managed procedures `S_GMANPROC` and `S_LMANPROC`
+/// (`MANPROCSYM` in `cvinfo.h` has parent and end links). Roslyn writes them
+/// in Windows PDBs of .NET assemblies.
+const UNDECODED_SCOPE_KINDS: [u16; 6] = [0x1132, 0x1155, 0x1156, 0x115d, 0x112a, 0x112b];
 
 /// A symbol with its place in the scope tree.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

@@ -216,6 +216,9 @@ pub struct SourceHeaderBlock<'a> {
 impl<'a> SourceHeaderBlock<'a> {
     /// Decode the `/src/headerblock` stream `stream`.
     ///
+    /// Returns `Ok(None)` for an empty stream. MSVC `link.exe` writes an empty stream when
+    /// the PDB has no injected sources.
+    ///
     /// # Errors
     ///
     /// Errors have the stream ID and a logical offset, and no physical offset.
@@ -224,9 +227,12 @@ impl<'a> SourceHeaderBlock<'a> {
     /// - [`ErrorKind::InvalidFormat`] if the header size differs from the stream size, the
     ///   padding is not zero, a table rule fails, a key differs from the virtual file name
     ///   offset of its entry, an entry is not in its probe sequence or bytes follow the table.
-    /// - [`ErrorKind::UnexpectedEof`] if the stream ends early.
+    /// - [`ErrorKind::UnexpectedEof`] if a non-empty stream ends early.
     /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
-    pub fn parse(bytes: &'a [u8], stream: StreamId) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8], stream: StreamId) -> Result<Option<Self>> {
+        if bytes.is_empty() {
+            return Ok(None);
+        }
         let mut cursor = Cursor::new(bytes, stream, "injected source header");
         let version = cursor.u32()?;
         if version != SOURCE_VERSION_ONE {
@@ -269,14 +275,14 @@ impl<'a> SourceHeaderBlock<'a> {
             ));
         }
         table.check_placement(|entry| Ok(entry.key & 0xffff))?;
-        Ok(Self {
+        Ok(Some(Self {
             header: SourceBlockHeader {
                 size,
                 file_time,
                 age,
             },
             table,
-        })
+        }))
     }
 
     /// Return the header.
