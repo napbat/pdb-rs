@@ -2,7 +2,8 @@
 
 use alloc::vec::Vec;
 
-use super::dbi::{Dbi, Module, ModuleStream};
+use super::dbi::{Dbi, DebugStream, Module, ModuleStream};
+use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
 use super::msf::{Msf, MsfLimits, Stream, StreamId};
 use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
@@ -152,6 +153,28 @@ impl<S: ReadAt> Pdb<S> {
             .map(|id| {
                 PublicSymbolIndex::parse(self.stream_bytes(id)?, id, self.symbol_bucket_count())
             })
+            .transpose()
+    }
+
+    /// Load the FPO stream that the [`DebugStream::Fpo`] slot of `dbi` names, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`FpoStream::parse`].
+    pub fn fpo(&self, dbi: &Dbi) -> Result<Option<FpoStream>> {
+        dbi.debug_stream(DebugStream::Fpo)
+            .map(|id| FpoStream::parse(self.stream_bytes(id)?, id))
+            .transpose()
+    }
+
+    /// Load the new FPO stream that the [`DebugStream::NewFpo`] slot of `dbi` names, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`] and [`FrameDataStream::parse`].
+    pub fn frame_data(&self, dbi: &Dbi) -> Result<Option<FrameDataStream>> {
+        dbi.debug_stream(DebugStream::NewFpo)
+            .map(|id| FrameDataStream::parse(self.stream_bytes(id)?, id))
             .transpose()
     }
 

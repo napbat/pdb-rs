@@ -1,9 +1,11 @@
-//! Behavior tests for the `/LinkInfo`, `/TMCache` and `/UDTSRCLINEUNDONE` streams.
+//! Behavior tests for the `/LinkInfo` and `/UDTSRCLINEUNDONE` streams and named-stream kinds.
+//!
+//! `tests/tm_cache.rs` tests the `/TMCache` stream.
 
 use pdbrs::ErrorKind;
 use pdbrs::native::auxiliary::{
     LINK_INFO_STREAM_NAME, LINK_INFO_VERSION_TWO, LinkInfo, NamedStreamKind, TM_CACHE_STREAM_NAME,
-    TmCache, UDT_SOURCE_LINE_UNDONE_STREAM_NAME, UdtSourceLineUndone,
+    UDT_SOURCE_LINE_UNDONE_STREAM_NAME, UdtSourceLineUndone,
 };
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::msf::StreamId;
@@ -96,14 +98,6 @@ fn link_info_layout_rules_are_enforced() {
 
     let error = LinkInfo::parse(&base[..20], STREAM).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
-}
-
-#[test]
-fn tm_cache_accepts_only_an_empty_stream() {
-    assert_eq!(TmCache::parse(&[], StreamId(6)).unwrap(), TmCache::Empty);
-    let error = TmCache::parse(&[0x29, 0x02, 0x20, 0x20], StreamId(6)).unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
-    assert_eq!(error.stream_location(), Some((6, 0)));
 }
 
 #[test]
