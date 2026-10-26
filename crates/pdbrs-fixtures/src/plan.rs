@@ -29,6 +29,9 @@ pub struct Plan {
     pub tools: Vec<(String, String)>,
     /// Directories to make before the first step.
     pub directories: Vec<PathBuf>,
+    /// Generated files to write after the directories and before the first step: the path and
+    /// the contents.
+    pub files: Vec<(PathBuf, String)>,
     /// The steps, in order.
     pub steps: Vec<Step>,
     /// The outputs.

@@ -12,6 +12,8 @@ use crate::tools::file_version::file_version;
 const DLL_SOURCE: &str = "dll/exports.cpp";
 /// The source of the C++/CLI variant.
 const CLR_SOURCE: &str = "clr/managed.cpp";
+/// The source of the annotation variant.
+const ANNOTATION_SOURCE: &str = "annotation/annotation.cpp";
 
 /// Plan the demo, then add a `srcsrv` stream to a copy of its PDB with `pdbstr`.
 ///
@@ -147,17 +149,26 @@ pub fn clr(build: &Build<'_>, plan: &mut Plan) -> Result<(), String> {
             build.label
         ));
     }
-    plan.steps
-        .push(build.compile("/std:c++20", &[], &[CLR_SOURCE]));
+    single_source(build, plan, CLR_SOURCE);
+    Ok(())
+}
+
+/// Plan the program `demo.exe` from `annotation/annotation.cpp`.
+pub fn annotation(build: &Build<'_>, plan: &mut Plan) {
+    single_source(build, plan, ANNOTATION_SOURCE);
+}
+
+/// Compile one C++ source below `fixtures/native` and link `demo.exe` and `demo.pdb`.
+fn single_source(build: &Build<'_>, plan: &mut Plan, source: &str) {
+    plan.steps.push(build.compile("/std:c++20", &[], &[source]));
     plan.steps.push(build.link(
         &[],
         &build.fixture.join("demo.exe"),
         &build.fixture.join("demo.pdb"),
-        &[build.object(CLR_SOURCE)],
+        &[build.object(source)],
     ));
     plan.outputs = vec![
         build.output("demo.exe", Kind::Image),
         build.output("demo.pdb", Kind::NativePdb),
     ];
-    Ok(())
 }

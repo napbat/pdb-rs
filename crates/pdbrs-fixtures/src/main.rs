@@ -220,7 +220,8 @@ fn build_fixture(
     record
 }
 
-/// Make a clean fixture directory and run each step. The steps write to `build.log`.
+/// Make a clean fixture directory, write the generated files and run each step. The steps write
+/// to `build.log`.
 fn run(plan: &Plan, directory: &Path) -> Result<(), StepError> {
     let failed = |action: &str, path: &Path, error: std::io::Error| {
         StepError::Failed(format!("cannot {action} {}: {error}", path.display()))
@@ -230,6 +231,9 @@ fn run(plan: &Plan, directory: &Path) -> Result<(), StepError> {
     }
     for path in std::iter::once(directory).chain(plan.directories.iter().map(PathBuf::as_path)) {
         fs::create_dir_all(path).map_err(|error| failed("make", path, error))?;
+    }
+    for (path, contents) in &plan.files {
+        fs::write(path, contents).map_err(|error| failed("write", path, error))?;
     }
     let log_path = directory.join("build.log");
     let mut log = File::create(&log_path).map_err(|error| failed("make", &log_path, error))?;
