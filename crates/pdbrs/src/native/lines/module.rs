@@ -105,11 +105,33 @@ impl<'a> ModuleLines<'a> {
         }
     }
 
+    /// Append the C13 line region to `out`: each subsection with its header
+    /// and padding, in stream order.
+    ///
+    /// The function encodes the decoded values again with
+    /// [`LineSubsection::encode_framed`]. For canonical input the output is
+    /// equal to [`ModuleStream::c13_data`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`LineSubsection::encode_framed`]. The errors
+    /// identify the module stream and the header of the subsection.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        for subsection in &self.subsections {
+            subsection
+                .data
+                .encode_framed(out)
+                .map_err(|error| self.locate(error, subsection.offset))?;
+        }
+        Ok(())
+    }
+
     /// Make sure that each file reference identifies a file checksum entry.
     ///
-    /// The function checks the file of each line block, and the file and the
-    /// extra files of each inlinee entry. A reference must be the offset of
-    /// an entry start, not an offset inside an entry.
+    /// The function checks the file of each block of the line and IL line
+    /// subsections, and the file and the extra files of each inlinee entry.
+    /// A reference must be the offset of an entry start, not an offset
+    /// inside an entry.
     ///
     /// # Errors
     ///
@@ -132,7 +154,7 @@ impl<'a> ModuleLines<'a> {
         };
         for subsection in &self.subsections {
             match &subsection.data {
-                LineSubsection::Lines(lines) => {
+                LineSubsection::Lines(lines) | LineSubsection::IlLines(lines) => {
                     for block in lines.blocks() {
                         check(block.checksum_offset, subsection)?;
                     }
