@@ -93,8 +93,13 @@ pub(crate) fn walk_symbol(symbol: &Symbol<'_>) {
         SymbolData::InlineSite(site) => {
             let _ = site.annotations.iter().take(MAX_RECORDS).count();
         }
-        SymbolData::Inlinees(list) | SymbolData::Callees(list) => {
+        SymbolData::Inlinees(list) => {
             assert_eq!(list.iter().count(), list.len());
+        }
+        SymbolData::Callees(list) => {
+            let functions = list.functions();
+            assert_eq!(functions.iter().count(), functions.len());
+            let _ = list.invocations().count();
         }
         SymbolData::EnvironmentBlock(block) => {
             let _ = block.strings.iter().take(MAX_RECORDS).count();

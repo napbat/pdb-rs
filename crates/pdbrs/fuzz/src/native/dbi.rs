@@ -89,7 +89,7 @@ pub(crate) fn walk_dbi(dbi: &Dbi, headers: Option<&[u8]>) {
     if let Some(Some(names)) = ok(dbi.ec_names()) {
         super::info::walk_names(&names);
     }
-    let _ = dbi.verify_type_server_map();
+    let _ = dbi.type_server_map();
     let _ = module_count;
 }
 
@@ -99,7 +99,7 @@ fn translate(addresses: Option<&AddressMap<'_>>, section: u16, offset: u32) {
         return;
     };
     let address = SectionOffset { section, offset };
-    if let Some(rva) = ok(map.rva(address)) {
+    if let Some(rva) = ok(map.rva(address)).and_then(pdbrs::native::address::Translation::mapped) {
         let _ = map.section_offset(rva);
     }
     let _ = map.section_offset(Rva(offset));

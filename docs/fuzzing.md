@@ -43,7 +43,8 @@ to the same value. It does not check that other readers accept the output.
 The MSFZ targets come with #20.
 
 The record encoders of the native streams (#29 to #32) were not on `main` when this work
-started. Add a round-trip target for each of them when they merge:
+started (8b77fb2). Most of them merged during the runs. Add a round-trip target for each of
+them:
 
 - TPI and IPI record encoders, numeric leaves, and the TPI, IPI and hash stream writers (#29).
 - Symbol record encoders and the GSI and PSI writers (#30).
@@ -150,6 +151,9 @@ runs without a finding. `cov` and `corpus` are from the last run of the target.
 | `portable_rebuild` | 901 | 73,989 | 8179 | 1428 | 587 |
 
 No run reported a sanitizer error, a timeout or memory use above the limit.
+
+After the merge of `main` 1f8fd09 into `fuzzing`, each target ran once over its whole corpus
+(`-runs=0`) without a finding. These replays are not new fuzzing time.
 
 ## Findings
 
