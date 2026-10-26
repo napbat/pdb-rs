@@ -13,10 +13,9 @@ use core::iter::FusedIterator;
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::numeric::Integer;
+use super::super::numeric::Numeric;
 use super::super::writer::FieldWriter;
 use super::SectionOffset;
-use super::leaf::{read_integer, write_integer};
 use crate::{Error, ErrorKind, Result};
 
 flags! {
@@ -582,13 +581,8 @@ impl<'a> Data<'a> {
 pub struct Constant<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
-    /// The value. Only integer numeric leaves are supported.
-    pub value: Integer,
-    /// The numeric leaf as the record stores it, with its tag.
-    ///
-    /// The encoder writes these bytes if they hold [`Constant::value`].
-    /// Otherwise it writes the shortest leaf for the value.
-    pub value_bytes: &'a [u8],
+    /// The value: a numeric leaf with its exact encoding.
+    pub value: Numeric<'a>,
     /// The name.
     pub name: &'a [u8],
 }
@@ -597,12 +591,11 @@ impl<'a> Constant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
-        let (value, value_bytes) = read_integer(fields)?;
+        let value = fields.numeric()?;
         let name = fields.name()?;
         Ok(Self {
             type_index,
             value,
-            value_bytes,
             name,
         })
     }
@@ -610,7 +603,7 @@ impl<'a> Constant<'a> {
     /// Write the fields.
     pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
-        write_integer(out, self.value, self.value_bytes)?;
+        self.value.encode(out.out())?;
         out.name(self.name)
     }
 }

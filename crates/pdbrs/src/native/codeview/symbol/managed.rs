@@ -85,9 +85,8 @@ pub use custom_debug_info::{
 
 use super::super::Fields;
 use super::super::index::TypeIndex;
-use super::super::numeric::Integer;
+use super::super::numeric::Numeric;
 use super::super::writer::FieldWriter;
-use super::leaf::write_integer;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
 use crate::{Error, ErrorKind, Result};
 
@@ -114,9 +113,6 @@ pub const S_MANCONSTANT: u16 = 0x112d;
 pub const MANAGED_ATTRIBUTE_OEM_ID: [u8; 16] = [
     0xc9, 0x3f, 0xea, 0xc6, 0xb3, 0x59, 0xd6, 0x49, 0xbc, 0x25, 0x09, 0x02, 0xbb, 0xab, 0xb4, 0x60,
 ];
-
-/// The numeric leaf of a counted byte string (`LF_VARSTRING`).
-const LF_VARSTRING: u16 = 0x8010;
 
 /// A managed procedure start record (`S_GMANPROC` and `S_LMANPROC`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -237,97 +233,6 @@ impl<'a> ManagedSlot<'a> {
     }
 }
 
-/// The value of a managed constant.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum ManagedConstantValue<'a> {
-    /// An immediate value or an integer leaf.
-    Integer(Integer),
-    /// An `LF_VARSTRING` leaf: the counted bytes of a string. The bytes are
-    /// not decoded as text.
-    String(&'a [u8]),
-    /// A fixed-size leaf that is not an integer: a real, a complex value,
-    /// `LF_DECIMAL` or `LF_DATE`. The bytes are the raw value after the leaf.
-    Fixed {
-        /// The leaf, for example `0x8006` (`LF_REAL64`).
-        leaf: u16,
-        /// The value bytes.
-        bytes: &'a [u8],
-    },
-}
-
-impl<'a> ManagedConstantValue<'a> {
-    /// Read a numeric leaf.
-    fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let leaf = fields
-            .rest()
-            .first_chunk::<2>()
-            .map(|bytes| u16::from_le_bytes(*bytes));
-        if leaf == Some(LF_VARSTRING) {
-            fields.u16()?;
-            let length = fields.u16()?;
-            return Ok(Self::String(fields.bytes(usize::from(length))?));
-        }
-        if let Some((leaf, size)) = leaf.and_then(|leaf| Some((leaf, fixed_leaf_size(leaf)?))) {
-            fields.u16()?;
-            return Ok(Self::Fixed {
-                leaf,
-                bytes: fields.bytes(size)?,
-            });
-        }
-        Ok(Self::Integer(fields.integer()?))
-    }
-
-    /// Write the leaf. `stored` is the stored form of an integer value.
-    fn write(&self, out: &mut FieldWriter<'_>, stored: &[u8]) -> Result<()> {
-        match *self {
-            Self::Integer(value) => write_integer(out, value, stored),
-            Self::String(bytes) => {
-                let length = u16::try_from(bytes.len()).map_err(|_| {
-                    Error::new(ErrorKind::LimitExceeded, None)
-                        .with_context("LF_VARSTRING value is longer than 65535 bytes")
-                })?;
-                out.u16(LF_VARSTRING)?;
-                out.u16(length)?;
-                out.bytes(bytes)
-            }
-            Self::Fixed { leaf, bytes } => {
-                if fixed_leaf_size(leaf) != Some(bytes.len()) {
-                    return Err(invalid("managed constant leaf and value size do not match"));
-                }
-                out.u16(leaf)?;
-                out.bytes(bytes)
-            }
-        }
-    }
-}
-
-/// Return the value size of a fixed-size numeric leaf that is not an integer.
-///
-/// The sizes come from the `lfReal*`, `lfCmplx*`, `lfDecimal` and `lfDate`
-/// structures in `cvinfo.h`.
-const fn fixed_leaf_size(leaf: u16) -> Option<usize> {
-    Some(match leaf {
-        // LF_REAL16
-        0x801c => 2,
-        // LF_REAL32
-        0x8005 => 4,
-        // LF_REAL48
-        0x800b => 6,
-        // LF_REAL64, LF_COMPLEX32 and LF_DATE
-        0x8006 | 0x800c | 0x801a => 8,
-        // LF_REAL80
-        0x8007 => 10,
-        // LF_REAL128, LF_COMPLEX64 and LF_DECIMAL
-        0x8008 | 0x800d | 0x8019 => 16,
-        // LF_COMPLEX80
-        0x800e => 20,
-        // LF_COMPLEX128
-        0x800f => 32,
-        _ => return None,
-    })
-}
-
 /// A managed constant record (`S_MANCONSTANT`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -335,13 +240,9 @@ pub struct ManagedConstant<'a> {
     /// A type index or a metadata token. Roslyn writes the token of the
     /// constant signature (`StandAloneSig`, table `0x11`).
     pub type_or_token: u32,
-    /// The value.
-    pub value: ManagedConstantValue<'a>,
-    /// The numeric leaf as the record stores it, with its tag.
-    ///
-    /// For an integer value, the encoder writes these bytes if they hold the
-    /// value. Otherwise it writes the shortest leaf for the value.
-    pub value_bytes: &'a [u8],
+    /// The value: a numeric leaf with its exact encoding. Roslyn writes
+    /// integers, `LF_VARSTRING` strings and real, decimal and date leaves.
+    pub value: Numeric<'a>,
     /// The name.
     pub name: &'a [u8],
 }
@@ -350,14 +251,11 @@ impl<'a> ManagedConstant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_or_token = fields.u32()?;
-        let before = fields.rest();
-        let value = ManagedConstantValue::read(fields)?;
-        let value_bytes = &before[..before.len() - fields.rest().len()];
+        let value = fields.numeric()?;
         let name = fields.name()?;
         Ok(Self {
             type_or_token,
             value,
-            value_bytes,
             name,
         })
     }
@@ -365,7 +263,7 @@ impl<'a> ManagedConstant<'a> {
     /// Write the fields.
     pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
         out.u32(self.type_or_token)?;
-        self.value.write(out, self.value_bytes)?;
+        self.value.encode(out.out())?;
         out.name(self.name)
     }
 }

@@ -78,7 +78,6 @@ mod encode;
 mod frame;
 mod global;
 mod hlsl;
-mod leaf;
 mod link;
 mod linker;
 mod managed;
@@ -132,10 +131,10 @@ pub use managed::{
     AttributeValue, CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData,
     CustomDebugInfoKind, CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal,
     DynamicLocalIter, DynamicLocals, HoistedLocalScope, HoistedLocalScopes,
-    MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant, ManagedConstantValue,
-    ManagedProcedure, ManagedSlot, Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM,
-    S_TOKENREF, SymbolAttribute, TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter,
-    UsingGroups, Utf8NameIter, Utf8Names,
+    MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant, ManagedProcedure, ManagedSlot, Oem,
+    S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_TOKENREF, SymbolAttribute,
+    TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter, UsingGroups, Utf8NameIter,
+    Utf8Names,
 };
 pub use procedure::{
     Block, CallSiteInfo, ExtendedProcedureFlags, FramePointer, FrameProcedure, FrameProcedureFlags,

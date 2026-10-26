@@ -14,7 +14,9 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::dbi::Dbi;
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
-use pdbrs::native::symbols::{HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets};
+use pdbrs::native::symbols::{
+    HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets, SymbolRecordWriter,
+};
 
 use crate::dbi::translate;
 use crate::symbol_encoding::{reencode, rewrite_module};
@@ -232,6 +234,7 @@ pub(crate) fn shared_symbols(
     let bytes = pdb.stream_bytes(id)?;
     let offsets = RecordOffsets::frame(&bytes, id)?;
     crate::symbol_validation::shared(&bytes, id, context, &procedures.records, report)?;
+    let mut writer = SymbolRecordWriter::new();
     for record in Records::new(&bytes) {
         let record = record?;
         let symbol = record
@@ -239,6 +242,9 @@ pub(crate) fn shared_symbols(
             .map_err(|error| error.with_stream(id.0, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
         reencode(&symbol, report)?;
+        if writer.push(symbol.kind(), symbol.data())?.0 != record.offset {
+            return Err("a rewritten symbol record moves to another offset".into());
+        }
         if let Some(reference) = symbol.procedure_reference() {
             let module = reference
                 .module_index()
@@ -283,7 +289,15 @@ pub(crate) fn shared_symbols(
         "shared symbols outside both indexes",
         offsets.len() - indexed.len(),
     );
-    crate::symbol_indexes::symbol_indexes(pdb, dbi, &bytes, report)?;
+    let rebuilt = writer.finish();
+    report.add("symbol record streams rewritten", 1);
+    // The run stops at the first difference, so a finished run prints 0.
+    report.add("symbol record streams rewritten with different bytes", 0);
+    if rebuilt.bytes != bytes {
+        return Err("the symbol record stream rewrites to different bytes".into());
+    }
+    // The index builders read the names from the rewritten stream.
+    crate::symbol_indexes::symbol_indexes(pdb, dbi, &rebuilt.bytes, report)?;
     Ok(())
 }
 

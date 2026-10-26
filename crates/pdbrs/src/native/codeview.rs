@@ -21,19 +21,13 @@ pub mod id_record;
 pub mod index;
 pub mod numeric;
 pub mod type_record;
-<<<<<<< HEAD
-#[expect(
-    dead_code,
-    reason = "the type record encoders of #29 use the rest of the shared writer"
-)]
-=======
->>>>>>> main
+
 pub(crate) mod writer;
 
 pub mod symbol;
 
 use index::{IdIndex, TypeIndex};
-use numeric::{Integer, Numeric};
+use numeric::Numeric;
 
 /// The size of the length field and the kind field at the start of a record.
 const PREFIX_LEN: usize = 4;
@@ -258,22 +252,6 @@ impl<'a> Fields<'a> {
         let (name, rest) = self.bytes.split_at(end);
         self.bytes = &rest[1..];
         Ok(name)
-    }
-
-    /// Read an integer numeric leaf.
-    ///
-    /// A truncated leaf returns the configured error. A non-integer leaf
-    /// returns [`ErrorKind::UnsupportedVersion`].
-    pub(crate) fn integer(&mut self) -> Result<Integer> {
-        let (value, rest) = Integer::parse_prefix(self.bytes).map_err(|error| {
-            if error.kind() == ErrorKind::UnexpectedEof {
-                self.short()
-            } else {
-                error
-            }
-        })?;
-        self.bytes = rest;
-        Ok(value)
     }
 
     /// Read a numeric leaf of any kind.

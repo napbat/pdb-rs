@@ -3,7 +3,7 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::numeric::Integer;
+use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     Annotation, BinaryAnnotations, FunctionList, IdList, RegisterList, Symbol, SymbolData,
 };
@@ -209,7 +209,7 @@ fn constant_keeps_its_stored_leaf_and_encodes_new_values_canonically() {
     let SymbolData::Constant(mut constant) = *symbol.data() else {
         panic!("expected a constant");
     };
-    constant.value = Integer::Unsigned(8);
+    constant.value = Numeric::from_integer(Integer::Unsigned(8));
     let mut out = Vec::new();
     SymbolData::Constant(constant)
         .encode(0x1107, &mut out)

@@ -33,12 +33,14 @@ use crate::{Error, ErrorKind, Result};
 
 mod gsi;
 mod psi;
+mod records;
 mod table;
 
 pub use gsi::GlobalSymbolIndex;
 pub use psi::{
     AddressMap, PublicHeader, PublicSymbolIndex, SectionStart, SectionStarts, ThunkMap, ThunkTable,
 };
+pub use records::{SymbolRecordStream, SymbolRecordWriter};
 pub use table::write::{HashEntry, IndexProducer, indexed_name};
 pub use table::{Bucket, Buckets, HashHeader, HashRecord, HashRecords, HashTable};
 

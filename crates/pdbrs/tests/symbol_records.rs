@@ -4,7 +4,7 @@ use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
-use pdbrs::native::codeview::numeric::Integer;
+use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     AddressGap, CompileFlags, FramePointer, FrameProcedureFlags, IdList, JumpTableEntry,
     LocalFlags, ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO, S_CALLEES, S_CALLERS,
@@ -654,7 +654,10 @@ fn decodes_constant_values() {
         let SymbolData::Constant(value) = symbol.data() else {
             panic!("expected S_CONSTANT");
         };
-        assert_eq!(value.value, Integer::Unsigned(u128::from(u64::MAX)));
+        assert_eq!(
+            value.value.integer(),
+            Some(Integer::Unsigned(u128::from(u64::MAX)))
+        );
         assert_eq!(value.name, b"DISCR_EXACT");
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x100c)));
     });
@@ -663,14 +666,26 @@ fn decodes_constant_values() {
         let SymbolData::Constant(value) = symbol.data() else {
             panic!("expected S_CONSTANT");
         };
-        assert_eq!(value.value, Integer::Unsigned(1));
+        assert_eq!(value.value.integer(), Some(Integer::Unsigned(1)));
     });
+    // A real constant keeps its leaf and value bytes.
     let real = Payload::default()
         .u32(0x40)
         .u16(0x8005)
+        .u32(0x3f80_0000)
+        .bytes(b"F\0");
+    decode(S_CONSTANT, &real, |symbol| {
+        let SymbolData::Constant(value) = symbol.data() else {
+            panic!("expected S_CONSTANT");
+        };
+        assert_eq!(value.value, Numeric::Real32(0x3f80_0000_u32.to_le_bytes()));
+    });
+    let unknown = Payload::default()
+        .u32(0x40)
+        .u16(0x80ff)
         .u32(0)
         .bytes(b"F\0");
-    assert_eq!(error(S_CONSTANT, &real), ErrorKind::UnsupportedVersion);
+    assert_eq!(error(S_CONSTANT, &unknown), ErrorKind::UnsupportedVersion);
     let truncated = Payload::default().u32(0x40).u16(0x8004).u16(1);
     assert_eq!(error(S_CONSTANT, &truncated), ErrorKind::InvalidFormat);
 }
