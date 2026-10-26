@@ -1,0 +1,4 @@
+# Keep pinned upstream files byte-identical on every checkout.
+llvm/** -text
+microsoft-pdb-rs/** -text
+microsoft-pdb/** -text

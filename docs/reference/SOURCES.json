@@ -1,0 +1,881 @@
+{
+  "snapshot_utc": "2026-10-26T02:29:01.293457+00:00",
+  "scope": "Complete llvm/docs/PDB and both Microsoft docs trees; upstream licenses and the original Microsoft README. External linked sites and implementation source are not mirrored.",
+  "sources": [
+    {
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "local_root": "llvm",
+      "file_count": 12
+    },
+    {
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "local_root": "microsoft-pdb-rs",
+      "file_count": 80
+    },
+    {
+      "repository": "microsoft/microsoft-pdb",
+      "revision": "805655a28bd8198004be2ac27e6e0290121a5e89",
+      "local_root": "microsoft-pdb",
+      "file_count": 3
+    }
+  ],
+  "files": [
+    {
+      "path": "llvm/llvm/LICENSE.TXT",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/LICENSE.TXT",
+      "git_blob_sha1": "fa6ac540007032cbd0ec772a1c72e6cb5527a4fe",
+      "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee",
+      "bytes": 15141
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/CodeViewSymbols.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/CodeViewSymbols.md",
+      "git_blob_sha1": "6a0315a200c04a01612480957be4aff236871d35",
+      "sha256": "12a8510347f27d841d802990b6bab8e74ac3e2fbb95ceff629b9af8e8416a94f",
+      "bytes": 11235
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/CodeViewTypes.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/CodeViewTypes.md",
+      "git_blob_sha1": "45950f56f2f3e6d4244cdbda50c3aab58c2542a6",
+      "sha256": "5f9493d70c78da688226d255a1b575ca5878f0f682ec4973478e7ae8877fcc0b",
+      "bytes": 6525
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/DbiStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/DbiStream.md",
+      "git_blob_sha1": "04057a24b5577408e3efd31f4bdc55f43d5a4995",
+      "sha256": "e3bb786c8c79f67fbfee6497cf4e3b4a8deb869b8aeec797b5d4353f8b535f05",
+      "bytes": 18286
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/GlobalStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/GlobalStream.md",
+      "git_blob_sha1": "a0325583b2c977a08f677083d996a2b4e4c41ee3",
+      "sha256": "d2f4bbf4bf291156316a0476a58a79726383f9f2944a6d87ca7e2caa8d559c1d",
+      "bytes": 32
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/HashTable.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/HashTable.md",
+      "git_blob_sha1": "9f1ddb8be63a64b8dee340dc06094b10b0d96d2d",
+      "sha256": "f61139cfd3e378ac55ec2675b73626bd4e6c2c61c687820d88d14163a6495849",
+      "bytes": 3794
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/ModiStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/ModiStream.md",
+      "git_blob_sha1": "e7c9bb78a82ffa8f99ec052d2a18d27d976c52bb",
+      "sha256": "b75900bf3d3bdb293b1dc8da6ddc81aee48521c11f014ab24f57d56232e98ee4",
+      "bytes": 2895
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/MsfFile.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/MsfFile.md",
+      "git_blob_sha1": "7fe16d259a28712513fba26d323d57a8bc19fb67",
+      "sha256": "6526c63682314d3f1e9baf91a175a155d77b8225f01a6704baa1941daaebd56a",
+      "bytes": 7232
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/PdbStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/PdbStream.md",
+      "git_blob_sha1": "7b9ace4a87e8b3ca66cf3dd5d78f943919f35dbb",
+      "sha256": "4ce09053f0487c31711df58d75bcb46a926a75b957943b9722504ff4ad918738",
+      "bytes": 5963
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/PublicStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/PublicStream.md",
+      "git_blob_sha1": "3e5cf19e1ee89f7ba0926c930e8e410f62f75a72",
+      "sha256": "2a9ff857e7a4cebf4ff8fb3205cde2fc52a4444dfe6a4114f47af3b1cca82933",
+      "bytes": 32
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/TpiStream.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/TpiStream.md",
+      "git_blob_sha1": "e74f7a2ac1ebc19558fd79002f14ac68baf73795",
+      "sha256": "0e1cb4e4784fcf1893953828c9ddb38bf5d2c7f028c934bc5cd082f2fee27871",
+      "bytes": 11342
+    },
+    {
+      "path": "llvm/llvm/docs/PDB/index.md",
+      "repository": "llvm/llvm-project",
+      "revision": "b9f2235fc3ac1948ef7e63954b04167cd0749088",
+      "upstream_path": "llvm/docs/PDB/index.md",
+      "git_blob_sha1": "e1355a22e41d0fc8f5cdcf4bf29cc9c350f7ab95",
+      "sha256": "571fd2e407285b81c4a68949c0e25c2649d9b04d1732280e7c05d77db22c1a5b",
+      "bytes": 6007
+    },
+    {
+      "path": "microsoft-pdb-rs/LICENSE",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "LICENSE",
+      "git_blob_sha1": "9e841e7a26e4eb057b24511e7b92d42b257a80e5",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "bytes": 1141
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/calling_convention.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/calling_convention.md",
+      "git_blob_sha1": "ab5be14ad560b31a1d78b81f988e4f5107076a7b",
+      "sha256": "250abf85998d5829f70259197b2de34b443a5907da04a79a2bbe3b7d6d994b28",
+      "bytes": 3084
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/codeview.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/codeview.md",
+      "git_blob_sha1": "e4da60059b558ef800b3df5747a292fa4792b5de",
+      "sha256": "8834b0debdabb9d24542e24a31f97c342e4079137eabfecd9985e62c9d09886e",
+      "bytes": 1475
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/items.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/items.md",
+      "git_blob_sha1": "2667b6764c64a3d794d320be505bcbfe32fbd3fd",
+      "sha256": "8e23a481e323c409ea1045186e01610bf5c4d2097c0edac971f5a378981a92e2",
+      "bytes": 2608
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_buildinfo.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_buildinfo.md",
+      "git_blob_sha1": "e22b36858f9628448a291fc953f7ede1ed5e5566",
+      "sha256": "d8f43ad787df893fb7c9d7d6f1cd7310e1b12728d70caa7671efe7bb39ae9d7b",
+      "bytes": 6614
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_func_id.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_func_id.md",
+      "git_blob_sha1": "920f0aaf672a920864076b8a679d996b2d51b720",
+      "sha256": "5d7739e6f28900e73d53295ef7c8af5d253e9837f02c213c9b8747eaa3afcb84",
+      "bytes": 5079
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_mfunc_id.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_mfunc_id.md",
+      "git_blob_sha1": "830765ca3c31d781bc293e4bc6a678df58d58d4d",
+      "sha256": "d324a0283e2c6481bcd3356e1b2779248d11cb086a6c9e6371855f1fe4cddb14",
+      "bytes": 2436
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_string_id.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_string_id.md",
+      "git_blob_sha1": "22e087ee6dd26d0c073e81ef91199fd51bed00f7",
+      "sha256": "ecee7986b6add2b6ebef848c3774ed7155deb1f527e9a12f3a0e55558ac503f3",
+      "bytes": 897
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_substr_list.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_substr_list.md",
+      "git_blob_sha1": "502445845ab3cb453c7ad1591b4845c176023cfe",
+      "sha256": "e4fd471765d3cef4ae700c52f9db1f1d68f38e2d02099985624cd23aedd059ea",
+      "bytes": 3638
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_udt_mod_src_line.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_udt_mod_src_line.md",
+      "git_blob_sha1": "9430285b64d783657aea6a4b1565238bfb5d739d",
+      "sha256": "bff953beee4564ad771ab8625bc6f8321d104ceb1ce4befec18bc0670b4200d2",
+      "bytes": 1739
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/items/lf_udt_src_line.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/items/lf_udt_src_line.md",
+      "git_blob_sha1": "193495415450bfa7c1061147c63c3164a180bc1a",
+      "sha256": "997b44e89df1a66a0c1bad2f8813db8952effd8c17ace734f9ce764a0d1b07df",
+      "bytes": 753
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/line_data.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/line_data.md",
+      "git_blob_sha1": "ec2e2928836eca9826356e78fff32ef0842598ea",
+      "sha256": "57fd1f0757216374971ef2683052a7d136750ea4889283ae2808fa30c26474fe",
+      "bytes": 12440
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/number.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/number.md",
+      "git_blob_sha1": "078d58d6279f2c617a913538187bf78febc04ff8",
+      "sha256": "7837cff5e96c84c7ff76ff8cc4737e545964f95fa4ced2313bce688bfbe933cd",
+      "bytes": 3875
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/primitive_types.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/primitive_types.md",
+      "git_blob_sha1": "30d413df2d83ee2ed84b3fcd1370519b59e39aeb",
+      "sha256": "56b570ef13738af6e22668491d97d97baba0f40c240b76c997bf399fe3bd2414",
+      "bytes": 18160
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_annotation.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_annotation.md",
+      "git_blob_sha1": "7c5c6d43c1d6c8695b1890a25accc2919fe1da2a",
+      "sha256": "b2dfe7a4dd4feee61ddb45c9b5ed7b1e7d231e98c3c047a0977f98d2f3f7caf4",
+      "bytes": 1295
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_armswitchtable.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_armswitchtable.md",
+      "git_blob_sha1": "96a6c152dba2f89a23a69f670d0ebe10eb47426c",
+      "sha256": "bd8f4945fa98142c84b0eeda73889e182f8e4f1cd4ad0b7d5b559adb40b83873",
+      "bytes": 2074
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_block.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_block.md",
+      "git_blob_sha1": "62d8466f3a30f52de1bdb3eb626b3dc2f8626ed4",
+      "sha256": "1ba04cf7152e5098ea5f98af15c6856932b1e3192371f2cd88c8308decbfd351",
+      "bytes": 570
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_buildinfo.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_buildinfo.md",
+      "git_blob_sha1": "ed0c87d305a67911e694fcc54e52baddef549725",
+      "sha256": "df40cff009df7811c5d40394b515624b687a1e9c46d0764ee7e0035e0ab6b6f4",
+      "bytes": 359
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_callsiteinfo.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_callsiteinfo.md",
+      "git_blob_sha1": "56fe8e88f8c967c69fa7ff5b368a02f34d83bea0",
+      "sha256": "4f4a300865d84f543a84a239941c05587b4cc0f1b27e0cb8ef764865927a2884",
+      "bytes": 3401
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_coffgroup.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_coffgroup.md",
+      "git_blob_sha1": "f187ecca027a2fb6735f74049b19eba6776fb4b1",
+      "sha256": "d944a0a70e80daf8a28f9135338cb120be130f237a6aed28dc12fbcf42531bfb",
+      "bytes": 1908
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_compile.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_compile.md",
+      "git_blob_sha1": "843e48aaf277c2d3e056f5444ec74d06d4a703f6",
+      "sha256": "33b93f58fa8da4fcd944938e429122190c4affcb82fef95195b538e760136771",
+      "bytes": 2908
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_constant.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_constant.md",
+      "git_blob_sha1": "df758aa3d172cc59ae801e4e29b347c607aa3fac",
+      "sha256": "1b13b78dc653070ad0d8c84086e07c00749b1dc9cb6a8cb48b4b9bd6214f9112",
+      "bytes": 551
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_data.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_data.md",
+      "git_blob_sha1": "641d95b91b12d76945dc30362a898838ec5928d8",
+      "sha256": "1706706866132b9ab4b5eb7e12740862087d814e473fe12ee053909598db0ccc",
+      "bytes": 1173
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_end.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_end.md",
+      "git_blob_sha1": "d05e68db45f73a6c73b583eca735044bf2c92e3c",
+      "sha256": "d0552d8240f656f1c61228c20e24ba9cee2d62113ea1f5c432bbb3a80d626d86",
+      "bytes": 297
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_frameproc.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_frameproc.md",
+      "git_blob_sha1": "0622503d97a1e8ec1584ec0db92978d6a6fbc7f3",
+      "sha256": "e77d1a693b3e0ef2faefb318e776942c07b640ae97723e7c26a36aab27bac142",
+      "bytes": 1462
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_inlinesite.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_inlinesite.md",
+      "git_blob_sha1": "0fdaf9e6926e62303aef9574b00d1a6badbfa22b",
+      "sha256": "a12c69039f21a9cbe2f06300ade3742484e7a4d9e2ff0443231f16a6cc77ab83",
+      "bytes": 471
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_label.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_label.md",
+      "git_blob_sha1": "c3c16b61e159a9511af8a1c2b006f98c18ee45cd",
+      "sha256": "10ba8533cf6e3c765a8fea71c6afa9d05975b47b1c4a8eeefd61ea9dd5eed48c",
+      "bytes": 284
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_local.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_local.md",
+      "git_blob_sha1": "be61d64c6a2f54039aea2e5a248e421f0355ef51",
+      "sha256": "6f9e4c664c78d65927bffab31782c829df5042c85648229cb71f4fcd9e887fe0",
+      "bytes": 3343
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_namespace.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_namespace.md",
+      "git_blob_sha1": "17ff23ddab49ee1b535c37c14aea812f12e93b6b",
+      "sha256": "d09d97d8b84b985eced0317628900c57ddcd8a7f3aa647ced7a56dd6c66aa1d5",
+      "bytes": 587
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_objname.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_objname.md",
+      "git_blob_sha1": "9969f107910fc7f33ae188c4c25971617ece6c51",
+      "sha256": "9b6e0d1d7255e3062a4f3d5123a247db87f19746238300b0cf7d76dc9c3578b5",
+      "bytes": 342
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_procs.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_procs.md",
+      "git_blob_sha1": "175f3a9565edbbd10c6d081bd47774e1cde1970a",
+      "sha256": "bf87025a27a3cceb86319b13d024574c7d4b52e4a42c21cd1e1505cdfbdddfb1",
+      "bytes": 7737
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_pub.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_pub.md",
+      "git_blob_sha1": "b1e0a2a954b2be28d20b7f8d53ae1375f554d27f",
+      "sha256": "b76210a70febb0cee0eaf180b8239f688438e7db43c837d98de4de1d6f4f64c7",
+      "bytes": 203
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_refsyms.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_refsyms.md",
+      "git_blob_sha1": "a6a035caeb0ff4db38bec5852fe63fab4ea0b7ab",
+      "sha256": "2b72de120d6756c35c2fdbbe66166f91513cb45b6494605ca1b51ebdef484f80",
+      "bytes": 2986
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_section.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_section.md",
+      "git_blob_sha1": "de9193652a62b912e2f030b737475c713955103d",
+      "sha256": "dd055a4b74408fb42bcfba29d278131a34b2331135095bd80b5957e4d7e209e3",
+      "bytes": 2585
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_thread.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_thread.md",
+      "git_blob_sha1": "7b275422a7b91e3f5d8c6e9238646f1c1a4fed7d",
+      "sha256": "ab8fa0a45263ebad120eec42b3b80a3b3966b47229db6b1471ec37467ddf85c3",
+      "bytes": 591
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_thunk.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_thunk.md",
+      "git_blob_sha1": "41fc1496a8875a7e50b775159fddec3cadc829d9",
+      "sha256": "a2b93d751dc98afc81346f6134179ac65399c3677d209285a3ec732933adab2d",
+      "bytes": 648
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_trampoline.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_trampoline.md",
+      "git_blob_sha1": "612e132d4140af15b1e527501e28e06c0df02c53",
+      "sha256": "1ef2c9eec7bdfb8ee18d19161b103301105e1a3c12e91a93c5dc7328d582502d",
+      "bytes": 936
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/s_udt.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/s_udt.md",
+      "git_blob_sha1": "5f7f3db07655c98837130bbe4cd859469f3b7ee5",
+      "sha256": "51fc3fc1ce544f4f2a194de6618a7e22626491dd495f0fbe5ca67d01ac397370",
+      "bytes": 626
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/symbols/symbols.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/symbols/symbols.md",
+      "git_blob_sha1": "4ceb0ef366dcda5fc586e7cc6a1ea13e6d674ae9",
+      "sha256": "e94063f5a4d0ff050c02125e481a1147955b83025f9b1a59715e06bb11a791ef",
+      "bytes": 10637
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_arglist.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_arglist.md",
+      "git_blob_sha1": "db37972cef01211ce3ae4922936a667baeb58b92",
+      "sha256": "bb4ee6567b8544712dd82e558f1832387a07ed203ed2165505a56ba9205b7719",
+      "bytes": 529
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_array.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_array.md",
+      "git_blob_sha1": "840ba88f5e2239e1cc108c7603dd2709e7e2fda2",
+      "sha256": "424236488eda4fc71c9cddb99e48389794a061cf211a9330b477ae0f5bf46a0a",
+      "bytes": 449
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_bitfield.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_bitfield.md",
+      "git_blob_sha1": "48ac80007307dfb3763a01dd187f9417d2aa2df2",
+      "sha256": "dac95899d992e258823a80be84c2008dffde3754c08e3216c40fa8bd83e72608",
+      "bytes": 378
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_class.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_class.md",
+      "git_blob_sha1": "fdc11ba4caa849fbd33d8676a3c979d2e2b0b2fb",
+      "sha256": "4be5b69a17dc4b7aac82bd67c3677cf31709fd102c0a34e294e9f43d22a399b2",
+      "bytes": 3745
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_endprecomp.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_endprecomp.md",
+      "git_blob_sha1": "2d0b4a778ba1feac9dc44577126a266e17bfbc0b",
+      "sha256": "449b031ca986db37a7f69071708e91d737607ebf86635f78c248d6397e8a4664",
+      "bytes": 1348
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_enum.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_enum.md",
+      "git_blob_sha1": "c0eeef4f4be4376c492cbb02e8fd916b879cf2bd",
+      "sha256": "836bdf40559a97cc8cc14d8b21c4b303a78ccee1140c978c15e443f38035e638",
+      "bytes": 945
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_fieldlist.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_fieldlist.md",
+      "git_blob_sha1": "8691c5ee1a738711631032d779d6ff7a8678fde2",
+      "sha256": "0bb3e0c3a08df50cffa12920dafebfe117fec2ac1030b9a41f5383df376d4fa4",
+      "bytes": 9131
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_methodlist.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_methodlist.md",
+      "git_blob_sha1": "f555768016ce22b0fceb5ffbbc263a2698c83021",
+      "sha256": "cdcb0b92f277c536713731951e87964cf07b9be2a44c85e4ef769052f3a2a8eb",
+      "bytes": 4072
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_mfunction.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_mfunction.md",
+      "git_blob_sha1": "abee63b778b2c75a5122ee5af80ea3cdbc23922c",
+      "sha256": "4f7160206dc621120f19c37eb12a3dcf97e4bfe00fc99573a3a81f892b11cd70",
+      "bytes": 797
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_modifier.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_modifier.md",
+      "git_blob_sha1": "f67c62a915092b5d37cf0afa7742a73be8cdec11",
+      "sha256": "0525d8ecea276a724217d98ce001c8932dfa4d3b51c0905418ef06f8a1eaec73",
+      "bytes": 1029
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_pointer.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_pointer.md",
+      "git_blob_sha1": "17171caa742462beef49fe5d5b630a2b5346ef7f",
+      "sha256": "e97857bd7245a5f254b51d69d172cbd5424c123c77c8bd125616f3bd487648fe",
+      "bytes": 4305
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_precomp.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_precomp.md",
+      "git_blob_sha1": "4ecf41dd9c8f24ea133e79779b13a58e8a7b8c8d",
+      "sha256": "fa41e7891ca3eddad9c7f57bf155425cdc1ad23ea6688e4bbad09da3be141daf",
+      "bytes": 1674
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_procedure.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_procedure.md",
+      "git_blob_sha1": "64cd8b244a04085eb167ed7a9bd4f2219f8263c1",
+      "sha256": "da35544d6427c983b76d4606e8479ccfdabb261e73d0e7ed801bc9beb7910506",
+      "bytes": 611
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_skip.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_skip.md",
+      "git_blob_sha1": "caff824d390a5c816331cfa1cbbc9fe5e484192f",
+      "sha256": "572210bc18a97ebbfaf66595f23a8470cb1fb52e54bc30989f02deb4744732b3",
+      "bytes": 243
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_union.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_union.md",
+      "git_blob_sha1": "9f7cdebf63d294ea82906565dd2d00931d8e7137",
+      "sha256": "e2c8500bc4cd2fb1bfb20eb57ca3812e7f47cda05202823b9f2df779861c8f81",
+      "bytes": 552
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/lf_vtshape.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/lf_vtshape.md",
+      "git_blob_sha1": "e5d49e417db0f966890f4b4cb4c73a60e96b38d3",
+      "sha256": "07c810f00dc7cae93a7dd3418c5d7ea09586b8dafc1a58992e5b6a9575b3baec",
+      "bytes": 1345
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/codeview/types/types.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/codeview/types/types.md",
+      "git_blob_sha1": "8b111260bfa7bee96140aacaba3bb53204c17fd3",
+      "sha256": "f3da93deef75a93779c9dd9503f03c10c27c47daade3d9e949333546b24ee55a",
+      "bytes": 4778
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/data_types.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/data_types.md",
+      "git_blob_sha1": "454cc77a7b66fdcfd1c2aecf60c1e0e1162d644b",
+      "sha256": "c6608dc622d6ad6e932496f09979a3519af014274d346342c0522e98f018891c",
+      "bytes": 4137
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/determinism.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/determinism.md",
+      "git_blob_sha1": "6e01393e45ceb9bb6f27f1968c2b42daeda24b9f",
+      "sha256": "f1d479509e950c0905849b695fc4e40daa6a17bea8fec481519a18bd1ad9a34f",
+      "bytes": 1621
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/index.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/index.md",
+      "git_blob_sha1": "87ef108762ccc37862c6f84f34ccd93b56c79962",
+      "sha256": "2f10539ebdb16f9105ab2359ffb50742a0d8a718fc02b1fe865aec122ccfe6c8",
+      "bytes": 1071
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/intro.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/intro.md",
+      "git_blob_sha1": "72f293fee6fe2c1ee1229f31ee2aceb8ba716467",
+      "sha256": "a398ee3e23bf2348fb06fc64b221f1e3f523eefd7a5c2e4cb1c50b6039af007b",
+      "bytes": 3338
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_fixups.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_fixups.md",
+      "git_blob_sha1": "399709dd5e0cc0f402c6f28f74a69eafbff2a112",
+      "sha256": "c724af97a475c2cf15a9a1f034e44575b29f5e2875522e9997fd671b05e32b09",
+      "bytes": 382
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_modules.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_modules.md",
+      "git_blob_sha1": "b856d020dc7dde0a69add95bd15a3058328ea89d",
+      "sha256": "92ce1939de69692d81de0f52be0654f510410681efcdc6def0fe638fae15fb40",
+      "bytes": 9286
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_opt_debug.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_opt_debug.md",
+      "git_blob_sha1": "b59ba43b6fc7d6c4ede0d7aaa2077766c5d69940",
+      "sha256": "8b72729f68de97f21a28c36014d9fcb3a838e621ce31d3d02de0d8ea55bbca92",
+      "bytes": 3320
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_sections.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_sections.md",
+      "git_blob_sha1": "9e5219b4c8a3925044a95fd1712e42ea4696c7b4",
+      "sha256": "a06efe5134438e462d4f56f02cd38183f34e366cf9f40d31b2ce2458cd4ccad9",
+      "bytes": 5553
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_sources.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_sources.md",
+      "git_blob_sha1": "62d924df670ad9bd88354858cf5927d0ddbcb91a",
+      "sha256": "febde6a4bac17e41a3e52dd2402ad7cb43f41b83bb0db2ab326a7b5b768fc35c",
+      "bytes": 15541
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/dbi_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/dbi_stream.md",
+      "git_blob_sha1": "3b2ce91a2c5963c11891cce358e93a98e5a01c72",
+      "sha256": "77791b4a04419156c4288dad21d70da465d907df3fa870c671bde26e243994bf",
+      "bytes": 9038
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/globals.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/globals.md",
+      "git_blob_sha1": "e1b06590e9dc0014134b7c35d95b10a7a99165a8",
+      "sha256": "237ef3138146c9d9c569175869df48bb67eab1d7065a44d44ebd07a4a78c4d4f",
+      "bytes": 30774
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/hashing.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/hashing.md",
+      "git_blob_sha1": "c484405d2dbbe9e71e38334b68231b9af310d648",
+      "sha256": "e8681f64009c10c5b9a2ef3575bf28fbe79085c722fad74f5dc57157dad60bb0",
+      "bytes": 2097
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/ipi_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/ipi_stream.md",
+      "git_blob_sha1": "0429b837e1fc94b552f4db154aa2cea7d1c0b7aa",
+      "sha256": "1c42c7f653d6ecb5c1879692aaa1a50cefd16c8769f828735988c9f10153e440",
+      "bytes": 1609
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/mini_pdb.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/mini_pdb.md",
+      "git_blob_sha1": "3d01a0d80a19c6809b2f3090b552260501a8af39",
+      "sha256": "29c42215dc388185d1f52d77d4be88b33ce5425b23fff1e0236c4e58d0a1820d",
+      "bytes": 1163
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/module_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/module_stream.md",
+      "git_blob_sha1": "4138d1248154922ae796fd21a5400754a1a75537",
+      "sha256": "9481f6ea2493773a32a829af58cdbe682dac13f61ccf8a44b14e24ae79091d53",
+      "bytes": 2396
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/msf.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/msf.md",
+      "git_blob_sha1": "7eaad062532a22578c282cbf37836812375e1d4f",
+      "sha256": "5f23ffc0a710d0677fdfd49acbe89b3891a5a7afb23bae177c44896d253b84cf",
+      "bytes": 34137
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/msfz.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/msfz.md",
+      "git_blob_sha1": "b160716e67140e0e14dcfc13cdc73981812fb4cf",
+      "sha256": "51eb02d0466c349d6a045514640ccf25a1c9fbead100a48aeb4866e4f0bac071",
+      "bytes": 25980
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/names_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/names_stream.md",
+      "git_blob_sha1": "8cc9b03f3c7e2c75b0e60a74d3ee6a2cf1769ae0",
+      "sha256": "d1687c5f4b4f4a777c55dabf4e631eb1628c4d867db8d114fb1ef50d0353e68a",
+      "bytes": 11457
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/pdb.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/pdb.md",
+      "git_blob_sha1": "998f5a1e38ab92ff8f72148703f2ebcdb1a84c64",
+      "sha256": "627b633469308e2c92dd190ba5387712554b4a551ffb6878643d4ff0526d0a49",
+      "bytes": 5512
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/pdbi_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/pdbi_stream.md",
+      "git_blob_sha1": "210ea0521fd1ad5a3234685af48a971b50129674",
+      "sha256": "e88d8ef77fa06fcd6b44bd6f72c513529ef444f5b4f6c847a7e9d9de988e9a61",
+      "bytes": 14227
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/relationships.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/relationships.md",
+      "git_blob_sha1": "76dcd792635ac6df9ec0e30c1f2f938eac372e8a",
+      "sha256": "c96ef97545ce99f6650a5b4ad3b7aaf7e66167ba10c86a911cffb67e2071b2aa",
+      "bytes": 4831
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/pdb/tpi_stream.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/pdb/tpi_stream.md",
+      "git_blob_sha1": "8aa46811906bf6575ae4b03a46c657a37ae14e29",
+      "sha256": "36c8ebe0dfe0db57f8b379ed45ef1038fd8397eee8aef5cf63480fecbf6e64d4",
+      "bytes": 15417
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/references.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/references.md",
+      "git_blob_sha1": "5ca0c49cabf26e40b305d6823fea4ed743f4f647",
+      "sha256": "cd8302adaa28c1b7cf006162da8ab98a91c9e0ea36d4e05a4a2902a171825356",
+      "bytes": 4099
+    },
+    {
+      "path": "microsoft-pdb-rs/docs/terminology.md",
+      "repository": "microsoft/pdb-rs",
+      "revision": "2081a0dd6f1150cf965dec10855e75cfecfde176",
+      "upstream_path": "docs/terminology.md",
+      "git_blob_sha1": "ef58ac0e882804105f7b2ee76cc7f3e2b9d4a184",
+      "sha256": "a6c810e2f3d08e9d90d3d9d0692c7e9c4fe33356eeb4b8b16a114cbc9c42ecd3",
+      "bytes": 3381
+    },
+    {
+      "path": "microsoft-pdb/LICENSE",
+      "repository": "microsoft/microsoft-pdb",
+      "revision": "805655a28bd8198004be2ac27e6e0290121a5e89",
+      "upstream_path": "LICENSE",
+      "git_blob_sha1": "aa58667a3fd3784b0dfa11bf17f05f5e8dbd7d02",
+      "sha256": "4c21dc82a1c7186ea754fd59d504c00947953a3401fe8e24eaa44109ef8e2555",
+      "bytes": 1157
+    },
+    {
+      "path": "microsoft-pdb/README.md",
+      "repository": "microsoft/microsoft-pdb",
+      "revision": "805655a28bd8198004be2ac27e6e0290121a5e89",
+      "upstream_path": "README.md",
+      "git_blob_sha1": "9c6f3e9080a1417d8a5add39b6e063dc6cd98690",
+      "sha256": "2cc8a9d1593b3d9237e47313011140cc9ec907ae8d23451ad05bc63871536978",
+      "bytes": 4919
+    },
+    {
+      "path": "microsoft-pdb/docs/ExternalResources.md",
+      "repository": "microsoft/microsoft-pdb",
+      "revision": "805655a28bd8198004be2ac27e6e0290121a5e89",
+      "upstream_path": "docs/ExternalResources.md",
+      "git_blob_sha1": "6aad5141c73d2ca506532620c2c8761b84998e3d",
+      "sha256": "d4ea2443ed60b2fc13b13a1f9a85e8bcfe263dd00a48bd56a9311a10729a9c09",
+      "bytes": 1151
+    }
+  ]
+}

@@ -3,6 +3,9 @@
 Status: the full reader/writer design remains proposed. The library implements native reading and the shared primitives listed below.
 Native semantic decoding is incomplete. Portable PDB parsing and PDB writing are not implemented.
 
+Track native implementation work in [NATIVE-0001](../issues/0001-native-pdb-support.md).
+The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
+
 ## Implemented primitives
 
 The `pdbrs` package is a library with no default executable. It uses `nostdio` for sequential I/O.
