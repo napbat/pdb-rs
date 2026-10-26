@@ -11,6 +11,7 @@
 //! Names stay bytes.
 
 mod dbi;
+mod lines;
 mod named;
 mod symbols;
 mod types;
@@ -143,6 +144,7 @@ fn main() -> Outcome {
     };
     frame_data(&pdb, &dbi, &context, &mut report)?;
     let procedures = modules(&pdb, &dbi, &context, &mut report)?;
+    lines::module_streams(&pdb, &dbi, &mut report)?;
     shared_symbols(&pdb, &dbi, &context, &procedures, &mut report)?;
     unclaimed_streams(&pdb, &mut report)?;
     print(&report);

@@ -198,7 +198,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
                 }
             }
             LineSubsection::CoffSymbolRvas(rvas) => coff_symbol_rvas(rvas.iter(), context, report)?,
-            _ => report.undecoded(format!("C13 subsection {:#x}", subsection.kind)),
+            other => crate::lines::other_subsection(other, &file_name, context, report)?,
         }
         report.add("C13 subsections", 1);
     }
