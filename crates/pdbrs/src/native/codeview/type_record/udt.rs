@@ -55,8 +55,9 @@ const fn is_producer_padding(bytes: &[u8]) -> bool {
 /// Read the name, the optional unique name and the padding at the end of a record.
 ///
 /// The standard `LF_PAD` run gives empty producer padding. Bytes in the MASM form give
-/// the producer padding. Other bytes give the error of [`Fields::finish_type_padding`].
-fn names<'a>(fields: &mut Fields<'a>, options: ClassOptions) -> Result<Names<'a>> {
+/// the producer padding if the record of the `length` payload bytes ends on a 4-byte boundary.
+/// Other bytes give the error of [`Fields::finish_type_padding`].
+fn names<'a>(fields: &mut Fields<'a>, length: usize, options: ClassOptions) -> Result<Names<'a>> {
     let name = fields.name()?;
     let unique_name = if options.has_unique_name() {
         Some(fields.name()?)
@@ -65,7 +66,8 @@ fn names<'a>(fields: &mut Fields<'a>, options: ClassOptions) -> Result<Names<'a>
     };
     let producer_padding = match fields.finish_type_padding() {
         Ok(()) => &[][..],
-        Err(_) if is_producer_padding(fields.rest()) => fields.rest(),
+        // The MASM form ends the record on a 4-byte boundary, as the encoder requires.
+        Err(_) if is_producer_padding(fields.rest()) && length.is_multiple_of(4) => fields.rest(),
         Err(error) => return Err(error),
     };
     Ok((name, unique_name, producer_padding))
@@ -175,7 +177,7 @@ impl<'a> Class<'a> {
         let derivation_list = fields.type_index()?;
         let vtable_shape = fields.type_index()?;
         let size = fields.numeric()?;
-        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, data.len(), options)?;
         Ok(Self {
             kind,
             member_count,
@@ -273,7 +275,8 @@ impl<'a> WideClass<'a> {
         let vtable_shape = fields.type_index()?;
         let member_count = fields.numeric()?;
         let size = fields.numeric()?;
-        let (name, unique_name, producer_padding) = names(&mut fields, low_options(options))?;
+        let (name, unique_name, producer_padding) =
+            names(&mut fields, data.len(), low_options(options))?;
         Ok(Self {
             kind,
             options,
@@ -346,7 +349,7 @@ impl<'a> Union<'a> {
         let options = ClassOptions(fields.u16()?);
         let field_list = fields.type_index()?;
         let size = fields.numeric()?;
-        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, data.len(), options)?;
         Ok(Self {
             member_count,
             options,
@@ -414,7 +417,8 @@ impl<'a> WideUnion<'a> {
         let field_list = fields.type_index()?;
         let member_count = fields.numeric()?;
         let size = fields.numeric()?;
-        let (name, unique_name, producer_padding) = names(&mut fields, low_options(options))?;
+        let (name, unique_name, producer_padding) =
+            names(&mut fields, data.len(), low_options(options))?;
         Ok(Self {
             options,
             field_list,
@@ -482,7 +486,7 @@ impl<'a> Enum<'a> {
         let options = ClassOptions(fields.u16()?);
         let underlying_type = fields.type_index()?;
         let field_list = fields.type_index()?;
-        let (name, unique_name, producer_padding) = names(&mut fields, options)?;
+        let (name, unique_name, producer_padding) = names(&mut fields, data.len(), options)?;
         Ok(Self {
             member_count,
             options,

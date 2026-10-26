@@ -38,7 +38,8 @@ pub fn stream(data: &[u8]) {
         1 => {
             if let Some(cache) = ok(TmCache::parse(input.rest(), STREAM)) {
                 let _ = cache.is_empty();
-                assert_eq!(cache.streams().count(), cache.entries().count());
+                assert_eq!(cache.streams().count(), cache.streams().len());
+                assert_eq!(cache.entries().count(), cache.entries().len());
             }
         }
         2 => type_map(input.rest()),

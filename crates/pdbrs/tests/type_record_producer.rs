@@ -141,3 +141,11 @@ fn encoder_rejects_producer_padding_outside_the_masm_form() {
     assert_eq!(out.len(), 20);
     assert_eq!(out[17..], [0xf1, 0x6d, 0x65]);
 }
+
+#[test]
+fn masm_padding_must_end_the_record_on_a_4_byte_boundary() {
+    // Without the last stale byte, the record has 39 bytes. The encoder cannot write such a
+    // record, so the decoder rejects it (fuzz finding, #40).
+    let error = decode(LF_STRUCTURE, &CS_FRAME_ENCODED[4..39]).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+}
