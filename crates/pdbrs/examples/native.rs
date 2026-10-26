@@ -6,15 +6,19 @@
 //! kind without a decoder, is counted as undecoded and reading continues.
 //! At the end, the example fails if anything is undecoded. It reports
 //! producer defects that do not stop reading, for example an index record
-//! outside the bucket of its name, without failing. Names stay bytes.
+//! outside the bucket of its name, without failing. It also reports decoded
+//! producer data that no stream names, with the reason, without failing.
+//! Names stay bytes.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 
 use pdbrs::io::FileReader;
 use pdbrs::native::Pdb;
-use pdbrs::native::address::{AddressMap, SectionOffset};
-use pdbrs::native::auxiliary::{LinkInfo, NamedStreamKind, TmCache, UdtSourceLineUndone};
+use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
+use pdbrs::native::auxiliary::{
+    LinkInfo, NamedStreamKind, TmCache, TypeMapKind, TypeMapStream, UdtSourceLineUndone,
+};
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
@@ -46,6 +50,10 @@ struct Report {
     undecoded: BTreeMap<String, usize>,
     /// Decoded data that breaks a producer rule but does not stop reading.
     inconsistencies: Vec<String>,
+    /// Decoded streams without an owner, with the reason and the number of occurrences.
+    unowned: BTreeMap<String, usize>,
+    /// The bytes of the type map streams that `/TMCache` names.
+    type_maps: HashSet<Vec<u8>>,
 }
 
 impl Report {
@@ -116,7 +124,7 @@ fn main() -> Outcome {
     report.claim(StreamId(4));
     let tpi_hash_bytes = hash_stream_bytes(&pdb, &tpi, &mut report)?;
     let ipi_hash_bytes = hash_stream_bytes(&pdb, &ipi, &mut report)?;
-    named_streams(&pdb, &names, &tpi, &mut report)?;
+    named_streams(&pdb, &names, &tpi, &ipi, &mut report)?;
     types(&tpi, tpi_hash_bytes.as_deref(), &mut report)?;
     let ids = identifiers(&ipi, ipi_hash_bytes.as_deref(), &tpi, &names, &mut report)?;
 
@@ -136,6 +144,7 @@ fn main() -> Outcome {
         addresses,
         module_count,
     };
+    frame_data(&pdb, &dbi, &context, &mut report)?;
     let procedures = modules(&pdb, &dbi, &context, &mut report)?;
     shared_symbols(&pdb, &dbi, &context, &procedures, &mut report)?;
     unclaimed_streams(&pdb, &mut report)?;
@@ -194,6 +203,7 @@ fn named_streams(
     pdb: &Pdb<FileReader>,
     names: &StringTable<'_>,
     tpi: &TypeStream,
+    ipi: &TypeStream,
     report: &mut Report,
 ) -> Outcome {
     let mut handled = HashSet::new();
@@ -207,7 +217,11 @@ fn named_streams(
                 report.supported(LinkInfo::parse(&bytes, named.stream), "/LinkInfo")?;
             }
             NamedStreamKind::TmCache => {
-                report.supported(TmCache::parse(&bytes, named.stream), "/TMCache")?;
+                let parsed = TmCache::parse(&bytes, named.stream);
+                if let Some(cache) = report.supported(parsed, "/TMCache")? {
+                    let ends = [tpi.header().index_end, ipi.header().index_end];
+                    type_maps(pdb, &cache, ends, report)?;
+                }
             }
             NamedStreamKind::UdtSourceLineUndone => {
                 let list = UdtSourceLineUndone::parse(&bytes, named.stream)?;
@@ -253,6 +267,66 @@ fn named_streams(
         );
         if content && !handled.contains(&named.stream) {
             report.undecoded("injected source stream without a header entry".to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// Decode the type map streams that `/TMCache` names, with their precompiled-header maps.
+///
+/// `ends` holds the TPI and IPI index ends.
+fn type_maps(
+    pdb: &Pdb<FileReader>,
+    cache: &TmCache<'_>,
+    ends: [u32; 2],
+    report: &mut Report,
+) -> Outcome {
+    let mut pending: Vec<StreamId> = cache.streams().flatten().collect();
+    let mut seen = HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        report.claim(id);
+        let bytes = pdb.stream_bytes(id)?;
+        let map = TypeMapStream::parse(&bytes, id)?;
+        if let TypeMapKind::Object {
+            precompiled: Some(precompiled),
+            ..
+        } = map.kind()
+        {
+            pending.push(precompiled);
+        }
+        check_type_map(&map, ends)?;
+        report.add("type map streams", 1);
+        report.type_maps.insert(bytes);
+    }
+    report.add("/TMCache entries", cache.entries().len());
+    Ok(())
+}
+
+/// Check that the map values and the function ID pairs of a type map are in range.
+fn check_type_map(map: &TypeMapStream<'_>, [tpi_end, ipi_end]: [u32; 2]) -> Outcome {
+    let within = |value: u32, end: u32| value == 0 || (0x1000..end).contains(&value);
+    let count = |len: usize| u32::try_from(len).map_err(|_| "type map is too long");
+    let (type_end, function_ids) = if map.kind() == TypeMapKind::TypeServer {
+        if !map.ids().all(|value| within(value, ipi_end)) {
+            return Err("type map names an ID past the IPI stream".into());
+        }
+        (tpi_end, 0x1000..0x1000 + count(map.ids().len())?)
+    } else {
+        let first = map.first_index();
+        let end = first
+            .checked_add(count(map.types().len())?)
+            .ok_or("type map index range overflows")?;
+        (tpi_end.max(ipi_end), first..end)
+    };
+    if !map.types().all(|value| within(value, type_end)) {
+        return Err("type map names an index past the TPI and IPI streams".into());
+    }
+    for (function, ty) in map.function_types() {
+        if !function_ids.contains(&function) || !(0x1000..tpi_end).contains(&ty) {
+            return Err("type map function ID pair is out of range".into());
         }
     }
     Ok(())
@@ -365,6 +439,8 @@ fn identifiers<'a>(
 }
 
 /// Load the section-header stream and claim every optional debug stream.
+///
+/// [`frame_data`] decodes the FPO and new-FPO streams.
 fn section_header_bytes(
     pdb: &Pdb<FileReader>,
     dbi: &Dbi,
@@ -378,11 +454,38 @@ fn section_header_bytes(
             headers = Some(pdb.stream_bytes(id)?);
         } else if slot == DebugStream::OriginalSectionHeader.index() {
             SectionHeaders::parse(&pdb.stream_bytes(id)?)?;
-        } else {
+        } else if slot != DebugStream::Fpo.index() && slot != DebugStream::NewFpo.index() {
             report.undecoded(format!("optional debug stream slot {slot}"));
         }
     }
     Ok(headers)
+}
+
+/// Decode the FPO and new-FPO streams, and resolve each frame program in `/names`.
+fn frame_data(
+    pdb: &Pdb<FileReader>,
+    dbi: &Dbi,
+    context: &Context<'_>,
+    report: &mut Report,
+) -> Outcome {
+    let mut starts = Vec::new();
+    if let Some(fpo) = pdb.fpo(dbi)? {
+        starts.extend(fpo.iter().map(|record| record.start));
+        report.add("FPO records", fpo.len());
+    }
+    if let Some(frames) = pdb.frame_data(dbi)? {
+        for frame in &frames {
+            context.names.get(frame.program)?;
+            starts.push(frame.start);
+        }
+        report.add("frame data records", frames.len());
+    }
+    if let Some(addresses) = &context.addresses {
+        for start in starts {
+            addresses.section_offset(Rva(start))?;
+        }
+    }
+    Ok(())
 }
 
 /// Decode the DBI substreams and return the module count.
@@ -698,9 +801,21 @@ fn check_lookup(
 }
 
 /// Report present streams that no decoder read.
+///
+/// An unclaimed stream with the same bytes as a type map stream that `/TMCache` names is an
+/// unowned type map: two inputs with the same type section checksum share one `/TMCache` entry,
+/// and the entry keeps only the last stream (#13).
 fn unclaimed_streams(pdb: &Pdb<FileReader>, report: &mut Report) -> Outcome {
     for index in 0..pdb.msf().stream_count() {
-        if pdb.msf().stream(StreamId(index))?.is_some() && !report.claimed.contains(&index) {
+        let id = StreamId(index);
+        if pdb.msf().stream(id)?.is_none() || report.claimed.contains(&index) {
+            continue;
+        }
+        let bytes = pdb.stream_bytes(id)?;
+        if report.type_maps.contains(&bytes) && TypeMapStream::parse(&bytes, id).is_ok() {
+            let reason = "type map stream that /TMCache does not name (same bytes as a named one)";
+            *report.unowned.entry(reason.to_owned()).or_default() += 1;
+        } else {
             report.undecoded("stream without a known role".to_owned());
         }
     }
@@ -720,5 +835,10 @@ fn print(report: &Report) {
     println!("inconsistencies: {}", report.inconsistencies.len());
     for item in &report.inconsistencies {
         println!("  {item}");
+    }
+    let unowned: usize = report.unowned.values().sum();
+    println!("decoded streams without an owner: {unowned}");
+    for (item, count) in &report.unowned {
+        println!("  {count} x {item}");
     }
 }

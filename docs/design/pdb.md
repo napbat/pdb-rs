@@ -57,12 +57,12 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot | Writing and repacking |
-| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | Non-empty `/TMCache`, `/LinkInfo` version 1, .NET document records (compression byte 101) and run-length, Huffman or LZ injected sources |
+| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, `/TMCache` and its type map streams, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | `/LinkInfo` version 1, .NET document records (compression byte 101) and run-length, Huffman or LZ injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
-| DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
+| DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map, EC names, and FPO and new-FPO (frame data) streams | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
-| Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
+| Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoding of 39 symbol kinds, including every kind in the Rust sample PDBs and the LLD `S_SKIP` filler; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
@@ -82,9 +82,11 @@ The example decodes every stream role and checks the references between streams.
 It joins line and inlinee data to `/names`, procedure references to module symbols and index records to name lookup.
 It translates symbol, contribution and line addresses to RVAs, and counts the absolute addresses that have none.
 It fails if any record kind, subsection kind or stream has no typed decoder.
+It reports a decoded stream that no other stream names, with the reason, and does not fail for it.
 
 `Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
+`Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
 GitHub issues #2 to #10 record the implementation and the evidence for each area.
 
 ## Required formats and scope
@@ -687,17 +689,28 @@ The full-read example read all 17 native fixtures to the end. It reported these 
   .NET document records in `/src/files/` streams (compression byte 101) and the `sourcelink` named stream.
   `llvm-pdbutil` 22.1.6 cannot dump their symbols.
 
-The fixtures also exposed two producer defects that pdbrs reports without failing:
+The fixtures also exposed a producer defect that pdbrs reports without failing:
 
 - LLD 22.1.3 puts some public symbols (`__chkstk`, `g_c_name`, `___favor`) in the wrong hash bucket.
   LLD 22.1.6 puts `__chkstk` in the correct bucket.
-- The public index of an MSVC 14.44 FASTLINK PDB uses 0x3ffff buckets, but 642 of its 836 records are in bucket
-  `(hash % 0x3ffff) & 0xffff`. Name lookup cannot find them with the documented rule.
 
 The fixtures found two reader defects, now fixed. Incremental links give end markers and empty COFF groups an
 offset equal to the section size; `AddressMap::rva` now accepts the end of a section. Managed procedures open
 scopes; the scope walker now reports them as undecoded instead of reporting a corrupt scope end.
 An empty `/src/headerblock` stream now means that the PDB has no injected sources.
+
+Evidence for the FPO, `/TMCache` and FASTLINK decisions of #13:
+
+- The x86 fixtures have 3, 2 and 3 FPO records and 489, 1307 and 1841 frame data records. All frame data
+  fields and frame programs match `llvm-pdbutil dump --fpo`. The FPO fields also match, except `fHasSEH`:
+  LLVM reads bit 9 of the attribute word, but `winnt.h` puts it at bit 11. The records with bit 11 set are
+  SEH filter blocks of procedures with `has seh` frames.
+- The layout of `/TMCache` and its type map streams comes from `DBI1::DumpTMCache` in `mspdbcore.dll`
+  (MSVC 14.51). Its output agrees with the decoded values. In the incremental fixture, 43 entries name 42
+  type map streams. One more stream is byte-identical to a named one: two inputs with the same checksum
+  share an entry. The example reports it as a type map stream that `/TMCache` does not name.
+- `GSI1::hashSz` returns the 16-bit `HASH` type, so the bucket is `(hash % count) & 0xffff`. With this rule,
+  lookup finds all 836 records of the MSVC 14.44 FASTLINK public index.
 
 The signature probe was also exercised against a .NET-produced Portable PDB, an embedded PDB payload and ordinary CLI assembly metadata.
 A synthetic Small MSF signature was identified. These checks establish signature behavior, not portable or legacy parsing.

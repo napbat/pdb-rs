@@ -3,13 +3,16 @@
 //! The PDB Info stream maps these names to stream indices. [`NamedStreamKind::classify`] maps a
 //! named-stream name to the decoder for its contents. Each decoder takes the stream bytes and
 //! the stream ID. Errors have the stream ID and a logical offset, and no physical offset.
+//! [`TmCache`] names unnamed type map streams; [`TypeMapStream`] decodes them.
 
 mod link_info;
 mod tm_cache;
+mod type_map;
 mod udt_source_line_undone;
 
 pub use link_info::{LINK_INFO_VERSION_TWO, LinkInfo};
-pub use tm_cache::TmCache;
+pub use tm_cache::{TM_CACHE_VERSION, TmCache, TmCacheEntry};
+pub use type_map::{TypeMapKind, TypeMapStream};
 pub use udt_source_line_undone::UdtSourceLineUndone;
 
 use super::injected_source::{HEADER_BLOCK_STREAM_NAME, SOURCE_FILE_STREAM_PREFIX};
