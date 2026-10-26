@@ -14,6 +14,10 @@
 //! embedded-source blobs. Windows PDB document records use the same
 //! embedded-source blob format. Decode an `MPDB` payload with
 //! [`embedded::decode_embedded`], then read the result with [`Pdb::parse`].
+//!
+//! [`write`](mod@write) writes Portable PDBs: exact copies with [`Pdb::copy_exact`], and
+//! new layouts from raw parts with [`write::PdbParts::plan`]. [`Pdb::to_parts`] reads a
+//! Portable PDB into such parts.
 
 pub mod compressed;
 pub mod custom;
@@ -21,6 +25,7 @@ pub mod debug;
 pub mod embedded;
 pub mod metadata;
 mod reader;
+pub mod write;
 
 pub use reader::{Pdb, ReadOptions, Rows};
 

@@ -7,6 +7,7 @@ pub const USAGE: &str = "\
 usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- tools
        cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
+       cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
        cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
@@ -23,6 +24,10 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   verify-portable
                  Print the canonical dump of each Portable PDB fixture with pdbrs and with
                  the verifier, write both to target/verify-portable/ and compare them.
+
+  verify-rebuild Rebuild each Portable PDB fixture with the pdbrs writer, write it to
+                 target/verify-rebuild/ and compare its bytes, its ID and its verifier dump
+                 with the original.
 
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
                  with the manifest. The CLI metadata of each image must be rejected.
@@ -48,6 +53,9 @@ pub enum Action {
     /// Open each fixture output with the format facade. The value is the fixture root, if
     /// the user gave one.
     Detect(Option<PathBuf>),
+    /// Rebuild each Portable PDB fixture with the pdbrs writer and compare it with the
+    /// original. The value is the fixture root, if the user gave one.
+    VerifyRebuild(Option<PathBuf>),
 }
 
 /// The options of a build.
@@ -77,6 +85,7 @@ where
     for (command, action) in [
         ("verify-portable", Action::VerifyPortable as fn(_) -> _),
         ("detect", Action::Detect),
+        ("verify-rebuild", Action::VerifyRebuild),
     ] {
         if arguments.next_if(|argument| argument == command).is_some() {
             return fixture_root(command, &mut arguments).map(action);
@@ -184,6 +193,7 @@ mod tests {
     #[test]
     fn fixture_commands_take_an_optional_fixture_root() {
         assert_eq!(run(&["verify-portable"]), Ok(Action::VerifyPortable(None)));
+        assert_eq!(run(&["verify-rebuild"]), Ok(Action::VerifyRebuild(None)));
         assert_eq!(
             run(&["detect", "--fixtures", "D:/f"]),
             Ok(Action::Detect(Some(PathBuf::from("D:/f"))))

@@ -3,7 +3,8 @@
 Status: the full reader/writer design remains proposed. The library reads every stream, record and subsection in the Rust-produced sample PDBs.
 Formats and record kinds outside those samples remain incomplete. The library writes MSF 7.0 containers (exact copies, stream-preserving repacks and new layouts).
 The library reads the metadata of standalone Portable PDBs and the raw rows of their eight debug tables (see [Implemented Portable PDB reading](#implemented-portable-pdb-reading)).
-Portable PDB blob decoding is partial, and Portable PDB writing and PDB semantic building and editing are not implemented.
+The library writes Portable PDBs: exact copies and new layouts from raw rows and heaps (see [Implemented Portable PDB writing](#implemented-portable-pdb-writing)).
+Portable PDB blob decoding is partial, and PDB semantic building and editing are not implemented.
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
 [#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
@@ -126,6 +127,30 @@ The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `S
 Evidence ([#22](https://github.com/napbat/pdbrs/issues/22)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) give dumps without differences.
 `cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
 It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
+
+## Implemented Portable PDB writing
+
+The `portable::write` module writes Portable PDBs through two operations ([#26](https://github.com/napbat/pdbrs/issues/26), phase 1):
+
+| Operation | API | Guarantee |
+| --- | --- | --- |
+| Exact copy | `Pdb::copy_exact`, `Pdb::copy_exact_file` | Every source byte, through one buffer of at most 64 KiB |
+| New layout | `PdbParts::plan`, then `WritePlan::write_to`, `to_vec`, `to_embedded` or `write_file` | A checked Portable PDB with the given raw rows and heaps |
+
+`PdbParts` holds the version string, the entry point, the external row counts, the four heaps and the raw rows of the eight debug tables.
+The heap builders remove duplicates. `#Blob`, `#US` and `#GUID` offsets follow the insertion order.
+`StringHeapBuilder::finish` sorts the strings by their reversed bytes and puts each suffix string inside a longer string.
+`Pdb::to_parts` reads all rows and re-adds the heap entries. It keeps the row IDs and the row order.
+It fails if a `#Blob` offset changes while `Document` or `ImportScope` rows exist, because their blobs contain `#Blob` offsets that only the codecs of [#23](https://github.com/napbat/pdbrs/issues/23) can rewrite.
+
+The plan checks every heap and row reference, the `#Pdb` fields and the required row order before it writes a byte.
+It uses the layout of `System.Reflection.Metadata`: the stream order, the `Valid` and `Sorted` masks, the index width rules and the trailing zero byte of `#~`.
+`IdPolicy` selects an explicit PDB ID or the content-derived ID of `BlobContentId.FromHash`: SHA-256 over the output with a zero ID, with the GUID version and variant bits and bit 31 of the stamp set.
+`WritePlan::identity`, `codeview` (GUID, age 1, stamp) and `checksum` (SHA-256, SHA-384 or SHA-512 with a zero ID, the PDB checksum entry of the addendum) give the values for the debug directory of the assembly.
+`WritePlan::write_file` and `copy_exact_file` use the temporary-sibling contract of the MSF file helpers.
+
+Evidence: `cargo run -p pdbrs-fixtures -- verify-rebuild` rebuilds the four standalone Portable PDB fixtures and the decoded `MPDB` payload of the embedded fixture.
+Each rebuild has the original bytes and the original content-derived ID, and its verifier dump has no differences.
 
 ## Implemented MSF writing
 
@@ -492,6 +517,7 @@ GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 | Semantic build or edit | Emit coherent supported records and all affected indexes | Byte-identical encoding or arbitrary unknown-reference relocation |
 
 Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (see [MSF writing](#implemented-msf-writing)).
+Exact copies and new layouts from raw rows are implemented for Portable PDBs (see [Portable PDB writing](#implemented-portable-pdb-writing)).
 Semantic builds and edits are not implemented.
 
 Keep these operations explicit. Do not silently fall back from preservation to normalization.

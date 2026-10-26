@@ -6,7 +6,7 @@
 
 use alloc::vec;
 
-use super::{Sha256Hasher, sha256, sha384, sha512};
+use super::{Sha256Hasher, Sha384Hasher, Sha512Hasher, sha256};
 use crate::test_support::hex;
 
 /// The 448-bit message of the NIST two-block SHA-256 example.
@@ -18,6 +18,25 @@ hijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
 
 /// The size of the one-million-'a' message.
 const MILLION: usize = 1_000_000;
+
+/// Return the SHA-384 digest of `message`, given to the hasher in pieces of 7 bytes. The
+/// pieces cross the 128-byte block boundaries.
+fn sha384(message: &[u8]) -> [u8; 48] {
+    let mut hasher = Sha384Hasher::new();
+    for piece in message.chunks(7) {
+        hasher.update(piece);
+    }
+    hasher.finalize()
+}
+
+/// Return the SHA-512 digest of `message`, given to the hasher in pieces of 7 bytes.
+fn sha512(message: &[u8]) -> [u8; 64] {
+    let mut hasher = Sha512Hasher::new();
+    for piece in message.chunks(7) {
+        hasher.update(piece);
+    }
+    hasher.finalize()
+}
 
 #[test]
 fn sha256_matches_nist_vectors() {
