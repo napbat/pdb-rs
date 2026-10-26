@@ -63,8 +63,8 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
-| Symbols | Typed decoding of 45 symbol kinds, including every kind in the Rust sample PDBs, the LLD `S_SKIP` filler and the managed kinds of .NET Windows PDBs (`S_GMANPROC`, `S_LMANPROC`, `S_MANSLOT`, `S_MANCONSTANT`, `S_TOKENREF`, raw `S_OEM` data); zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) and the Roslyn custom debug information in `S_OEM` |
-| Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
+| Symbols | Typed decoding of 57 symbol kinds, including every kind in the Rust sample PDBs, the MSVC, Clang and rustc producer fixtures (#13), the LLD `S_SKIP` filler and the managed kinds of .NET Windows PDBs (#14: `S_GMANPROC`, `S_LMANPROC`, `S_MANSLOT`, `S_MANCONSTANT`, `S_TOKENREF`, `S_OEM`); zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations. `S_FRAMEREG`, `S_FASTLINK` and `S_REGREL32_ENCTMP` layouts come from fixtures (#13) | Other symbol kinds (kept raw as `Unsupported`) |
+| Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines, COFF symbol RVAs (`0xfd`) and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists; `S_MANCONSTANT` also keeps `LF_VARSTRING` and fixed-size real, complex, decimal and date leaves | Non-integer leaves in other records |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
@@ -689,6 +689,12 @@ The full-read example read all 17 native fixtures to the end. It reported these 
   (32), blocks (12), slots (11), constants (2) and token references (32) agree with DIA2Dump. The five
   document records have a correct entry CRC and size. The two embedded sources (one raw, one DEFLATE) match
   their SHA-256 checksums.
+
+After #13, the full-read example decodes every symbol kind and C13 subsection of the MSVC, Clang and rustc fixtures.
+The decoded fields and the counts per kind match `llvm-pdbutil` 22.1.6. `llvm-pdbutil` cannot decode `S_FRAMEREG`,
+`S_FASTLINK`, `S_REGREL32_ENCTMP` and subsection `0xfd`; the record bytes and the object files of the link confirm
+them. The example joins all 532 `S_TRAMPOLINE` records of the incremental fixture to the 532 public thunk map
+entries, and resolves the `S_FILESTATIC` file name in `/names`.
 
 The fixtures also exposed two producer defects that pdbrs reports without failing:
 

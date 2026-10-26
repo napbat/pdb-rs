@@ -1,8 +1,8 @@
 //! Variable, def-range, data, constant and user-defined type records.
 //!
 //! The layouts follow `LocalSym`, the `DefRange*Sym` classes,
-//! `RegRelativeSym`, `DataSym`, `ConstantSym` and `UDTSym` in LLVM
-//! `SymbolRecord.h` and `SymbolRecordMapping.cpp`.
+//! `RegRelativeSym`, `DataSym`, `ThreadLocalDataSym`, `ConstantSym` and
+//! `UDTSym` in LLVM `SymbolRecord.h` and `SymbolRecordMapping.cpp`.
 //!
 //! Register fields stay raw `u16` values. A value is a `CV_HREG_e` register
 //! number for the CPU of the module. Read the CPU from the `machine` field of
@@ -254,6 +254,57 @@ impl<'a> DefRangeRegister<'a> {
     }
 }
 
+/// A def-range for a part of a variable in a register
+/// (`S_DEFRANGE_SUBFIELD_REGISTER`).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct DefRangeSubfieldRegister<'a> {
+    /// The register that holds the part. See the module documentation.
+    pub register: u16,
+    /// The range attributes, with the same bits as
+    /// [`DefRangeRegister::attributes`].
+    pub attributes: u16,
+    /// The raw offset field. `cvinfo.h` gives the offset of the part in the
+    /// parent variable in bits 0 to 11 and padding in bits 12 to 31. LLVM
+    /// keeps all 32 bits as `OffsetInParent`.
+    pub parent_offset: u32,
+    /// The code range where the location is valid.
+    pub range: AddressRange,
+    /// The parts of the range where the location is not valid.
+    pub gaps: AddressGaps<'a>,
+}
+
+impl<'a> DefRangeSubfieldRegister<'a> {
+    /// Read the fields.
+    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
+        let register = fields.u16()?;
+        let attributes = fields.u16()?;
+        let parent_offset = fields.u32()?;
+        let range = AddressRange::read(fields)?;
+        let gaps = AddressGaps::read(fields)?;
+        Ok(Self {
+            register,
+            attributes,
+            parent_offset,
+            range,
+            gaps,
+        })
+    }
+
+    /// Return `true` if the "may have no name" bit is set.
+    #[must_use]
+    pub const fn may_have_no_name(&self) -> bool {
+        self.attributes & 1 != 0
+    }
+
+    /// Return the offset of the part in the parent variable (bits 0 to 11).
+    #[must_use]
+    pub const fn offset_in_parent(&self) -> u16 {
+        let [low, high, _, _] = (self.parent_offset & 0xfff).to_le_bytes();
+        u16::from_le_bytes([low, high])
+    }
+}
+
 /// Return the "spilled member" bit of def-range register flags.
 const fn spilled_member(flags: u16) -> bool {
     flags & 1 != 0
@@ -364,7 +415,12 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
     }
 }
 
-/// A register-relative variable (`S_REGREL32`).
+/// A register-relative variable (`S_REGREL32` and `S_REGREL32_ENCTMP`).
+///
+/// MSVC writes `S_REGREL32_ENCTMP` for compiler temporaries, for example
+/// `__$ReturnUdt`, in code compiled with `/ZI` (Edit and Continue). No
+/// reference gives its layout. The MSVC incremental fixture of #12 confirms
+/// the `S_REGREL32` layout (#13).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct RegisterRelative<'a> {
@@ -395,7 +451,10 @@ impl<'a> RegisterRelative<'a> {
     }
 }
 
-/// A data record (`S_GDATA32` and `S_LDATA32`).
+/// A data record (`S_GDATA32`, `S_LDATA32`, `S_GTHREAD32` and `S_LTHREAD32`).
+///
+/// For a thread-local record, the address is in the thread storage section,
+/// for example `.tls`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Data<'a> {

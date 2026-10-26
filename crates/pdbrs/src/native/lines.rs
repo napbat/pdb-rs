@@ -7,6 +7,8 @@
 //! - [`DEBUG_S_LINES`]: line blocks of one code contribution.
 //! - [`DEBUG_S_FILECHKSMS`]: the file checksum table of the module.
 //! - [`DEBUG_S_INLINEELINES`]: the source lines of inlined functions.
+//! - [`DEBUG_S_COFF_SYMBOL_RVA`]: the RVAs of the COFF symbols of the object
+//!   file, in FASTLINK PDBs.
 //!
 //! Data of all other kinds stays raw. [`SubsectionKind`] classifies these
 //! kinds and does not decode them. [`ModuleLines`] decodes all subsections
@@ -18,8 +20,9 @@
 //! The layouts come from these sources:
 //!
 //! - `docs/reference/microsoft-pdb-rs/docs/codeview/line_data.md`.
-//! - `DebugLinesSubsection.cpp`, `DebugChecksumsSubsection.cpp` and
-//!   `DebugInlineeLinesSubsection.cpp` of LLVM.
+//! - `DebugLinesSubsection.cpp`, `DebugChecksumsSubsection.cpp`,
+//!   `DebugInlineeLinesSubsection.cpp` and `DebugSymbolRVASubsection.h` of
+//!   LLVM.
 //! - `CV_DebugSLinesHeader_t`, `CV_Line_t`, `CV_Column_t` and
 //!   `DEBUG_S_SUBSECTION_TYPE` in `cvinfo.h` of `microsoft/microsoft-pdb`.
 
@@ -27,6 +30,7 @@ use crate::{Error, ErrorKind, Result};
 
 mod blocks;
 mod checksums;
+mod coff_symbol_rva;
 mod inlinee;
 mod module;
 
@@ -35,6 +39,7 @@ pub use blocks::{
     LineEntries, LineEntriesIter, LineEntry, LinesHeader, LinesSubsection, NEVER_STEP_INTO_LINE,
 };
 pub use checksums::{ChecksumKind, FileChecksum, FileChecksums, FileChecksumsIter};
+pub use coff_symbol_rva::{CoffSymbolRvas, CoffSymbolRvasIter};
 pub use inlinee::{
     ChecksumOffsets, ChecksumOffsetsIter, InlineeLine, InlineeLines, InlineeLinesIter,
     InlineeSignature,
@@ -104,7 +109,7 @@ pub enum SubsectionKind {
     TypeTokenMap,
     /// [`DEBUG_S_MERGED_ASSEMBLYINPUT`].
     MergedAssemblyInput,
-    /// [`DEBUG_S_COFF_SYMBOL_RVA`].
+    /// [`DEBUG_S_COFF_SYMBOL_RVA`]. This crate decodes it.
     CoffSymbolRva,
     /// [`DEBUG_S_INLINEE_MDTOKEN_MAP`].
     InlineeTokenMap,
@@ -147,7 +152,10 @@ impl SubsectionKind {
     /// Return `true` if [`LineSubsection::decode`] decodes this kind.
     #[must_use]
     pub const fn is_decoded(self) -> bool {
-        matches!(self, Self::Lines | Self::FileChecksums | Self::InlineeLines)
+        matches!(
+            self,
+            Self::Lines | Self::FileChecksums | Self::InlineeLines | Self::CoffSymbolRva
+        )
     }
 }
 
@@ -161,6 +169,8 @@ pub enum LineSubsection<'a> {
     FileChecksums(FileChecksums<'a>),
     /// A [`DEBUG_S_INLINEELINES`] subsection.
     InlineeLines(InlineeLines<'a>),
+    /// A [`DEBUG_S_COFF_SYMBOL_RVA`] subsection.
+    CoffSymbolRvas(CoffSymbolRvas<'a>),
     /// A subsection of a kind that this crate does not decode.
     Unsupported {
         /// The class of the raw kind.
@@ -181,13 +191,15 @@ impl<'a> LineSubsection<'a> {
     /// # Errors
     ///
     /// Returns the errors of [`LinesSubsection::decode`],
-    /// [`FileChecksums::decode`] and [`InlineeLines::decode`]. The errors do
-    /// not have a file offset or a stream location.
+    /// [`FileChecksums::decode`], [`InlineeLines::decode`] and
+    /// [`CoffSymbolRvas::decode`]. The errors do not have a file offset or a
+    /// stream location.
     pub fn decode(kind: u32, data: &'a [u8]) -> Result<Self> {
         Ok(match SubsectionKind::from_raw(kind) {
             SubsectionKind::Lines => Self::Lines(LinesSubsection::decode(data)?),
             SubsectionKind::FileChecksums => Self::FileChecksums(FileChecksums::decode(data)?),
             SubsectionKind::InlineeLines => Self::InlineeLines(InlineeLines::decode(data)?),
+            SubsectionKind::CoffSymbolRva => Self::CoffSymbolRvas(CoffSymbolRvas::decode(data)?),
             kind => Self::Unsupported { kind, data },
         })
     }
