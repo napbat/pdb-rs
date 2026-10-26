@@ -13,6 +13,7 @@ pub mod hash_table;
 pub mod info;
 pub mod injected_source;
 pub mod lines;
+pub mod locate;
 pub mod msf;
 pub mod names;
 pub mod section;
