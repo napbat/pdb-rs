@@ -3,10 +3,13 @@
 //! Container versions, stream versions and record kinds are independent.
 //! Typed decoders report unsupported versions rather than guessing a layout.
 
+pub mod auxiliary;
 pub mod codeview;
 pub mod dbi;
 pub mod hash;
+pub mod hash_table;
 pub mod info;
+pub mod injected_source;
 pub mod msf;
 pub mod types;
 

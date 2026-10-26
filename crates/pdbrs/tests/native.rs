@@ -18,10 +18,11 @@ fn container(named_target: Option<u32>, age: u32) -> Vec<u8> {
     };
     info.extend_from_slice(&u32::try_from(name.len()).unwrap().to_le_bytes());
     info.extend_from_slice(name);
+    // The hash table, then the `niMac` word.
     let values = if let Some(target) = named_target {
-        vec![1, 2, 1, 1, 0, 0, target]
+        vec![1, 2, 1, 1, 0, 0, target, 0]
     } else {
-        vec![0, 1, 0, 0]
+        vec![0, 1, 0, 0, 0]
     };
     for value in values {
         info.extend_from_slice(&u32::to_le_bytes(value));
@@ -77,7 +78,7 @@ fn with_debug_info(info_age: u32, dbi_age: u32, debug_target: u16) -> Vec<u8> {
     bytes.resize(7 * 512, 0);
     put(&mut bytes, 40, 7);
     put(&mut bytes, 44, 28);
-    for (index, value) in [4, u32::MAX, 48, u32::MAX, 66, 5, 6]
+    for (index, value) in [4, u32::MAX, 52, u32::MAX, 66, 5, 6]
         .into_iter()
         .enumerate()
     {
