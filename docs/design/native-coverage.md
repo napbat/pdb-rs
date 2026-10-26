@@ -96,7 +96,7 @@ Most cells are fixture evidence for kinds that no local producer writes (`extern
 
 | Issue | Column | Cells | Rows |
 | --- | --- | ---: | --- |
-| #15 | Independent fixture evidence | 4 | Page size 8192, Page size 16384, Page size 32768, Free page map intervals after the first |
+| #1 | Independent fixture evidence | 4 | Page size 8192, Page size 16384, Page size 32768, Free page map intervals after the first |
 | #29 | Semantic reading | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Reference validation | 1 | Auxiliary hash stream (`hash_aux_stream`) |
 | #29 | Writing | 1 | Auxiliary hash stream (`hash_aux_stream`) |
