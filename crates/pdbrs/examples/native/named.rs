@@ -4,22 +4,84 @@
 use std::collections::HashSet;
 
 use pdbrs::io::FileReader;
-use pdbrs::native::Pdb;
 use pdbrs::native::auxiliary::{
     LinkInfo, NamedStreamKind, SourceLink, TmCache, TypeMapKind, TypeMapStream, UdtSourceLineUndone,
 };
+use pdbrs::native::hash_table::HashTableProducer;
+use pdbrs::native::info::Feature;
+use pdbrs::native::info::InfoBuilder;
 use pdbrs::native::injected_source::{
     ChecksumCheck, InjectedSource, SourceCompression, SourceHeaderBlock, content_stream_name,
 };
 use pdbrs::native::msf::StreamId;
-use pdbrs::native::names::StringTable;
+use pdbrs::native::names::{StringTable, StringTableBuilder};
 use pdbrs::native::types::{TypeStream, TypeTable};
+use pdbrs::native::{Identity, Pdb};
 use pdbrs::portable::embedded::EmbeddedFormat;
 
 use crate::{Outcome, Report};
 
 /// The largest embedded source that the example decodes.
 const MAX_EMBEDDED_SOURCE: usize = 64 << 20;
+
+/// Encode the Info stream and the `/names` table again, and build both again from their names.
+///
+/// The decoded forms must give the same bytes. The rebuilds insert the names in string buffer
+/// order with the rules of Microsoft `NMTNI` and `NMT`; the report counts the rebuilds that give
+/// other bytes, for example the `/names` bucket layout of LLVM, without failing.
+pub(crate) fn info_and_names(
+    pdb: &Pdb<FileReader>,
+    names: &StringTable<'_>,
+    report: &mut Report,
+) -> Outcome {
+    let info = pdb.info();
+    let mut encoded = Vec::new();
+    info.encode(&mut encoded)?;
+    report.reencoded("PDB Info streams", info.as_bytes(), &encoded);
+
+    let Identity::Modern { guid, age } = info.identity() else {
+        return Err("PDB Info stream has no GUID identity".into());
+    };
+    let mut model = InfoBuilder::new(HashTableProducer::Microsoft, info.signature(), guid, age)?;
+    let mut streams: Vec<_> = info.named_streams().collect();
+    streams.sort_by_key(|named| named.name_offset);
+    for named in &streams {
+        model.set_named_stream(named.name, named.stream)?;
+    }
+    model.set_next_name_index(info.next_name_index());
+    let features: Vec<Feature> = info.typed_features().collect();
+    model.set_features(&features)?;
+    let mut rebuilt = Vec::new();
+    model.encode(&mut rebuilt)?;
+    let key = if rebuilt == info.as_bytes() {
+        "PDB Info streams rebuilt from names with the NMTNI rules: same bytes"
+    } else {
+        "PDB Info streams rebuilt from names with the NMTNI rules: other bytes"
+    };
+    report.add(key, 1);
+
+    let Some(original) = pdb.named_stream_bytes(b"/names")? else {
+        return Ok(());
+    };
+    let mut encoded = Vec::new();
+    names.encode(&mut encoded)?;
+    report.reencoded("/names string tables", &original, &encoded);
+    let mut offsets: Vec<u32> = names.entries().map(|entry| entry.offset).collect();
+    offsets.sort_unstable();
+    let mut builder = StringTableBuilder::new(names.hash_version())?;
+    for offset in offsets {
+        builder.insert(names.get(offset)?)?;
+    }
+    let mut rebuilt = Vec::new();
+    builder.encode(&mut rebuilt)?;
+    let key = if rebuilt == original {
+        "/names tables rebuilt from names with the NMT rules: same bytes"
+    } else {
+        "/names tables rebuilt from names with the NMT rules: other bytes"
+    };
+    report.add(key, 1);
+    Ok(())
+}
 
 /// Decode every named stream and verify the injected sources.
 pub(crate) fn named_streams(

@@ -251,14 +251,13 @@ fn builder_grows_like_the_microsoft_name_table() {
     for version in [HashVersion::V1, HashVersion::V2] {
         let mut builder = StringTableBuilder::new(version).unwrap();
         assert_eq!(builder.strings(), b"\0");
-        assert_eq!(builder.insert(b"").unwrap(), 0);
         let mut counts = Vec::new();
         let mut offsets = Vec::new();
         for index in 0..10 {
             offsets.push(builder.insert(format!("name{index}").as_bytes()).unwrap());
             counts.push(builder.bucket_count());
         }
-        // The pairs of LLVM `computeBucketCount` that copy `NMT::grow`.
+        // The bucket counts of `NMT::grow`.
         assert_eq!(counts, [2, 4, 4, 7, 7, 11, 11, 11, 17, 17]);
         assert_eq!(offsets[1], 7);
         assert_eq!(builder.insert(b"name1").unwrap(), 7);
@@ -277,6 +276,11 @@ fn builder_grows_like_the_microsoft_name_table() {
     }
     let mut builder = StringTableBuilder::new(HashVersion::V1).unwrap();
     assert_error(builder.insert(b"a\0b"), ErrorKind::InvalidFormat);
+    // As in `NMT`, the empty name gets its own NUL byte; offset 0 marks an empty bucket.
+    assert_eq!(builder.insert(b"").unwrap(), 1);
+    assert_eq!(builder.insert(b"").unwrap(), 1);
+    assert_eq!(builder.strings(), b"\0\0");
+    assert_eq!(builder.name_count(), 1);
     assert_error(
         StringTableBuilder::from_table(&StringTable::parse(&table(1, b"\0", &[], 0)).unwrap()),
         ErrorKind::InvalidFormat,

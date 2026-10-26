@@ -11,9 +11,11 @@
 //!    table gets `bucket_count * 3 / 2 + 1` buckets. `NMT::rehash` puts the names again in the
 //!    order of the old buckets.
 //!
-//! LLVM `PDBStringTableBuilder` gives the same bucket count for the same number of names. It
-//! puts colliding names in the order of its internal string map, so the buckets of a table
-//! from LLVM can differ in the order of colliding names.
+//! LLVM `PDBStringTableBuilder` uses the same series of bucket counts, but it selects the
+//! count before the growth that the next names would cause (for 242 names, 709 buckets
+//! instead of 472). It also puts colliding names in the order of its internal string map.
+//! This builder does not copy the LLVM layout. [`super::StringTable::encode`] writes a decoded
+//! LLVM table with the same bytes.
 
 use alloc::vec::Vec;
 
@@ -116,7 +118,8 @@ impl StringTableBuilder {
 
     /// Return the offset of `name`, and add the name if the table does not have it.
     ///
-    /// The empty name has offset 0 and does not change the table.
+    /// The empty name is a name too: as in `NMT::addNiForSz`, it gets its own NUL byte and
+    /// bucket. Offset 0 marks an empty bucket and is never the offset of a name.
     ///
     /// # Errors
     ///
@@ -125,9 +128,6 @@ impl StringTableBuilder {
     /// - [`ErrorKind::LimitExceeded`] if the string buffer, the bucket count or the name count
     ///   does not fit in `u32`, or if an allocation fails.
     pub fn insert(&mut self, name: &[u8]) -> Result<u32> {
-        if name.is_empty() {
-            return Ok(0);
-        }
         let bucket = match self.find(name)? {
             Probe::Found(offset) => return Ok(offset),
             Probe::Empty(bucket) => bucket,

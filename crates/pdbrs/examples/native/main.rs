@@ -30,11 +30,17 @@ use pdbrs::native::section::SectionHeaders;
 use pdbrs::{ErrorKind, Result as PdbResult};
 
 use dbi::{debug_info_tables, frame_data, section_header_bytes};
-use named::named_streams;
+use named::{info_and_names, named_streams};
 use symbols::{modules, shared_symbols};
 use types::{hash_stream_bytes, identifiers, types};
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
+
+/// A string table without names: signature, version 1, a buffer with one NUL, one empty bucket
+/// and a name count of 0.
+const EMPTY_NAMES: [u8; 25] = [
+    0xfe, 0xef, 0xfe, 0xef, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 /// Counts and coverage gathered while reading.
 #[derive(Default)]
@@ -51,6 +57,8 @@ struct Report {
     unowned: BTreeMap<String, usize>,
     /// The bytes of the type map streams that `/TMCache` names.
     type_maps: HashSet<Vec<u8>>,
+    /// Streams and records that an encoder wrote again: the count and the differences by family.
+    reencoded: BTreeMap<&'static str, (usize, usize)>,
 }
 
 impl Report {
@@ -68,6 +76,15 @@ impl Report {
 
     fn inconsistency(&mut self, what: String) {
         self.inconsistencies.push(what);
+    }
+
+    /// Count one item that an encoder wrote again, and whether the bytes differ.
+    fn reencoded(&mut self, family: &'static str, original: &[u8], encoded: &[u8]) {
+        let entry = self.reencoded.entry(family).or_default();
+        entry.0 += 1;
+        if original != encoded {
+            entry.1 += 1;
+        }
     }
 
     /// Return the value, or count an unsupported format and return `None`.
@@ -107,8 +124,16 @@ fn main() -> Outcome {
     let mut report = Report::default();
     container(&pdb, &mut report)?;
 
-    let names_bytes = pdb.named_stream_bytes(b"/names")?.ok_or("missing /names")?;
+    let names_bytes = if let Some(bytes) = pdb.named_stream_bytes(b"/names")? {
+        bytes
+    } else {
+        // `link /PDBSTRIPPED` writes no `/names` stream. Use a table without names, so that
+        // any reference to a name fails.
+        report.add("PDBs without /names (stripped)", 1);
+        EMPTY_NAMES.to_vec()
+    };
     let names = StringTable::parse(&names_bytes)?;
+    info_and_names(&pdb, &names, &mut report)?;
     if let Some(placement) = report.supported(names.verify_buckets(), "/names hashing")? {
         report.add(
             "/names strings",
@@ -127,6 +152,12 @@ fn main() -> Outcome {
 
     let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
     report.claim(StreamId(3));
+    let info_age = pdb.info().identity().age();
+    if dbi.header().age != info_age {
+        // `pdbstr -w` increments only the Info age; the image matches the DBI age.
+        report.add("PDB Info age above the DBI age", 1);
+        println!("PDB Info age: {info_age}, DBI age: {}", dbi.header().age);
+    }
     let header_bytes = section_header_bytes(&pdb, &dbi, &mut report)?;
     let addresses = header_bytes
         .as_deref()
@@ -147,10 +178,17 @@ fn main() -> Outcome {
     unclaimed_streams(&pdb, &mut report)?;
     print(&report);
     let undecoded: usize = report.undecoded.values().sum();
-    if undecoded == 0 {
-        Ok(())
-    } else {
+    let different: usize = report
+        .reencoded
+        .values()
+        .map(|(_, different)| different)
+        .sum();
+    if undecoded != 0 {
         Err(format!("{undecoded} items have no typed decoder").into())
+    } else if different != 0 {
+        Err(format!("{different} items encode to other bytes").into())
+    } else {
+        Ok(())
     }
 }
 
@@ -218,5 +256,8 @@ fn print(report: &Report) {
     println!("decoded streams without an owner: {unowned}");
     for (item, count) in &report.unowned {
         println!("  {count} x {item}");
+    }
+    for (family, (count, different)) in &report.reencoded {
+        println!("{family} re-encoded: {count}, different: {different}");
     }
 }

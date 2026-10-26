@@ -14,9 +14,12 @@
 //!
 //! | Rule | [`HashTableProducer::Microsoft`] | [`HashTableProducer::Llvm`] |
 //! | --- | --- | --- |
-//! | Capacity of a new table | 1 | 8 |
+//! | Capacity of a table from the default constructor (`Map()`, `HashTable()`) | 1 | 8 |
 //! | Present bit vector words | At least 1; extended to the highest bit set since the last growth | Up to the highest present bit |
 //! | Deleted bit vector words | Extended to the highest bit set since the last growth | Up to the highest deleted bit |
+//!
+//! Some tables use another first capacity: the LLVM named-stream map starts with 1 bucket
+//! (`OffsetIndexMap(1)`). Use [`OwnedHashTable::with_capacity`] for them.
 //!
 //! A table decoded from a file keeps its bit vector words exactly, so that
 //! [`OwnedHashTable::encode`] gives the same bytes again.
@@ -38,7 +41,7 @@ pub enum HashTableProducer {
 }
 
 impl HashTableProducer {
-    /// Return the bucket count of a new table.
+    /// Return the bucket count of a table from the default constructor of the producer.
     #[must_use]
     pub const fn initial_capacity(self) -> u32 {
         match self {
@@ -97,7 +100,7 @@ pub struct OwnedHashTable<V> {
 }
 
 impl<V: Clone> OwnedHashTable<V> {
-    /// Create an empty table with the capacity of a new table of `producer`.
+    /// Create an empty table with the default capacity of `producer`.
     ///
     /// # Errors
     ///
