@@ -425,3 +425,60 @@ fn error_kinds_in_this_module_match_the_docs() {
     );
     assert_eq!(error.stream_location(), Some((100, 0)));
 }
+
+/// A source that counts the reads that start at one offset.
+struct Counting<'a> {
+    bytes: &'a [u8],
+    offset: u64,
+    reads: core::cell::Cell<usize>,
+}
+
+impl ReadAt for Counting<'_> {
+    fn len(&self) -> crate::Result<u64> {
+        ReadAt::len(self.bytes)
+    }
+
+    fn read_exact_at(&self, offset: u64, buffer: &mut [u8]) -> crate::Result<()> {
+        if offset == self.offset {
+            self.reads.set(self.reads.get() + 1);
+        }
+        self.bytes.read_exact_at(offset, buffer)
+    }
+}
+
+#[test]
+fn a_corrupt_chunk_is_decoded_once() {
+    // Regression test for a `msfz` fuzz timeout: each read of a fragment in a corrupt chunk
+    // decoded the chunk again.
+    let chunk = pattern(12, 600);
+    let streams: Vec<Spec> = (0..8)
+        .map(|index| {
+            Spec::Parts(vec![Part::Chunk {
+                chunk: 0,
+                offset: index * 70,
+                size: 40,
+            }])
+        })
+        .collect();
+    let mut image = Image::new(&[(ZSTD, &chunk)], &streams);
+    let start = usize::try_from(image.chunks[0]).unwrap();
+    image.bytes[start + 6] ^= 0xff;
+    let source = Counting {
+        bytes: &image.bytes,
+        offset: image.chunks[0],
+        reads: core::cell::Cell::new(0),
+    };
+    let msfz = Msfz::open(&source).unwrap();
+    let mut kinds = Vec::new();
+    for id in 0..8 {
+        let stream = msfz.stream(StreamId(id)).unwrap().unwrap();
+        for _ in 0..2 {
+            let error = stream.read_all(usize::MAX).unwrap_err();
+            assert_eq!(error.stream_location(), Some((id, 0)));
+            kinds.push(error.kind());
+        }
+    }
+    assert_eq!(source.reads.get(), 1);
+    assert!(kinds.iter().all(|&kind| kind == kinds[0]), "{kinds:?}");
+    assert_ne!(kinds[0], ErrorKind::Io);
+}

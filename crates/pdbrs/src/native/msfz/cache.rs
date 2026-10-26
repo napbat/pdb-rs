@@ -3,7 +3,8 @@
 //! The cache keeps decompressed chunks up to a byte capacity. When a new chunk does not fit,
 //! it removes the least recently used chunks first. A counter that increments on each access
 //! gives the order, so the same sequence of reads gives the same evictions. A chunk that is
-//! larger than the capacity is decoded for the read and not kept.
+//! larger than the capacity is decoded for the read and not kept. A chunk that does not decode
+//! is decoded only once: the cache keeps its error.
 //!
 //! Under `std`, a `Mutex` protects the cache, so the cache is `Sync`. Without `std`, a
 //! `RefCell` protects it, as in [`crate::io::SeekReader`].
@@ -11,7 +12,7 @@
 use alloc::vec::Vec;
 
 use super::no_memory;
-use crate::Result;
+use crate::{Error, ErrorKind, Result};
 
 /// The interior mutability of the cache.
 #[cfg(feature = "std")]
@@ -66,6 +67,11 @@ struct State {
     used: usize,
     /// The access counter.
     clock: u64,
+    /// The chunks that do not decode, with the error kind and context.
+    ///
+    /// The source bytes do not change ([`crate::io::ReadAt`]), so a chunk that does not decode
+    /// once does not decode again. The list has at most one entry for each chunk.
+    failures: Vec<(u32, ErrorKind, Option<&'static str>)>,
 }
 
 /// A bounded cache of decompressed chunks.
@@ -87,7 +93,10 @@ impl ChunkCache {
     /// Call `visit` with the decompressed bytes of chunk `chunk`.
     ///
     /// If the cache does not hold the chunk, `load` decodes it. Then the cache keeps it if it
-    /// is not larger than the capacity.
+    /// is not larger than the capacity. If `load` fails with [`ErrorKind::InvalidFormat`],
+    /// [`ErrorKind::UnexpectedEof`] or [`ErrorKind::UnsupportedVersion`], the cache keeps the
+    /// error kind and context, and later calls return them without a new decode. Other errors,
+    /// for example I/O errors and failed allocations, are not kept.
     pub(super) fn with_chunk<R>(
         &self,
         chunk: u32,
@@ -102,7 +111,34 @@ impl ChunkCache {
                 slot.last_use = clock;
                 return Ok(visit(&slot.data));
             }
-            let data = load()?;
+            let failed = state
+                .failures
+                .binary_search_by_key(&chunk, |&(failed, ..)| failed);
+            if let Ok(index) = failed {
+                let (_, kind, context) = state.failures[index];
+                let error = Error::new(kind, None);
+                return Err(match context {
+                    Some(context) => error.with_context(context),
+                    None => error,
+                });
+            }
+            let data = match load() {
+                Ok(data) => data,
+                Err(error) => {
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::InvalidFormat
+                            | ErrorKind::UnexpectedEof
+                            | ErrorKind::UnsupportedVersion
+                    ) && let Err(position) = failed
+                        && state.failures.try_reserve(1).is_ok()
+                    {
+                        let failure = (chunk, error.kind(), error.context());
+                        state.failures.insert(position, failure);
+                    }
+                    return Err(error);
+                }
+            };
             if data.len() > capacity {
                 return Ok(visit(&data));
             }
