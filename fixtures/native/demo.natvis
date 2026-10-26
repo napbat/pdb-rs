@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debugger visualizers for the native demo. The msvc-x64-natvis fixture links this file
+     with /NATVIS, so the PDB keeps it as an injected source. -->
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="demo::Widget">
+    <DisplayString>{{ value={value} }}</DisplayString>
+    <Expand>
+      <LinkedListItems>
+        <HeadPointer>this</HeadPointer>
+        <NextPointer>next</NextPointer>
+        <ValueNode>value</ValueNode>
+      </LinkedListItems>
+    </Expand>
+  </Type>
+  <Type Name="c_point">
+    <DisplayString>({x}, {y})</DisplayString>
+  </Type>
+</AutoVisualizer>

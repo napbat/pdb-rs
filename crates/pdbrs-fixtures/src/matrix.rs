@@ -84,6 +84,41 @@ pub enum Linker {
     Lld,
 }
 
+/// The sources and steps of a native fixture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variant {
+    /// Compile the demo and link `demo.exe`.
+    Demo,
+    /// Like `Demo`, but `main.cpp` makes a precompiled header from `demo.h` (`/Yc`) and the
+    /// other C++ files use it (`/Yu`).
+    PrecompiledHeader,
+    /// Like `Demo`, and the linker also writes `demo.stripped.pdb` (`/PDBSTRIPPED`).
+    Stripped,
+    /// Like `Demo`, and the linker adds `demo.natvis` to the PDB (`/NATVIS`).
+    Natvis,
+    /// Like `Demo`, then `pdbstr` adds a `srcsrv` stream to `demo.srcsrv.pdb`, a copy of the
+    /// PDB.
+    SourceServer,
+    /// Profile-guided optimization of the demo: an instrumented link, a training run of the
+    /// instrumented program and an optimized link.
+    ProfileGuided,
+    /// The DLL `dll/exports.cpp` with the exports of `dll/exports.def`.
+    Dll,
+    /// The C++/CLI program `clr/managed.cpp`.
+    Clr,
+}
+
+impl Variant {
+    /// The source languages.
+    pub const fn language(self) -> &'static str {
+        match self {
+            Self::Dll => "c++20",
+            Self::Clr => "c++/cli",
+            _ => "c++20, c17",
+        }
+    }
+}
+
 /// A native C and C++ build.
 #[derive(Debug, Clone, Copy)]
 pub struct Native {
@@ -99,6 +134,8 @@ pub struct Native {
     pub compile: &'static [&'static str],
     /// Linker options.
     pub link: &'static [&'static str],
+    /// The sources and steps.
+    pub variant: Variant,
 }
 
 /// A Cargo build of `fixtures/rust`.
@@ -169,7 +206,7 @@ const fn native(
     Fixture {
         name,
         producer,
-        language: "c++20, c17",
+        language: native.variant.language(),
         arch: native.arch.name(),
         configuration,
         recipe: Recipe::Native(native),
@@ -188,6 +225,7 @@ const fn msvc(
         arch,
         compile,
         link,
+        variant: Variant::Demo,
     }
 }
 
@@ -204,12 +242,18 @@ const fn clang(
         arch,
         compile,
         link,
+        variant: Variant::Demo,
     }
 }
 
 /// Build a native recipe with the tools of another Visual Studio installation.
 const fn in_studio(studio: Studio, native: Native) -> Native {
     Native { studio, ..native }
+}
+
+/// Build a native recipe with other sources or steps.
+const fn with_variant(variant: Variant, native: Native) -> Native {
+    Native { variant, ..native }
 }
 
 const fn rust(name: &'static str, linker: Linker, arch: Arch, release: bool) -> Fixture {
@@ -352,6 +396,95 @@ pub static FIXTURES: &[Fixture] = &[
         "clang-cl + link",
         "debug",
         clang(Linker::Msvc, Arch::X64, DEBUG, LINK_DEBUG),
+    ),
+    native(
+        "msvc-x64-clr",
+        "msvc",
+        "debug, c++/cli",
+        with_variant(
+            Variant::Clr,
+            msvc(Arch::X64, &["/clr", "/Zi", "/Od", "/MDd"], LINK_DEBUG),
+        ),
+    ),
+    native(
+        "msvc-x64-pgo",
+        "msvc",
+        "release, profile-guided optimization",
+        with_variant(
+            Variant::ProfileGuided,
+            msvc(Arch::X64, &["/Zi", "/O2", "/MD", "/GL"], LINK_RELEASE),
+        ),
+    ),
+    native(
+        "msvc-x64-dll",
+        "msvc",
+        "debug, dll with exports",
+        with_variant(Variant::Dll, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-xfg",
+        "msvc (vs 2022)",
+        "debug, xfg",
+        // MSVC 14.50 and later accept /guard:xfg but write no XFG data, so this fixture needs
+        // the 14.4x tools.
+        in_studio(
+            Studio::Vs2022,
+            msvc(
+                Arch::X64,
+                &["/Zi", "/Od", "/MDd", "/guard:xfg"],
+                &["/DEBUG:FULL", "/INCREMENTAL:NO", "/guard:xfg"],
+            ),
+        ),
+    ),
+    native(
+        "msvc-x64-debugtype",
+        "msvc",
+        "debug, debugtype cv fixup pdata",
+        msvc(
+            Arch::X64,
+            DEBUG,
+            &[
+                "/DEBUG:FULL",
+                "/INCREMENTAL:NO",
+                "/DEBUGTYPE:CV,FIXUP,PDATA",
+            ],
+        ),
+    ),
+    native(
+        "msvc-x64-stripped",
+        "msvc",
+        "debug, pdbstripped",
+        with_variant(Variant::Stripped, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-natvis",
+        "msvc",
+        "debug, natvis",
+        with_variant(Variant::Natvis, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-srcsrv",
+        "msvc + pdbstr",
+        "debug, srcsrv stream",
+        with_variant(Variant::SourceServer, msvc(Arch::X64, DEBUG, LINK_DEBUG)),
+    ),
+    native(
+        "msvc-x64-pch-z7",
+        "msvc",
+        "debug, z7, precompiled header",
+        with_variant(
+            Variant::PrecompiledHeader,
+            msvc(Arch::X64, &["/Z7", "/Od", "/MDd"], LINK_DEBUG),
+        ),
+    ),
+    native(
+        "msvc-x64-pch-zi",
+        "msvc",
+        "debug, precompiled header",
+        with_variant(
+            Variant::PrecompiledHeader,
+            msvc(Arch::X64, DEBUG, LINK_DEBUG),
+        ),
     ),
     rust("rust-link-x64-debug", Linker::Msvc, Arch::X64, false),
     rust("rust-link-x64-release", Linker::Msvc, Arch::X64, true),

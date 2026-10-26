@@ -12,7 +12,9 @@ exception handling and .NET async state machines.
 
 | Directory | Contents |
 | --- | --- |
-| `native/` | C++20 and C17 sources for MSVC and `clang-cl`: `main.cpp`, `types.cpp`, `control.cpp`, `big_enum.cpp`, `c_api.c` and two headers. |
+| `native/` | C++20 and C17 sources for MSVC and `clang-cl`: `main.cpp`, `types.cpp`, `control.cpp`, `big_enum.cpp`, `c_api.c` and two headers. Inputs of the native variants: `demo.natvis` (Natvis visualizers) and `srcsrv.txt` (a `srcsrv` stream). |
+| `native/dll/` | A small DLL for the `msvc-x64-dll` fixture: `exports.cpp` and the module-definition file `exports.def`. |
+| `native/clr/` | A mixed C++/CLI program for the `msvc-x64-clr` fixture: `managed.cpp`. |
 | `rust/` | A standalone Cargo project. Its empty `[workspace]` table keeps it out of the root workspace. |
 | `dotnet/csharp/` | A C# console project with four source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs` and `Locals.cs`. |
 | `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
@@ -68,6 +70,16 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `clang-lld-x86-debug` | `clang-cl` + `lld-link` | x86 | `/Zi /Od`, `/DEBUG:FULL` |
 | `clang-lld-arm64-debug` | `clang-cl` + `lld-link` | ARM64 | `/Zi /Od`, `/DEBUG:FULL` |
 | `clang-link-x64-debug` | `clang-cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL` |
+| `msvc-x64-clr` | `cl` + `link` | x64 | `/clr /Zi /Od`, `/DEBUG:FULL` |
+| `msvc-x64-pgo` | `cl` + `link` | x64 | `/Zi /O2 /GL`, `/LTCG:PGINSTRUMENT`, a training run, `/LTCG:PGOPTIMIZE` |
+| `msvc-x64-dll` | `cl` + `link` | x64 | `/Zi /Od`, `/DLL /DEF:exports.def` |
+| `msvc-x64-xfg` | `cl` + `link` from Visual Studio 2022 | x64 | `/Zi /Od /guard:xfg`, `/DEBUG:FULL /guard:xfg` |
+| `msvc-x64-debugtype` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /DEBUGTYPE:CV,FIXUP,PDATA` |
+| `msvc-x64-stripped` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /PDBSTRIPPED` |
+| `msvc-x64-natvis` | `cl` + `link` | x64 | `/Zi /Od`, `/DEBUG:FULL /NATVIS:demo.natvis` |
+| `msvc-x64-srcsrv` | `cl` + `link` + `pdbstr` | x64 | `/Zi /Od`, `/DEBUG:FULL`, then `pdbstr -w -s:srcsrv` on a copy |
+| `msvc-x64-pch-z7` | `cl` + `link` | x64 | `/Z7 /Od /Yc /Yu`, `/DEBUG:FULL` |
+| `msvc-x64-pch-zi` | `cl` + `link` | x64 | `/Zi /Od /Yc /Yu`, `/DEBUG:FULL` |
 | `rust-link-x64-debug` | `rustc` + `link` | x86_64 | debug profile |
 | `rust-link-x64-release` | `rustc` + `link` | x86_64 | release profile with full debug information |
 | `rust-lld-x64-debug` | `rustc` + `lld-link` | x86_64 | debug profile |
@@ -84,6 +96,64 @@ separate LLVM installation. MSVC 14.50 and later ignore `/DEBUG:FASTLINK` (warni
 and write a full PDB. For this reason, `msvc-x64-fastlink` uses the tools of a Visual Studio
 2022 installation. A FASTLINK PDB keeps the type records in the object files and in
 `obj/compile.pdb`, so keep the `obj/` directory with the PDB.
+
+### Native variants
+
+The `msvc-x64-*` variants after `clang-link-x64-debug` give the native reader record kinds and
+streams that the other fixtures do not contain (#27). Each variant is small. Most variants use
+the sources of `native/`. The table gives the outputs and the items that only the variant
+contains. The issue in the last column decodes these items.
+
+| Fixture | Outputs | Items that only this fixture contains | Issue |
+| --- | --- | --- | --- |
+| `msvc-x64-clr` | `demo.exe`, `demo.pdb` | `S_GMANDATA` global symbols and `S_MANSLOT` module symbols. | #30 |
+| `msvc-x64-pgo` | `demo.exe`, `demo.pdb` | `S_POGODATA`, `S_CALLERS`, `S_INLINESITE2` and `S_SEPCODE` (separated code) module symbols. | #30 |
+| `msvc-x64-dll` | `demo.dll`, `demo.pdb` | `S_EXPORT` symbols with each flag: explicit ordinal, NONAME, DATA, CONSTANT, PRIVATE and forwarder. | #30 |
+| `msvc-x64-xfg` | `demo.exe`, `demo.pdb` | None in the PDB. The object files in `obj/` have the XFG hash subsections `0xFF` and `0x100`. | #31 |
+| `msvc-x64-debugtype` | `demo.exe`, `demo.pdb` | The optional debug streams Fixup (slot 2), Xdata (slot 7) and Pdata (slot 8). | #32 |
+| `msvc-x64-stripped` | `demo.exe`, `demo.pdb`, `demo.stripped.pdb` | A stripped PDB: no `/names` stream and no type records. 51 of 58 modules have no stream. The other modules have only procedure stubs. The globals are only public symbols and procedure references. | #32 |
+| `msvc-x64-natvis` | `demo.exe`, `demo.pdb` | None that is new. `demo.natvis` is an injected source (`/src/headerblock`, `/src/files/...`). The Rust fixtures have Natvis injected sources from `link.exe` and `lld-link` too, but no fixture of C++ code had them. | #32 |
+| `msvc-x64-srcsrv` | `demo.exe`, `demo.pdb`, `demo.srcsrv.pdb` | The `srcsrv` named stream. `pdbstr` also increments the age in the PDB Info stream, but not in the DBI stream. | #32 |
+| `msvc-x64-pch-z7` | `demo.exe`, `demo.pdb` | None in the PDB. The object files have `LF_ENDPRECOMP` (`obj/main.obj`) and `LF_PRECOMP` (the other C++ objects). | #29 |
+| `msvc-x64-pch-zi` | `demo.exe`, `demo.pdb` | None in the PDB. The objects refer to `obj/compile.pdb` with `LF_TYPESERVER2`. | #29 |
+
+Some notes about the variants:
+
+- `msvc-x64-clr` needs the Visual Studio component "C++/CLI support". It compiles with `/EHa`,
+  because `/clr` does not accept `/EHsc`. MSVC 14.51 writes no IL line subsections (`0xF9`), no
+  metadata token map subsections (`0xFA`, `0xFB`) and no TokenRidMap stream for C++/CLI.
+- `msvc-x64-pgo` runs the instrumented `demo.exe` once. The program loads `pgort140.dll` from the
+  `PATH` of the `vcvarsall.bat` environment. The optimized link updates the PDB of the
+  instrumented link, so the PDB keeps earlier stream directories.
+- `msvc-x64-dll` exports `demo_dll_limit` with the obsolete keyword `CONSTANT`. The linker
+  writes warning LNK4087, but it sets the constant flag of the `S_EXPORT` record.
+- `msvc-x64-xfg` uses the tools of a Visual Studio 2022 installation. MSVC 14.50 and later
+  accept `/guard:xfg` but write no XFG hashes. `link.exe` does not copy the XFG hash
+  subsections from the objects to the PDB, also with `/Z7` or `/DEBUG:FASTLINK`.
+- `msvc-x64-srcsrv` needs `pdbstr.exe` from the Debugging Tools for Windows, in
+  `Debuggers\<host>\srcsrv` below the Windows SDK root (`WindowsSdkDir`). `pdbstr` changes the
+  PDB in place, so the generator copies `demo.pdb` to `demo.srcsrv.pdb` first. The source file
+  entries of `srcsrv.txt` use names, not the absolute paths of the build.
+- The precompiled header variants compile `main.cpp` with `/Ycdemo.h` and the other C++ files
+  with `/Yudemo.h`. The linker resolves the precompiled types, so the PDB records are the same
+  kinds as in `msvc-x64-z7` and `msvc-x64-debug`.
+
+A missing component or tool makes the fixture `unavailable` with the reason. The generator
+checks for `msvcmrt.lib` in the `LIB` directories, for `pgort140.dll` on the `PATH` and for
+`pdbstr.exe`.
+
+These LLVM options do not give new PDB data, so the matrix has no fixture for them:
+
+- `clang-cl -gcodeview-ghash` with `lld-link /DEBUG:GHASH`: the objects have `.debug$H`
+  sections, but the TPI stream is the same as without global type hashes. Only the command
+  line strings in the IPI stream are different.
+- `lld-link /PDBSTRIPPED`: LLD ignores the option with a warning.
+- `lld-link /DEBUGTYPE:CV,FIXUP,PDATA`: LLD writes no Fixup, Pdata or Xdata stream.
+- `lld-link` with a module-definition file writes no `S_EXPORT` records.
+- `clang-cl /guard:cf` with `lld-link /guard:cf`: no new record kinds.
+- `clang-cl` precompiled headers (`/Yc`, `/Yu`): the objects have no `LF_PRECOMP` records.
+- `lld-link /NATVIS`: the Rust fixtures that use `lld-link` already contain Natvis injected
+  sources.
 
 ## Run the generator
 
@@ -432,6 +502,9 @@ The reader prints counts, undecoded record kinds and producer inconsistencies. I
 failure code while any record kind, subsection kind or stream has no typed decoder. GitHub issues
 #13 (MSVC and Clang C/C++) and #14 (.NET Windows PDBs) list the kinds that these fixtures still
 contain.
+
+The native variants contain kinds and streams without a decoder. [Native variants](#native-variants)
+gives the issue (#29 to #32) that decodes each item.
 
 Read every row and heap value of a Portable PDB with:
 
