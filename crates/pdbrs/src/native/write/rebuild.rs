@@ -17,6 +17,9 @@
 //! - the module offsets of `S_PROCREF`, `S_LPROCREF`, `S_DATAREF`,
 //!   `S_ANNOTATIONREF` and `S_TOKENREF` records,
 //! - the type map streams of `/TMCache`,
+//! - the module type streams that an `S_MOD_TYPEREF` record names in a PDB
+//!   without type merging (`NOTM`). The rebuild decodes and encodes their
+//!   records, and the record gets the new stream numbers,
 //! - the stream fields of the DBI header, the TPI and IPI headers and the
 //!   optional debug header, and the named-stream map.
 //!
@@ -33,6 +36,7 @@ use alloc::vec::Vec;
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache};
+use crate::native::codeview::symbol::{ModuleTypeReference, ModuleTypeSource};
 use crate::native::dbi::{Dbi, DebugStream, ModuleStream};
 use crate::native::info::Info;
 use crate::native::msf::StreamId;
@@ -102,6 +106,9 @@ pub struct PdbContents {
     named: Vec<NamedContent>,
     /// The type map streams that `/TMCache` names, by source stream ID.
     type_maps: Vec<(StreamId, Vec<u8>)>,
+    /// The module type streams that `S_MOD_TYPEREF` records name, by source
+    /// stream ID.
+    module_types: Vec<(StreamId, Vec<u8>)>,
     /// The present streams that no other stream names.
     unclaimed: Vec<StreamId>,
     /// The page size of the source container.
@@ -141,7 +148,9 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// - [`ErrorKind::MissingStream`] if the PDB has no TPI or DBI stream.
     /// - [`ErrorKind::UnsupportedVersion`] for an optional debug header slot
-    ///   after the slots that [`DebugStream`] names, if it holds a stream.
+    ///   after the slots that [`DebugStream`] names, if it holds a stream,
+    ///   and for an `S_MOD_TYPEREF` record with flags whose words have no
+    ///   known meaning ([`ModuleTypeSource::Other`]).
     /// - The errors of the stream readers and decoders.
     pub fn contents(&self) -> Result<PdbContents> {
         let mut claimed = Vec::new();
@@ -165,12 +174,17 @@ impl<S: ReadAt> Pdb<S> {
             .debug_info()?
             .ok_or_else(|| missing("PDB has no DBI stream"))?;
         let mut modules = Vec::new();
+        let mut module_types = Vec::new();
         for module in dbi.modules() {
             let module = module?;
             if let Some(id) = module.stream {
                 claim(id)?;
             }
-            push(&mut modules, self.module_stream(&module)?)?;
+            let stream = self.module_stream(&module)?;
+            if let Some(stream) = &stream {
+                self.module_types(stream, &mut module_types, &mut claim)?;
+            }
+            push(&mut modules, stream)?;
         }
         let header = *dbi.header();
         let symbols = match header.symbol_stream {
@@ -248,6 +262,7 @@ impl<S: ReadAt> Pdb<S> {
             debug,
             named,
             type_maps,
+            module_types,
             unclaimed,
             page_size: self.output_page_size(),
         })
@@ -306,6 +321,31 @@ impl<S: ReadAt> Pdb<S> {
             push(&mut streams, (kind, bytes))?;
         }
         Ok(streams)
+    }
+
+    /// Read the streams that the `S_MOD_TYPEREF` record of a module names.
+    fn module_types(
+        &self,
+        stream: &ModuleStream,
+        streams: &mut Vec<(StreamId, Vec<u8>)>,
+        claim: &mut impl FnMut(StreamId) -> Result<()>,
+    ) -> Result<()> {
+        let Some(reference) = ModuleTypeReference::find(stream.symbol_data())? else {
+            return Ok(());
+        };
+        let source = reference.source();
+        if let ModuleTypeSource::Other(_) = source {
+            return Err(Error::new(ErrorKind::UnsupportedVersion, None)
+                .with_context("S_MOD_TYPEREF record has flags with words of unknown meaning"));
+        }
+        for id in source.streams() {
+            if streams.iter().any(|(existing, _)| *existing == id) {
+                continue;
+            }
+            claim(id)?;
+            push(streams, (id, self.stream_bytes(id)?))?;
+        }
+        Ok(())
     }
 
     /// Read the type map streams that a `/TMCache` stream names.

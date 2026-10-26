@@ -20,7 +20,7 @@ use crate::native::codeview::symbol::{
     S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROCREF, S_PUB32, Symbol, SymbolData,
 };
 use crate::native::dbi::{DbiBuilder, DebugStream, ModuleStreamParts, OwnedSourceInfo};
-use crate::native::info::InfoBuilder;
+use crate::native::info::{Feature, InfoBuilder};
 use crate::native::msf::StreamId;
 use crate::native::names::{HashVersion, StringTableBuilder};
 use crate::native::output::no_memory;
@@ -310,8 +310,21 @@ pub(super) fn plan<S: ReadAt>(
 ) -> Result<DbiBuilder> {
     // The strip removes all type records, so it removes the type maps
     // without an owner as it removes the type maps that `/TMCache` names.
-    for map in opaque::check(pdb, context, Scope::Streams)? {
-        changes.remove(map)?;
+    // `link /DEBUG:LAZY /PDBSTRIPPED` also writes no module type streams,
+    // and the stripped PDB has no `NOTM` feature code.
+    let streams = opaque::check(pdb, context, Scope::Streams)?;
+    for stream in streams.type_maps.into_iter().chain(streams.module_types) {
+        changes.remove(stream)?;
+    }
+    if info
+        .features()
+        .any(|feature| feature == Feature::NoTypeMerge)
+    {
+        let features: Vec<Feature> = info
+            .features()
+            .filter(|&feature| feature != Feature::NoTypeMerge)
+            .collect();
+        info.set_features(&features)?;
     }
     strip_types(TPI_STREAM, context.tpi.header(), changes)?;
     if let Some(ipi) = pdb.ids()? {

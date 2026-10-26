@@ -87,6 +87,7 @@ mod storage;
 pub mod validate;
 mod variable;
 
+pub(crate) use annotation::code::{ChunkRange, CodeError, CodeState, separated_chunks};
 pub use annotation::{Annotation, Annotations, BinaryAnnotations};
 pub use architecture::{
     Ia64Procedure, MipsProcedure, ProcedureHeader, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,

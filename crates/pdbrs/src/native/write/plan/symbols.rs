@@ -166,7 +166,7 @@ impl PdbBuilder<'_> {
             .try_reserve_exact(self.modules.len())
             .map_err(|_| no_memory())?;
         for (module, stream) in self.modules.iter().zip(&ids.modules) {
-            let Some(stream) = *stream else {
+            if stream.is_none() {
                 if module
                     .symbols
                     .as_ref()
@@ -179,19 +179,12 @@ impl PdbBuilder<'_> {
                 regions.push(None);
                 module_offsets.push(Vec::new());
                 continue;
-            };
-            let (region, offsets) = module_regions(module, resolver)?;
-            if let Some(symbols) = &region.symbols {
-                check(&validate_module_symbols(
-                    symbols,
-                    stream,
-                    SYMBOL_BASE,
-                    &base,
-                )?)?;
             }
+            let (region, offsets) = module_regions(module, resolver)?;
             regions.push(Some(region));
             module_offsets.push(offsets);
         }
+        self.check_modules(&regions, ids, &base)?;
         let kinds = record_kinds(&regions)?;
         let module_record = |module: u16, offset: u32| {
             kinds
@@ -222,6 +215,42 @@ impl PdbBuilder<'_> {
             globals,
             publics,
         })
+    }
+
+    /// Check the references of the module symbols.
+    ///
+    /// The type and ID indices of a module with an `S_MOD_TYPEREF` record
+    /// resolve against the records that it names, not against TPI and IPI.
+    fn check_modules(
+        &self,
+        regions: &[Option<ModuleRegions>],
+        ids: &StreamIds,
+        base: &ValidationContext<'_>,
+    ) -> Result<()> {
+        let mut symbols = Vec::new();
+        symbols
+            .try_reserve_exact(regions.len())
+            .map_err(|_| no_memory())?;
+        symbols.extend(
+            regions
+                .iter()
+                .map(|region| region.as_ref().and_then(|region| region.symbols.as_deref())),
+        );
+        let (types, streams) = self.module_types(ids, &symbols)?;
+        for ((records, types), stream) in symbols.iter().zip(types).zip(&ids.modules) {
+            let (Some(records), Some(stream)) = (records, stream) else {
+                continue;
+            };
+            streams.with_context(types, base, self.modules.len(), |context| {
+                check(&validate_module_symbols(
+                    records,
+                    *stream,
+                    SYMBOL_BASE,
+                    context,
+                )?)
+            })?;
+        }
+        Ok(())
     }
 
     /// Join the module streams with their global references and set the

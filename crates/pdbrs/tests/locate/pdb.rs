@@ -6,8 +6,17 @@
 //! - `outer` (`S_GPROC32_ID`) at offset 0x10, 0x40 bytes. It inlines
 //!   `inner` at 0x10..0x18 and 0x20..0x24. `inner` inlines `leaf` at
 //!   0x12..0x14. The annotations give offsets from the start of `outer`.
+//! - `second` (`S_GPROC32`) at offset 0x60, 0x10 bytes.
 //!
 //! Offsets 0x50 to 0x5f are a gap between the procedures.
+//!
+//! The variant with separated code adds an `S_SEPCODE` record of `outer`
+//! after its end, at offset 0x80 with 0x40 bytes (chunk 1). In `outer` it
+//! adds two inline sites with `ChangeCodeOffsetBase`:
+//!
+//! - `leaf` at offset 0x20..0x24 of chunk 1 (0xa0..0xa4).
+//! - `inner` from offset 0x38 of chunk 0 to the end of the chunk
+//!   (0x48..0x50), and at offset 0x30..0x32 of chunk 1 (0xb0..0xb2).
 
 use pdbrs::ErrorKind;
 use pdbrs::native::Pdb;
@@ -15,7 +24,7 @@ use pdbrs::native::address::{Rva, SectionOffset};
 use pdbrs::native::codeview::id_record::LF_FUNC_ID;
 use pdbrs::native::codeview::index::IdIndex;
 use pdbrs::native::codeview::symbol::{
-    S_END, S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_PROC_ID_END,
+    S_END, S_GPROC32, S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_PROC_ID_END, S_SEPCODE,
 };
 use pdbrs::native::lines::{DEBUG_S_FILECHKSMS, DEBUG_S_INLINEELINES, DEBUG_S_LINES};
 use pdbrs::native::locate::{Location, SourceLine, SymbolLocator};
@@ -65,8 +74,16 @@ fn site(parent: u32, end: u32, inlinee: u32, annotations: &[u8]) -> Vec<u8> {
     payload
 }
 
+/// The payload of the `S_SEPCODE` record of `outer` at offset 0x80.
+fn separated_code(end: u32) -> Vec<u8> {
+    let mut payload = u32s(&[0, end, 0x40, 0, 0x80, 0x10]);
+    payload.extend_from_slice(&[1, 0, 1, 0]);
+    payload
+}
+
 /// Build the symbol records with the signature, and fill the scope links.
-fn symbols() -> Vec<u8> {
+/// `separated` adds the separated code of `outer`.
+fn symbols(separated: bool) -> Vec<u8> {
     let inner = [
         annotation(6, &[signed(1)]),
         annotation(3, &[0]),
@@ -78,23 +95,56 @@ fn symbols() -> Vec<u8> {
     ]
     .concat();
     let leaf = [annotation(3, &[2]), annotation(4, &[2])].concat();
+    // `leaf` in chunk 1 only, at line 205.
+    let cold_leaf = [
+        annotation(2, &[1]),
+        annotation(6, &[signed(5)]),
+        annotation(12, &[4, 0x20]),
+    ]
+    .concat();
+    // `inner` at line 140 in chunk 0 without a length, then in chunk 1.
+    let cold_inner = [
+        annotation(6, &[signed(40)]),
+        annotation(3, &[0x38]),
+        annotation(2, &[1]),
+        annotation(12, &[2, 0x30]),
+    ]
+    .concat();
     let build = |offsets: &[u32]| {
-        let records = [
+        let end = if separated { 9 } else { 5 };
+        let mut records = vec![
             symbol(
                 S_GPROC32_ID,
-                procedure([0, offsets[5]], 0x40, OUTER, 0x10, b"outer"),
+                procedure([0, offsets[end]], 0x40, OUTER, 0x10, b"outer"),
             ),
             symbol(S_INLINESITE, site(offsets[0], offsets[4], INNER, &inner)),
             symbol(S_INLINESITE, site(offsets[1], offsets[3], LEAF, &leaf)),
             symbol(S_INLINESITE_END, Vec::new()),
             symbol(S_INLINESITE_END, Vec::new()),
-            symbol(S_PROC_ID_END, Vec::new()),
-            symbol(
-                S_GPROC32,
-                procedure([0, offsets[7]], 0x10, 0x74, 0x60, b"second"),
-            ),
-            symbol(S_END, Vec::new()),
         ];
+        if separated {
+            records.extend([
+                symbol(S_INLINESITE, site(offsets[0], offsets[6], LEAF, &cold_leaf)),
+                symbol(S_INLINESITE_END, Vec::new()),
+                symbol(
+                    S_INLINESITE,
+                    site(offsets[0], offsets[8], INNER, &cold_inner),
+                ),
+                symbol(S_INLINESITE_END, Vec::new()),
+            ]);
+        }
+        records.push(symbol(S_PROC_ID_END, Vec::new()));
+        if separated {
+            // MSVC writes the separated code after the end of its procedure.
+            records.push(symbol(S_SEPCODE, separated_code(offsets[end + 2])));
+            records.push(symbol(S_END, Vec::new()));
+        }
+        let second = records.len();
+        records.push(symbol(
+            S_GPROC32,
+            procedure([0, offsets[second + 1]], 0x10, 0x74, 0x60, b"second"),
+        ));
+        records.push(symbol(S_END, Vec::new()));
         let mut next = 4;
         let mut starts = Vec::new();
         for record in &records {
@@ -103,7 +153,7 @@ fn symbols() -> Vec<u8> {
         }
         (records.concat(), starts)
     };
-    let (_, offsets) = build(&[0; 8]);
+    let (_, offsets) = build(&[0; 14]);
     let (records, _) = build(&offsets);
     [4_u32.to_le_bytes().to_vec(), records].concat()
 }
@@ -118,8 +168,9 @@ fn subsection(kind: u32, data: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// Build the C13 line region.
-fn c13(inlinee_lines: bool) -> Vec<u8> {
+/// Build the C13 line region. `separated` adds the lines of the separated
+/// code of `outer`.
+fn c13(inlinee_lines: bool, separated: bool) -> Vec<u8> {
     // Two entries without checksums: name offset, size 0, kind 0, padding.
     let checksums = [u32s(&[1]), vec![0, 0, 0, 0], u32s(&[7]), vec![0, 0, 0, 0]].concat();
     let outer = lines_subsection(
@@ -135,6 +186,10 @@ fn c13(inlinee_lines: bool) -> Vec<u8> {
         subsection(DEBUG_S_LINES, &second),
     ]
     .concat();
+    if separated {
+        let cold = lines_subsection(0x80, 0x40, &[(FILE_A, &[(0, 40)])]);
+        bytes.extend_from_slice(&subsection(DEBUG_S_LINES, &cold));
+    }
     if inlinee_lines {
         bytes.extend_from_slice(&subsection(DEBUG_S_INLINEELINES, &inlinees));
     }
@@ -142,9 +197,9 @@ fn c13(inlinee_lines: bool) -> Vec<u8> {
 }
 
 /// Build the module stream and its module info record.
-fn module(inlinee_lines: bool) -> (Vec<u8>, Vec<u8>) {
-    let symbols = symbols();
-    let c13 = c13(inlinee_lines);
+fn module(inlinee_lines: bool, separated: bool) -> (Vec<u8>, Vec<u8>) {
+    let symbols = symbols(separated);
+    let c13 = c13(inlinee_lines, separated);
     let mut record = vec![0; 64];
     record[34..36].copy_from_slice(&5_u16.to_le_bytes());
     record[36..40].copy_from_slice(&u32::try_from(symbols.len()).unwrap().to_le_bytes());
@@ -234,9 +289,10 @@ fn section_headers() -> Vec<u8> {
     bytes
 }
 
-/// Build the PDB file. `ids` adds the IPI stream.
-fn pdb_bytes(inlinee_lines: bool, ids: bool) -> Vec<u8> {
-    let (module_stream, record) = module(inlinee_lines);
+/// Build the PDB file. `ids` adds the IPI stream. `separated` adds the
+/// separated code of `outer`.
+fn pdb_bytes(inlinee_lines: bool, ids: bool, separated: bool) -> Vec<u8> {
+    let (module_stream, record) = module(inlinee_lines, separated);
     let streams = [
         Some(Vec::new()),
         Some(info()),
@@ -287,7 +343,7 @@ fn frames<'a>(location: &Location<'a>) -> Vec<(&'a [u8], Option<u32>, Option<u32
 
 #[test]
 fn procedures_come_in_rva_order() {
-    let bytes = pdb_bytes(true, true);
+    let bytes = pdb_bytes(true, true, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let locator = SymbolLocator::new(&pdb).unwrap();
     let procedures: Vec<_> = locator.procedures().map(Result::unwrap).collect();
@@ -316,7 +372,7 @@ fn procedures_come_in_rva_order() {
 
 #[test]
 fn locates_procedure_boundaries_and_gaps() {
-    let bytes = pdb_bytes(true, true);
+    let bytes = pdb_bytes(true, true, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let locator = SymbolLocator::new(&pdb).unwrap();
     // The first byte: the first of two line entries at offset 0.
@@ -363,7 +419,7 @@ fn locates_procedure_boundaries_and_gaps() {
 
 #[test]
 fn builds_inline_call_chains_from_the_innermost_frame() {
-    let bytes = pdb_bytes(true, true);
+    let bytes = pdb_bytes(true, true, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let locator = SymbolLocator::new(&pdb).unwrap();
     // `inner` holds 0x10 but `leaf` does not.
@@ -399,8 +455,96 @@ fn builds_inline_call_chains_from_the_innermost_frame() {
 }
 
 #[test]
+fn code_chunks_come_from_the_separated_code_after_the_procedure() {
+    let bytes = pdb_bytes(true, true, true);
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let locator = SymbolLocator::new(&pdb).unwrap();
+    let procedures: Vec<_> = locator.procedures().map(Result::unwrap).collect();
+    assert_eq!(procedures.len(), 2);
+    let chunks = locator.code_chunks(&procedures[0]).unwrap();
+    assert_eq!(
+        chunks
+            .iter()
+            .map(|chunk| (
+                chunk.offset.is_some(),
+                chunk.address.offset,
+                chunk.start,
+                chunk.length
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (false, 0x10, Some(Rva(0x1010)), 0x40),
+            (true, 0x80, Some(Rva(0x1080)), 0x40)
+        ]
+    );
+    assert_eq!(locator.code_chunks(&procedures[1]).unwrap().len(), 1);
+    let sites = locator.inline_sites(&procedures[0]).unwrap();
+    let ranges = |index: usize| {
+        sites[index]
+            .ranges
+            .iter()
+            .map(|range| {
+                let place = (range.chunk, range.code_offset, range.code_length);
+                (place, range.rva_range(&chunks))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ranges(2), [((1, 0x20, Some(4)), Some((Rva(0x10a0), 4)))]);
+    // `ChangeCodeOffsetBase` ends a range without a length at the end of
+    // its chunk.
+    assert_eq!(
+        ranges(3),
+        [
+            ((0, 0x38, None), Some((Rva(0x1048), 8))),
+            ((1, 0x30, Some(2)), Some((Rva(0x10b0), 2)))
+        ]
+    );
+    // A chunk that the procedure does not have gives no RVA range.
+    assert_eq!(sites[2].ranges[0].rva_range(&chunks[..1]), None);
+}
+
+#[test]
+fn locates_inline_frames_in_separated_code() {
+    let bytes = pdb_bytes(true, true, true);
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let locator = SymbolLocator::new(&pdb).unwrap();
+    let cold = locate(&locator, 0x10a0);
+    assert_eq!(cold.procedure.unwrap().name, b"outer");
+    assert_eq!(cold.module.unwrap().name, b"m.obj");
+    assert_eq!(place(cold.line), Some((&b"a.cpp"[..], 40)));
+    assert_eq!(frames(&cold), [(&b"leaf"[..], Some(205), Some(40))]);
+    let leaf = cold.inline_frames[0];
+    assert_eq!(leaf.range.unwrap().chunk, 1);
+    assert_eq!(leaf.range.unwrap().code_offset, 0x20);
+    assert_eq!(place(leaf.line), Some((&b"b.h"[..], 205)));
+    assert_eq!(leaf.line.unwrap().start, Rva(0x10a0));
+    assert_eq!(leaf.line.unwrap().length, Some(4));
+    assert_eq!(frames(&locate(&locator, 0x10a3)).len(), 1);
+    // The chunk holds the address after the range, but no inline site does.
+    let after = locate(&locator, 0x10a4);
+    assert_eq!(after.procedure.unwrap().name, b"outer");
+    assert_eq!(after.inline_frames, []);
+    assert_eq!(
+        frames(&locate(&locator, 0x10b1)),
+        [(&b"inner"[..], Some(140), Some(40))]
+    );
+    // The procedure start plus the chunk number and the code offset is not
+    // an address of the separated range.
+    assert_eq!(locate(&locator, 0x1031).inline_frames, []);
+    // The range of chunk 0 without a length ends with the procedure.
+    let open = locate(&locator, 0x104f);
+    assert_eq!(frames(&open), [(&b"inner"[..], Some(140), Some(15))]);
+    assert_eq!(open.inline_frames[0].line.unwrap().start, Rva(0x1048));
+    assert_eq!(open.inline_frames[0].line.unwrap().length, Some(8));
+    // After the separated code.
+    let past = locate(&locator, 0x10c0);
+    assert_eq!(past.procedure, None);
+    assert_eq!(past.inline_frames, []);
+}
+
+#[test]
 fn a_missing_inlinee_line_entry_is_an_error() {
-    let bytes = pdb_bytes(false, true);
+    let bytes = pdb_bytes(false, true, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let locator = SymbolLocator::new(&pdb).unwrap();
     let error = locator.locate(Rva(0x1012)).unwrap_err();
@@ -411,7 +555,7 @@ fn a_missing_inlinee_line_entry_is_an_error() {
 
 #[test]
 fn inline_sites_need_the_ipi_stream() {
-    let bytes = pdb_bytes(true, false);
+    let bytes = pdb_bytes(true, false, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let error = SymbolLocator::new(&pdb).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::MissingStream);
@@ -419,7 +563,7 @@ fn inline_sites_need_the_ipi_stream() {
 
 #[test]
 fn name_and_public_queries_without_symbol_indexes_are_empty() {
-    let bytes = pdb_bytes(true, true);
+    let bytes = pdb_bytes(true, true, false);
     let pdb = Pdb::parse(&bytes).unwrap();
     let locator = SymbolLocator::new(&pdb).unwrap();
     assert_eq!(locator.find_name(b"outer").unwrap(), []);

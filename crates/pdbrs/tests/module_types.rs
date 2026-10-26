@@ -147,3 +147,34 @@ fn gives_the_source_of_module_type_records() {
         assert_eq!(value.source(), ModuleTypeSource::Other(value));
     }
 }
+
+#[test]
+fn maps_only_the_stream_words_of_module_type_records() {
+    let streams = |value: ModuleTypeReference| value.source().streams().collect::<Vec<_>>();
+    assert_eq!(streams(reference(0x08, 0x12, 7)), [StreamId(0x12)]);
+    assert_eq!(
+        streams(reference(0x10, 0x20, 0x21)),
+        [StreamId(0x20), StreamId(0x21)]
+    );
+    for flags in [0x01, 0x20, 0x0c] {
+        assert_eq!(streams(reference(flags, 1, 2)), []);
+        let mut value = reference(flags, 1, 2);
+        value
+            .map_streams(|_| panic!("the record names no stream"))
+            .expect("no stream");
+        assert_eq!(value, reference(flags, 1, 2));
+    }
+    let mut value = reference(0x10, 0x20, 0x21);
+    value
+        .map_streams(|id| Ok(StreamId(id.0 + 0x100)))
+        .expect("mapped");
+    assert_eq!(value, reference(0x10, 0x120, 0x121));
+    // The type records keep the second word.
+    let mut value = reference(0x08, 0x12, 7);
+    value.map_streams(|_| Ok(StreamId(5))).expect("mapped");
+    assert_eq!(value, reference(0x08, 5, 7));
+    let error = reference(0x08, 0x12, 0)
+        .map_streams(|_| Ok(StreamId(0x1_0000)))
+        .expect_err("the word has 16 bits");
+    assert_eq!(error.kind(), ErrorKind::LimitExceeded);
+}

@@ -10,15 +10,22 @@
 //!   [`MIN_ADDRESSES`] addresses and the ranges have more distinct addresses, it adds one
 //!   address in each range from a pseudo-random generator with a fixed seed.
 //! - A sample with more than [`MAX_ADDRESSES`] addresses keeps a pseudo-random selection.
+//! - The sample also has the separated code addresses of [`separated_addresses`]. The
+//!   `DIA2Dump -all` output gives separated code only as `Block` lines, and the inline ranges
+//!   in it not at all. The limit of [`MAX_ADDRESSES`] does not remove these addresses.
 //! - The type names come from the `UserDefinedType: <name>` lines. More than [`MAX_TYPES`]
 //!   names give a pseudo-random selection.
 
 use std::collections::BTreeSet;
+use std::path::Path;
+
+use pdbrs::native::Pdb;
+use pdbrs::native::locate::SymbolLocator;
 
 /// The address count that the sample tries to reach.
 pub(crate) const MIN_ADDRESSES: usize = 200;
 
-/// The maximum address count of a sample.
+/// The maximum address count of a sample, without the separated code addresses.
 pub(crate) const MAX_ADDRESSES: usize = 600;
 
 /// The maximum type name count of a sample.
@@ -37,27 +44,34 @@ pub(crate) struct Sample {
     pub rvas: Vec<u32>,
     /// The number of distinct addresses in all ranges.
     pub available: u64,
+    /// The number of separated code addresses in `rvas`.
+    pub separated: usize,
     /// The type names, in increasing order.
     pub types: Vec<String>,
 }
 
 impl Sample {
-    /// Select a sample from the `DIA2Dump -all` output of a PDB.
-    pub(crate) fn select(dia_all: &str) -> Self {
+    /// Select a sample from the `DIA2Dump -all` output of a PDB and its separated code
+    /// addresses.
+    pub(crate) fn select(dia_all: &str, separated: &[u32]) -> Self {
         let ranges = ranges(dia_all);
         let (rvas, available) = addresses(&ranges);
+        let separated: BTreeSet<u32> = separated.iter().copied().collect();
+        let mut all: BTreeSet<u32> = rvas.into_iter().collect();
+        all.extend(&separated);
         Self {
-            rvas,
+            rvas: all.into_iter().collect(),
             available,
+            separated: separated.len(),
             types: type_names(dia_all),
         }
     }
 
     /// Describe the address count. A sample with fewer than [`MIN_ADDRESSES`] addresses
-    /// tells why.
+    /// tells why. A sample with separated code addresses gives their number.
     pub(crate) fn describe(&self) -> String {
         let count = self.rvas.len();
-        if count >= MIN_ADDRESSES {
+        let text = if count >= MIN_ADDRESSES {
             format!("{count} addresses")
         } else if self.available == 0 {
             format!("{count} addresses (DIA lists no code or data addresses)")
@@ -66,8 +80,56 @@ impl Sample {
                 "{count} addresses (all {} distinct addresses used)",
                 self.available
             )
+        };
+        if self.separated == 0 {
+            text
+        } else {
+            format!("{text}, {} in separated code", self.separated)
         }
     }
+}
+
+/// Return the separated code addresses of the PDB at `path`, sorted and without duplicates.
+///
+/// The addresses are the first, the middle and the last byte of each separated code chunk of a
+/// procedure (`S_SEPCODE`) and of each inline range in such a chunk. The pdbrs locator gives
+/// the chunks ([`SymbolLocator::code_chunks`]) and the inline ranges.
+pub(crate) fn separated_addresses(path: &Path) -> Result<Vec<u32>, String> {
+    let bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let error = |error: pdbrs::Error| format!("separated code of {}: {error}", path.display());
+    let pdb = Pdb::parse(bytes.as_slice()).map_err(error)?;
+    let locator = SymbolLocator::new(&pdb).map_err(error)?;
+    let mut rvas = BTreeSet::new();
+    let mut add = |start: u32, length: u32| {
+        if let Some(last) = length.checked_sub(1) {
+            rvas.extend([
+                start,
+                start.saturating_add(length / 2),
+                start.saturating_add(last),
+            ]);
+        }
+    };
+    for procedure in locator.procedures() {
+        let procedure = procedure.map_err(error)?;
+        let chunks = locator.code_chunks(&procedure).map_err(error)?;
+        if chunks.len() < 2 {
+            continue;
+        }
+        for chunk in &chunks[1..] {
+            if let Some(start) = chunk.start {
+                add(start.0, chunk.length);
+            }
+        }
+        for site in locator.inline_sites(&procedure).map_err(error)? {
+            for range in site.ranges.iter().filter(|range| range.chunk > 0) {
+                if let Some((start, length)) = range.rva_range(&chunks) {
+                    add(start.0, length);
+                }
+            }
+        }
+    }
+    Ok(rvas.into_iter().collect())
 }
 
 /// A pseudo-random generator: `SplitMix64`.
@@ -250,8 +312,8 @@ UserDefinedType: std::pair<int,int>
 
     #[test]
     fn the_sample_is_deterministic_and_inside_the_ranges() {
-        let first = Sample::select(DUMP);
-        assert_eq!(first, Sample::select(DUMP));
+        let first = Sample::select(DUMP, &[]);
+        assert_eq!(first, Sample::select(DUMP, &[]));
         assert_eq!(first.rvas.len(), MIN_ADDRESSES);
         assert_eq!(first.available, 0x15C + 2);
         assert!(first.rvas.is_sorted());
@@ -271,14 +333,14 @@ UserDefinedType: std::pair<int,int>
     #[test]
     fn a_small_dump_uses_all_addresses() {
         let dump = "Function : static, [00001000][0001:00000000], len = 00000004, f\n";
-        let sample = Sample::select(dump);
+        let sample = Sample::select(dump, &[]);
         assert_eq!(sample.rvas, vec![0x1000, 0x1001, 0x1002, 0x1003]);
         assert_eq!(
             sample.describe(),
             "4 addresses (all 4 distinct addresses used)"
         );
         assert_eq!(
-            Sample::select("").describe(),
+            Sample::select("", &[]).describe(),
             "0 addresses (DIA lists no code or data addresses)"
         );
     }
@@ -295,10 +357,17 @@ UserDefinedType: std::pair<int,int>
             .unwrap();
             writeln!(dump, "UserDefinedType: t{index}").unwrap();
         }
-        let sample = Sample::select(&dump);
+        let sample = Sample::select(&dump, &[]);
         assert_eq!(sample.rvas.len(), MAX_ADDRESSES);
         assert_eq!(sample.types.len(), MAX_TYPES);
-        assert_eq!(sample, Sample::select(&dump));
+        assert_eq!(sample, Sample::select(&dump, &[]));
         assert!(sample.types.is_sorted());
+        // The limit does not remove separated code addresses.
+        let separated = [0x9000, 0x9001, 0x1000];
+        let with = Sample::select(&dump, &separated);
+        assert!(separated.iter().all(|rva| with.rvas.contains(rva)));
+        assert!(with.rvas.is_sorted());
+        assert_eq!(with.separated, 3);
+        assert!(with.describe().ends_with(", 3 in separated code"));
     }
 }

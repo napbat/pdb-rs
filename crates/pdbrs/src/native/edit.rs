@@ -64,6 +64,10 @@
 //!   `/TMCache` and `/UDTSRCLINEUNDONE` become empty. The plan removes the
 //!   type map streams that `/TMCache` names and the type map streams that no
 //!   stream names (type maps without an owner).
+//! - In a PDB without type merging (feature `NOTM`, `link /DEBUG:LAZY`), the
+//!   plan removes the module type streams that the `S_MOD_TYPEREF` records
+//!   name, and the Info stream loses the `NOTM` feature code. A stripped
+//!   module stream has no `S_MOD_TYPEREF` record.
 //!
 //! # Rejected edits
 //!
@@ -71,12 +75,14 @@
 //! writes nothing, so `PdbEditPlan::write_file` makes no file. The plan
 //! rejects these edits with [`ErrorKind::InvalidReference`]:
 //!
-//! - An edit that moves a symbol record, and a strip, if the source has
+//! - An edit that moves symbol records, and a strip, if the source has
 //!   opaque data that can refer to symbol offsets or type indices: a present
 //!   stream that no other stream names and that does not decode as a type map
 //!   stream, a named stream of an unknown kind, a symbol record of an unknown
 //!   kind or a C13 subsection of an unknown kind. A type map without an owner
-//!   holds type indices, not symbol offsets, so it does not block an edit.
+//!   holds type indices, not symbol offsets, so it does not block an edit. A
+//!   module type stream belongs to the module whose `S_MOD_TYPEREF` record
+//!   names it, so it does not block an edit either.
 //! - A record with a reference that does not resolve.
 //! - A rename of a name that is not in the index or that is not unique.
 //!

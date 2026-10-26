@@ -6,7 +6,9 @@
 //! decoder, so it rejects the edit if such data exists:
 //!
 //! - A present stream that no other stream names, unless it decodes as a
-//!   type map stream. A type map holds type indices, not symbol offsets.
+//!   type map stream. A type map holds type indices, not symbol offsets. A
+//!   module type stream that an `S_MOD_TYPEREF` record names belongs to the
+//!   module of that record; it holds type records, not symbol offsets.
 //! - A named stream of a kind that this crate does not decode.
 //! - For moved symbol records also: a symbol record of a kind that this crate
 //!   does not decode, in the symbol record stream or in a module stream, a C13
@@ -19,7 +21,7 @@ use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache, TypeMapStream};
 use crate::native::codeview::Records;
-use crate::native::codeview::symbol::SymbolData;
+use crate::native::codeview::symbol::{ModuleTypeReference, SymbolData};
 use crate::native::lines::{LineSubsection, ModuleLines};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
@@ -40,26 +42,37 @@ fn opaque(context: &'static str) -> Error {
     Error::new(ErrorKind::InvalidReference, None).with_context(context)
 }
 
+/// The streams that the scan found and that a strip removes.
+#[derive(Debug, Default)]
+pub(super) struct TypeStreams {
+    /// The streams that no other stream names and that decode as a type map
+    /// stream: type maps without an owner. Incremental links of `link.exe`
+    /// leave them, for example stream 61 of the `msvc-x64-incremental`
+    /// fixture.
+    pub(super) type_maps: Vec<StreamId>,
+    /// The module type streams that `S_MOD_TYPEREF` records name, in a PDB
+    /// without type merging (`NOTM`).
+    pub(super) module_types: Vec<StreamId>,
+}
+
 /// Return an error if the PDB has opaque data in `scope`.
 ///
-/// Return the streams that no other stream names and that decode as a type
-/// map stream: type maps without an owner. Incremental links of `link.exe`
-/// leave them, for example stream 61 of the `msvc-x64-incremental` fixture.
+/// Return the type maps without an owner and the module type streams.
 pub(super) fn check<S: ReadAt>(
     pdb: &Pdb<S>,
     context: &Context,
     scope: Scope,
-) -> Result<Vec<StreamId>> {
-    let type_maps = check_streams(pdb, context)?;
+) -> Result<TypeStreams> {
+    let streams = check_streams(pdb, context)?;
     if scope == Scope::Records {
         check_records(pdb, context)?;
     }
-    Ok(type_maps)
+    Ok(streams)
 }
 
 /// Return an error for a stream without a known role or a named stream
 /// without a decoder.
-fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<StreamId>> {
+fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStreams> {
     let count = pdb.container().stream_count();
     let mut claimed = Vec::new();
     claimed
@@ -86,8 +99,22 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<Strea
     claim(header.global_stream);
     claim(header.public_stream);
     claim(header.symbol_stream);
+    let mut module_types = Vec::new();
     for module in dbi.modules() {
-        claim(module?.stream);
+        let module = module?;
+        claim(module.stream);
+        let Some(stream) = pdb.module_stream(&module)? else {
+            continue;
+        };
+        if let Some(reference) = ModuleTypeReference::find(stream.symbol_data())? {
+            for id in reference.source().streams() {
+                claim(Some(id));
+                if !module_types.contains(&id) {
+                    module_types.try_reserve(1).map_err(|_| no_memory())?;
+                    module_types.push(id);
+                }
+            }
+        }
     }
     for id in dbi.debug_streams() {
         claim(id);
@@ -126,7 +153,10 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<Strea
         type_maps.try_reserve(1).map_err(|_| no_memory())?;
         type_maps.push(StreamId(id));
     }
-    Ok(type_maps)
+    Ok(TypeStreams {
+        type_maps,
+        module_types,
+    })
 }
 
 /// Return an error for a symbol record of an unknown kind, a C13 subsection
