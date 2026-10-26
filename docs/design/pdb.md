@@ -63,8 +63,8 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
-| Symbols | Typed decoding of 39 symbol kinds, including every kind in the Rust sample PDBs and the LLD `S_SKIP` filler; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
-| Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
+| Symbols | Typed decoding of 51 symbol kinds, including every kind in the Rust sample PDBs, the MSVC, Clang and rustc producer fixtures (#13) and the LLD `S_SKIP` filler; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations. `S_FRAMEREG`, `S_FASTLINK` and `S_REGREL32_ENCTMP` layouts come from fixtures (#13) | Other symbol kinds (kept raw as `Unsupported`) |
+| Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines, COFF symbol RVAs (`0xfd`) and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
 | Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
@@ -688,6 +688,12 @@ The full-read example read all 17 native fixtures to the end. It reported these 
 - .NET Windows PDBs (#14): managed procedures and slots, `S_OEM`, `S_MANCONSTANT`, `S_TOKENREF`,
   .NET document records in `/src/files/` streams (compression byte 101) and the `sourcelink` named stream.
   `llvm-pdbutil` 22.1.6 cannot dump their symbols.
+
+After #13, the full-read example decodes every symbol kind and C13 subsection of the MSVC, Clang and rustc fixtures.
+The decoded fields and the counts per kind match `llvm-pdbutil` 22.1.6. `llvm-pdbutil` cannot decode `S_FRAMEREG`,
+`S_FASTLINK`, `S_REGREL32_ENCTMP` and subsection `0xfd`; the record bytes and the object files of the link confirm
+them. The example joins all 532 `S_TRAMPOLINE` records of the incremental fixture to the 532 public thunk map
+entries, and resolves the `S_FILESTATIC` file name in `/names`.
 
 The fixtures also exposed a producer defect that pdbrs reports without failing:
 

@@ -10,7 +10,7 @@
 //! producer data that no stream names, with the reason, without failing.
 //! Names stay bytes.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::error::Error;
 
 use pdbrs::io::FileReader;
@@ -22,7 +22,9 @@ use pdbrs::native::auxiliary::{
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
-use pdbrs::native::codeview::symbol::{Annotation, ModuleSymbols, Symbol, SymbolData};
+use pdbrs::native::codeview::symbol::{
+    Annotation, ModuleSymbols, Symbol, SymbolData, Trampoline, TrampolineKind,
+};
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::dbi::{Dbi, DebugStream};
 use pdbrs::native::injected_source::{SourceHeaderBlock, content_stream_name};
@@ -30,7 +32,7 @@ use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::msf::{OldDirectory, StreamId};
 use pdbrs::native::names::StringTable;
 use pdbrs::native::section::SectionHeaders;
-use pdbrs::native::symbols::{HashTable, RecordOffsets};
+use pdbrs::native::symbols::{HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets};
 use pdbrs::native::types::{ForwardRefs, HEADER_SIZE, TypeHashes, TypeStream, TypeTable};
 use pdbrs::{ErrorKind, Result as PdbResult};
 
@@ -581,13 +583,15 @@ fn check_symbol(symbol: &Symbol<'_>, context: &Context<'_>, report: &mut Report)
     Ok(())
 }
 
-/// The module procedures that procedure references can name.
+/// The module records that the shared symbol checks need.
 #[derive(Default)]
 struct Procedures {
     /// The module index and module-stream offset of each decoded procedure.
     offsets: HashSet<(u16, u32)>,
     /// Modules whose symbol walk stopped at a scope that is not decoded.
     incomplete: HashSet<u16>,
+    /// The `S_TRAMPOLINE` records of all modules.
+    trampolines: Vec<Trampoline>,
 }
 
 /// Decode every module stream and return the procedure offsets per module.
@@ -636,6 +640,12 @@ fn modules(
                         }
                     }
                 }
+                SymbolData::FileStatic(value) => {
+                    context.names.get(value.module_name_offset)?;
+                    report.add("file statics joined to /names", 1);
+                }
+                SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
+                SymbolData::FastLink(_) => report.add("FASTLINK references", 1),
                 _ => {}
             }
             report.add("module symbols", 1);
@@ -691,6 +701,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
                     report.add("inlinee lines", 1);
                 }
             }
+            LineSubsection::CoffSymbolRvas(rvas) => coff_symbol_rvas(rvas.iter(), context, report)?,
             _ => report.undecoded(format!("C13 subsection {:#x}", subsection.kind)),
         }
         report.add("C13 subsections", 1);
@@ -756,12 +767,102 @@ fn shared_symbols(
         })?;
         check_lookup("public", publics.hash_table(), &bytes, &mut indexed, report)?;
         report.add("public index records", publics.hash_table().len());
+        join_trampolines(&publics, &procedures.trampolines, report);
     }
     report.add(
         "shared symbols outside both indexes",
         offsets.len() - indexed.len(),
     );
     Ok(())
+}
+
+/// Make sure that each COFF symbol RVA is 0, 0xffffffff or inside a section.
+///
+/// In the MSVC FASTLINK fixture, 0 marks a record without an image address
+/// and 0xffffffff marks an external symbol that the linker resolved to an
+/// absolute value, for example `__guard_flags` (#13).
+fn coff_symbol_rvas(
+    rvas: impl Iterator<Item = u32>,
+    context: &Context<'_>,
+    report: &mut Report,
+) -> Outcome {
+    for rva in rvas {
+        if rva == 0 {
+            report.add("COFF symbol RVAs without an address", 1);
+        } else if rva == u32::MAX {
+            report.add("COFF symbol RVAs of absolute symbols", 1);
+        } else if let Some(map) = &context.addresses {
+            map.section_offset(Rva(rva))?;
+            report.add("COFF symbol RVAs inside a section", 1);
+        } else {
+            report.add("addresses without section headers", 1);
+        }
+    }
+    Ok(())
+}
+
+/// Join the incremental trampolines to the public thunk map.
+///
+/// Thunk `i` is at `thunk_table_offset + i * thunk_size` in the thunk table
+/// section. Thunk map entry `i` is the flat address of the thunk target: the
+/// section start (`SO` entry) of the target section plus the target offset.
+fn join_trampolines(publics: &PublicSymbolIndex, trampolines: &[Trampoline], report: &mut Report) {
+    let header = publics.header();
+    if trampolines.is_empty() && header.thunk_count == 0 {
+        return;
+    }
+    let starts: HashMap<u16, u32> = publics
+        .section_starts()
+        .map(|start| (start.section, start.offset))
+        .collect();
+    let targets: Vec<u32> = publics.thunk_map().collect();
+    let mut covered = HashSet::new();
+    let (mut joined, mut mismatched) = (0, 0);
+    for trampoline in trampolines {
+        if trampoline.kind != TrampolineKind::INCREMENTAL {
+            report.add("trampolines that are not incremental thunks", 1);
+            continue;
+        }
+        let target = starts
+            .get(&trampoline.target.section)
+            .and_then(|start| start.checked_add(trampoline.target.offset));
+        match thunk_index(header, trampoline) {
+            Some(index) if target.is_some() && targets.get(index) == target.as_ref() => {
+                covered.insert(index);
+                joined += 1;
+            }
+            _ => mismatched += 1,
+        }
+    }
+    report.add("trampolines joined to the thunk map", joined);
+    report.add("trampolines without a matching thunk map entry", mismatched);
+    report.add(
+        "thunk map entries without a trampoline",
+        targets.len() - covered.len(),
+    );
+    if mismatched != 0 {
+        report.inconsistency(format!(
+            "{mismatched} trampolines do not match the public thunk map"
+        ));
+    }
+}
+
+/// Return the index of the trampoline thunk in the thunk table, if the table
+/// holds it.
+fn thunk_index(header: &PublicHeader, trampoline: &Trampoline) -> Option<usize> {
+    if trampoline.thunk.section != header.thunk_table_section
+        || u32::from(trampoline.thunk_size) != header.thunk_size
+    {
+        return None;
+    }
+    let delta = trampoline
+        .thunk
+        .offset
+        .checked_sub(header.thunk_table_offset)?;
+    if delta.checked_rem(header.thunk_size)? != 0 {
+        return None;
+    }
+    usize::try_from(delta / header.thunk_size).ok()
 }
 
 /// Make sure that name lookup finds every record of a symbol hash table.

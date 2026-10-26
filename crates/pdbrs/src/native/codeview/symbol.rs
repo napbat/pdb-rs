@@ -65,9 +65,12 @@ macro_rules! values {
 
 mod annotation;
 mod compile;
+mod frame;
 mod global;
+mod link;
 mod procedure;
 mod scope;
+mod storage;
 mod variable;
 
 pub use annotation::{Annotation, Annotations, BinaryAnnotations};
@@ -75,17 +78,21 @@ pub use compile::{
     Compile2, Compile3, CompileFlags, EnvironmentBlock, ObjectName, SourceLanguage, StringList,
     Strings,
 };
+pub use frame::{CookieKind, FrameCookie, HeapAllocationSite};
 pub use global::{CoffGroup, ProcedureReference, Public, PublicFlags, Section};
+pub use link::{FastLink, FastLinkFlags, Trampoline, TrampolineKind};
 pub use procedure::{
     Block, CallSiteInfo, FramePointer, FrameProcedure, FrameProcedureFlags, IdList, IdListIter,
     InlineSite, JumpTable, JumpTableEntry, Label, Procedure, ProcedureFlags, ProcedureType, Thunk,
     ThunkOrdinal,
 };
 pub use scope::{ModuleSymbols, ScopedSymbol};
+pub use storage::{BasePointerRelative, FileStatic, RegisterVariable};
 pub use variable::{
     AddressGap, AddressGapIter, AddressGaps, AddressRange, Constant, Data,
     DefRangeFramePointerRelative, DefRangeRegister, DefRangeRegisterRelative,
-    DefRangeRegisterRelativeIndirect, Local, LocalFlags, RegisterRelative, UserDefinedType,
+    DefRangeRegisterRelativeIndirect, DefRangeSubfieldRegister, Local, LocalFlags,
+    RegisterRelative, UserDefinedType,
 };
 
 /// The kind of a filler record that reserves space (`S_SKIP`).
@@ -102,10 +109,14 @@ pub const S_THUNK32: u16 = 0x1102;
 pub const S_BLOCK32: u16 = 0x1103;
 /// The kind of a code label (`S_LABEL32`).
 pub const S_LABEL32: u16 = 0x1105;
+/// The kind of a register variable (`S_REGISTER`).
+pub const S_REGISTER: u16 = 0x1106;
 /// The kind of a constant (`S_CONSTANT`).
 pub const S_CONSTANT: u16 = 0x1107;
 /// The kind of a user-defined type name (`S_UDT`).
 pub const S_UDT: u16 = 0x1108;
+/// The kind of a frame-pointer-relative variable (`S_BPREL32`).
+pub const S_BPREL32: u16 = 0x110b;
 /// The kind of a module-local data symbol (`S_LDATA32`).
 pub const S_LDATA32: u16 = 0x110c;
 /// The kind of a global data symbol (`S_GDATA32`).
@@ -118,6 +129,10 @@ pub const S_LPROC32: u16 = 0x110f;
 pub const S_GPROC32: u16 = 0x1110;
 /// The kind of a register-relative variable (`S_REGREL32`).
 pub const S_REGREL32: u16 = 0x1111;
+/// The kind of a module-local thread storage symbol (`S_LTHREAD32`).
+pub const S_LTHREAD32: u16 = 0x1112;
+/// The kind of a global thread storage symbol (`S_GTHREAD32`).
+pub const S_GTHREAD32: u16 = 0x1113;
 /// The kind of a compile record, version 2 (`S_COMPILE2`).
 pub const S_COMPILE2: u16 = 0x1116;
 /// The kind of a using-namespace record (`S_UNAMESPACE`).
@@ -126,12 +141,16 @@ pub const S_UNAMESPACE: u16 = 0x1124;
 pub const S_PROCREF: u16 = 0x1125;
 /// The kind of a reference to a module-local procedure (`S_LPROCREF`).
 pub const S_LPROCREF: u16 = 0x1127;
+/// The kind of a trampoline thunk (`S_TRAMPOLINE`).
+pub const S_TRAMPOLINE: u16 = 0x112c;
 /// The kind of an image section record (`S_SECTION`).
 pub const S_SECTION: u16 = 0x1136;
 /// The kind of a COFF group record (`S_COFFGROUP`).
 pub const S_COFFGROUP: u16 = 0x1137;
 /// The kind of a call site record (`S_CALLSITEINFO`).
 pub const S_CALLSITEINFO: u16 = 0x1139;
+/// The kind of a security cookie record (`S_FRAMECOOKIE`).
+pub const S_FRAMECOOKIE: u16 = 0x113a;
 /// The kind of a compile record, version 3 (`S_COMPILE3`).
 pub const S_COMPILE3: u16 = 0x113c;
 /// The kind of a build environment block (`S_ENVBLOCK`).
@@ -142,6 +161,9 @@ pub const S_LOCAL: u16 = 0x113e;
 pub const S_DEFRANGE_REGISTER: u16 = 0x1141;
 /// The kind of a frame-pointer-relative def-range (`S_DEFRANGE_FRAMEPOINTER_REL`).
 pub const S_DEFRANGE_FRAMEPOINTER_REL: u16 = 0x1142;
+/// The kind of a register def-range for a part of a variable
+/// (`S_DEFRANGE_SUBFIELD_REGISTER`).
+pub const S_DEFRANGE_SUBFIELD_REGISTER: u16 = 0x1143;
 /// The kind of a full-scope frame-pointer-relative def-range
 /// (`S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE`).
 pub const S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE: u16 = 0x1144;
@@ -159,15 +181,26 @@ pub const S_INLINESITE: u16 = 0x114d;
 pub const S_INLINESITE_END: u16 = 0x114e;
 /// The kind of the end of a procedure scope with an ID index (`S_PROC_ID_END`).
 pub const S_PROC_ID_END: u16 = 0x114f;
+/// The kind of a file-static variable (`S_FILESTATIC`).
+pub const S_FILESTATIC: u16 = 0x1153;
 /// The kind of a jump table record (`S_ARMSWITCHTABLE`).
 pub const S_ARMSWITCHTABLE: u16 = 0x1159;
 /// The kind of a list of callees (`S_CALLEES`).
 pub const S_CALLEES: u16 = 0x115a;
+/// The kind of a heap allocation call site (`S_HEAPALLOCSITE`).
+pub const S_HEAPALLOCSITE: u16 = 0x115e;
+/// The kind of a frame register record (`S_FRAMEREG`).
+pub const S_FRAMEREG: u16 = 0x1166;
+/// The kind of a FASTLINK reference (`S_FASTLINK`).
+pub const S_FASTLINK: u16 = 0x1167;
 /// The kind of a list of inlinees (`S_INLINEES`).
 pub const S_INLINEES: u16 = 0x1168;
 /// The kind of an indirect register-relative def-range
 /// (`S_DEFRANGE_REGISTER_REL_INDIR`).
 pub const S_DEFRANGE_REGISTER_REL_INDIR: u16 = 0x1177;
+/// The kind of a register-relative compiler temporary for Edit and Continue
+/// (`S_REGREL32_ENCTMP`).
+pub const S_REGREL32_ENCTMP: u16 = 0x1179;
 
 /// The error context for a payload that is too short for its fields.
 const SHORT_PAYLOAD: &str = "symbol record payload is shorter than its fields";
@@ -258,8 +291,33 @@ pub enum SymbolData<'a> {
     DefRangeRegisterRelative(DefRangeRegisterRelative<'a>),
     /// [`S_DEFRANGE_REGISTER_REL_INDIR`].
     DefRangeRegisterRelativeIndirect(DefRangeRegisterRelativeIndirect<'a>),
-    /// [`S_REGREL32`].
+    /// [`S_REGREL32`] and [`S_REGREL32_ENCTMP`].
     RegisterRelative(RegisterRelative<'a>),
+    /// [`S_DEFRANGE_SUBFIELD_REGISTER`].
+    DefRangeSubfieldRegister(DefRangeSubfieldRegister<'a>),
+    /// [`S_BPREL32`].
+    BasePointerRelative(BasePointerRelative<'a>),
+    /// [`S_REGISTER`].
+    Register(RegisterVariable<'a>),
+    /// [`S_FILESTATIC`].
+    FileStatic(FileStatic<'a>),
+    /// [`S_GTHREAD32`] and [`S_LTHREAD32`].
+    ThreadData(Data<'a>),
+    /// [`S_FRAMECOOKIE`].
+    FrameCookie(FrameCookie),
+    /// [`S_FRAMEREG`]: a register as a `CV_HREG_e` number for the CPU of the
+    /// module.
+    ///
+    /// No reference gives the layout. The MSVC ARM64 fixture of #12 writes
+    /// a 16-bit register and two zero bytes after `S_FRAMEPROC`, in
+    /// procedures with exception handling and in their funclets (#13).
+    FrameRegister(u16),
+    /// [`S_HEAPALLOCSITE`].
+    HeapAllocationSite(HeapAllocationSite),
+    /// [`S_TRAMPOLINE`].
+    Trampoline(Trampoline),
+    /// [`S_FASTLINK`].
+    FastLink(FastLink<'a>),
     /// [`S_SECTION`].
     Section(Section<'a>),
     /// [`S_COFFGROUP`].
@@ -338,10 +396,14 @@ impl<'a> Symbol<'a> {
             SymbolData::Thunk(value) => Some(value.name),
             SymbolData::Local(value) => Some(value.name),
             SymbolData::RegisterRelative(value) => Some(value.name),
+            SymbolData::BasePointerRelative(value) => Some(value.name),
+            SymbolData::Register(value) => Some(value.name),
+            SymbolData::FileStatic(value) => Some(value.name),
+            SymbolData::FastLink(value) => Some(value.name),
             SymbolData::Section(value) => Some(value.name),
             SymbolData::CoffGroup(value) => Some(value.name),
             SymbolData::UserDefinedType(value) => Some(value.name),
-            SymbolData::Data(value) => Some(value.name),
+            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.name),
             SymbolData::Constant(value) => Some(value.name),
             SymbolData::Public(value) => Some(value.name),
             SymbolData::ProcedureReference(value) => Some(value.name),
@@ -351,10 +413,11 @@ impl<'a> Symbol<'a> {
 
     /// Return the start address, if the kind has one address.
     ///
-    /// Procedures, blocks, labels, thunks, data, publics, COFF groups and
-    /// call sites have an address. [`S_ARMSWITCHTABLE`] has three
-    /// addresses, and def-ranges have address ranges. Read these values from
-    /// [`Symbol::data`].
+    /// Procedures, blocks, labels, thunks, data, thread data, publics, COFF
+    /// groups, call sites and heap allocation sites have an address.
+    /// [`S_TRAMPOLINE`] gives the address of the thunk. [`S_ARMSWITCHTABLE`]
+    /// has three addresses, and def-ranges have address ranges. Read these
+    /// values from [`Symbol::data`].
     #[must_use]
     pub const fn address(&self) -> Option<SectionOffset> {
         match self.data {
@@ -362,7 +425,9 @@ impl<'a> Symbol<'a> {
             SymbolData::Block(value) => Some(value.address),
             SymbolData::Label(value) => Some(value.address),
             SymbolData::Thunk(value) => Some(value.address),
-            SymbolData::Data(value) => Some(value.address),
+            SymbolData::HeapAllocationSite(value) => Some(value.address),
+            SymbolData::Trampoline(value) => Some(value.thunk),
+            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.address),
             SymbolData::Public(value) => Some(value.address),
             SymbolData::CoffGroup(value) => Some(value.address),
             SymbolData::CallSiteInfo(value) => Some(value.address),
@@ -372,9 +437,11 @@ impl<'a> Symbol<'a> {
 
     /// Return the index in the TPI stream, if the kind has one.
     ///
-    /// Procedures without the `_ID` suffix, locals, register-relative
-    /// variables, user-defined types, data, constants and call sites have a
-    /// type index.
+    /// Procedures without the `_ID` suffix, locals, register-relative and
+    /// frame-relative variables, register variables, file statics,
+    /// user-defined types, data, thread data, constants, call sites and heap
+    /// allocation sites have a type index. The type index of [`S_FASTLINK`]
+    /// refers to the object file, so this function gives `None` for it.
     #[must_use]
     pub const fn type_index(&self) -> Option<TypeIndex> {
         match self.data {
@@ -384,8 +451,12 @@ impl<'a> Symbol<'a> {
             }) => Some(index),
             SymbolData::Local(value) => Some(value.type_index),
             SymbolData::RegisterRelative(value) => Some(value.type_index),
+            SymbolData::BasePointerRelative(value) => Some(value.type_index),
+            SymbolData::Register(value) => Some(value.type_index),
+            SymbolData::FileStatic(value) => Some(value.type_index),
+            SymbolData::HeapAllocationSite(value) => Some(value.type_index),
             SymbolData::UserDefinedType(value) => Some(value.type_index),
-            SymbolData::Data(value) => Some(value.type_index),
+            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.type_index),
             SymbolData::Constant(value) => Some(value.type_index),
             SymbolData::CallSiteInfo(value) => Some(value.type_index),
             _ => None,
@@ -473,7 +544,21 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
         S_DEFRANGE_REGISTER_REL_INDIR => SymbolData::DefRangeRegisterRelativeIndirect(
             DefRangeRegisterRelativeIndirect::read(fields)?,
         ),
-        S_REGREL32 => SymbolData::RegisterRelative(RegisterRelative::read(fields)?),
+        S_REGREL32 | S_REGREL32_ENCTMP => {
+            SymbolData::RegisterRelative(RegisterRelative::read(fields)?)
+        }
+        S_DEFRANGE_SUBFIELD_REGISTER => {
+            SymbolData::DefRangeSubfieldRegister(DefRangeSubfieldRegister::read(fields)?)
+        }
+        S_BPREL32 => SymbolData::BasePointerRelative(BasePointerRelative::read(fields)?),
+        S_REGISTER => SymbolData::Register(RegisterVariable::read(fields)?),
+        S_FILESTATIC => SymbolData::FileStatic(FileStatic::read(fields)?),
+        S_GTHREAD32 | S_LTHREAD32 => SymbolData::ThreadData(Data::read(fields)?),
+        S_FRAMECOOKIE => SymbolData::FrameCookie(FrameCookie::read(fields)?),
+        S_FRAMEREG => SymbolData::FrameRegister(fields.u16()?),
+        S_HEAPALLOCSITE => SymbolData::HeapAllocationSite(HeapAllocationSite::read(fields)?),
+        S_TRAMPOLINE => SymbolData::Trampoline(Trampoline::read(fields)?),
+        S_FASTLINK => SymbolData::FastLink(FastLink::read(fields)?),
         S_SECTION => SymbolData::Section(Section::read(fields)?),
         S_COFFGROUP => SymbolData::CoffGroup(CoffGroup::read(fields)?),
         S_UDT => SymbolData::UserDefinedType(UserDefinedType::read(fields)?),
