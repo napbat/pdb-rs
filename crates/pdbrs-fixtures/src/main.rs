@@ -79,6 +79,11 @@ fn main() -> ExitCode {
             let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
             exit_code(verify::verify_native_build(&workspace, &fixtures))
         }
+        Ok(Action::VerifyNativeEdit(fixtures)) => {
+            let workspace = workspace_root();
+            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
+            exit_code(verify::verify_native_edit(&workspace, &fixtures))
+        }
         Ok(Action::Detect(fixtures)) => {
             let fixtures =
                 fixtures.unwrap_or_else(|| workspace_root().join("target").join("fixtures"));

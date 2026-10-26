@@ -569,3 +569,27 @@ fn added_public_records_decode_as_public_symbols() {
         SymbolData::Public(public)
     );
 }
+
+/// A type map stream (version 2) that no other stream names: the bytes of
+/// stream 61 of the `msvc-x64-incremental` fixture.
+const UNOWNED_TYPE_MAP: [u8; 40] = [
+    2, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0x10, 0, 0, 2, 0, 0, 0, 0, 0x10, 0, 0, 3, 0x10, 0,
+    0, 0, 0, 0, 0, 8, 0, 0, 0, 0x18, 0, 0, 0,
+];
+
+#[test]
+fn unowned_type_map_does_not_block_moved_records() {
+    let source = build(|builder| builder.add_stream(UNOWNED_TYPE_MAP.to_vec()).map(|_| ()));
+    let pdb = Pdb::parse(source.as_slice()).expect("source");
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    editor
+        .rename_public(b"sum", b"sum_with_a_longer_name")
+        .expect("recorded");
+    let edited = editor.plan().expect("type map").to_vec().expect("output");
+    let symbols = symbols(&edited);
+    assert!(has(&symbols.publics, b"sum_with_a_longer_name"));
+    // The type map keeps its bytes.
+    let count = pdb.msf().stream_count();
+    let edited = Pdb::parse(edited.as_slice()).expect("edited");
+    assert_eq!(stream(&edited, count - 1), Some(UNOWNED_TYPE_MAP.to_vec()));
+}

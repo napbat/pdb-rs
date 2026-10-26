@@ -640,3 +640,61 @@ counts of the DIA queries and the symbolizer, and the source streams that the re
 command writes the dumps (`*.original.txt`, `*.rebuilt.txt`) and the differences (`*.diff`) to
 the directory of the PDB. It exits with a failure code if a rebuild fails, a check cannot run
 or a difference is unexplained.
+
+## Native edit check
+
+The `verify-native-edit` command checks the native PDB editor of pdbrs (#34) with each
+`native-pdb` output of `manifest.json`:
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-native-edit [--fixtures <dir>]
+```
+
+The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It applies each edit to
+each other PDB with `Pdb::edit` and `PdbEditor::plan`:
+
+| Edit | Changes | Identity |
+| --- | --- | --- |
+| `named` | Add or replace `srcsrv`, `sourcelink` and the raw stream `pdbrs-edit`. Remove `/LinkInfo` if present | `Preserve` |
+| `add-symbols` | Add the public symbol `pdbrs_edit_public` and the `S_GDATA32` global `pdbrs_edit_global` | `IncrementAge` |
+| `rename-symbols` | Append `_pdbrs_renamed` to a unique public name and to a unique data, constant or UDT global name. The later records move | `IncrementAge` |
+| `types` | Add a field list, the structure `PdbrsEditType`, its `S_UDT` global and the `LF_STRING_ID` record `pdbrs edit string` | `IncrementAge` |
+| `identity` | Write the signature `0x52444250`, the GUID `pdbrs-edit-guid!` and age 7 | `Replace` |
+| `strip` | `PdbEditor::strip_private` | `Preserve` |
+
+The edited PDB is `target/verify-native-edit/<fixture>/<PDB file stem>/<edit>.pdb`. For each
+edited PDB, the command does these checks:
+
+1. `pdbtool check` shows 0 PDBs with errors.
+2. `llvm-pdbutil dump --all` and `DIA2Dump -all` succeed, or fail as on the source PDB.
+3. `pdbtool compare --continue-on-differences` shows exactly the streams of
+   `PdbEditPlan::changed_streams`, and the stream counts of the added streams.
+4. The independent lookups of the edit:
+   - `llvm-pdbutil --named-streams` lists the added streams and not the removed ones.
+     `pdbstr -r -s:srcsrv` reads the written `srcsrv` text.
+   - `llvm-pdbutil --publics` and `DIA2Dump -p` list the added and renamed public names, and
+     not the old names. `llvm-pdbutil --globals` and `DIA2Dump -sym` find the added and renamed
+     global names. For an old global name, `DIA2Dump -sym` finds one symbol less than on the
+     source PDB.
+   - `llvm-pdbutil --types` and `DIA2Dump -type` find `PdbrsEditType`, and `llvm-pdbutil --ids`
+     finds the added string.
+   - `llvm-pdbutil --summary` shows the new signature, age and GUID, and
+     `PdbEditPlan::pe_match` gives the GUID and the age.
+
+The command also compares the strip of `msvc-x64-stripped/demo.pdb` with
+`demo.stripped.pdb`, which `link /PDBSTRIPPED` wrote. These `llvm-pdbutil` sections must be
+equal: `--symbols`, `--section-contribs`, `--section-map`, `--types`, `--ids`, `--files`,
+`--section-headers`, `--fpo` and `--type-stats`; `--summary` without the stream count;
+`--named-streams` without the stream indices; `--modules` without the stream numbers; and the
+records of `--globals` and `--publics` without their offsets.
+
+The command prints each explained class with its PDB count. It exits with a failure for each
+other difference, for each edit that the plan rejects and for each missing tool. The explained
+classes are:
+
+- A full dump that fails on the edited PDB as on the source (`msvc-x64-fastlink`, `dotnet-csharp-full`),
+  or that succeeds where it fails on the source (the strip of `dotnet-csharp-full`).
+- `llvm-pdbutil --publics` fails on the source PDB too (`msvc-x64-fastlink`). DIA2Dump finds the names.
+- `DIA2Dump -t` lists no UDT of the source PDB (FASTLINK and managed PDBs), so `-type` finds no added type.
+- The stripped PDB keeps the source stream IDs, and `link.exe` writes the stripped symbol
+  records in another order, so the stream numbers and the symbol record offsets differ.

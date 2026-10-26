@@ -209,3 +209,24 @@ fn strip_with_an_opaque_stream_is_rejected() {
         ErrorKind::InvalidReference
     );
 }
+
+#[test]
+fn strip_removes_an_unowned_type_map() {
+    let source = build(|builder| {
+        builder
+            .add_stream(super::UNOWNED_TYPE_MAP.to_vec())
+            .map(|_| ())
+    });
+    let pdb = Pdb::parse(source.as_slice()).expect("source");
+    let last = pdb.msf().stream_count() - 1;
+    let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    editor.strip_private();
+    let plan = editor.plan().expect("type map");
+    assert!(
+        plan.changed_streams()
+            .contains(&pdbrs::native::msf::StreamId(last))
+    );
+    let edited = plan.to_vec().expect("output");
+    let edited = Pdb::parse(edited.as_slice()).expect("stripped");
+    assert!(super::stream(&edited, last).is_none());
+}

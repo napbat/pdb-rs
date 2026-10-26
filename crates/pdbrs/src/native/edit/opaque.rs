@@ -5,7 +5,8 @@
 //! of this crate knows. It cannot rewrite a reference in data without a
 //! decoder, so it rejects the edit if such data exists:
 //!
-//! - A present stream that no other stream names. Its role is not known.
+//! - A present stream that no other stream names, unless it decodes as a
+//!   type map stream. A type map holds type indices, not symbol offsets.
 //! - A named stream of a kind that this crate does not decode.
 //! - For moved symbol records also: a symbol record of a kind that this crate
 //!   does not decode, in the symbol record stream or in a module stream, a C13
@@ -16,7 +17,7 @@ use alloc::vec::Vec;
 use super::plan::Context;
 use crate::io::ReadAt;
 use crate::native::Pdb;
-use crate::native::auxiliary::{NamedStreamKind, TmCache};
+use crate::native::auxiliary::{NamedStreamKind, TmCache, TypeMapStream};
 use crate::native::codeview::Records;
 use crate::native::codeview::symbol::SymbolData;
 use crate::native::lines::{LineSubsection, ModuleLines};
@@ -40,17 +41,25 @@ fn opaque(context: &'static str) -> Error {
 }
 
 /// Return an error if the PDB has opaque data in `scope`.
-pub(super) fn check<S: ReadAt>(pdb: &Pdb<S>, context: &Context, scope: Scope) -> Result<()> {
-    check_streams(pdb, context)?;
+///
+/// Return the streams that no other stream names and that decode as a type
+/// map stream: type maps without an owner. Incremental links of `link.exe`
+/// leave them, for example stream 61 of the `msvc-x64-incremental` fixture.
+pub(super) fn check<S: ReadAt>(
+    pdb: &Pdb<S>,
+    context: &Context,
+    scope: Scope,
+) -> Result<Vec<StreamId>> {
+    let type_maps = check_streams(pdb, context)?;
     if scope == Scope::Records {
         check_records(pdb, context)?;
     }
-    Ok(())
+    Ok(type_maps)
 }
 
 /// Return an error for a stream without a known role or a named stream
 /// without a decoder.
-fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
+fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<Vec<StreamId>> {
     let count = pdb.msf().stream_count();
     let mut claimed = Vec::new();
     claimed
@@ -100,15 +109,24 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
             _ => {}
         }
     }
+    let mut type_maps = Vec::new();
     for (id, claimed) in (0..count).zip(claimed) {
-        if !claimed && pdb.msf().stream(StreamId(id))?.is_some() {
+        if claimed || pdb.msf().stream(StreamId(id))?.is_none() {
+            continue;
+        }
+        // A type map holds type and ID indices of input files and of the
+        // PDB. It holds no symbol offset and no stream ID.
+        let bytes = pdb.stream_bytes(StreamId(id))?;
+        if TypeMapStream::parse(&bytes, StreamId(id)).is_err() {
             return Err(opaque(
                 "the edit changes offsets or indices, and a stream that no other stream names can refer to them",
             )
             .with_stream(id, 0));
         }
+        type_maps.try_reserve(1).map_err(|_| no_memory())?;
+        type_maps.push(StreamId(id));
     }
-    Ok(())
+    Ok(type_maps)
 }
 
 /// Return an error for a symbol record of an unknown kind, a C13 subsection

@@ -62,7 +62,8 @@
 //! - The plan removes `/names` and the `/src/` streams. `/names` stays if the
 //!   PDB has a new FPO stream, because its frame programs refer to `/names`.
 //!   `/TMCache` and `/UDTSRCLINEUNDONE` become empty. The plan removes the
-//!   type map streams that `/TMCache` names.
+//!   type map streams that `/TMCache` names and the type map streams that no
+//!   stream names (type maps without an owner).
 //!
 //! # Rejected edits
 //!
@@ -72,8 +73,10 @@
 //!
 //! - An edit that moves a symbol record, and a strip, if the source has
 //!   opaque data that can refer to symbol offsets or type indices: a present
-//!   stream that no other stream names, a named stream of an unknown kind, a
-//!   symbol record of an unknown kind or a C13 subsection of an unknown kind.
+//!   stream that no other stream names and that does not decode as a type map
+//!   stream, a named stream of an unknown kind, a symbol record of an unknown
+//!   kind or a C13 subsection of an unknown kind. A type map without an owner
+//!   holds type indices, not symbol offsets, so it does not block an edit.
 //! - A record with a reference that does not resolve.
 //! - A rename of a name that is not in the index or that is not unique.
 //!

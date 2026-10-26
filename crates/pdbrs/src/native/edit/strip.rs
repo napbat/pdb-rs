@@ -308,7 +308,11 @@ pub(super) fn plan<S: ReadAt>(
     info: &mut InfoBuilder,
     changes: &mut Changes,
 ) -> Result<DbiBuilder> {
-    opaque::check(pdb, context, Scope::Streams)?;
+    // The strip removes all type records, so it removes the type maps
+    // without an owner as it removes the type maps that `/TMCache` names.
+    for map in opaque::check(pdb, context, Scope::Streams)? {
+        changes.remove(map)?;
+    }
     strip_types(TPI_STREAM, context.tpi.header(), changes)?;
     if let Some(ipi) = pdb.ids()? {
         strip_types(IPI_STREAM, ipi.header(), changes)?;

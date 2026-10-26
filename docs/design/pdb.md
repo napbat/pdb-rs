@@ -296,8 +296,9 @@ The module documentation of `native::edit` gives all rules.
 
 The plan rejects these edits before it writes a byte. A planning error writes nothing.
 
-- An edit that moves a symbol record, and a strip, if opaque data can refer to the changed offsets or indices: a stream that no other stream names, a named stream of an unknown kind,
-  and for moved records also a symbol record or a C13 subsection of an unknown kind. The `msvc-x64-incremental` fixture has such a stream (stream 61, a type map that `/TMCache` does not name).
+- An edit that moves a symbol record, and a strip, if opaque data can refer to the changed offsets or indices: a stream that no other stream names and that does not decode as a type map,
+  a named stream of an unknown kind, and for moved records also a symbol record or a C13 subsection of an unknown kind.
+  A type map without an owner holds type indices only, so it does not block an edit. The strip removes it. Stream 61 of the `msvc-x64-incremental` fixture is such a type map: `/TMCache` does not name it.
 - A change of `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a rename of a reference record such as `S_PROCREF`, a strip together with another symbol or type edit, and a reference that does not resolve.
 
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
