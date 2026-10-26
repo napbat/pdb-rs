@@ -17,6 +17,7 @@ use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::symbols::{HashTable, PublicHeader, PublicSymbolIndex, RecordOffsets};
 
 use crate::dbi::translate;
+use crate::symbol_encoding::reencode;
 use crate::{Context, Outcome, Report};
 
 /// The deepest scope nesting that the example accepts in a module.
@@ -86,6 +87,7 @@ pub(crate) fn modules(
             };
             let symbol = scoped.symbol;
             check_symbol(&symbol, context, report)?;
+            reencode(&symbol, report)?;
             match symbol.data() {
                 SymbolData::Unsupported(_) => {
                     report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
@@ -225,6 +227,7 @@ pub(crate) fn shared_symbols(
             .symbol()
             .map_err(|error| error.with_stream(id.0, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
+        reencode(&symbol, report)?;
         if let Some(reference) = symbol.procedure_reference() {
             let module = reference
                 .module_index()

@@ -14,7 +14,9 @@ use core::iter::FusedIterator;
 use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Integer;
+use super::super::writer::FieldWriter;
 use super::SectionOffset;
+use super::leaf::{read_integer, write_integer};
 use crate::{Error, ErrorKind, Result};
 
 flags! {
@@ -71,6 +73,13 @@ impl<'a> Local<'a> {
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.type_index(self.type_index)?;
+        out.u16(self.flags.0)?;
+        out.name(self.name)
+    }
 }
 
 /// The code range where a def-range location is valid
@@ -86,10 +95,16 @@ pub struct AddressRange {
 
 impl AddressRange {
     /// Read a `u32` offset, a `u16` section and a `u16` length.
-    fn read(fields: &mut Fields<'_>) -> Result<Self> {
+    pub(super) fn read(fields: &mut Fields<'_>) -> Result<Self> {
         let start = SectionOffset::read(fields)?;
         let length = fields.u16()?;
         Ok(Self { start, length })
+    }
+
+    /// Write the start and the length.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        self.start.write(out)?;
+        out.u16(self.length)
     }
 }
 
@@ -116,7 +131,7 @@ pub struct AddressGaps<'a> {
 
 impl<'a> AddressGaps<'a> {
     /// Read all remaining bytes as gaps.
-    fn read(fields: &mut Fields<'a>) -> Result<Self> {
+    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let length = fields.rest().len();
         if !length.is_multiple_of(4) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -144,6 +159,29 @@ impl<'a> AddressGaps<'a> {
         AddressGapIter {
             entries: self.entries.iter(),
         }
+    }
+
+    /// Create gaps from their little-endian 4-byte form.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
+    /// a multiple of 4.
+    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
+        let (entries, rest) = bytes.as_chunks();
+        if !rest.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("def-range gap array is not a multiple of 4 bytes"));
+        }
+        Ok(Self { entries })
+    }
+
+    /// Write all gaps.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        for entry in self.entries {
+            out.bytes(entry)?;
+        }
+        Ok(())
     }
 }
 
@@ -215,6 +253,13 @@ impl<'a> DefRangeFramePointerRelative<'a> {
             gaps,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.i32(self.offset)?;
+        self.range.write(out)?;
+        self.gaps.write(out)
+    }
 }
 
 /// A register def-range (`S_DEFRANGE_REGISTER`).
@@ -251,6 +296,14 @@ impl<'a> DefRangeRegister<'a> {
     #[must_use]
     pub const fn may_have_no_name(&self) -> bool {
         self.attributes & 1 != 0
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.register)?;
+        out.u16(self.attributes)?;
+        self.range.write(out)?;
+        self.gaps.write(out)
     }
 }
 
@@ -302,6 +355,15 @@ impl<'a> DefRangeSubfieldRegister<'a> {
     pub const fn offset_in_parent(&self) -> u16 {
         let [low, high, _, _] = (self.parent_offset & 0xfff).to_le_bytes();
         u16::from_le_bytes([low, high])
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.register)?;
+        out.u16(self.attributes)?;
+        out.u32(self.parent_offset)?;
+        self.range.write(out)?;
+        self.gaps.write(out)
     }
 }
 
@@ -360,6 +422,15 @@ impl<'a> DefRangeRegisterRelative<'a> {
     pub const fn offset_in_parent(&self) -> u16 {
         offset_in_parent(self.flags)
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.register)?;
+        out.u16(self.flags)?;
+        out.i32(self.base_offset)?;
+        self.range.write(out)?;
+        self.gaps.write(out)
+    }
 }
 
 /// An indirect register-relative def-range (`S_DEFRANGE_REGISTER_REL_INDIR`).
@@ -413,6 +484,16 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
     pub const fn offset_in_parent(&self) -> u16 {
         offset_in_parent(self.flags)
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u16(self.register)?;
+        out.u16(self.flags)?;
+        out.i32(self.base_offset)?;
+        out.i32(self.offset_in_udt)?;
+        self.range.write(out)?;
+        self.gaps.write(out)
+    }
 }
 
 /// A register-relative variable (`S_REGREL32` and `S_REGREL32_ENCTMP`).
@@ -449,6 +530,14 @@ impl<'a> RegisterRelative<'a> {
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.offset)?;
+        out.type_index(self.type_index)?;
+        out.u16(self.register)?;
+        out.name(self.name)
+    }
 }
 
 /// A data record (`S_GDATA32`, `S_LDATA32`, `S_GTHREAD32` and `S_LTHREAD32`).
@@ -478,6 +567,13 @@ impl<'a> Data<'a> {
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.type_index(self.type_index)?;
+        self.address.write(out)?;
+        out.name(self.name)
+    }
 }
 
 /// A constant record (`S_CONSTANT`).
@@ -488,6 +584,11 @@ pub struct Constant<'a> {
     pub type_index: TypeIndex,
     /// The value. Only integer numeric leaves are supported.
     pub value: Integer,
+    /// The numeric leaf as the record stores it, with its tag.
+    ///
+    /// The encoder writes these bytes if they hold [`Constant::value`].
+    /// Otherwise it writes the shortest leaf for the value.
+    pub value_bytes: &'a [u8],
     /// The name.
     pub name: &'a [u8],
 }
@@ -496,17 +597,29 @@ impl<'a> Constant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
-        let value = fields.integer()?;
+        let (value, value_bytes) = read_integer(fields)?;
         let name = fields.name()?;
         Ok(Self {
             type_index,
             value,
+            value_bytes,
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.type_index(self.type_index)?;
+        write_integer(out, self.value, self.value_bytes)?;
+        out.name(self.name)
+    }
 }
 
-/// A user-defined type name record (`S_UDT`).
+/// The kind of a COBOL user-defined type name (`S_COBOLUDT`). It has the
+/// layout of `S_UDT` (`UDTSYM` in `cvinfo.h`).
+pub const S_COBOLUDT: u16 = 0x1109;
+
+/// A user-defined type name record (`S_UDT` and [`S_COBOLUDT`]).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct UserDefinedType<'a> {
@@ -522,5 +635,11 @@ impl<'a> UserDefinedType<'a> {
         let type_index = fields.type_index()?;
         let name = fields.name()?;
         Ok(Self { type_index, name })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.type_index(self.type_index)?;
+        out.name(self.name)
     }
 }

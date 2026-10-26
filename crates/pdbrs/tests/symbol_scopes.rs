@@ -1,8 +1,10 @@
 //! Tests for the scope checks of module symbol streams.
 
 use pdbrs::native::codeview::symbol::{
-    ModuleSymbols, S_BLOCK32, S_END, S_GMANPROC, S_GPROC32, S_INLINESITE, S_INLINESITE_END,
-    S_LABEL32, S_LMANPROC, S_LOCAL, S_PROC_ID_END, S_THUNK32, ScopedSymbol, SymbolData,
+    ModuleSymbols, S_BLOCK32, S_END, S_GMANPROC, S_GPROC32, S_GPROC32EX, S_GPROCMIPS, S_INLINESITE,
+    S_INLINESITE_END, S_INLINESITE2, S_LABEL32, S_LMANPROC, S_LOCAL, S_LPROC32_DPC,
+    S_LPROC32_DPC_ID, S_LPROCIA64, S_PROC_ID_END, S_SEPCODE, S_THUNK32, S_WITH32, ScopedSymbol,
+    SymbolData,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::{Error, ErrorKind};
@@ -261,20 +263,60 @@ fn enforces_the_depth_limit() {
 }
 
 #[test]
-fn rejects_scope_kinds_that_are_not_decoded() {
-    // S_SEPCODE and S_LPROC32_DPC start a scope, but this crate does not
-    // decode them. A later S_END must not be reported as a scope end without
-    // an open scope.
-    for kind in [0x1132, 0x1155] {
+fn walks_scopes_of_all_scope_kinds() {
+    // Each kind starts a scope. The length is the size of the fields after
+    // the parent and end links, and the flag tells if a name follows.
+    let kinds: [(u16, usize, bool, u16); 8] = [
+        (S_SEPCODE, 20, false, S_END),
+        (S_LPROC32_DPC, 27, true, S_END),
+        (S_LPROC32_DPC_ID, 27, true, S_PROC_ID_END),
+        (S_GPROC32EX, 28, true, S_END),
+        (S_WITH32, 10, true, S_END),
+        (S_GPROCMIPS, 44, true, S_END),
+        (S_LPROCIA64, 29, true, S_END),
+        (S_INLINESITE2, 8, false, S_INLINESITE_END),
+    ];
+    for (kind, length, named, end) in kinds {
         let mut builder = Builder::default();
-        builder.label();
-        let opener = builder.push(kind, &[0; 24]);
-        assert_eq!(
-            failure(&builder, 4),
-            (ErrorKind::UnsupportedVersion, u64::from(opener)),
-            "kind {kind:#x}"
-        );
+        let procedure = builder.open(S_GPROC32, 0);
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&procedure.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+        payload.resize(8 + length, 0);
+        if named {
+            payload.extend_from_slice(b"s\0");
+        }
+        let opener = builder.push(kind, &payload);
+        let inner = builder.label();
+        let closer = builder.close(end, opener);
+        builder.close(S_END, procedure);
+        let symbols: Vec<ScopedSymbol<'_>> = builder
+            .walk(4)
+            .into_iter()
+            .map(|symbol| symbol.unwrap_or_else(|error| panic!("kind {kind:#x}: {error:?}")))
+            .collect();
+        assert_eq!(symbols[1].offset, opener, "kind {kind:#x}");
+        assert_eq!(symbols[2].offset, inner);
+        assert_eq!(symbols[2].scope, Some(opener), "kind {kind:#x}");
+        assert_eq!(symbols[3].offset, closer);
+        assert_eq!(symbols[3].scope, Some(opener), "kind {kind:#x}");
     }
+}
+
+#[test]
+fn rejects_an_inline_site_end_for_other_scopes() {
+    let mut builder = Builder::default();
+    let procedure = builder.open(S_GPROC32, 0);
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&procedure.to_le_bytes());
+    payload.resize(28, 0);
+    let separated = builder.push(S_SEPCODE, &payload);
+    let wrong = builder.close(S_INLINESITE_END, separated);
+    builder.close(S_END, procedure);
+    assert_eq!(
+        failure(&builder, 4),
+        (ErrorKind::InvalidFormat, u64::from(wrong))
+    );
 }
 
 #[test]

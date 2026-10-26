@@ -1,12 +1,14 @@
 //! A walk over a module symbol stream that checks the scope links.
 //!
-//! Procedures, managed procedures, blocks, thunks and inline sites start a
-//! scope. `S_END` or `S_PROC_ID_END` ends a procedure, block or thunk scope.
-//! `S_INLINESITE_END` ends an inline site scope. These rules follow
-//! `symbolOpensScope` and `symbolEndsScope` in LLVM `SymbolRecordHelpers.h`.
-//! LLVM does not list the managed procedures `S_GMANPROC` and `S_LMANPROC`,
-//! but `MANPROCSYM` in `cvinfo.h` has parent and end links, and `S_END` ends
-//! their scope.
+//! Procedures of all architectures, managed procedures, blocks, `with`
+//! blocks, separated code, thunks and inline sites start a scope. `S_END`
+//! or `S_PROC_ID_END` ends a scope that is not an inline site.
+//! `S_INLINESITE_END` ends an inline site scope (`S_INLINESITE` and
+//! `S_INLINESITE2`). These rules follow `symbolOpensScope` and
+//! `symbolEndsScope` in LLVM `SymbolRecordHelpers.h`. LLVM does not list the
+//! managed procedures, the MIPS and IA64 procedures, `S_WITH32` and the `EX`
+//! procedures, but their `cvinfo.h` structures have parent and end links,
+//! and `S_END` ends their scope.
 //!
 //! The parent and end links are offsets in the module stream. A module
 //! stream starts with a 4-byte signature, so the offset of a record is its
@@ -16,15 +18,9 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::{Record, Records};
-use super::{S_INLINESITE, S_INLINESITE_END, Symbol, SymbolData};
+use super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
-
-/// Kinds that start a scope but that this crate does not decode.
-///
-/// The list comes from `symbolOpensScope` and `getScopeEndOffset` in LLVM:
-/// `S_SEPCODE`, `S_LPROC32_DPC`, `S_LPROC32_DPC_ID` and `S_INLINESITE2`.
-const UNDECODED_SCOPE_KINDS: [u16; 4] = [0x1132, 0x1155, 0x1156, 0x115d];
 
 /// A symbol with its place in the scope tree.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -161,19 +157,13 @@ impl<'a> ModuleSymbols<'a> {
             self.stack.push(OpenScope {
                 offset,
                 end: links.end,
-                inline: symbol.kind() == S_INLINESITE,
+                inline: matches!(symbol.kind(), S_INLINESITE | S_INLINESITE2),
             });
         } else if matches!(
             symbol.data(),
             SymbolData::ScopeEnd | SymbolData::InlineSiteEnd
         ) {
             self.close(offset, symbol.kind() == S_INLINESITE_END)?;
-        } else if UNDECODED_SCOPE_KINDS.contains(&symbol.kind()) {
-            return Err(self.error(
-                ErrorKind::UnsupportedVersion,
-                offset,
-                "symbol kind starts a scope that this crate does not decode",
-            ));
         }
         Ok(ScopedSymbol {
             offset,

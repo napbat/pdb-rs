@@ -15,8 +15,12 @@
 //! and not demangled.
 //!
 //! [`ModuleSymbols`] walks a module symbol stream and checks the scope links.
+//!
+//! [`SymbolData::encode`] and [`Symbol::encode`] write a record again. A
+//! decoded record encodes to its original bytes.
 
 use super::index::{IdIndex, TypeIndex};
+use super::writer::FieldWriter;
 use super::{Fields, Record};
 use crate::native::address::SectionOffset;
 use crate::{ErrorKind, Result};
@@ -63,11 +67,20 @@ macro_rules! values {
     };
 }
 
+mod access;
 mod annotation;
+mod architecture;
+mod attributed;
+mod code;
 mod compile;
+mod defrange;
+mod encode;
 mod frame;
 mod global;
+mod hlsl;
+mod leaf;
 mod link;
+mod linker;
 mod managed;
 mod procedure;
 mod scope;
@@ -75,13 +88,44 @@ mod storage;
 mod variable;
 
 pub use annotation::{Annotation, Annotations, BinaryAnnotations};
+pub use architecture::{
+    Ia64Procedure, MipsProcedure, ProcedureHeader, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,
+    S_GPROCMIPS_ID, S_LPROCIA64, S_LPROCIA64_ID, S_LPROCMIPS, S_LPROCMIPS_ID,
+};
+pub use attributed::{
+    AttributedFrameRelative, AttributedRegister, AttributedRegisterRelative, ManyRegisters,
+    RegisterList, S_ATTR_FRAMEREL, S_ATTR_MANYREG, S_ATTR_REGISTER, S_ATTR_REGREL, S_GMANDATA,
+    S_LMANDATA, S_LOCALSLOT, S_MANFRAMEREL, S_MANMANYREG, S_MANMANYREG2, S_MANREGISTER,
+    S_MANREGREL, S_MANTYPREF, S_MANYREG, S_MANYREG2, S_PARAMSLOT, Slot, VariableAttributes,
+};
+pub use code::{
+    AnnotationStrings, Association, AssociationKind, HotPatchFunction, HybridRange, S_ANNOTATION,
+    S_ASSOCIATION, S_HOTPATCHFUNC, S_HYBRIDRANGE, S_SEPCODE, S_STATICLOCAL, S_VFTABLE32, S_WITH32,
+    SeparatedCode, SeparatedCodeFlags, StaticLocal, VirtualFunctionTable, With,
+};
 pub use compile::{
     Compile2, Compile3, CompileFlags, EnvironmentBlock, ObjectName, SourceLanguage, StringList,
     Strings,
 };
+use defrange::read_global_on_entry;
+pub use defrange::{
+    DefRangeProgram, EntryValues, S_DEFRANGE, S_DEFRANGE_CONSTVAL_ON_ENTRY,
+    S_DEFRANGE_GLOBALSYM_ON_ENTRY, S_DEFRANGE_SUBFIELD,
+};
 pub use frame::{CookieKind, FrameCookie, HeapAllocationSite};
-pub use global::{CoffGroup, ProcedureReference, Public, PublicFlags, Section};
-pub use link::{FastLink, FastLinkFlags, Trampoline, TrampolineKind};
+pub use global::{
+    CoffGroup, ProcedureReference, Public, PublicFlags, S_ANNOTATIONREF, S_DATAREF, Section,
+};
+pub use hlsl::{
+    DefRangeHlsl, DpcGroupSharedLocal, DpcTag, DpcTagMap, HlslData, HlslDataEx,
+    S_DEFRANGE_DPC_PTR_TAG, S_DEFRANGE_HLSL, S_DPC_SYM_TAG_MAP, S_GDATA_HLSL, S_GDATA_HLSL32,
+    S_GDATA_HLSL32_EX, S_LDATA_HLSL, S_LDATA_HLSL32, S_LDATA_HLSL32_EX, S_LOCAL_DPC_GROUPSHARED,
+};
+pub use link::{FastLink, FastLinkFlags, S_REF_MINIPDB, Trampoline, TrampolineKind};
+pub use linker::{
+    DiscardReason, Discarded, Export, ExportFlags, ModuleTypeReference, ModuleTypeReferenceFlags,
+    PdbMap, ProfileData, S_DISCARDED, S_EXPORT, S_MOD_TYPEREF, S_PDBMAP, S_POGODATA, S_SOURCELINK,
+};
 pub use managed::{
     ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,
     AttributeValue, CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData,
@@ -93,17 +137,22 @@ pub use managed::{
     UsingGroups, Utf8NameIter, Utf8Names,
 };
 pub use procedure::{
-    Block, CallSiteInfo, FramePointer, FrameProcedure, FrameProcedureFlags, IdList, IdListIter,
-    InlineSite, JumpTable, JumpTableEntry, Label, Procedure, ProcedureFlags, ProcedureType, Thunk,
-    ThunkOrdinal,
+    Block, CallSiteInfo, ExtendedProcedureFlags, FramePointer, FrameProcedure, FrameProcedureFlags,
+    FunctionList, IdList, IdListIter, InlineSite, JumpTable, JumpTableEntry, Label, Procedure,
+    ProcedureFlags, ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2,
+    S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
 };
 pub use scope::{ModuleSymbols, ScopedSymbol};
-pub use storage::{BasePointerRelative, FileStatic, RegisterVariable};
+pub use storage::{
+    BasePointerRelative, BasePointerRelativeIndirect, FileStatic, RegisterRelativeIndirect,
+    RegisterVariable, S_BPREL32_ENCTMP, S_BPREL32_INDIR, S_BPREL32_INDIR_ENCTMP, S_REGREL32_INDIR,
+    S_REGREL32_INDIR_ENCTMP,
+};
 pub use variable::{
     AddressGap, AddressGapIter, AddressGaps, AddressRange, Constant, Data,
     DefRangeFramePointerRelative, DefRangeRegister, DefRangeRegisterRelative,
     DefRangeRegisterRelativeIndirect, DefRangeSubfieldRegister, Local, LocalFlags,
-    RegisterRelative, UserDefinedType,
+    RegisterRelative, S_COBOLUDT, UserDefinedType,
 };
 
 /// The kind of a filler record that reserves space (`S_SKIP`).
@@ -223,6 +272,12 @@ impl SectionOffset {
         let section = fields.u16()?;
         Ok(Self { section, offset })
     }
+
+    /// Write the `u32` offset and then the `u16` section number.
+    fn write(self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.offset)?;
+        out.u16(self.section)
+    }
 }
 
 /// The parent and end links of a record that starts a scope.
@@ -261,36 +316,61 @@ pub enum SymbolData<'a> {
     Compile3(Compile3<'a>),
     /// [`S_BUILDINFO`]: the ID index of an `LF_BUILDINFO` record in the IPI stream.
     BuildInfo(IdIndex),
+    /// [`S_SOURCELINK`]: an ID index in the IPI stream.
+    SourceLink(IdIndex),
     /// [`S_ENVBLOCK`].
     EnvironmentBlock(EnvironmentBlock<'a>),
     /// [`S_UNAMESPACE`]: the namespace name.
     UsingNamespace(&'a [u8]),
-    /// [`S_GPROC32`], [`S_LPROC32`], [`S_GPROC32_ID`] and [`S_LPROC32_ID`].
+    /// [`S_GPROC32`], [`S_LPROC32`], [`S_LPROC32_DPC`], their `_ID` kinds
+    /// and the `EX` kinds, for example [`S_GPROC32EX`].
     Procedure(Procedure<'a>),
+    /// [`S_GPROCMIPS`], [`S_LPROCMIPS`] and their `_ID` kinds.
+    MipsProcedure(MipsProcedure<'a>),
+    /// [`S_GPROCIA64`], [`S_LPROCIA64`] and their `_ID` kinds.
+    Ia64Procedure(Ia64Procedure<'a>),
     /// [`S_FRAMEPROC`].
     FrameProcedure(FrameProcedure),
     /// [`S_BLOCK32`].
     Block(Block<'a>),
+    /// [`S_WITH32`].
+    With(With<'a>),
+    /// [`S_SEPCODE`].
+    SeparatedCode(SeparatedCode),
     /// [`S_LABEL32`].
     Label(Label<'a>),
     /// [`S_THUNK32`].
     Thunk(Thunk<'a>),
     /// [`S_END`] and [`S_PROC_ID_END`]. These kinds have no fields.
     ScopeEnd,
-    /// [`S_INLINESITE`].
+    /// [`S_INLINESITE`] and [`S_INLINESITE2`].
     InlineSite(InlineSite<'a>),
     /// [`S_INLINESITE_END`]. This kind has no fields.
     InlineSiteEnd,
     /// [`S_INLINEES`]: the ID indices of the functions inlined into the procedure.
     Inlinees(IdList<'a>),
-    /// [`S_CALLEES`]: the ID indices of the functions that the procedure calls.
-    Callees(IdList<'a>),
+    /// [`S_CALLEES`]: the functions that the procedure calls.
+    Callees(FunctionList<'a>),
+    /// [`S_CALLERS`]: the functions that call the procedure.
+    Callers(FunctionList<'a>),
     /// [`S_CALLSITEINFO`].
     CallSiteInfo(CallSiteInfo),
     /// [`S_ARMSWITCHTABLE`].
     JumpTable(JumpTable),
+    /// [`S_POGODATA`].
+    ProfileData(ProfileData),
+    /// [`S_HOTPATCHFUNC`].
+    HotPatchFunction(HotPatchFunction<'a>),
+    /// [`S_ASSOCIATION`].
+    Association(Association),
+    /// [`S_HYBRIDRANGE`].
+    HybridRange(HybridRange),
+    /// [`S_ANNOTATION`].
+    AnnotationStrings(AnnotationStrings<'a>),
     /// [`S_LOCAL`].
     Local(Local<'a>),
+    /// [`S_DEFRANGE`] and [`S_DEFRANGE_SUBFIELD`].
+    DefRangeProgram(DefRangeProgram<'a>),
     /// [`S_DEFRANGE_FRAMEPOINTER_REL`].
     DefRangeFramePointerRelative(DefRangeFramePointerRelative<'a>),
     /// [`S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE`]: the offset from the frame
@@ -302,16 +382,39 @@ pub enum SymbolData<'a> {
     DefRangeRegisterRelative(DefRangeRegisterRelative<'a>),
     /// [`S_DEFRANGE_REGISTER_REL_INDIR`].
     DefRangeRegisterRelativeIndirect(DefRangeRegisterRelativeIndirect<'a>),
-    /// [`S_REGREL32`] and [`S_REGREL32_ENCTMP`].
-    RegisterRelative(RegisterRelative<'a>),
     /// [`S_DEFRANGE_SUBFIELD_REGISTER`].
     DefRangeSubfieldRegister(DefRangeSubfieldRegister<'a>),
-    /// [`S_BPREL32`].
+    /// [`S_DEFRANGE_HLSL`] and [`S_DEFRANGE_DPC_PTR_TAG`].
+    DefRangeHlsl(DefRangeHlsl<'a>),
+    /// [`S_DEFRANGE_CONSTVAL_ON_ENTRY`].
+    DefRangeConstantOnEntry(EntryValues<'a>),
+    /// [`S_DEFRANGE_GLOBALSYM_ON_ENTRY`]: the address of the global symbol.
+    DefRangeGlobalOnEntry(SectionOffset),
+    /// [`S_REGREL32`] and [`S_REGREL32_ENCTMP`].
+    RegisterRelative(RegisterRelative<'a>),
+    /// [`S_REGREL32_INDIR`] and [`S_REGREL32_INDIR_ENCTMP`].
+    RegisterRelativeIndirect(RegisterRelativeIndirect<'a>),
+    /// [`S_BPREL32`] and [`S_BPREL32_ENCTMP`].
     BasePointerRelative(BasePointerRelative<'a>),
+    /// [`S_BPREL32_INDIR`] and [`S_BPREL32_INDIR_ENCTMP`].
+    BasePointerRelativeIndirect(BasePointerRelativeIndirect<'a>),
     /// [`S_REGISTER`].
     Register(RegisterVariable<'a>),
+    /// [`S_MANYREG`], [`S_MANYREG2`], [`S_MANMANYREG`], [`S_MANMANYREG2`] and
+    /// [`S_ATTR_MANYREG`].
+    ManyRegisters(ManyRegisters<'a>),
+    /// [`S_MANFRAMEREL`] and [`S_ATTR_FRAMEREL`].
+    AttributedFrameRelative(AttributedFrameRelative<'a>),
+    /// [`S_MANREGISTER`] and [`S_ATTR_REGISTER`].
+    AttributedRegister(AttributedRegister<'a>),
+    /// [`S_MANREGREL`] and [`S_ATTR_REGREL`].
+    AttributedRegisterRelative(AttributedRegisterRelative<'a>),
+    /// [`S_LOCALSLOT`] and [`S_PARAMSLOT`].
+    Slot(Slot<'a>),
     /// [`S_FILESTATIC`].
     FileStatic(FileStatic<'a>),
+    /// [`S_STATICLOCAL`].
+    StaticLocal(StaticLocal),
     /// [`S_GTHREAD32`] and [`S_LTHREAD32`].
     ThreadData(Data<'a>),
     /// [`S_FRAMECOOKIE`].
@@ -327,16 +430,38 @@ pub enum SymbolData<'a> {
     HeapAllocationSite(HeapAllocationSite),
     /// [`S_TRAMPOLINE`].
     Trampoline(Trampoline),
-    /// [`S_FASTLINK`].
+    /// [`S_FASTLINK`] and [`S_REF_MINIPDB`].
     FastLink(FastLink<'a>),
     /// [`S_SECTION`].
     Section(Section<'a>),
     /// [`S_COFFGROUP`].
     CoffGroup(CoffGroup<'a>),
-    /// [`S_UDT`].
+    /// [`S_EXPORT`].
+    Export(Export<'a>),
+    /// [`S_DISCARDED`].
+    Discarded(Discarded<'a>),
+    /// [`S_MOD_TYPEREF`].
+    ModuleTypeReference(ModuleTypeReference),
+    /// [`S_PDBMAP`].
+    PdbMap(PdbMap<'a>),
+    /// [`S_UDT`] and [`S_COBOLUDT`].
     UserDefinedType(UserDefinedType<'a>),
     /// [`S_GDATA32`] and [`S_LDATA32`].
     Data(Data<'a>),
+    /// [`S_GMANDATA`] and [`S_LMANDATA`]. The type field holds a metadata
+    /// token.
+    ManagedData(Data<'a>),
+    /// [`S_GDATA_HLSL`], [`S_LDATA_HLSL`], [`S_GDATA_HLSL32`] and
+    /// [`S_LDATA_HLSL32`].
+    HlslData(HlslData<'a>),
+    /// [`S_GDATA_HLSL32_EX`] and [`S_LDATA_HLSL32_EX`].
+    HlslDataEx(HlslDataEx<'a>),
+    /// [`S_LOCAL_DPC_GROUPSHARED`].
+    DpcGroupSharedLocal(DpcGroupSharedLocal<'a>),
+    /// [`S_DPC_SYM_TAG_MAP`].
+    DpcTagMap(DpcTagMap<'a>),
+    /// [`S_VFTABLE32`].
+    VirtualFunctionTable(VirtualFunctionTable),
     /// [`S_CONSTANT`].
     Constant(Constant<'a>),
     /// [`S_PUB32`].
@@ -344,12 +469,18 @@ pub enum SymbolData<'a> {
     /// [`S_PROCREF`], [`S_LPROCREF`] and [`S_TOKENREF`]. An `S_TOKENREF`
     /// record names a managed procedure.
     ProcedureReference(ProcedureReference<'a>),
+    /// [`S_DATAREF`] and [`S_ANNOTATIONREF`]: a reference to a data or
+    /// annotation record in a module, with the layout of
+    /// [`SymbolData::ProcedureReference`].
+    SymbolReference(ProcedureReference<'a>),
     /// [`S_GMANPROC`] and [`S_LMANPROC`].
     ManagedProcedure(ManagedProcedure<'a>),
     /// [`S_MANSLOT`].
     ManagedSlot(ManagedSlot<'a>),
     /// [`S_MANCONSTANT`].
     ManagedConstant(ManagedConstant<'a>),
+    /// [`S_MANTYPREF`]: a type index.
+    ManagedTypeReference(TypeIndex),
     /// [`S_OEM`].
     Oem(Oem<'a>),
     /// [`S_SKIP`]: filler bytes without fields.
@@ -399,165 +530,95 @@ impl<'a> Symbol<'a> {
     pub const fn data(&self) -> &SymbolData<'a> {
         &self.data
     }
-
-    /// Return the name bytes, if the kind has a name.
-    ///
-    /// The bytes do not include the NUL terminator. [`S_OBJNAME`] gives the
-    /// object file path and [`S_UNAMESPACE`] gives the namespace. Compile
-    /// records have a version string, not a name, so they give `None`.
-    #[must_use]
-    pub const fn name(&self) -> Option<&'a [u8]> {
-        match self.data {
-            SymbolData::ObjectName(value) => Some(value.name),
-            SymbolData::UsingNamespace(name) => Some(name),
-            SymbolData::Procedure(value) => Some(value.name),
-            SymbolData::Block(value) => Some(value.name),
-            SymbolData::Label(value) => Some(value.name),
-            SymbolData::Thunk(value) => Some(value.name),
-            SymbolData::Local(value) => Some(value.name),
-            SymbolData::RegisterRelative(value) => Some(value.name),
-            SymbolData::BasePointerRelative(value) => Some(value.name),
-            SymbolData::Register(value) => Some(value.name),
-            SymbolData::FileStatic(value) => Some(value.name),
-            SymbolData::FastLink(value) => Some(value.name),
-            SymbolData::Section(value) => Some(value.name),
-            SymbolData::CoffGroup(value) => Some(value.name),
-            SymbolData::UserDefinedType(value) => Some(value.name),
-            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.name),
-            SymbolData::Constant(value) => Some(value.name),
-            SymbolData::Public(value) => Some(value.name),
-            SymbolData::ProcedureReference(value) => Some(value.name),
-            SymbolData::ManagedProcedure(value) => Some(value.name),
-            SymbolData::ManagedSlot(value) => Some(value.name),
-            SymbolData::ManagedConstant(value) => Some(value.name),
-            _ => None,
-        }
-    }
-
-    /// Return the start address, if the kind has one address.
-    ///
-    /// Procedures, blocks, labels, thunks, data, thread data, publics, COFF
-    /// groups, call sites and heap allocation sites have an address.
-    /// [`S_TRAMPOLINE`] gives the address of the thunk. [`S_ARMSWITCHTABLE`]
-    /// has three addresses, and def-ranges have address ranges. Read these
-    /// values from [`Symbol::data`].
-    #[must_use]
-    pub const fn address(&self) -> Option<SectionOffset> {
-        match self.data {
-            SymbolData::Procedure(value) => Some(value.address),
-            SymbolData::Block(value) => Some(value.address),
-            SymbolData::Label(value) => Some(value.address),
-            SymbolData::Thunk(value) => Some(value.address),
-            SymbolData::HeapAllocationSite(value) => Some(value.address),
-            SymbolData::Trampoline(value) => Some(value.thunk),
-            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.address),
-            SymbolData::Public(value) => Some(value.address),
-            SymbolData::CoffGroup(value) => Some(value.address),
-            SymbolData::CallSiteInfo(value) => Some(value.address),
-            SymbolData::ManagedProcedure(value) => Some(value.address),
-            _ => None,
-        }
-    }
-
-    /// Return the index in the TPI stream, if the kind has one.
-    ///
-    /// Procedures without the `_ID` suffix, locals, register-relative and
-    /// frame-relative variables, register variables, file statics,
-    /// user-defined types, data, thread data, constants, call sites and heap
-    /// allocation sites have a type index. The type index of [`S_FASTLINK`]
-    /// refers to the object file, so this function gives `None` for it.
-    #[must_use]
-    pub const fn type_index(&self) -> Option<TypeIndex> {
-        match self.data {
-            SymbolData::Procedure(Procedure {
-                signature: ProcedureType::Type(index),
-                ..
-            }) => Some(index),
-            SymbolData::Local(value) => Some(value.type_index),
-            SymbolData::RegisterRelative(value) => Some(value.type_index),
-            SymbolData::BasePointerRelative(value) => Some(value.type_index),
-            SymbolData::Register(value) => Some(value.type_index),
-            SymbolData::FileStatic(value) => Some(value.type_index),
-            SymbolData::HeapAllocationSite(value) => Some(value.type_index),
-            SymbolData::UserDefinedType(value) => Some(value.type_index),
-            SymbolData::Data(value) | SymbolData::ThreadData(value) => Some(value.type_index),
-            SymbolData::Constant(value) => Some(value.type_index),
-            SymbolData::CallSiteInfo(value) => Some(value.type_index),
-            SymbolData::Oem(value) => Some(value.type_index),
-            _ => None,
-        }
-    }
-
-    /// Return the index in the IPI stream, if the kind has one.
-    ///
-    /// [`S_GPROC32_ID`] and [`S_LPROC32_ID`] give the function ID,
-    /// [`S_INLINESITE`] gives the inlinee and [`S_BUILDINFO`] gives the
-    /// build information record.
-    #[must_use]
-    pub const fn id_index(&self) -> Option<IdIndex> {
-        match self.data {
-            SymbolData::Procedure(Procedure {
-                signature: ProcedureType::Id(index),
-                ..
-            })
-            | SymbolData::BuildInfo(index) => Some(index),
-            SymbolData::InlineSite(value) => Some(value.inlinee),
-            _ => None,
-        }
-    }
-
-    /// Return the module and offset of the referenced procedure.
-    ///
-    /// Only [`S_PROCREF`], [`S_LPROCREF`] and [`S_TOKENREF`] give a value.
-    #[must_use]
-    pub const fn procedure_reference(&self) -> Option<ProcedureReference<'a>> {
-        match self.data {
-            SymbolData::ProcedureReference(value) => Some(value),
-            _ => None,
-        }
-    }
-
-    /// Return the parent and end links, if the record starts a scope.
-    ///
-    /// Procedures, managed procedures, blocks, thunks and inline sites start
-    /// a scope.
-    #[must_use]
-    pub const fn scope(&self) -> Option<ScopeLinks> {
-        let (parent, end) = match self.data {
-            SymbolData::Procedure(value) => (value.parent, value.end),
-            SymbolData::Block(value) => (value.parent, value.end),
-            SymbolData::Thunk(value) => (value.parent, value.end),
-            SymbolData::InlineSite(value) => (value.parent, value.end),
-            SymbolData::ManagedProcedure(value) => (value.parent, value.end),
-            _ => return None,
-        };
-        Some(ScopeLinks { parent, end })
-    }
 }
 
 /// Decode the fields of `kind`. Do not check the padding.
 fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>> {
+    if let Some(data) = decode_variable(kind, fields)? {
+        return Ok(data);
+    }
     Ok(match kind {
         S_OBJNAME => SymbolData::ObjectName(ObjectName::read(fields)?),
         S_COMPILE2 => SymbolData::Compile2(Compile2::read(fields)?),
         S_COMPILE3 => SymbolData::Compile3(Compile3::read(fields)?),
         S_BUILDINFO => SymbolData::BuildInfo(fields.id_index()?),
+        S_SOURCELINK => SymbolData::SourceLink(fields.id_index()?),
         S_ENVBLOCK => SymbolData::EnvironmentBlock(EnvironmentBlock::read(fields)?),
         S_UNAMESPACE => SymbolData::UsingNamespace(fields.name()?),
-        S_GPROC32 | S_LPROC32 => SymbolData::Procedure(Procedure::read(fields, false)?),
-        S_GPROC32_ID | S_LPROC32_ID => SymbolData::Procedure(Procedure::read(fields, true)?),
+        S_GPROC32 | S_LPROC32 | S_LPROC32_DPC => {
+            SymbolData::Procedure(Procedure::read(fields, false, false)?)
+        }
+        S_GPROC32_ID | S_LPROC32_ID | S_LPROC32_DPC_ID => {
+            SymbolData::Procedure(Procedure::read(fields, true, false)?)
+        }
+        S_GPROC32EX | S_LPROC32EX => SymbolData::Procedure(Procedure::read(fields, false, true)?),
+        S_GPROC32EX_ID | S_LPROC32EX_ID => {
+            SymbolData::Procedure(Procedure::read(fields, true, true)?)
+        }
+        S_GPROCMIPS | S_LPROCMIPS => SymbolData::MipsProcedure(MipsProcedure::read(fields, false)?),
+        S_GPROCMIPS_ID | S_LPROCMIPS_ID => {
+            SymbolData::MipsProcedure(MipsProcedure::read(fields, true)?)
+        }
+        S_GPROCIA64 | S_LPROCIA64 => SymbolData::Ia64Procedure(Ia64Procedure::read(fields, false)?),
+        S_GPROCIA64_ID | S_LPROCIA64_ID => {
+            SymbolData::Ia64Procedure(Ia64Procedure::read(fields, true)?)
+        }
         S_FRAMEPROC => SymbolData::FrameProcedure(FrameProcedure::read(fields)?),
         S_BLOCK32 => SymbolData::Block(Block::read(fields)?),
+        S_WITH32 => SymbolData::With(With::read(fields)?),
+        S_SEPCODE => SymbolData::SeparatedCode(SeparatedCode::read(fields)?),
         S_LABEL32 => SymbolData::Label(Label::read(fields)?),
         S_THUNK32 => SymbolData::Thunk(Thunk::read(fields)?),
         S_END | S_PROC_ID_END => SymbolData::ScopeEnd,
-        S_INLINESITE => SymbolData::InlineSite(InlineSite::read(fields)?),
+        S_INLINESITE => SymbolData::InlineSite(InlineSite::read(fields, false)?),
+        S_INLINESITE2 => SymbolData::InlineSite(InlineSite::read(fields, true)?),
         S_INLINESITE_END => SymbolData::InlineSiteEnd,
         S_INLINEES => SymbolData::Inlinees(IdList::read(fields)?),
-        S_CALLEES => SymbolData::Callees(IdList::read(fields)?),
+        S_CALLEES => SymbolData::Callees(FunctionList::read(fields)?),
+        S_CALLERS => SymbolData::Callers(FunctionList::read(fields)?),
         S_CALLSITEINFO => SymbolData::CallSiteInfo(CallSiteInfo::read(fields)?),
         S_ARMSWITCHTABLE => SymbolData::JumpTable(JumpTable::read(fields)?),
+        S_POGODATA => SymbolData::ProfileData(ProfileData::read(fields)?),
+        S_HOTPATCHFUNC => SymbolData::HotPatchFunction(HotPatchFunction::read(fields)?),
+        S_ASSOCIATION => SymbolData::Association(Association::read(fields)?),
+        S_HYBRIDRANGE => SymbolData::HybridRange(HybridRange::read(fields)?),
+        S_ANNOTATION => SymbolData::AnnotationStrings(AnnotationStrings::read(fields)?),
+        S_FRAMECOOKIE => SymbolData::FrameCookie(FrameCookie::read(fields)?),
+        S_FRAMEREG => SymbolData::FrameRegister(fields.u16()?),
+        S_HEAPALLOCSITE => SymbolData::HeapAllocationSite(HeapAllocationSite::read(fields)?),
+        S_TRAMPOLINE => SymbolData::Trampoline(Trampoline::read(fields)?),
+        S_FASTLINK => SymbolData::FastLink(FastLink::read(fields, false)?),
+        S_REF_MINIPDB => SymbolData::FastLink(FastLink::read(fields, true)?),
+        S_SECTION => SymbolData::Section(Section::read(fields)?),
+        S_COFFGROUP => SymbolData::CoffGroup(CoffGroup::read(fields)?),
+        S_EXPORT => SymbolData::Export(Export::read(fields)?),
+        S_DISCARDED => SymbolData::Discarded(Discarded::read(fields)?),
+        S_MOD_TYPEREF => SymbolData::ModuleTypeReference(ModuleTypeReference::read(fields)?),
+        S_PDBMAP => SymbolData::PdbMap(PdbMap::read(fields)?),
+        S_VFTABLE32 => SymbolData::VirtualFunctionTable(VirtualFunctionTable::read(fields)?),
+        S_PUB32 => SymbolData::Public(Public::read(fields)?),
+        S_PROCREF | S_LPROCREF | S_TOKENREF => {
+            SymbolData::ProcedureReference(ProcedureReference::read(fields)?)
+        }
+        S_DATAREF | S_ANNOTATIONREF => {
+            SymbolData::SymbolReference(ProcedureReference::read(fields)?)
+        }
+        S_GMANPROC | S_LMANPROC => SymbolData::ManagedProcedure(ManagedProcedure::read(fields)?),
+        S_MANTYPREF => SymbolData::ManagedTypeReference(fields.type_index()?),
+        S_OEM => SymbolData::Oem(Oem::read(fields)?),
+        S_SKIP => SymbolData::Skip(fields.rest()),
+        _ => SymbolData::Unsupported(fields.rest()),
+    })
+}
+
+/// Decode the fields of a variable, data or def-range kind.
+///
+/// Return `None` for the other kinds.
+fn decode_variable<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<Option<SymbolData<'a>>> {
+    Ok(Some(match kind {
         S_LOCAL => SymbolData::Local(Local::read(fields)?),
+        S_DEFRANGE => SymbolData::DefRangeProgram(DefRangeProgram::read(fields, false)?),
+        S_DEFRANGE_SUBFIELD => SymbolData::DefRangeProgram(DefRangeProgram::read(fields, true)?),
         S_DEFRANGE_FRAMEPOINTER_REL => {
             SymbolData::DefRangeFramePointerRelative(DefRangeFramePointerRelative::read(fields)?)
         }
@@ -571,35 +632,63 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
         S_DEFRANGE_REGISTER_REL_INDIR => SymbolData::DefRangeRegisterRelativeIndirect(
             DefRangeRegisterRelativeIndirect::read(fields)?,
         ),
-        S_REGREL32 | S_REGREL32_ENCTMP => {
-            SymbolData::RegisterRelative(RegisterRelative::read(fields)?)
-        }
         S_DEFRANGE_SUBFIELD_REGISTER => {
             SymbolData::DefRangeSubfieldRegister(DefRangeSubfieldRegister::read(fields)?)
         }
-        S_BPREL32 => SymbolData::BasePointerRelative(BasePointerRelative::read(fields)?),
-        S_REGISTER => SymbolData::Register(RegisterVariable::read(fields)?),
-        S_FILESTATIC => SymbolData::FileStatic(FileStatic::read(fields)?),
-        S_GTHREAD32 | S_LTHREAD32 => SymbolData::ThreadData(Data::read(fields)?),
-        S_FRAMECOOKIE => SymbolData::FrameCookie(FrameCookie::read(fields)?),
-        S_FRAMEREG => SymbolData::FrameRegister(fields.u16()?),
-        S_HEAPALLOCSITE => SymbolData::HeapAllocationSite(HeapAllocationSite::read(fields)?),
-        S_TRAMPOLINE => SymbolData::Trampoline(Trampoline::read(fields)?),
-        S_FASTLINK => SymbolData::FastLink(FastLink::read(fields)?),
-        S_SECTION => SymbolData::Section(Section::read(fields)?),
-        S_COFFGROUP => SymbolData::CoffGroup(CoffGroup::read(fields)?),
-        S_UDT => SymbolData::UserDefinedType(UserDefinedType::read(fields)?),
-        S_GDATA32 | S_LDATA32 => SymbolData::Data(Data::read(fields)?),
-        S_CONSTANT => SymbolData::Constant(Constant::read(fields)?),
-        S_PUB32 => SymbolData::Public(Public::read(fields)?),
-        S_PROCREF | S_LPROCREF | S_TOKENREF => {
-            SymbolData::ProcedureReference(ProcedureReference::read(fields)?)
+        S_DEFRANGE_HLSL | S_DEFRANGE_DPC_PTR_TAG => {
+            SymbolData::DefRangeHlsl(DefRangeHlsl::read(fields)?)
         }
-        S_GMANPROC | S_LMANPROC => SymbolData::ManagedProcedure(ManagedProcedure::read(fields)?),
+        S_DEFRANGE_CONSTVAL_ON_ENTRY => {
+            SymbolData::DefRangeConstantOnEntry(EntryValues::read(fields)?)
+        }
+        S_DEFRANGE_GLOBALSYM_ON_ENTRY => {
+            SymbolData::DefRangeGlobalOnEntry(read_global_on_entry(fields)?)
+        }
+        S_REGREL32 | S_REGREL32_ENCTMP => {
+            SymbolData::RegisterRelative(RegisterRelative::read(fields)?)
+        }
+        S_REGREL32_INDIR | S_REGREL32_INDIR_ENCTMP => {
+            SymbolData::RegisterRelativeIndirect(RegisterRelativeIndirect::read(fields)?)
+        }
+        S_BPREL32 | S_BPREL32_ENCTMP => {
+            SymbolData::BasePointerRelative(BasePointerRelative::read(fields)?)
+        }
+        S_BPREL32_INDIR | S_BPREL32_INDIR_ENCTMP => {
+            SymbolData::BasePointerRelativeIndirect(BasePointerRelativeIndirect::read(fields)?)
+        }
+        S_REGISTER => SymbolData::Register(RegisterVariable::read(fields)?),
+        S_MANYREG => SymbolData::ManyRegisters(ManyRegisters::read(fields, false, false)?),
+        S_MANYREG2 => SymbolData::ManyRegisters(ManyRegisters::read(fields, false, true)?),
+        S_MANMANYREG => SymbolData::ManyRegisters(ManyRegisters::read(fields, true, false)?),
+        S_MANMANYREG2 | S_ATTR_MANYREG => {
+            SymbolData::ManyRegisters(ManyRegisters::read(fields, true, true)?)
+        }
+        S_MANFRAMEREL | S_ATTR_FRAMEREL => {
+            SymbolData::AttributedFrameRelative(AttributedFrameRelative::read(fields)?)
+        }
+        S_MANREGISTER | S_ATTR_REGISTER => {
+            SymbolData::AttributedRegister(AttributedRegister::read(fields)?)
+        }
+        S_MANREGREL | S_ATTR_REGREL => {
+            SymbolData::AttributedRegisterRelative(AttributedRegisterRelative::read(fields)?)
+        }
+        S_LOCALSLOT | S_PARAMSLOT => SymbolData::Slot(Slot::read(fields)?),
+        S_FILESTATIC => SymbolData::FileStatic(FileStatic::read(fields)?),
+        S_STATICLOCAL => SymbolData::StaticLocal(StaticLocal::read(fields)?),
+        S_GTHREAD32 | S_LTHREAD32 => SymbolData::ThreadData(Data::read(fields)?),
+        S_UDT | S_COBOLUDT => SymbolData::UserDefinedType(UserDefinedType::read(fields)?),
+        S_GDATA32 | S_LDATA32 => SymbolData::Data(Data::read(fields)?),
+        S_GMANDATA | S_LMANDATA => SymbolData::ManagedData(Data::read(fields)?),
+        S_GDATA_HLSL | S_LDATA_HLSL => SymbolData::HlslData(HlslData::read(fields, false)?),
+        S_GDATA_HLSL32 | S_LDATA_HLSL32 => SymbolData::HlslData(HlslData::read(fields, true)?),
+        S_GDATA_HLSL32_EX | S_LDATA_HLSL32_EX => SymbolData::HlslDataEx(HlslDataEx::read(fields)?),
+        S_LOCAL_DPC_GROUPSHARED => {
+            SymbolData::DpcGroupSharedLocal(DpcGroupSharedLocal::read(fields)?)
+        }
+        S_DPC_SYM_TAG_MAP => SymbolData::DpcTagMap(DpcTagMap::read(fields)?),
+        S_CONSTANT => SymbolData::Constant(Constant::read(fields)?),
         S_MANSLOT => SymbolData::ManagedSlot(ManagedSlot::read(fields)?),
         S_MANCONSTANT => SymbolData::ManagedConstant(ManagedConstant::read(fields)?),
-        S_OEM => SymbolData::Oem(Oem::read(fields)?),
-        S_SKIP => SymbolData::Skip(fields.rest()),
-        _ => SymbolData::Unsupported(fields.rest()),
-    })
+        _ => return Ok(None),
+    }))
 }

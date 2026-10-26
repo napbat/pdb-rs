@@ -6,6 +6,7 @@
 use core::iter::FusedIterator;
 
 use super::super::Fields;
+use super::super::writer::FieldWriter;
 use crate::{Error, ErrorKind, Result};
 
 /// An object file name record (`S_OBJNAME`).
@@ -24,6 +25,12 @@ impl<'a> ObjectName<'a> {
         let signature = fields.u32()?;
         let name = fields.name()?;
         Ok(Self { signature, name })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.signature)?;
+        out.name(self.name)
     }
 }
 
@@ -162,6 +169,17 @@ impl<'a> Compile2<'a> {
             extra_strings,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.flags.0)?;
+        out.u16(self.machine)?;
+        for value in self.frontend.into_iter().chain(self.backend) {
+            out.u16(value)?;
+        }
+        out.name(self.version)?;
+        self.extra_strings.write(out)
+    }
 }
 
 /// A compile record, version 3 (`S_COMPILE3`).
@@ -178,6 +196,12 @@ pub struct Compile3<'a> {
     pub backend: [u16; 4],
     /// The compiler version string.
     pub version: &'a [u8],
+    /// The number of zero bytes after the NUL terminator of the version
+    /// string, with the record padding.
+    ///
+    /// The encoder writes these bytes and then pads the record. Most
+    /// producers write only the record padding; `ml64` writes one more NUL.
+    pub trailing_zeros: usize,
 }
 
 impl<'a> Compile3<'a> {
@@ -204,7 +228,22 @@ impl<'a> Compile3<'a> {
             frontend,
             backend,
             version,
+            trailing_zeros: rest.len(),
         })
+    }
+
+    /// Write the fields and the trailing zero bytes.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.flags.0)?;
+        out.u16(self.machine)?;
+        for value in self.frontend.into_iter().chain(self.backend) {
+            out.u16(value)?;
+        }
+        out.name(self.version)?;
+        for _ in 0..self.trailing_zeros {
+            out.u8(0)?;
+        }
+        Ok(())
     }
 }
 
@@ -228,17 +267,26 @@ impl<'a> EnvironmentBlock<'a> {
         let strings = StringList::read(fields)?;
         Ok(Self { flags, strings })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u8(self.flags)?;
+        self.strings.write(out)
+    }
 }
 
 /// A sequence of non-empty NUL-terminated strings.
 ///
 /// In the record, an empty string ends the sequence. The value keeps the
-/// bytes before the empty string. An absent sequence and an empty sequence
-/// give the same value.
+/// bytes before the empty string. The sequence can also be absent: the
+/// record then ends without the empty string. [`StringList::is_terminated`]
+/// tells the two forms apart.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct StringList<'a> {
     /// The strings with their terminators, without the final empty string.
     bytes: &'a [u8],
+    /// `true` if the record holds the empty string that ends the sequence.
+    terminated: bool,
 }
 
 impl<'a> StringList<'a> {
@@ -269,13 +317,57 @@ impl<'a> StringList<'a> {
         let bytes = fields.bytes(length)?;
         // Consume the empty string that ends the sequence.
         fields.bytes(1)?;
-        Ok(Self { bytes })
+        Ok(Self {
+            bytes,
+            terminated: true,
+        })
+    }
+
+    /// Create a list from strings with their NUL terminators.
+    ///
+    /// The encoder writes the strings and the empty string that ends them.
+    /// An empty `bytes` gives an absent sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidFormat`] if `bytes` does not end with a
+    /// NUL byte or holds an empty string.
+    pub fn new(bytes: &'a [u8]) -> Result<Self> {
+        let valid = bytes.is_empty()
+            || (bytes.first() != Some(&0)
+                && bytes.last() == Some(&0)
+                && !bytes.windows(2).any(|pair| pair == [0, 0]));
+        if !valid {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("symbol string list holds an empty or unterminated string"));
+        }
+        Ok(Self {
+            bytes,
+            terminated: !bytes.is_empty(),
+        })
+    }
+
+    /// Write the strings and, if the sequence is present, the empty string
+    /// that ends it.
+    fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.bytes(self.bytes)?;
+        if self.terminated || !self.bytes.is_empty() {
+            out.u8(0)?;
+        }
+        Ok(())
     }
 
     /// Return the raw bytes of the strings with their terminators.
     #[must_use]
     pub const fn bytes(&self) -> &'a [u8] {
         self.bytes
+    }
+
+    /// Return `true` if the record holds the empty string that ends the
+    /// sequence. An absent sequence gives `false`.
+    #[must_use]
+    pub const fn is_terminated(&self) -> bool {
+        self.terminated
     }
 
     /// Return `true` if the list has no strings.

@@ -86,6 +86,8 @@ pub use custom_debug_info::{
 use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Integer;
+use super::super::writer::FieldWriter;
+use super::leaf::write_integer;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
 use crate::{Error, ErrorKind, Result};
 
@@ -173,6 +175,21 @@ impl<'a> ManagedProcedure<'a> {
             name,
         })
     }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.parent)?;
+        out.u32(self.end)?;
+        out.u32(self.next)?;
+        out.u32(self.code_length)?;
+        out.u32(self.debug_start)?;
+        out.u32(self.debug_end)?;
+        out.u32(self.token)?;
+        self.address.write(out)?;
+        out.u8(self.flags.0)?;
+        out.u16(self.return_register)?;
+        out.name(self.name)
+    }
 }
 
 /// A managed local variable in an IL slot (`S_MANSLOT`).
@@ -208,6 +225,15 @@ impl<'a> ManagedSlot<'a> {
             flags,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.slot)?;
+        out.u32(self.type_or_token)?;
+        self.address.write(out)?;
+        out.u16(self.flags.0)?;
+        out.name(self.name)
     }
 }
 
@@ -251,6 +277,29 @@ impl<'a> ManagedConstantValue<'a> {
         }
         Ok(Self::Integer(fields.integer()?))
     }
+
+    /// Write the leaf. `stored` is the stored form of an integer value.
+    fn write(&self, out: &mut FieldWriter<'_>, stored: &[u8]) -> Result<()> {
+        match *self {
+            Self::Integer(value) => write_integer(out, value, stored),
+            Self::String(bytes) => {
+                let length = u16::try_from(bytes.len()).map_err(|_| {
+                    Error::new(ErrorKind::LimitExceeded, None)
+                        .with_context("LF_VARSTRING value is longer than 65535 bytes")
+                })?;
+                out.u16(LF_VARSTRING)?;
+                out.u16(length)?;
+                out.bytes(bytes)
+            }
+            Self::Fixed { leaf, bytes } => {
+                if fixed_leaf_size(leaf) != Some(bytes.len()) {
+                    return Err(invalid("managed constant leaf and value size do not match"));
+                }
+                out.u16(leaf)?;
+                out.bytes(bytes)
+            }
+        }
+    }
 }
 
 /// Return the value size of a fixed-size numeric leaf that is not an integer.
@@ -288,6 +337,11 @@ pub struct ManagedConstant<'a> {
     pub type_or_token: u32,
     /// The value.
     pub value: ManagedConstantValue<'a>,
+    /// The numeric leaf as the record stores it, with its tag.
+    ///
+    /// For an integer value, the encoder writes these bytes if they hold the
+    /// value. Otherwise it writes the shortest leaf for the value.
+    pub value_bytes: &'a [u8],
     /// The name.
     pub name: &'a [u8],
 }
@@ -296,13 +350,23 @@ impl<'a> ManagedConstant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_or_token = fields.u32()?;
+        let before = fields.rest();
         let value = ManagedConstantValue::read(fields)?;
+        let value_bytes = &before[..before.len() - fields.rest().len()];
         let name = fields.name()?;
         Ok(Self {
             type_or_token,
             value,
+            value_bytes,
             name,
         })
+    }
+
+    /// Write the fields.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.u32(self.type_or_token)?;
+        self.value.write(out, self.value_bytes)?;
+        out.name(self.name)
     }
 }
 
@@ -345,6 +409,13 @@ impl<'a> Oem<'a> {
     #[must_use]
     pub fn attribute(&self) -> Option<Result<SymbolAttribute<'a>>> {
         (self.id == MANAGED_ATTRIBUTE_OEM_ID).then(|| SymbolAttribute::parse(self.data))
+    }
+
+    /// Write the fields and the raw data.
+    pub(super) fn write(&self, out: &mut FieldWriter<'_>) -> Result<()> {
+        out.bytes(&self.id)?;
+        out.type_index(self.type_index)?;
+        out.bytes(self.data)
     }
 }
 

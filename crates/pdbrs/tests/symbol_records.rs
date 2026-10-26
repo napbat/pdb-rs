@@ -6,9 +6,9 @@ use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::symbol::{
-    AddressGap, CompileFlags, FramePointer, FrameProcedureFlags, JumpTableEntry, LocalFlags,
-    ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO, S_CALLEES, S_CALLSITEINFO,
-    S_COFFGROUP, S_COMPILE2, S_COMPILE3, S_CONSTANT, S_DEFRANGE_FRAMEPOINTER_REL,
+    AddressGap, CompileFlags, FramePointer, FrameProcedureFlags, IdList, JumpTableEntry,
+    LocalFlags, ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO, S_CALLEES, S_CALLERS,
+    S_CALLSITEINFO, S_COFFGROUP, S_COMPILE2, S_COMPILE3, S_CONSTANT, S_DEFRANGE_FRAMEPOINTER_REL,
     S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_DEFRANGE_REGISTER_REL,
     S_DEFRANGE_REGISTER_REL_INDIR, S_END, S_ENVBLOCK, S_FRAMEPROC, S_INLINEES, S_INLINESITE,
     S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROCREF, S_OBJNAME, S_PROC_ID_END, S_PROCREF,
@@ -392,28 +392,43 @@ fn decodes_inline_site() {
     assert_eq!(error(S_INLINESITE, &broken), ErrorKind::InvalidFormat);
 }
 
+/// Return the ID list of an `S_INLINEES`, `S_CALLEES` or `S_CALLERS` record.
+fn id_list(symbol: Symbol<'_>) -> IdList<'_> {
+    match *symbol.data() {
+        SymbolData::Inlinees(list) => list,
+        SymbolData::Callees(list) | SymbolData::Callers(list) => list.functions(),
+        _ => panic!("expected an ID list"),
+    }
+}
+
 #[test]
 fn decodes_inlinee_and_callee_lists() {
-    for kind in [S_INLINEES, S_CALLEES] {
+    for kind in [S_INLINEES, S_CALLEES, S_CALLERS] {
         let payload = Payload::default().u32(2).u32(0x11fd).u32(0x1237);
         decode(kind, &payload, |symbol| {
-            let (SymbolData::Inlinees(list) | SymbolData::Callees(list)) = *symbol.data() else {
-                panic!("expected an ID list");
-            };
+            let list = id_list(symbol);
             assert_eq!(list.len(), 2);
             let ids: Vec<IdIndex> = list.iter().collect();
             assert_eq!(ids, [IdIndex(0x11fd), IdIndex(0x1237)]);
         });
         decode(kind, &Payload::default().u32(0), |symbol| {
-            let (SymbolData::Inlinees(list) | SymbolData::Callees(list)) = *symbol.data() else {
-                panic!("expected an ID list");
-            };
-            assert!(list.is_empty());
+            assert!(id_list(symbol).is_empty());
         });
         let short = Payload::default().u32(3).u32(1).u32(2);
         assert_eq!(error(kind, &short), ErrorKind::InvalidFormat);
-        let extra = Payload::default().u32(1).u32(1).u32(2);
-        assert_eq!(error(kind, &extra), ErrorKind::InvalidFormat);
+    }
+    let extra = Payload::default().u32(1).u32(1).u32(2);
+    assert_eq!(error(S_INLINEES, &extra), ErrorKind::InvalidFormat);
+    // A function list can have one invocation count for each function.
+    for kind in [S_CALLEES, S_CALLERS] {
+        decode(kind, &extra, |symbol| {
+            let (SymbolData::Callees(list) | SymbolData::Callers(list)) = *symbol.data() else {
+                panic!("expected a function list");
+            };
+            assert_eq!(list.invocations().collect::<Vec<_>>(), [2]);
+        });
+        let too_many = Payload::default().u32(1).u32(1).u32(2).u32(3);
+        assert_eq!(error(kind, &too_many), ErrorKind::InvalidFormat);
     }
 }
 

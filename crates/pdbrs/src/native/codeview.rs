@@ -21,6 +21,11 @@ pub mod id_record;
 pub mod index;
 pub mod numeric;
 pub mod type_record;
+#[expect(
+    dead_code,
+    reason = "the type record encoders of #29 use the rest of the shared writer"
+)]
+pub(crate) mod writer;
 
 pub mod symbol;
 
