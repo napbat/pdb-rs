@@ -19,6 +19,7 @@ exception handling and .NET async state machines.
 | `dotnet/csharp/` | A C# console project with four source files: `Program.cs`, `AsyncWork.cs`, `Shapes.cs` and `Locals.cs`. |
 | `dotnet/vb/` | A Visual Basic console project with two source files: `Program.vb` and `Tracing.vb`. |
 | `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
+| `hlsl/` | HLSL shaders for `fxc` and `dxc`: `vertex.hlsl`, `pixel.hlsl`, `compute.hlsl` and the shared header `common.hlsli`. |
 
 Each program runs without arguments, prints a checksum and exits with code 0. MSVC-only
 constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m128` and
@@ -90,6 +91,9 @@ come from the PDB of `FSharp.Core`, not from the PDB of the demo.
 | `dotnet-csharp-embed-sources` | `dotnet build` | AnyCPU | `DebugType=portable`, `EmbedAllSources=true` |
 | `dotnet-vb-portable` | `dotnet build` | AnyCPU | `DebugType=portable` |
 | `dotnet-fsharp-portable` | `dotnet build` | AnyCPU | `DebugType=portable`, `Optimize=true` |
+| `hlsl-fxc-sm50-debug` | `fxc` | DXBC | `/Zi /Od`, profiles `vs_5_0`, `ps_5_0`, `cs_5_0` |
+| `hlsl-fxc-sm51-debug` | `fxc` | DXBC | `/Zi /Od`, profiles `vs_5_1`, `ps_5_1`, `cs_5_1` |
+| `hlsl-dxc-debug` | `dxc` | DXIL | `-Zi -Od`, profiles `vs_6_0`, `ps_6_0`, `cs_6_0` |
 
 The `clang-cl` and `lld-link` tools come from the LLVM component of Visual Studio, not from a
 separate LLVM installation. MSVC 14.50 and later ignore `/DEBUG:FASTLINK` (warning LNK4315)
@@ -154,6 +158,30 @@ These LLVM options do not give new PDB data, so the matrix has no fixture for th
 - `clang-cl` precompiled headers (`/Yc`, `/Yu`): the objects have no `LF_PRECOMP` records.
 - `lld-link /NATVIS`: the Rust fixtures that use `lld-link` already contain Natvis injected
   sources.
+
+### HLSL shaders
+
+The HLSL fixtures give the native reader the HLSL record kinds (#27). The shaders use a
+constant buffer with `row_major` and `column_major` matrices and vectors, textures, samplers,
+structured, RW and byte address buffers, `groupshared` memory, `min16float` and `half` types
+and an inlined helper function. Each fixture compiles each shader stage to `<stage>.pdb` and
+`<stage>.cso`. `fxc.exe` and `dxc.exe` come from the Windows SDK on the `PATH` of the x64
+`vcvarsall.bat` environment. If a compiler is missing, the fixture is `unavailable`.
+
+| Fixture | Items |
+| --- | --- |
+| `hlsl-fxc-sm50-debug` | `LF_VECTOR`, `LF_MATRIX`, `LF_MODIFIER_EX`, `LF_HLSL`, `LF_STRIDED_ARRAY`, `S_GDATA_HLSL`, `S_LDATA_HLSL` (`groupshared`), `S_DEFRANGE_HLSL`, `S_INLINESITE`, `S_ENVBLOCK` with the HLSL target. |
+| `hlsl-fxc-sm51-debug` | The same kinds, but `S_GDATA_HLSL32_EX` and `S_LDATA_HLSL32_EX` instead of `S_GDATA_HLSL` and `S_LDATA_HLSL`. |
+| `hlsl-dxc-debug` | No CodeView data. The TPI, DBI and IPI streams are empty. Stream 5 holds a DXIL container with the parts `ILDN`, `HASH`, `SRCI`, `VERS` and `ILDB`. |
+
+Some producer properties of these PDBs:
+
+- `fxc` writes MSF 7.0 PDBs with 512-byte pages. The names of `S_LOCAL` records have zero bytes
+  after the terminating zero, not `LF_PAD` bytes. Some `LF_HLSL` records have nonzero bits in
+  the unused part of the property field.
+- `dxc` declares one page less in the MSF header than the streams use. `pdbtool check` and
+  DIA2Dump reject these PDBs. `llvm-pdbutil` reads the summary and the stream list, but not the
+  empty TPI stream.
 
 ## Run the generator
 

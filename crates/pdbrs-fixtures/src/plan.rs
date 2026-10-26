@@ -1,6 +1,7 @@
 //! Build plans: the tool versions, steps and expected outputs of one fixture.
 
 mod dotnet;
+mod hlsl;
 mod native;
 mod rust;
 
@@ -59,5 +60,6 @@ pub fn plan(fixture: &Fixture, paths: &Paths, toolchains: &mut Toolchains) -> Re
         Recipe::Native(recipe) => native::plan(recipe, paths, toolchains),
         Recipe::Rust(recipe) => rust::plan(recipe, paths, toolchains),
         Recipe::Dotnet(recipe) => dotnet::plan(recipe, paths, toolchains),
+        Recipe::Hlsl(recipe) => hlsl::plan(recipe, paths, toolchains),
     }
 }

@@ -164,6 +164,26 @@ pub struct Dotnet {
     pub pdb: Option<Kind>,
 }
 
+/// An HLSL shader compiler from the Windows SDK.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShaderCompiler {
+    /// `fxc.exe`, the DXBC compiler for shader models 5.1 and older.
+    Fxc,
+    /// `dxc.exe`, the DXIL compiler for shader model 6.
+    Dxc,
+}
+
+/// A build of each shader stage in `fixtures/hlsl` with one compiler.
+#[derive(Debug)]
+pub struct Hlsl {
+    /// The compiler.
+    pub compiler: ShaderCompiler,
+    /// The shader model in profile form, for example `5_0`.
+    pub model: &'static str,
+    /// Compiler options for debug information and optimization.
+    pub options: &'static [&'static str],
+}
+
 /// How to build a fixture.
 #[derive(Debug)]
 pub enum Recipe {
@@ -173,6 +193,8 @@ pub enum Recipe {
     Rust(Rust),
     /// A .NET build.
     Dotnet(Dotnet),
+    /// An HLSL shader build.
+    Hlsl(Hlsl),
 }
 
 /// One fixture of the matrix.
@@ -289,6 +311,31 @@ const fn csharp(
         properties,
         pdb,
     )
+}
+
+const fn hlsl(
+    name: &'static str,
+    configuration: &'static str,
+    compiler: ShaderCompiler,
+    model: &'static str,
+    options: &'static [&'static str],
+) -> Fixture {
+    let (producer, arch) = match compiler {
+        ShaderCompiler::Fxc => ("fxc", "dxbc"),
+        ShaderCompiler::Dxc => ("dxc", "dxil"),
+    };
+    Fixture {
+        name,
+        producer,
+        language: "hlsl",
+        arch,
+        configuration,
+        recipe: Recipe::Hlsl(Hlsl {
+            compiler,
+            model,
+            options,
+        }),
+    }
 }
 
 const fn dotnet(
@@ -530,6 +577,27 @@ pub static FIXTURES: &[Fixture] = &[
         // The F# compiler makes a state machine for `task { }` only with optimization.
         &["DebugType=portable", "Optimize=true"],
         Some(Kind::PortablePdb),
+    ),
+    hlsl(
+        "hlsl-fxc-sm50-debug",
+        "debug, shader model 5.0",
+        ShaderCompiler::Fxc,
+        "5_0",
+        &["/Zi", "/Od"],
+    ),
+    hlsl(
+        "hlsl-fxc-sm51-debug",
+        "debug, shader model 5.1",
+        ShaderCompiler::Fxc,
+        "5_1",
+        &["/Zi", "/Od"],
+    ),
+    hlsl(
+        "hlsl-dxc-debug",
+        "debug, shader model 6.0",
+        ShaderCompiler::Dxc,
+        "6_0",
+        &["-Zi", "-Od"],
     ),
 ];
 
