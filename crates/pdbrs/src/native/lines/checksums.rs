@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::{invalid, too_large, truncated};
+use super::{invalid, pad4, put, put_u32, too_large, truncated};
 use crate::{Error, ErrorKind, Result};
 
 /// The size of an entry header: a name offset, a size and a kind.
@@ -182,6 +182,70 @@ impl<'a> FileChecksums<'a> {
             offsets: self.offsets.iter(),
         }
     }
+
+    /// Append the subsection data to `out`.
+    ///
+    /// Each entry gets the padding that it had in the decoded data, so the
+    /// output is equal to that data. The padding after the last entry can
+    /// be absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let ends = self
+            .offsets
+            .iter()
+            .skip(1)
+            .map(|&next| usize::try_from(next).unwrap_or(usize::MAX))
+            .chain([self.data.len()]);
+        for (entry, next) in self.iter().zip(ends) {
+            write_entry(entry.name_offset, entry.kind, entry.checksum, out)?;
+            // `decode` checked that the entry and its padding end at `next`.
+            let start = usize::try_from(entry.offset).unwrap_or(usize::MAX);
+            let end = start.saturating_add(ENTRY_HEADER_SIZE + entry.checksum.len());
+            let padding = next.saturating_sub(end).min(ENTRY_ALIGNMENT - 1);
+            put(out, &[0; ENTRY_ALIGNMENT - 1][..padding])?;
+        }
+        Ok(())
+    }
+}
+
+/// Append one entry of a file checksum table and its padding to `out`.
+///
+/// The entry starts at a 4-byte boundary of the table. The output offset of
+/// the entry, relative to the table start, is the value that line blocks
+/// and inlinee entries use to refer to it.
+///
+/// # Errors
+///
+/// - [`ErrorKind::InvalidFormat`] if the checksum size is not
+///   [`ChecksumKind::size`].
+/// - [`ErrorKind::LimitExceeded`] if the output cannot grow.
+pub fn encode_file_checksum(
+    name_offset: u32,
+    kind: ChecksumKind,
+    checksum: &[u8],
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    write_entry(name_offset, kind, checksum, out)?;
+    pad4(out, ENTRY_HEADER_SIZE + checksum.len())
+}
+
+/// Append the header and the checksum of one entry to `out`.
+fn write_entry(
+    name_offset: u32,
+    kind: ChecksumKind,
+    checksum: &[u8],
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    if checksum.len() != kind.size() {
+        return Err(invalid("file checksum size does not match its kind"));
+    }
+    put_u32(out, name_offset)?;
+    // The sizes of all kinds are at most 32, so the size fits in `u8`.
+    put(out, &[checksum.len().to_le_bytes()[0], kind.raw()])?;
+    put(out, checksum)
 }
 
 impl<'s, 'a> IntoIterator for &'s FileChecksums<'a> {
