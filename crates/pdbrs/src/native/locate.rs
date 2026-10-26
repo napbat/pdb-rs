@@ -30,12 +30,12 @@
 //!
 //! # Limits
 //!
-//! The locator does not translate addresses through OMAP: queries return
-//! [`ErrorKind::UnsupportedVersion`] if the DBI stream names an OMAP stream.
-//! It indexes only the records before a scope kind that this crate does not
-//! decode, for example `S_SEPCODE`. [`SymbolLocator::incomplete_modules`]
-//! lists the modules with such a record. A module symbol scope can have at
-//! most [`MAX_SCOPE_DEPTH`] levels.
+//! The locator translates addresses through the OMAP tables of an image
+//! that a tool rewrote. An address without an OMAP mapping has no location.
+//! The locator indexes only the records before a record that this crate
+//! cannot decode, for example a constant with an unknown numeric leaf.
+//! [`SymbolLocator::incomplete_modules`] lists the modules with such a
+//! record. A module symbol scope can have at most [`MAX_SCOPE_DEPTH`] levels.
 //!
 //! The locator keeps names as bytes. It does not demangle or undecorate them.
 
@@ -335,21 +335,25 @@ impl SymbolLocator {
 
     /// Find the source location of an RVA.
     ///
-    /// Return `None` if no image section holds the RVA. The fields of the
-    /// location are `None` or empty where the PDB has no data for the RVA,
-    /// for example in a gap between procedures.
+    /// Return `None` if no image section holds the RVA, or if the OMAP
+    /// tables of an image that a tool rewrote give no mapping for it. The
+    /// fields of the location are `None` or empty where the PDB has no data
+    /// for the RVA, for example in a gap between procedures.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::UnsupportedVersion`] if the DBI stream names an OMAP stream.
     /// - [`ErrorKind::InvalidReference`] if a record refers to a missing file
     ///   checksum, `/names` string or inlinee line entry.
     /// - [`ErrorKind::MissingStream`] if line data needs `/names` and the PDB
     ///   has no `/names` stream.
-    /// - The decoding errors of the module records and line subsections.
+    /// - The errors of the address translation, and the decoding errors of
+    ///   the module records and line subsections.
     pub fn locate(&self, rva: Rva) -> Result<Option<Location<'_>>> {
         match self.address_map()?.section_offset(rva) {
-            Ok(address) => self.locate_at(rva, address).map(Some),
+            Ok(address) => address
+                .mapped()
+                .map(|address| self.locate_at(rva, address))
+                .transpose(),
             Err(error) if error.kind() == ErrorKind::InvalidReference => Ok(None),
             Err(error) => Err(error),
         }
@@ -364,7 +368,10 @@ impl SymbolLocator {
     /// Returns the errors of [`SymbolLocator::locate`].
     pub fn locate_section_offset(&self, address: SectionOffset) -> Result<Option<Location<'_>>> {
         match self.address_map()?.rva(address) {
-            Ok(rva) => self.locate(rva),
+            Ok(rva) => match rva.mapped() {
+                Some(rva) => self.locate(rva),
+                None => Ok(None),
+            },
             Err(error) if error.kind() == ErrorKind::InvalidReference => Ok(None),
             Err(error) => Err(error),
         }

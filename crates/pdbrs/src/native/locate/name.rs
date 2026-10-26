@@ -118,7 +118,9 @@ impl SymbolLocator {
         let offset = span.value;
         let public = self.public(offset)?;
         let same_section = match map.section_offset(rva) {
-            Ok(address) => address.section == public.address.section,
+            Ok(address) => address
+                .mapped()
+                .is_some_and(|address| address.section == public.address.section),
             Err(error) if error.kind() == ErrorKind::InvalidReference => false,
             Err(error) => return Err(error),
         };

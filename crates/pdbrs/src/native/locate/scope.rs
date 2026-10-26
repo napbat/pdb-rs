@@ -310,11 +310,12 @@ pub(super) fn module_symbol(module: &ModuleData, offset: u32) -> Result<Symbol<'
 
 /// Translate an address that can lie outside the image sections.
 ///
-/// Section 0 and section numbers past the last header give `None`, as for
-/// absolute symbols. Other translation errors stay errors.
+/// Section 0, section numbers past the last header and an address without
+/// an OMAP mapping give `None`, as for absolute symbols. Other translation
+/// errors stay errors.
 pub(super) fn optional_rva(map: &AddressMap<'_>, address: SectionOffset) -> Result<Option<Rva>> {
     match map.rva(address) {
-        Ok(rva) => Ok(Some(rva)),
+        Ok(rva) => Ok(rva.mapped()),
         Err(_) if address.section == 0 || usize::from(address.section) > map.sections().len() => {
             Ok(None)
         }

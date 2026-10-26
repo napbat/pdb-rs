@@ -50,7 +50,6 @@ impl SymbolLocator {
     ///
     /// - [`ErrorKind::MissingStream`] if the PDB has no DBI stream or no
     ///   section header stream, or if it has inline sites but no IPI stream.
-    /// - [`ErrorKind::UnsupportedVersion`] if the DBI stream names an OMAP stream.
     /// - [`ErrorKind::InvalidReference`] if an inlinee is not a function ID,
     ///   or if a member function ID does not name a class, union or enum.
     /// - [`ErrorKind::LimitExceeded`] if an index cannot be allocated.
