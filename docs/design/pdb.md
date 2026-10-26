@@ -281,7 +281,7 @@ Names below are proposed contracts, not compilable examples.
 | `native::MsfBuilder` | Construct arbitrary streams without claiming PDB semantic validity |
 | Backend `WritePlan` | Freeze format-specific lengths, references, identity and layout before output |
 | Backend `WritePlan::write_to` | Write to a fresh destination without mutating the source |
-| `portable::decode_embedded`, `encode_embedded` | Decode or emit an `MPDB` payload; PE directory handling stays with the caller |
+| `portable::embedded::decode_embedded`, `encode_embedded` | Decode or emit an `MPDB` payload; PE directory handling stays with the caller |
 
 Use the root facade for detection and dispatch, not to hide format-specific operations.
 Match the selected backend before editing or constructing records.

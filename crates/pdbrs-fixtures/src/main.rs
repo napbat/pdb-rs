@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::args::{Action, Options, USAGE};
-use crate::classify::classify;
+use crate::classify::{Kind, classify, embedded_pdb_payload};
 use crate::manifest::{Header, Output, Record, Status, relative_path};
 use crate::matrix::{FIXTURES, Fixture};
 use crate::plan::{Paths, Plan};
@@ -197,7 +197,9 @@ fn run(plan: &Plan, directory: &Path) -> Result<(), StepError> {
 
 /// Check that each output exists and classify its contents.
 ///
-/// Return the outputs and notes about outputs whose kind differs from the plan.
+/// For an image with an embedded Portable PDB, also write its `MPDB` payload to a file next to
+/// the image, with the extension `mpdb`. Return the outputs and notes about outputs whose kind
+/// differs from the plan.
 fn check_outputs(plan: &Plan, out: &Path) -> Result<(Vec<Output>, Vec<String>), String> {
     let mut outputs = Vec::new();
     let mut notes = Vec::new();
@@ -217,11 +219,28 @@ fn check_outputs(plan: &Plan, out: &Path) -> Result<(Vec<Output>, Vec<String>), 
                 kind.name()
             ));
         }
-        outputs.push(Output {
-            kind,
-            path,
-            size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-        });
+        outputs.push(output(kind, path, &bytes));
+        if kind == Kind::EmbeddedInImage
+            && let Some(payload) = embedded_pdb_payload(&bytes)
+        {
+            let payload_path = expected.path.with_extension("mpdb");
+            fs::write(&payload_path, payload)
+                .map_err(|error| format!("cannot write {}: {error}", payload_path.display()))?;
+            outputs.push(output(
+                Kind::EmbeddedPdbPayload,
+                relative_path(out, &payload_path),
+                payload,
+            ));
+        }
     }
     Ok((outputs, notes))
+}
+
+/// Make the record of one output file.
+fn output(kind: Kind, path: String, bytes: &[u8]) -> Output {
+    Output {
+        kind,
+        path,
+        size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+    }
 }
