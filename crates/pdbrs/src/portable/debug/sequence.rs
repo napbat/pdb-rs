@@ -147,10 +147,11 @@ impl<'a> SequencePoints<'a> {
     }
 
     /// Return the form of the `LocalSignature` field in the header. A nil row has the row
-    /// form.
+    /// form, also if the header has the token `0x11000000`, because the encoder writes a nil
+    /// row as 0 in both forms.
     #[must_use]
     pub const fn local_signature_form(&self) -> LocalSignatureForm {
-        if self.local_signature > MAX_ROW {
+        if self.local_signature > MAX_ROW && self.local_signature & MAX_ROW != 0 {
             LocalSignatureForm::Token
         } else {
             LocalSignatureForm::Row
