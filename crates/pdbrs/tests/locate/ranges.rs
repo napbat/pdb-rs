@@ -29,26 +29,26 @@ fn code_length_ends_a_range_and_moves_the_offset_past_it() {
     assert_eq!(ranges.len(), 2);
     let [first, second] = [ranges[0], ranges[1]];
     assert_eq!(
-        (first.code_offset, first.code_length, first.file, first.line),
-        (0x10, Some(8), 0, 101)
+        (
+            first.chunk,
+            first.code_offset,
+            first.code_length,
+            first.file,
+            first.line
+        ),
+        (0, 0x10, Some(8), 0, 101)
     );
     // The second range starts after a gap: 0x18 plus 8.
     assert_eq!(
         (
+            second.chunk,
             second.code_offset,
             second.code_length,
             second.file,
             second.line
         ),
-        (0x20, Some(4), 0x18, 103)
+        (0, 0x20, Some(4), 0x18, 103)
     );
-    assert!(first.contains(0x10));
-    assert!(first.contains(0x17));
-    assert!(!first.contains(0x18));
-    assert!(!first.contains(0x0f));
-    assert!(!second.contains(0x1f));
-    assert!(second.contains(0x23));
-    assert!(!second.contains(0x24));
 }
 
 #[test]
@@ -85,26 +85,52 @@ fn code_length_and_offset_give_an_explicit_length() {
 }
 
 #[test]
-fn the_last_range_without_length_holds_no_offset() {
+fn the_last_range_without_length_ends_with_its_chunk() {
     let ranges = ranges(&annotation(3, &[0x10])).unwrap();
     assert_eq!(ranges.len(), 1);
-    assert_eq!(ranges[0].code_length, None);
-    assert_eq!(ranges[0].code_end(), None);
-    assert!(!ranges[0].contains(0x10));
+    assert_eq!(
+        (
+            ranges[0].chunk,
+            ranges[0].code_offset,
+            ranges[0].code_length
+        ),
+        (0, 0x10, None)
+    );
 }
 
 #[test]
-fn code_offset_base_moves_the_ranges_of_a_separated_chunk() {
+fn code_offset_base_selects_a_separated_chunk() {
     let bytes = [
-        annotation(2, &[0x100]),
-        annotation(1, &[0x4]),
+        // A range of chunk 0 without a length.
+        annotation(3, &[0x10]),
+        // Chunk 1 ends that range and sets the code offset to 0.
+        annotation(2, &[1]),
+        annotation(6, &[signed(1)]),
+        annotation(1, &[4]),
         annotation(3, &[0]),
         annotation(4, &[2]),
+        // Chunk 2 also starts at code offset 0.
+        annotation(2, &[2]),
+        annotation(12, &[3, 1]),
     ]
     .concat();
     let ranges = ranges(&bytes).unwrap();
-    assert_eq!(ranges[0].code_offset, 0x104);
-    assert_eq!(ranges[0].code_length, Some(2));
+    assert_eq!(
+        ranges
+            .iter()
+            .map(|range| (
+                range.chunk,
+                range.code_offset,
+                range.code_length,
+                range.line
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (0, 0x10, None, 100),
+            (1, 4, Some(2), 101),
+            (2, 1, Some(3), 101)
+        ]
+    );
 }
 
 #[test]

@@ -4,7 +4,10 @@ use alloc::vec::Vec;
 
 use super::range::{RangeIndex, Span};
 use super::scope::optional_rva;
-use super::{InlineeName, LineKey, MAX_SCOPE_DEPTH, ModuleData, ProcedureKey, SymbolLocator, push};
+use super::{
+    InlineeName, LineKey, MAX_SCOPE_DEPTH, ModuleData, ProcedureKey, SeparatedChunk, SymbolLocator,
+    push,
+};
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::address::{AddressMap, SectionOffset};
@@ -30,6 +33,8 @@ struct Lists {
     modules: Vec<ModuleData>,
     /// The procedure ranges.
     procedures: Vec<Span<ProcedureKey>>,
+    /// The separated code ranges, with the procedure of each range.
+    separated: Vec<Span<ProcedureKey>>,
     /// The line subsection ranges.
     lines: Vec<Span<LineKey>>,
     /// The inlinees of all inline sites, with duplicates.
@@ -102,6 +107,7 @@ impl SymbolLocator {
         };
         Ok(Self {
             procedures: RangeIndex::new(lists.procedures)?,
+            separated: RangeIndex::new(lists.separated)?,
             lines: RangeIndex::new(lists.lines)?,
             contributions: RangeIndex::new(contributions)?,
             publics: RangeIndex::new(publics)?,
@@ -132,10 +138,11 @@ impl Lists {
             files: Vec::new(),
             inlinees: Vec::new(),
             walk_end: None,
+            separated: Vec::new(),
         };
         if let Some(stream) = pdb.module_stream(module)? {
             self.lines_of(module.index, &stream, &mut data, map)?;
-            data.walk_end = self.symbols_of(module.index, &stream, map)?;
+            data.walk_end = self.symbols_of(module.index, &stream, &mut data, map)?;
             data.inlinees.sort_by_key(|&(id, _, _)| id);
             data.inlinees.dedup_by_key(|&mut (id, _, _)| id);
             data.stream = Some(stream);
@@ -192,7 +199,8 @@ impl Lists {
         Ok(())
     }
 
-    /// Index the procedures and collect the inlinees of a module.
+    /// Index the procedures and the separated code, and collect the
+    /// inlinees of a module.
     ///
     /// Return the module stream offset of the record that stopped the walk,
     /// if a scope kind that this crate does not decode stopped it.
@@ -200,26 +208,43 @@ impl Lists {
         &mut self,
         index: u32,
         stream: &crate::native::dbi::ModuleStream,
+        data: &mut ModuleData,
         map: &AddressMap<'_>,
     ) -> Result<Option<u32>> {
         let base = u32::try_from(stream.symbol_offset())
             .map_err(|_| invalid("module symbol offset does not fit in 32 bits"))?;
         let symbols =
             ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+        // The address and the record offset of each procedure.
+        let mut starts = Vec::new();
+        let mut walk_end = None;
         for scoped in symbols {
             let scoped = match scoped {
                 Ok(scoped) => scoped,
                 Err(error) if error.kind() == ErrorKind::UnsupportedVersion => {
                     push(&mut self.incomplete, index, LIMIT)?;
                     let offset = error.stream_location().map_or(0, |(_, offset)| offset);
-                    return Ok(Some(u32::try_from(offset).unwrap_or(u32::MAX)));
+                    walk_end = Some(u32::try_from(offset).unwrap_or(u32::MAX));
+                    break;
                 }
                 Err(error) => return Err(error),
             };
             let (address, length) = match scoped.symbol.data() {
-                SymbolData::Procedure(value) => (value.address, value.code_length),
+                SymbolData::Procedure(value) => {
+                    push(&mut starts, (value.address, scoped.offset), LIMIT)?;
+                    (value.address, value.code_length)
+                }
                 SymbolData::ManagedProcedure(value) => (value.address, value.code_length),
                 SymbolData::Thunk(value) => (value.address, u32::from(value.length)),
+                SymbolData::SeparatedCode(value) => {
+                    let chunk = SeparatedChunk {
+                        offset: scoped.offset,
+                        address: value.address,
+                        length: value.code_length,
+                    };
+                    push(&mut data.separated, (value.parent_address, chunk), LIMIT)?;
+                    continue;
+                }
                 SymbolData::InlineSite(site) => {
                     push(&mut self.inlinees, site.inlinee, LIMIT)?;
                     continue;
@@ -234,7 +259,21 @@ impl Lists {
                 push(&mut self.procedures, span(start.0, length, key), LIMIT)?;
             }
         }
-        Ok(None)
+        // MSVC writes an `S_SEPCODE` record after the end of its procedure,
+        // so the walk links the records after it read all procedures.
+        for (parent, chunk) in &data.separated {
+            let procedure = starts.iter().find(|(address, _)| address == parent);
+            if let (Some(&(_, offset)), Some(start)) =
+                (procedure, optional_rva(map, chunk.address)?)
+            {
+                let key = ProcedureKey {
+                    module: index,
+                    offset,
+                };
+                push(&mut self.separated, span(start.0, chunk.length, key), LIMIT)?;
+            }
+        }
+        Ok(walk_end)
     }
 }
 

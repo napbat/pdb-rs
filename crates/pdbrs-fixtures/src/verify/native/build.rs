@@ -33,7 +33,7 @@ use super::consumers::{
     pdbtool_compare, pdbutil_dump,
 };
 use super::diff::{Comparison, Dump, Exits};
-use super::sample::Sample;
+use super::sample::{Sample, separated_addresses};
 use super::symbolize::{self, Frames};
 use super::{NativeFixture, native_fixtures};
 use crate::verify::SHOWN_DIFFERENCES;
@@ -345,7 +345,8 @@ fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path) -> Re
     });
     let (sample, dia_all) = match dia_all {
         Ok(runs) => (
-            Ok(Sample::select(&runs[0].text)),
+            separated_addresses(original)
+                .map(|separated| Sample::select(&runs[0].text, &separated)),
             compare_dumps(Dump::Dia, &runs, directory, "dia-all"),
         ),
         Err(error) => (Err(error.clone()), Err(error)),
