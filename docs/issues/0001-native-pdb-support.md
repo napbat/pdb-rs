@@ -82,7 +82,7 @@ Floating-point, complex, decimal, date and string representations remain separat
 Boundary tests cover every integer width, sign extremes, the immediate/tag boundary, truncation and suffix preservation.
 A temporary consumer decoded all 40 shared `S_CONSTANT` integer values in the original Rust PDB.
 Names and values matched LLVM exactly in both feature modes, including `18446744073709551615`.
-This does not yet add `S_CONSTANT` to `Record::symbol`.
+`Record::symbol` now uses this decoder for `S_CONSTANT` values (#5).
 
 ### Next acceptance milestone: Rust type inspection
 

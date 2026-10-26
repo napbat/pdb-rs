@@ -2,6 +2,7 @@
 
 use pdbrs::native::Pdb;
 use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::symbol::SymbolData;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -49,9 +50,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for record in Records::new(&bytes) {
             let record = record?;
             shared_count += 1;
-            if let Some(symbol) = record.symbol()? {
-                if shared_decoded < 8 {
-                    println!("Symbol: {}", String::from_utf8_lossy(symbol.name()));
+            let symbol = record.symbol()?;
+            if !matches!(symbol.data(), SymbolData::Unsupported(_)) {
+                if shared_decoded < 8
+                    && let Some(name) = symbol.name()
+                {
+                    println!("Symbol: {}", String::from_utf8_lossy(name));
                 }
                 shared_decoded += 1;
             }
@@ -69,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(stream) = pdb.module_stream(&module)? {
             for record in stream.symbols() {
                 module_symbols += 1;
-                if record?.symbol()?.is_some() {
+                if !matches!(record?.symbol()?.data(), SymbolData::Unsupported(_)) {
                     decoded_module_symbols += 1;
                 }
             }

@@ -9,8 +9,8 @@
 //! records of all kinds, also kinds that this crate cannot decode. It keeps
 //! the padding at the end of a record as part of [`Record::data`].
 //!
-//! [`Record::symbol`] decodes the fixed fields and the name of some common
-//! symbol kinds. It does not demangle names.
+//! [`Record::symbol`] decodes a symbol record into a typed
+//! [`symbol::Symbol`]. It does not demangle names.
 
 use core::iter::FusedIterator;
 
@@ -20,14 +20,10 @@ pub mod id_record;
 pub mod index;
 pub mod numeric;
 
-mod symbol;
+pub mod symbol;
 
 use index::{IdIndex, TypeIndex};
-
-pub use symbol::{
-    Procedure, S_GDATA32, S_GPROC32, S_GPROC32_ID, S_LDATA32, S_LPROC32, S_LPROC32_ID, S_PUB32,
-    Symbol, SymbolDetail,
-};
+use numeric::Integer;
 
 /// The size of the length field and the kind field at the start of a record.
 const PREFIX_LEN: usize = 4;
@@ -45,7 +41,7 @@ pub struct Record<'a> {
     /// This offset is relative to the slice given to [`Records::new`]. It is
     /// not a file offset.
     pub offset: u32,
-    /// The record kind, for example [`S_PUB32`] or a type leaf kind.
+    /// The record kind, for example [`symbol::S_PUB32`] or a type leaf kind.
     pub kind: u16,
     /// The payload after the kind field.
     ///
@@ -54,20 +50,22 @@ pub struct Record<'a> {
 }
 
 impl<'a> Record<'a> {
-    /// Decode the record as a symbol, if this crate supports its kind.
+    /// Decode the record as a symbol.
     ///
-    /// Supported kinds are [`S_PUB32`], [`S_GDATA32`], [`S_LDATA32`],
-    /// [`S_GPROC32`], [`S_LPROC32`], [`S_GPROC32_ID`] and [`S_LPROC32_ID`].
-    /// Return `Ok(None)` for all other kinds. Do not use this function on type
-    /// records: type leaf kinds and symbol kinds use different value spaces.
+    /// A kind that this crate does not decode gives
+    /// [`symbol::SymbolData::Unsupported`] with the raw payload. Do not use
+    /// this function on type records: type leaf kinds and symbol kinds use
+    /// different value spaces.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::InvalidFormat`] if the payload of a supported kind
-    /// is too short for its fixed fields, or if its name has no terminating
-    /// NUL byte. The error does not have a file offset.
-    pub fn symbol(&self) -> Result<Option<Symbol<'a>>> {
-        symbol::decode(*self)
+    /// Returns [`ErrorKind::InvalidFormat`] if the payload of a decoded kind
+    /// is too short for its fields, has a name without a NUL terminator, has
+    /// padding that is not zero, or breaks a rule of its kind. Returns
+    /// [`ErrorKind::UnsupportedVersion`] for a constant value that is not an
+    /// integer. The error does not have a file offset.
+    pub fn symbol(&self) -> Result<symbol::Symbol<'a>> {
+        symbol::Symbol::decode(*self)
     }
 }
 
@@ -216,7 +214,6 @@ impl<'a> Fields<'a> {
     pub(crate) fn u64(&mut self) -> Result<u64> {
         Ok(u64::from_le_bytes(self.array()?))
     }
-
     /// Read a 32-bit type index.
     pub(crate) fn type_index(&mut self) -> Result<TypeIndex> {
         Ok(TypeIndex(self.u32()?))
@@ -226,6 +223,7 @@ impl<'a> Fields<'a> {
     pub(crate) fn id_index(&mut self) -> Result<IdIndex> {
         Ok(IdIndex(self.u32()?))
     }
+
     /// Read `count` bytes.
     pub(crate) fn bytes(&mut self, count: usize) -> Result<&'a [u8]> {
         if count > self.bytes.len() {
@@ -253,6 +251,22 @@ impl<'a> Fields<'a> {
         Ok(name)
     }
 
+    /// Read an integer numeric leaf.
+    ///
+    /// A truncated leaf returns the configured error. A non-integer leaf
+    /// returns [`ErrorKind::UnsupportedVersion`].
+    pub(crate) fn integer(&mut self) -> Result<Integer> {
+        let (value, rest) = Integer::parse_prefix(self.bytes).map_err(|error| {
+            if error.kind() == ErrorKind::UnexpectedEof {
+                self.short()
+            } else {
+                error
+            }
+        })?;
+        self.bytes = rest;
+        Ok(value)
+    }
+
     /// Return `true` if all bytes are read.
     pub(crate) const fn is_empty(&self) -> bool {
         self.bytes.is_empty()
@@ -276,6 +290,18 @@ impl<'a> Fields<'a> {
         } else {
             Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("CodeView type record has invalid padding"))
+        }
+    }
+
+    /// Make sure that the remaining bytes are fewer than four zero bytes.
+    ///
+    /// Symbol records in PDB streams pad with zero bytes.
+    pub(crate) fn finish_zero_padding(&self) -> Result<()> {
+        if self.bytes.len() < 4 && self.bytes.iter().all(|&byte| byte == 0) {
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("CodeView symbol record has invalid padding"))
         }
     }
 
