@@ -255,8 +255,29 @@ impl Symbol<'_> {
     /// # Errors
     ///
     /// The errors of [`SymbolData::encode`].
+    ///
+    /// A record with four or more zero bytes after its fields (see
+    /// [`Symbol::padding`]) keeps all of them.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        self.data.encode(self.kind(), out)
+        let start = out.len();
+        self.data.encode(self.kind(), out)?;
+        if self.padding() < 4 {
+            return Ok(());
+        }
+        // The record had a valid u16 length, so the original length fits.
+        let original = self.record().data.len() + 4;
+        let extra = original.saturating_sub(out.len() - start);
+        out.try_reserve(extra).map_err(|_| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("CodeView record output cannot be allocated")
+        })?;
+        out.resize(out.len() + extra, 0);
+        let length = u16::try_from(original - 2).map_err(|_| {
+            Error::new(ErrorKind::LimitExceeded, None)
+                .with_context("CodeView record is longer than its u16 length field allows")
+        })?;
+        out[start..start + 2].copy_from_slice(&length.to_le_bytes());
+        Ok(())
     }
 }
 

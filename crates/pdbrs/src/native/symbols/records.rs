@@ -10,7 +10,7 @@
 use alloc::vec::Vec;
 
 use super::SymbolOffset;
-use crate::native::codeview::symbol::SymbolData;
+use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
 /// A writer of the symbol record stream.
@@ -52,6 +52,26 @@ impl SymbolRecordWriter {
     ///
     /// After an error, the writer is unchanged.
     pub fn push(&mut self, kind: u16, data: &SymbolData<'_>) -> Result<SymbolOffset> {
+        self.push_with(|out| data.encode(kind, out))
+    }
+
+    /// Encode a decoded symbol and return its offset in the stream.
+    ///
+    /// Unlike [`SymbolRecordWriter::push`], this function keeps a long run
+    /// of zero padding (see [`Symbol::padding`]).
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`SymbolRecordWriter::push`].
+    pub fn push_symbol(&mut self, symbol: &Symbol<'_>) -> Result<SymbolOffset> {
+        self.push_with(|out| symbol.encode(out))
+    }
+
+    /// Encode a record with `encode` and keep its offset.
+    fn push_with(
+        &mut self,
+        encode: impl FnOnce(&mut Vec<u8>) -> Result<()>,
+    ) -> Result<SymbolOffset> {
         let offset = u32::try_from(self.bytes.len()).map_err(|_| {
             Error::new(ErrorKind::OffsetOverflow, None)
                 .with_context("symbol record offset does not fit in 32 bits")
@@ -61,7 +81,7 @@ impl SymbolRecordWriter {
                 .with_context("symbol record offsets cannot be allocated")
         })?;
         let start = self.bytes.len();
-        if let Err(error) = data.encode(kind, &mut self.bytes) {
+        if let Err(error) = encode(&mut self.bytes) {
             self.bytes.truncate(start);
             return Err(error);
         }

@@ -105,7 +105,8 @@ fn decodes_heap_allocation_site() {
     // The fixed fields fill 12 bytes, so the record has no padding.
     let short = heap_allocation_site().truncated(1);
     assert_eq!(error(S_HEAPALLOCSITE, &short), ErrorKind::InvalidFormat);
-    let trailing = heap_allocation_site().bytes(&[0, 0, 0, 0]);
+    // Trailing bytes must be zero; zero bytes are kept as padding (#30).
+    let trailing = heap_allocation_site().bytes(&[0, 0, 0, 1]);
     assert_eq!(error(S_HEAPALLOCSITE, &trailing), ErrorKind::InvalidFormat);
 }
 

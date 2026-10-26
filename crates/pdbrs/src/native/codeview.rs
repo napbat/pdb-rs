@@ -294,18 +294,6 @@ impl<'a> Fields<'a> {
                 .with_context("CodeView type record has invalid padding"))
         }
     }
-
-    /// Make sure that the remaining bytes are fewer than four zero bytes.
-    ///
-    /// Symbol records in PDB streams pad with zero bytes.
-    pub(crate) fn finish_zero_padding(&self) -> Result<()> {
-        if self.bytes.len() < 4 && self.bytes.iter().all(|&byte| byte == 0) {
-            Ok(())
-        } else {
-            Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("CodeView symbol record has invalid padding"))
-        }
-    }
     /// Return the bytes that are not read yet.
     pub(crate) const fn rest(&self) -> &'a [u8] {
         self.bytes

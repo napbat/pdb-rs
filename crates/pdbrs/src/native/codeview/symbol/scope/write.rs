@@ -12,7 +12,7 @@
 
 use alloc::vec::Vec;
 
-use super::super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, SymbolData};
+use super::super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
 /// The byte offset of the parent link in a record, after the length and kind.
@@ -89,6 +89,28 @@ impl ModuleSymbolWriter {
     ///
     /// After an error, the writer is unchanged.
     pub fn push(&mut self, kind: u16, data: &SymbolData<'_>) -> Result<u32> {
+        self.push_with(kind, data, |out| data.encode(kind, out))
+    }
+
+    /// Encode a decoded symbol and return its module stream offset.
+    ///
+    /// Unlike [`ModuleSymbolWriter::push`], this function keeps a long run
+    /// of zero padding (see [`Symbol::padding`]).
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`ModuleSymbolWriter::push`].
+    pub fn push_symbol(&mut self, symbol: &Symbol<'_>) -> Result<u32> {
+        self.push_with(symbol.kind(), symbol.data(), |out| symbol.encode(out))
+    }
+
+    /// Encode a record with `encode` and set its scope links.
+    fn push_with(
+        &mut self,
+        kind: u16,
+        data: &SymbolData<'_>,
+        encode: impl FnOnce(&mut Vec<u8>) -> Result<()>,
+    ) -> Result<u32> {
         let offset = self.next_offset()?;
         let position = self.out.len();
         let starts_scope = data.scope_links().is_some();
@@ -107,7 +129,7 @@ impl ModuleSymbolWriter {
                     .with_context("cannot allocate the symbol scope stack")
             })?;
         }
-        if let Err(error) = data.encode(kind, &mut self.out) {
+        if let Err(error) = encode(&mut self.out) {
             self.out.truncate(position);
             return Err(error);
         }

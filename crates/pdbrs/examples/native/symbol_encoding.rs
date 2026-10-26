@@ -35,6 +35,10 @@ pub(crate) fn reencode(symbol: &Symbol<'_>, report: &mut Report) -> Outcome {
     let mut encoded = Vec::new();
     symbol.encode(&mut encoded)?;
     report.add("symbols re-encoded", 1);
+    if symbol.padding() >= 4 {
+        // The HLSL compiler fxc writes S_LOCAL records of a fixed length (#30).
+        report.add("symbols with four or more padding bytes", 1);
+    }
     // The run stops at the first difference, so a finished run prints 0.
     report.add("symbols re-encoded with different bytes", 0);
     if encoded != original {

@@ -299,6 +299,8 @@ pub struct Symbol<'a> {
     record: Record<'a>,
     /// The typed fields of the kind.
     data: SymbolData<'a>,
+    /// The number of zero bytes after the fields.
+    padding: usize,
 }
 
 /// The typed fields of a symbol record.
@@ -497,20 +499,43 @@ pub enum SymbolData<'a> {
 impl<'a> Symbol<'a> {
     /// Decode `record` as a symbol.
     ///
+    /// The bytes after the fields must be zero. Most producers write fewer
+    /// than four of them to align the next record. The Windows SDK HLSL
+    /// compiler `fxc` writes `S_LOCAL` records of a fixed length, so more
+    /// zero bytes follow the name (#30). [`Symbol::encode`] keeps them.
+    ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the payload of a decoded kind
     /// is too short for its fields, has a name without a NUL terminator, has
     /// padding that is not zero, or breaks a rule of its kind. Returns
-    /// [`ErrorKind::UnsupportedVersion`] for a constant value that is not an
-    /// integer. The error does not have a file offset.
+    /// [`ErrorKind::UnsupportedVersion`] for a numeric leaf that is not
+    /// known. The error does not have a file offset.
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let mut fields = Fields::new(record.data, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
         let data = decode_data(record.kind, &mut fields)?;
-        if !matches!(data, SymbolData::Unsupported(_) | SymbolData::Skip(_)) {
-            fields.finish_zero_padding()?;
-        }
-        Ok(Self { record, data })
+        let padding = match data {
+            SymbolData::Unsupported(_) | SymbolData::Skip(_) => 0,
+            _ if fields.rest().iter().any(|&byte| byte != 0) => {
+                return Err(crate::Error::new(ErrorKind::InvalidFormat, None)
+                    .with_context("CodeView symbol record has invalid padding"));
+            }
+            _ => fields.rest().len(),
+        };
+        Ok(Self {
+            record,
+            data,
+            padding,
+        })
+    }
+
+    /// Return the number of zero bytes after the fields of the record.
+    ///
+    /// The value is usually below 4. [`SymbolData::Unsupported`] and
+    /// [`SymbolData::Skip`] keep these bytes in their value and give 0.
+    #[must_use]
+    pub const fn padding(&self) -> usize {
+        self.padding
     }
 
     /// Return the original record.

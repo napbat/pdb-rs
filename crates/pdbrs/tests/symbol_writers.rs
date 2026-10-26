@@ -148,3 +148,45 @@ fn record_writer_returns_the_record_offsets() {
     };
     assert_eq!(value.name, b"main");
 }
+
+/// The `S_LOCAL` record at offset 172 of module stream 10 of the fxc
+/// shader model 5.0 vertex shader fixture of #27: the name `input` and 32
+/// zero bytes.
+fn fxc_local() -> Vec<u8> {
+    let mut bytes = vec![
+        0x2e, 0x00, 0x3e, 0x11, 0x03, 0x10, 0x00, 0x00, 0x09, 0x00, b'i', b'n', b'p', b'u', b't',
+        0x00,
+    ];
+    bytes.extend_from_slice(&[0; 32]);
+    bytes
+}
+
+#[test]
+fn long_zero_padding_of_fxc_is_kept() {
+    let bytes = fxc_local();
+    let symbol = decode(&bytes);
+    assert_eq!(symbol.name(), Some(&b"input"[..]));
+    assert_eq!(symbol.padding(), 32);
+    let mut out = Vec::new();
+    symbol.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
+    // The fields alone encode with the shortest padding.
+    out.clear();
+    symbol.data().encode(symbol.kind(), &mut out).unwrap();
+    assert_eq!(out.len(), 16);
+    // Both writers keep the producer form.
+    let mut module = ModuleSymbolWriter::new(4);
+    module.push_symbol(&symbol).unwrap();
+    assert_eq!(module.finish().unwrap(), bytes);
+    let mut records = SymbolRecordWriter::new();
+    records.push_symbol(&symbol).unwrap();
+    assert_eq!(records.finish().bytes, bytes);
+}
+
+#[test]
+fn padding_must_be_zero() {
+    let mut bytes = fxc_local();
+    bytes[40] = 1;
+    let error = Records::new(&bytes).next().unwrap().unwrap().symbol();
+    assert_eq!(error.unwrap_err().kind(), ErrorKind::InvalidFormat);
+}

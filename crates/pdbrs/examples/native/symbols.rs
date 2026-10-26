@@ -95,7 +95,7 @@ pub(crate) fn modules(
             check_symbol(&symbol, context, report)?;
             reencode(&symbol, report)?;
             if let Some(writer) = &mut writer {
-                writer.push(symbol.kind(), symbol.data())?;
+                writer.push_symbol(&symbol)?;
             }
             match symbol.data() {
                 SymbolData::Unsupported(_) => {
@@ -242,7 +242,7 @@ pub(crate) fn shared_symbols(
             .map_err(|error| error.with_stream(id.0, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
         reencode(&symbol, report)?;
-        if writer.push(symbol.kind(), symbol.data())?.0 != record.offset {
+        if writer.push_symbol(&symbol)?.0 != record.offset {
             return Err("a rewritten symbol record moves to another offset".into());
         }
         if let Some(reference) = symbol.procedure_reference() {
