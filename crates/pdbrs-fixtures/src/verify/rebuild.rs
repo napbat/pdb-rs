@@ -3,7 +3,7 @@
 //! The command reads each Portable PDB of the fixture manifest (a standalone file or the
 //! decoded `MPDB` payload of an image) and checks the pdbrs writer:
 //!
-//! 1. `Pdb::copy_exact` gives the same bytes.
+//! 1. `io::copy_exact` gives the same bytes.
 //! 2. `Pdb::to_parts` and a plan with the content-derived ID give the same bytes and the same
 //!    PDB ID. The fixtures are deterministic Roslyn and F# builds, so `System.Reflection.Metadata`
 //!    computed the original ID with the same algorithm.

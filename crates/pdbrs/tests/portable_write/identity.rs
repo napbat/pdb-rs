@@ -50,7 +50,7 @@ fn content_derived_id_comes_from_the_sha256_checksum() {
     assert_eq!(id, expected);
 
     // Another ID policy changes only the ID bytes, not the checksum.
-    let explicit = plan_with(sample(b"x"), Identity::from_bytes(ID));
+    let explicit = plan_explicit(sample(b"x"), Identity::from_bytes(ID));
     assert_eq!(
         explicit.checksum(ChecksumAlgorithm::Sha256).digest(),
         digest
@@ -65,7 +65,7 @@ fn content_derived_id_comes_from_the_sha256_checksum() {
 }
 
 /// Plan parts with an explicit ID.
-fn plan_with(parts: PdbParts, identity: Identity) -> PdbWritePlan {
+fn plan_explicit(parts: PdbParts, identity: Identity) -> PdbWritePlan {
     parts.plan(IdentityPolicy::Explicit(identity)).unwrap()
 }
 

@@ -346,7 +346,7 @@ A legacy top-level record in a modern TPI stream still keeps its bytes as `TypeL
 | `LF_MEMBERMODIFY_ST` | `0x140e` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 | `LF_MANAGED_ST` | `0x140f` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 
-[build]: ../../../crates/pdbrs/src/native/write.rs
+[build]: ../../../crates/pdbrs/src/native/build.rs
 [cv]: ../../../crates/pdbrs/src/native/codeview.rs
 [e11]: https://github.com/napbat/pdbrs/issues/11#issuecomment-6408363519
 [e14]: https://github.com/napbat/pdbrs/issues/14#issuecomment-6409977445

@@ -477,8 +477,8 @@ cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
 
 For each input, the command checks these items and prints `yes` or `NO` for each one:
 
-1. `portable::Pdb::copy_exact` gives the same bytes.
-2. `Pdb::to_parts` and a plan with `IdPolicy::ContentDerived` give the same bytes and the same
+1. `io::copy_exact` with `portable::Pdb::source` gives the same bytes.
+2. `Pdb::to_parts` and a plan with `IdentityPolicy::ContentDerived` give the same bytes and the same
    PDB ID. The fixtures are deterministic builds, so SRM computed the original ID with the
    same algorithm.
 3. A second plan gives the same bytes. A plan with the original ID as an explicit ID gives the
@@ -785,7 +785,7 @@ edited PDB, the command does these checks:
    - `llvm-pdbutil --types` and `DIA2Dump -type` find `PdbrsEditType`, and `llvm-pdbutil --ids`
      finds the added string.
    - `llvm-pdbutil --summary` shows the new signature, age and GUID, and
-     `PdbEditPlan::pe_match` gives the GUID and the age.
+     `PdbEditPlan::identity` gives the GUID and the age.
 
 The command also compares the strip of `msvc-x64-stripped/demo.pdb` with
 `demo.stripped.pdb`, which `link /PDBSTRIPPED` wrote. These `llvm-pdbutil` sections must be

@@ -40,7 +40,7 @@ to the same value. It does not check that other readers accept the output.
 | `custom_debug_info` | kind selector, value | round trip of each `CustomDebugValue` kind; native `MD2`, `asyncMethodInfo` and symbol attributes |
 | `mpdb` | payload | `decode_embedded` and `encode_embedded` round trips |
 | `embedded_source` | blob | `EmbeddedSource::parse`, `decode` and `encode` round trips in both formats |
-| `portable_rebuild` | Portable PDB | `copy_exact`, `to_parts`, `PdbParts::plan`, `to_embedded`, `Pdb::edit` round trips |
+| `portable_rebuild` | Portable PDB | `io::copy_exact`, `to_parts`, `PdbParts::plan`, `to_embedded`, `Pdb::edit` round trips |
 | `portable_build` | builder commands | `PdbBuilder` with typed records: `plan`, `to_vec`, read back documents and sequence points |
 | `native_type_encode` | as `native_types` | `TypeLeaf::encode`, `encode_field_list`, `encode_type_stream`, `TypeHashes::check` of the output |
 | `native_id_encode` | as `native_ids` | `IdRecord::encode`, `encode_type_stream` |

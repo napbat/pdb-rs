@@ -200,8 +200,8 @@ The `portable::write` and `portable::build` modules write Portable PDBs through 
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
-| Exact copy | `Pdb::copy_exact`, `Pdb::copy_exact_file` | Every source byte, through one buffer of at most 64 KiB |
-| New layout | `PdbParts::plan`, then `WritePlan::write_to`, `to_vec`, `to_embedded` or `write_file` | A checked Portable PDB with the given raw rows and heaps |
+| Exact copy | `io::copy_exact(pdb.source(), ..)`, `io::copy_exact_file` | Every source byte, through one buffer of at most 64 KiB |
+| New layout | `PdbParts::plan`, then `portable::PdbWritePlan::write_to`, `to_vec`, `to_embedded` or `write_file` | A checked Portable PDB with the given raw rows and heaps |
 | Semantic build | `PdbBuilder::plan` | A checked Portable PDB from records with typed handles, in new heaps |
 | Semantic edit | `Pdb::edit`, then `PdbEditor::plan` | The source records with the changes; each source heap entry keeps its offset |
 
@@ -224,9 +224,9 @@ Custom debug information of an unknown kind keeps its bytes. If a change gives a
 
 The plan checks every heap and row reference, the `#Pdb` fields and the required row order before it writes a byte.
 It uses the layout of `System.Reflection.Metadata`: the stream order, the `Valid` and `Sorted` masks, the index width rules and the trailing zero byte of `#~`.
-`IdPolicy` selects an explicit PDB ID or the content-derived ID of `BlobContentId.FromHash`: SHA-256 over the output with a zero ID, with the GUID version and variant bits and bit 31 of the stamp set.
-`WritePlan::identity`, `codeview` (GUID, age 1, stamp) and `checksum` (SHA-256, SHA-384 or SHA-512 with a zero ID, the PDB checksum entry of the addendum) give the values for the debug directory of the assembly.
-`WritePlan::write_file` and `copy_exact_file` use the temporary-sibling contract of the MSF file helpers.
+`portable::IdentityPolicy` selects an explicit PDB ID or the content-derived ID of `BlobContentId.FromHash`: SHA-256 over the output with a zero ID, with the GUID version and variant bits and bit 31 of the stamp set.
+`PdbWritePlan::identity`, `codeview` (GUID, age 1, stamp) and `checksum` (SHA-256, SHA-384 or SHA-512 with a zero ID, the PDB checksum entry of the addendum) give the values for the debug directory of the assembly.
+`PdbWritePlan::write_file` and `io::copy_exact_file` use the temporary-sibling contract of the MSF file helpers.
 
 Evidence: `cargo run -p pdbrs-fixtures -- verify-rebuild` rebuilds the four standalone Portable PDB fixtures and the decoded `MPDB` payload of the embedded fixture.
 Each rebuild has the original bytes and the original content-derived ID, and its verifier dump has no differences.
@@ -243,12 +243,12 @@ The `native::msf` module writes Big MSF 7.0 containers through three operations 
 | Stream-preserving repack | `Msf::repack` | Stream IDs, nil and empty streams, sizes and all stream bytes. `OldDirectoryPolicy` selects stream 0 |
 | New layout | `MsfBuilder::plan` | A consistent container with the given streams, without a PDB semantic claim |
 
-`Msf::repack` and `MsfBuilder::plan` return a `WritePlan`. The plan computes and checks the full layout before output.
-A planning error writes nothing. `WritePlan::write_to` writes to a `nostdio` writer in page order, and `WritePlan::to_vec` writes to memory.
+`Msf::repack` and `MsfBuilder::plan` take `MsfWriteOptions` and return an `MsfWritePlan`. The plan computes and checks the full layout before output.
+A planning error writes nothing. `MsfWritePlan::write_to` writes to a `nostdio` writer in page order, and `MsfWritePlan::to_vec` writes to memory.
 Both work with `no_std + alloc`. The writer reads stream payloads one page at a time.
 `io::copy_exact` copies through one buffer of at most 64 KiB.
 
-Under `std`, `WritePlan::write_file` and `io::copy_exact_file` write a temporary file in the destination directory and rename it.
+Under `std`, `MsfWritePlan::write_file` and `io::copy_exact_file` write a temporary file in the destination directory and rename it.
 On error, they delete the temporary file and do not change the destination. Writing over the source file is not supported.
 After an error, `write_to` and `io::copy_exact` can leave a partial output in the writer.
 
@@ -291,11 +291,12 @@ Its output differs only in block numbers, block counts and the stream 0 size.
 
 ## Implemented native building
 
-`native::write::PdbBuilder` builds a new native PDB from semantic records ([#33](https://github.com/napbat/pdbrs/issues/33)).
-It reuses the encoders of each record family. The module documentation of `native::write` describes the handles and the plan.
+`native::PdbBuilder` builds a new native PDB from semantic records ([#33](https://github.com/napbat/pdbrs/issues/33)).
+It reuses the encoders of each record family. The documentation of `native::PdbBuilder` describes the plan, and the module documentation of `native::write` describes the handles.
+`PdbBuilder::plan` takes `native::BuildOptions` by value.
 
 - The caller gives the identity (signature, GUID and age). `PdbBuilder::apply_identity` applies an `IdentityPolicy`.
-  `PdbWritePlan::pe_match` returns the GUID and the DBI age for the `RSDS` entry of the image.
+  `PdbWritePlan::identity` returns the GUID and the DBI age (`native::Identity::Modern`) for the `RSDS` entry of the image.
 - `TypeHandle`, `IdHandle`, `ModuleHandle`, `ModuleSymbolHandle`, `SymbolHandle` and `StreamHandle` exist before on-disk values.
   A deferred record gets a `Resolver` when the plan encodes it. `reserve_type` and `reserve_id` give a handle before its record.
 - `PdbBuilder::plan` assigns type indices, ID indices, stream IDs, module symbol offsets and symbol record offsets.
@@ -320,8 +321,8 @@ DIA2Dump does not list `S_GPROC32_ID` procedures of the synthetic PDB.
 ## Implemented native editing
 
 `native::Pdb::edit` makes a `native::PdbEditor` ([#34](https://github.com/napbat/pdbrs/issues/34)). The editor borrows the source PDB and owns only the changes.
-`PdbEditor::plan` checks all changes and encodes the changed streams. It returns a `PdbEditPlan`, which writes like `PdbWritePlan`.
-The module documentation of `native::edit` gives all rules.
+`PdbEditor::plan(EditOptions)` checks all changes and encodes the changed streams. It returns a `PdbEditPlan`, which writes like `PdbWritePlan`.
+`EditOptions::default()` keeps the page size of the source. The documentation of `native::PdbEditor` gives all rules.
 
 - The output keeps the stream ID of each source stream. The plan reads each unchanged stream from the source when it writes, so `pdbtool compare` shows it as identical.
   A removed stream becomes a nil stream. A new stream gets the next stream ID. `PdbEditPlan::changed_streams` lists the changed, removed and new streams.
@@ -329,10 +330,10 @@ The module documentation of `native::edit` gives all rules.
 - Symbols: `add_public`, `add_global`, `rename_public` and `rename_global`. A renamed record stays at its position, and an added record goes to the end of the symbol record stream.
   The plan builds the global and public indexes again with the source buckets, reference counts, thunk map and section starts. It writes moved offsets into the global references of the module streams.
 - Types and IDs: `add_type` and `add_id` append records. The hash stream keeps the source hash values, index offsets and adjusters, and gets the values of the new records.
-- Identity: the caller gives an `IdentityPolicy` to `Pdb::edit`. The Info and DBI ages stay consistent. `PdbEditPlan::pe_match` returns the values for the image.
+- Identity: the caller gives an `IdentityPolicy` to `Pdb::edit`. The Info and DBI ages stay consistent. `PdbEditPlan::identity` returns the values for the image.
 - Strip: `strip_private` writes the streams that `link /PDBSTRIPPED` (MSVC 14.51) writes: no types or IDs, only `S_PUB32` and `S_LPROCREF` records, local procedures without types in the module streams, no source files, lines or EC names, zero section contribution CRCs and the DBI stripped flag.
 
-The plan rejects these edits before it writes a byte. A planning error writes nothing.
+The plan rejects these edits before it writes a byte. A planning error writes nothing. A reference that does not resolve gives `InvalidReference`; the other rejected edits give `UnsupportedEdit`.
 
 - An edit that moves a symbol record, and a strip, if opaque data can refer to the changed offsets or indices: a stream that no other stream names and that does not decode as a type map,
   a named stream of an unknown kind, and for moved records also a symbol record or a C13 subsection of an unknown kind.
@@ -340,7 +341,7 @@ The plan rejects these edits before it writes a byte. A planning error writes no
 - A change of `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a rename of a reference record such as `S_PROCREF`, a strip together with another symbol or type edit, and a reference that does not resolve.
 
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
-Use `IncrementAge` or `Replace` for a semantic change, and write the returned `PeMatch` to the image.
+Use `IncrementAge` or `Replace` for a semantic change, and write the returned identity to the image.
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-native-edit
@@ -434,7 +435,8 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `native/symbols.rs` and `native/symbols/` | Shared symbols, global/public indexes and lookup |
 | `native/lines.rs` and `native/lines/` | C13 subsections, checksums, line tables and inline annotations |
 | `native/address.rs` | Section offsets, RVAs and OMAP mappings |
-| `native/write.rs` and `native/write/` | Native dependency checks, indexes and block allocation |
+| `native/build.rs`, `native/build/` and `native/write.rs` | Native builder, write plan, semantic rebuild and builder handles |
+| `native/edit.rs` and `native/edit/` | Native editor and edit plan |
 | `portable.rs` and `portable/` | Portable reader, editor, builder, identity and capability reporting |
 | `portable/metadata.rs` and `portable/metadata/` | Metadata root, tables, heaps, compressed integers and coded indexes |
 | `portable/debug.rs` and `portable/debug/` | Documents, sequence points, scopes, locals, imports and state machines |
@@ -482,9 +484,10 @@ Names below are proposed contracts, not compilable examples.
 | `native::PdbEditor`, `portable::PdbEditor` | Retain unchanged source content and own changes for that format |
 | `native::PdbBuilder` | Construct native records with explicit identity and target information |
 | `portable::PdbBuilder` | Construct debug tables with explicit external table counts and identity policy |
-| `native::MsfBuilder` | Construct arbitrary streams without claiming PDB semantic validity |
-| Backend `WritePlan` | Freeze format-specific lengths, references, identity and layout before output |
-| Backend `WritePlan::write_to` | Write to a fresh destination without mutating the source |
+| `native::msf::MsfBuilder`, `native::msfz::MsfzBuilder` | Construct arbitrary streams without claiming PDB semantic validity |
+| `native::BuildOptions`, `native::EditOptions`, `msf::MsfWriteOptions`, `msfz::MsfzWriteOptions` | Options with private fields, `Default` and `with_*` functions; a later output profile is an addition |
+| `msf::MsfWritePlan`, `msfz::MsfzWritePlan`, `native::PdbWritePlan`, `native::PdbEditPlan`, `portable::PdbWritePlan` | Freeze format-specific lengths, references, identity and layout before output; made by `plan(options)` (the portable plan by `plan(IdentityPolicy)`) |
+| Plan `file_size`, `write_to`, `to_vec`, `write_file` | Write to a fresh destination without mutating the source; PDB plans give `identity()` and native plans give `stream_count()` |
 | `portable::embedded::decode_embedded`, `encode_embedded` | Decode or emit an `MPDB` payload; PE directory handling stays with the caller |
 
 Use the root facade for detection and dispatch, not to hide format-specific operations.
@@ -596,7 +599,7 @@ The names of these items use one vocabulary (rule 13 of #40):
 | `symbols::HashEntry::bucket` | LLD 22.1.3 (hashes a public name of exactly 8 bytes with the bytes after the short name in the COFF symbol table) | The bucket of each hash record (`Bucket::index`). | The record in the stored bucket. `None` selects the bucket of the name. `PdbEditor` keeps the source bucket; the rebuild uses the bucket of the name. |
 | `GlobalSymbolIndex::encode_parts(.., producer, ..)`, `PublicSymbolIndex::encode_parts(.., producer, ..)` (`native::Producer`) | Microsoft (`mspdbcore.dll`) and LLVM (`GSIStreamBuilder.cpp`) | The decoder accepts both forms. | `Producer::Microsoft`: a table without records has no bucket data, and the address map compares sections and offsets as signed values. `Producer::Llvm`: a table without records has a bitmap with no bits set, and the address map compares unsigned values. |
 | `TypeHeader::producer()`, `TypeStreamOptions::with_producer` (`native::Producer`) | Microsoft (`tpi.cpp`) and LLVM (`TpiStreamBuilder`) | The header buffers give the form: LLVM puts the empty hash adjuster buffer at the end of the hash values, or writes zero-length buffers without a hash stream. | `encode_type_stream`: the buffer order, the index offset pair rule and the buffers without a hash stream of the producer. The LLVM form has no hash adjusters. |
-| `BuildOptions::{hash_layout, index_producer, info_producer}` (`native::Producer`), `PdbContents::build_options()` | Microsoft and LLVM | The rebuild selects one producer for the three fields from `TypeHeader::producer()` of the TPI stream. `PdbEditor` uses the same rule. | The TPI and IPI hash streams, the GSI and PSI, and the named-stream map of the Info stream in the form of the producer. |
+| `BuildOptions::{with_type_hash_producer, with_index_producer, with_info_producer}` (`native::Producer`), `PdbContents::build_options()` | Microsoft and LLVM | The rebuild selects one producer for the three fields from `TypeHeader::producer()` of the TPI stream. `PdbEditor` uses the same rule. | The TPI and IPI hash streams, the GSI and PSI, and the named-stream map of the Info stream in the form of the producer. |
 | `OwnedHashTable::{new, with_capacity, from_table, producer}`, `InfoBuilder::{new, from_info_with}`, `SourceHeaderBlockBuilder::{new, from_block}` (`native::Producer`) | Microsoft (`map.h`) and LLVM (`HashTable.h`) | The bucket of each entry and the words of both bit vectors of a decoded table. | `Producer::Microsoft`: a default table has 1 bucket, the present vector has at least 1 word, and a vector keeps its words until the next growth. `Producer::Llvm`: a default table has 8 buckets, and a vector has words up to its highest set bit. A new `/src/headerblock` table has 1 bucket (Microsoft) or 2 buckets (LLVM). |
 | `InjectedSource::reserved` | Not known (`pvReserved1` of `SrcHeaderOut`) | The 8 reserved bytes of a `/src/headerblock` entry, raw. | The same bytes. `SourceHeaderBlockBuilder::add_file` writes zeros. |
 | `LinkInfo::trailing` | Not known (bytes after the `/LinkInfo` record) | The stream bytes after the record, raw. | The same bytes. `LinkInfo::new` sets no bytes. |
@@ -667,7 +670,7 @@ The `native::msfz` module writes MSFZ containers, and `native::container::Contai
 | MSF 7.0 or MSFZ to MSFZ | `Container::to_msfz` | Stream IDs, nil and empty streams and all stream bytes. `OldDirectoryPolicy` selects stream 0 |
 | MSF 7.0 or MSFZ to MSF 7.0 | `Container::to_msf` | The same, through the MSF writer (`Msf::repack` for MSF 7.0 input). A stream of `0xFFFFFFFF` bytes or more gives `LimitExceeded` |
 
-`msfz::WriteOptions` has the options of `pdbtool pdz-encode` and the chunk codec:
+`msfz::MsfzWriteOptions` has the options of `pdbtool pdz-encode` and the chunk codec:
 
 - The maximum chunk size: 1 MiB by default, from 4 KiB to 1 GiB. `pdz-encode` changes other values to the nearest limit; the plan rejects them with `InvalidFormat`.
 - One stream for each chunk: each stream with data starts a new chunk.
@@ -684,7 +687,7 @@ The plan computes and checks the full layout before output. The layout is determ
 4. A fragment never crosses a chunk boundary: the `ms-pdb-msfz` reader (`pdbtool compare`) reads a fragment from one chunk only. The writer writes no uncompressed fragments.
 
 The header holds the offsets of the directory and the Chunk Table, and these depend on the compressed chunk sizes. Thus planning reads all stream bytes and compresses each chunk once to get its size.
-`WritePlan::write_to` compresses each chunk again and fails with `InvalidFormat` if a size changed (the source changed).
+`MsfzWritePlan::write_to` compresses each chunk again and fails with `InvalidFormat` if a size changed (the source changed).
 The memory is one chunk buffer, its compressed bytes, the directory and the Chunk Table. `write_to`, `to_vec` and `write_file` have the contract of the MSF writer: a planning error writes nothing, and `write_file` leaves no partial file.
 
 Write a PDZ file, convert it back and compare the streams:
@@ -831,7 +834,7 @@ A plan borrows immutable inputs or owns them. Edits cannot change a live plan.
 A planning error leaves the source and destination untouched.
 An output I/O error may leave a partial destination; document this contract.
 Do not support writing over the source file or incremental in-place commits in this design.
-The MSF file helpers (`WritePlan::write_file`, `io::copy_exact_file`) write a temporary sibling file and rename it.
+The MSF file helpers (`MsfWritePlan::write_file`, `io::copy_exact_file`) write a temporary sibling file and rename it.
 On error, they delete the temporary file, so the destination does not change.
 
 Native dependencies include:

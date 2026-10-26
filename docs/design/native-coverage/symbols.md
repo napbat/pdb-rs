@@ -286,7 +286,7 @@ A legacy record in a modern module stream still keeps its bytes as `SymbolData::
 [exs]: ../../../crates/pdbrs/examples/native/symbols.rs
 [gsiw]: ../../../crates/pdbrs/src/native/symbols/gsi/write.rs
 [num]: ../../../crates/pdbrs/src/native/codeview/numeric.rs
-[plantypes]: ../../../crates/pdbrs/src/native/write/plan/module_types.rs
+[plantypes]: ../../../crates/pdbrs/src/native/build/plan/module_types.rs
 [sattr]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/attribute.rs
 [scdi]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/custom_debug_info.rs
 [slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs

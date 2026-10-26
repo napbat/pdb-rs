@@ -81,7 +81,7 @@ The fuzz targets `msfz`, `msfz_chunks` and `msfz_convert` cover the reader, the 
 | `PdbImpvVC80` | `20030901` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | missing (#32: external-input; `Info::parse` returns `UnsupportedVersion`; no producer known writes it as the header version) | missing (#32: external-input; no layout difference known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known; `pdbcopy`, `pdbcopy -p` and `pdbcopy -f` write `VC70` ([triage][e39p])) | LLVM lists it; no producer known |
 | `PdbImpvVC110` | `20091201` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | missing (#32: external-input; `Info::parse` returns `UnsupportedVersion`; no producer known writes it as the header version) | missing (#32: external-input; no layout difference known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known; `pdbcopy`, `pdbcopy -p` and `pdbcopy -f` write `VC70` ([triage][e39p])) | MSVC writes `VC110` and `VC140` as feature codes, not as the version (also `/DEBUG:FULL,VC120`) |
 | `PdbImpvVC140` | `20140508` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | missing (#32: external-input; `Info::parse` returns `UnsupportedVersion`; no producer known writes it as the header version) | missing (#32: external-input; no layout difference known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known) | missing (#32: external-input; no producer known; `pdbcopy`, `pdbcopy -p` and `pdbcopy -f` write `VC70` ([triage][e39p])) | MSVC writes `VC110` and `VC140` as feature codes, not as the version (also `/DEBUG:FULL,VC120`) |
-| Identity: signature, age, GUID | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][info], [check][t:info], [check][t:identity], [check][e9]) | complete ([code][reader], [check][t:native], [check][e32]) | complete ([code][info], [code][infob], [check][t:info_builder], [check][e32]) | complete ([code][infob], [code][edit], [check][e32], [check][e34]) | complete ([code][exnm], [check][e9], [check][e34]) | `IdentityPolicy` writes the Info and DBI ages together and returns `PeMatch` |
+| Identity: signature, age, GUID | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][info], [check][t:info], [check][t:identity], [check][e9]) | complete ([code][reader], [check][t:native], [check][e32]) | complete ([code][info], [code][infob], [check][t:info_builder], [check][e32]) | complete ([code][infob], [code][edit], [check][e32], [check][e34]) | complete ([code][exnm], [check][e9], [check][e34]) | `IdentityPolicy` writes the Info and DBI ages together and returns the `native::Identity` of the image |
 | Info age larger than the DBI age | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][reader], [check][t:native], [check][e32]) | complete ([code][reader], [check][t:native], [check][e32]) | complete ([code][info], [code][infob], [check][t:info_builder], [check][e32]) | complete ([code][infob], [code][ednam], [check][e32], [check][e34]) | complete ([code][exnm], [check][e27s], [check][e32]) | 1 fixture PDB (`msvc-x64-srcsrv/demo.srcsrv.pdb`); `pdbstr -w` increments only the Info age; a larger DBI age is still an error |
 | Named-stream map (hash table) | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][info], [code][ht], [check][t:hash_table], [check][e9]) | complete ([code][ht], [check][t:hash_table], [check][e9]) | complete ([code][ht], [code][hto], [check][t:info_builder], [check][e32]) | complete ([code][hto], [code][ednam], [check][e32], [check][e34]) | complete ([code][exnm], [check][e9], [check][e32]) | Slots use `hash_string_v1(name) & 0xffff` with linear probing; `native::Producer` gives the Microsoft or LLVM growth rules |
 | `niMac` word after the map | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][info], [check][t:info], [check][e9]) | not applicable (a counter) | complete ([code][info], [code][infob], [check][t:info_builder], [check][e32]) | complete ([code][infob], [code][ednam], [check][e32], [check][e34]) | complete ([code][exnm], [check][e9]) | LLVM `PdbStream.md` omits it (#9) |
@@ -230,7 +230,7 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 
 [addr]: ../../../crates/pdbrs/src/native/address.rs
 [blob]: ../../../crates/pdbrs/src/native/debug_stream/blob.rs
-[build]: ../../../crates/pdbrs/src/native/write.rs
+[build]: ../../../crates/pdbrs/src/native/build.rs
 [cont]: ../../../crates/pdbrs/src/native/container.rs
 [conv]: ../../../crates/pdbrs/src/native/container/convert.rs
 [dbg]: ../../../crates/pdbrs/src/native/debug_stream.rs
@@ -326,11 +326,11 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 [natvis]: ../../../crates/pdbrs/src/native/injected_source/natvis.rs
 [old]: ../../../crates/pdbrs/src/native/msf/old_directory.rs
 [omap]: ../../../crates/pdbrs/src/native/debug_stream/omap.rs
-[plantypes]: ../../../crates/pdbrs/src/native/write/plan/module_types.rs
+[plantypes]: ../../../crates/pdbrs/src/native/build/plan/module_types.rs
 [psi]: ../../../crates/pdbrs/src/native/symbols/psi.rs
 [psiw]: ../../../crates/pdbrs/src/native/symbols/psi/write.rs
 [reader]: ../../../crates/pdbrs/src/native/reader.rs
-[rebuild]: ../../../crates/pdbrs/src/native/write/rebuild.rs
+[rebuild]: ../../../crates/pdbrs/src/native/build/rebuild.rs
 [sec]: ../../../crates/pdbrs/src/native/section.rs
 [slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs
 [slnk]: ../../../crates/pdbrs/src/native/auxiliary/source_link.rs
