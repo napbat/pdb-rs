@@ -300,8 +300,8 @@ impl ValidationReport {
 ///
 /// # Errors
 ///
-/// - [`ErrorKind::UnsupportedVersion`] if a record starts a scope kind that
-///   [`ModuleSymbols`] does not decode. The scopes after it cannot be checked.
+/// - [`ErrorKind::UnsupportedVersion`] if a record holds a numeric leaf with a
+///   tag that `cvinfo.h` does not define. The scopes after it cannot be checked.
 /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
 ///
 /// [`ModuleSymbols`]: super::ModuleSymbols

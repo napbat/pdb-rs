@@ -1,18 +1,17 @@
 # pdbrs
 
-pdbrs is a Rust library for Program Database (PDB) files. It reads native Windows PDB files
-(MSF 7.0), writes MSF 7.0 containers and reads the metadata of standalone Portable .NET PDB
-files. `pdbrs::Pdb` detects the format from the file contents. The library supports `std` and
-`no_std + alloc`.
+pdbrs is a Rust library for Program Database (PDB) files. It reads, writes, builds and edits
+native Windows PDB files (MSF 7.0) and standalone Portable .NET PDB files. `pdbrs::Pdb` detects
+the format from the file contents. The library supports `std` and `no_std + alloc`.
 
 ## Status
 
 | Area | Status |
 | --- | --- |
-| Native PDB reading (MSF 7.0) | Reads every stream, record and C13 subsection in Rust-produced test PDBs from MSVC `link.exe` and LLD. Other producers use record kinds that pdbrs keeps raw ([#13](https://github.com/napbat/pdbrs/issues/13), [#14](https://github.com/napbat/pdbrs/issues/14)). |
-| Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. The writer makes no PDB semantic claim about the streams. |
-| Native PDB semantic building and editing | Not implemented. |
-| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writing is in progress ([#26](https://github.com/napbat/pdbrs/issues/26)). |
+| Native PDB reading (MSF 7.0) | Typed decoders for every modern record kind, numeric leaf, C13 subsection and stream version that has a layout definition, with reference validation. Reads all 36 readable native fixture PDBs of MSVC, Clang/LLD, rustc, .NET and fxc. The [native coverage](docs/design/native-coverage.md) document gives the state of each kind and version. Kinds without a local producer or a layout definition stay open there as `external-input` ([#29](https://github.com/napbat/pdbrs/issues/29) to [#32](https://github.com/napbat/pdbrs/issues/32)). |
+| Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. |
+| Native PDB writing, building and editing | An encoder for each decoded record and stream, `native::write::PdbBuilder` for new PDBs ([#33](https://github.com/napbat/pdbrs/issues/33)) and `native::PdbEditor` for named-stream, symbol, type, identity and strip edits with index rebuilds ([#34](https://github.com/napbat/pdbrs/issues/34)). `llvm-pdbutil`, DIA2Dump, `pdbtool` and `llvm-symbolizer` agree with the rebuilt and edited fixtures. |
+| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writes exact copies, new layouts, semantic builds and edits ([#26](https://github.com/napbat/pdbrs/issues/26)). |
 | Native PDB in MSFZ (PDZ files) | Not implemented. `format::probe` does not recognize the signature yet ([#20](https://github.com/napbat/pdbrs/issues/20)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
@@ -79,8 +78,15 @@ Record kinds without a decoder stay available as raw bytes.
 ## Examples
 
 ```sh
-# Read every stream and record of a native PDB and report undecoded data.
+# Read every stream and record of a native PDB, encode each again and report undecoded data.
 cargo run -p pdbrs --example native -- path/to/file.pdb
+
+# Rebuild a native PDB from its decoded records, or build a small PDB from scratch.
+cargo run -p pdbrs --example native_rebuild -- input.pdb output.pdb
+cargo run -p pdbrs --example native_synthetic -- output.pdb
+
+# Print the procedure, source lines and inline chain of an RVA.
+cargo run -p pdbrs --example locate -- path/to/file.pdb 0x1000
 
 # Read, decode, encode again and validate every row and blob of a standalone Portable PDB.
 cargo run -p pdbrs --example portable -- path/to/file.pdb

@@ -66,8 +66,8 @@ impl<'a> Record<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] if the payload of a decoded kind
     /// is too short for its fields, has a name without a NUL terminator, has
     /// padding that is not zero, or breaks a rule of its kind. Returns
-    /// [`ErrorKind::UnsupportedVersion`] for a constant value that is not an
-    /// integer. The error does not have a file offset.
+    /// [`ErrorKind::UnsupportedVersion`] for a numeric leaf with a tag that
+    /// `cvinfo.h` does not define. The error does not have a file offset.
     pub fn symbol(&self) -> Result<symbol::Symbol<'a>> {
         symbol::Symbol::decode(*self)
     }
