@@ -42,6 +42,7 @@ Each decoder in `crates/pdbrs/src/native/codeview/symbol/` has an encoder next t
   - `S_ALTOBJNAME` (0x1181), `S_LOCAL_2005`, `S_DEFRANGE_2005`, `S_DEFRANGE2_2005` and `S_RESERVED1` to `S_RESERVED4` have no layout in any reference. The pre-VC70 `_ST` kinds (for example 0x1007, 0x1008, 0x100a) have length-prefixed names. pdbrs keeps all of them raw (`Unsupported`) and encodes them raw (#30).
   - Fixture-confirmed layouts for kinds without a reference layout: `S_FRAMEREG` (u16 register + 2 zero bytes), `S_FASTLINK` (`REFMINIPDB` without module index; flag bit 6 = namespace), `S_REGREL32_ENCTMP` (= `S_REGREL32` layout) (#13).
   - Managed kinds use packed cvinfo.h layouts (#14).
+  - Producers of the kinds above `0x1168` (#39): MSVC 14.51 writes `S_ASSOCIATION` for C++20 coroutines and `S_REGREL32_INDIR` for structured bindings; x86 `/ZI` writes `S_BPREL32_ENCTMP` and `S_BPREL32_INDIR`; `link` keeps `S_STATICLOCAL` only with `/DEBUG:LAZY`; an ARM64EC link writes `S_HYBRIDRANGE`. The DIA SDK layouts decode all of them.
 
 ### `microsoft-pdb-rs/docs/codeview/symbols/s_annotation.md`
 - Documents: The `S_ANNOTATION` (0x1019) record: u32 offset, u16 section, u16 string count, then `count` NUL-terminated strings, with an MSVC `__annotation` example.
@@ -160,6 +161,7 @@ Each decoder in `crates/pdbrs/src/native/codeview/symbol/` has an encoder next t
   - `BA_OP_ChangeCodeOffsetBase` (opcode 2) selects the n-th separated code chunk (`cvinfo.h`: "nth separated code chunk (main code chunk == 0)") and sets the code offset to 0. Chunk 0 is the procedure; chunk n is the n-th `S_SEPCODE` record of the module whose parent address is the procedure start, in stream order. MSVC writes these `S_SEPCODE` records at the top level after the `S_END` of the procedure. A last range without a length ends at the end of its chunk. `msvc-x64-pgo` has 62 sites with this opcode; DIA agrees with `native::locate` at all 720 addresses of the separated code (#30).
   - The validation reports a def-range in an inline site that does not overlap or touch the code of its innermost or an enclosing inline site (`Rule::DefRangeOutsideInlineSite`). Gaps are not part of the range. Def-ranges of length 0 and def-ranges with the `CV_RANGEATTR` "may have no name" bit are not checked. "Touch" and enclosing sites are necessary because MSVC, Clang, rustc and fxc write def-ranges past the inlined code, and MSVC PGO writes def-ranges of an inner site in the separated code of an outer site. Annotations that give no valid code ranges (offset overflow, a range before an earlier range) give `Rule::InlineSiteAnnotations`, and the def-ranges of that site are not checked. One finding remains in the fixtures: a producer inconsistency of MSVC 19.51 PGO in `msvc-x64-pgo` (#30).
   - `ChangeFile` (opcode 5) gives an offset in the module file-checksum subsection (`annotation.rs`).
+  - In a `NOTM` PDB, the inlinee of an inline site is an ID of the module records that `S_MOD_TYPEREF` names, not an IPI index; `SymbolLocator` resolves it there (`msvc-x64-amp-lazy`, `msvc-x64-modern-lazy`, #30).
 
 ### `microsoft-pdb-rs/docs/codeview/symbols/s_label.md`
 - Documents: The `S_LABEL32` (0x1105) record (offset, segment, u8 flags, name).
@@ -222,7 +224,7 @@ Each decoder in `crates/pdbrs/src/native/codeview/symbol/` has an encoder next t
   - The top-level parent link must be 0; a nonzero value gives `InvalidReference` (`scope.rs`).
   - `S_END` ends managed procedure scopes. LLVM `symbolOpensScope` does not list `S_GMANPROC`/`S_LMANPROC`; pdbrs adds them because `MANPROCSYM` has links (#14). LLVM also does not list the MIPS, IA64 and `EX` procedures; their cvinfo.h structures have links, and `S_END` ends them (`scope.rs`, #30).
   - The `EX` kinds use the `PROCSYM32EX` layout of the DIA SDK `diaguids.lib`: the `PROCSYM32` layout with a 2-byte `CV_EXPROCFLAGS` in place of the 1-byte `CV_PROCFLAGS`. `ExtendedProcedureFlags` names the second byte from the DIA bit fields; no reference describes the bits (#30).
-  - The `_DPC` kinds use the `S_LPROC32` and `S_LPROC32_ID` layouts (`symbol.rs`). No fixture has them; C++ AMP can make them (external input, #30).
+  - The `_DPC` kinds use the `S_LPROC32` and `S_LPROC32_ID` layouts (`symbol.rs`). MSVC 14.44 with `amp.h` writes them (`msvc-x64-amp`, and `S_LPROC32_DPC_ID` with `/DEBUG:LAZY` in `msvc-x64-amp-lazy`); `llvm-pdbutil` decodes `S_LPROC32_DPC` as pdbrs does (#39).
   - The managed `token` is usually a `MethodDef` token (table 0x06), and the name can be empty (#14).
   - MSVC funclets in `msvc-x64-lazy` are `S_LPROC32_ID` records with ID 0. The validation accepts ID 0 there (#30).
 

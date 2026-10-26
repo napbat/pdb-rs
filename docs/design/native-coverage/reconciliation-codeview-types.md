@@ -37,6 +37,7 @@ Common pdbrs facts used below:
   - pdbrs accepts mode bits for every kind except 0xf0, for example 0x0600 (`T_NOTYPE` with mode 6). `cvinfo.h` defines no such value. Kind 0xf0 with mode 0 or 7 is `InvalidFormat`, because `cvinfo.h` defines it only as a pointer (`index.rs:44-51`, #29).
   - pdbrs rejects bit 11 set (mode byte 8-15) as `InvalidFormat`. This agrees with the document's reserved bit 11 but the document does not say that a reader must reject it.
   - Sizes that the document does not give: `Complex48` 12 bytes, `Complex16` 4 bytes, `Complex32PartialPrecision` 8 bytes, `Boolean128` 16 bytes, `HResult` 4 bytes, `Currency` 8 bytes. No size for no type, absolute, segment, `void`, BASIC strings, not translated, bit, Pascal `CHAR` and `CvPointer` in direct mode (`index.rs:309-376`, #29). pdbrs gives `NarrowCharacter` (`T_RCHAR`) and `WideCharacter` (`T_WCHAR`) a signedness (signed and unsigned); `cvinfo.h` does not state it.
+  - Producer fixtures of #39 hold the rare kinds: `ml64` and `ml` write `T_REAL48`, `T_INT8`, `T_REAL80` and `T_UINT16`; clang-cl and flang write `T_OCT`, `T_UOCT`, `T_REAL16`, `T_REAL80`, `T_REAL128`, `T_CPLX32` to `T_CPLX128`, LLVM `Complex16` (`0x56`) and `T_BOOL16` to `T_BOOL64`; MSVC ARM64EC writes `T_UINT2`. `llvm-pdbutil` names all of them.
 
 ### `microsoft-pdb-rs/docs/codeview/number.md`
 - Documents: The numeric leaf (`Number`): immediate values below 0x8000 and leaf tags 0x8000-0x801b with their payload sizes, `LF_VARSTRING`, and examples.
@@ -46,11 +47,13 @@ Common pdbrs facts used below:
   - Document internal error: example `10 80 04 00 44 45 46` declares length 4 but has 3 string bytes for "DEF". The length must be `03 00`.
   - Document vs `cvinfo.h`, LLVM `CodeViewTypes.def` and `ms-codeview` `number.rs`: the table omits `LF_REAL16` = 0x801c (2 bytes). pdbrs decodes it in all contexts (#29).
   - Document vs pdbrs: an unknown tag above 0x8000 is not a valid `Number`. The document does not say what a reader must do. pdbrs returns `UnsupportedVersion`, so the record fails to decode.
+  - `LF_DATE` (`cvinfo.h` vs Roslyn): `cvinfo.h` names an OLE automation date (an `f64` of days since 30 December 1899). Roslyn writes the .NET `DateTime.Ticks` value as a little-endian `i64` in the `S_MANCONSTANT` records of VB `Date` constants (`dotnet-vb-full`), and DIA returns the same 8 bytes as `VT_DATE`. `Numeric::date` keeps the `cvinfo.h` meaning; `Numeric::date_ticks` gives the tick count (#29).
 - Undocumented assumptions:
   - pdbrs reports immediate values as `Unsigned` and keeps signedness and width for each leaf (`IntegerLeaf`, `numeric.rs:144-276`), so a non-canonical width (for example `LF_ULONG` 5) encodes again to the same bytes (#29).
   - Value sizes of the non-integer leaves come from the `cvinfo.h` `lfReal*`/`lfCmplx*`/`lfDecimal`/`lfDate` structures: `LF_REAL16`=2, `LF_REAL32`=4, `LF_REAL48`=6, `LF_REAL64`/`LF_COMPLEX32`/`LF_DATE`=8, `LF_REAL80`=10, `LF_REAL128`/`LF_COMPLEX64`/`LF_DECIMAL`=16, `LF_COMPLEX80`=20, `LF_COMPLEX128`=32 (#14, #29). `LF_UTF8STRING` without a NUL terminator is `InvalidFormat`.
   - `Numeric::from_integer` picks an immediate, `LF_USHORT`, `LF_ULONG`, `LF_UQUADWORD` or `LF_UOCTWORD` for a value that is not negative, and `LF_CHAR`, `LF_SHORT`, `LF_LONG`, `LF_QUADWORD` or `LF_OCTWORD` for a negative value (LLVM `writeEncodedSignedInteger`/`writeEncodedUnsignedInteger`, `numeric.rs:417-455`).
   - No fixture has a non-integer numeric leaf; only synthetic tests (`tests/numeric_leaves.rs`) cover them (#29).
+  - Roslyn writes one fixed numeric leaf for each constant type (for example `LF_LONG` for `int` 0 and `LF_SHORT` for `short` 32767), and `LF_VARSTRING` with UTF-8 bytes for all strings, also non-ASCII text and NUL. It does not write `LF_UTF8STRING` (#39).
 
 ### `microsoft-pdb-rs/docs/codeview/line_data.md`
 - Documents: The C13 line region of a module stream: subsection framing and alignment, the `DEBUG_S_*` kind list 0xf1-0x100 and the ignore bit, the `DEBUG_S_LINES` header, blocks, line and column entries, and the `DEBUG_S_FILECHKSMS` entries with checksum kinds.
@@ -116,7 +119,7 @@ Common pdbrs facts used below:
   - Kind values and layouts follow LLVM `CodeViewTypes.def` and `TypeRecordMapping.cpp` at `b9f2235f`; flag bit layouts follow `cvinfo.h` (`type_record.rs:1-13`). `LF_VFTABLE` and `LF_LABEL` layouts are confirmed against `lld-link` output (#11, https://github.com/napbat/pdbrs/issues/11#issuecomment-6408363519). Fixtures contain `LF_HLSL`, `LF_VECTOR`, `LF_MATRIX`, `LF_MODIFIER_EX` and `LF_STRIDED_ARRAY` (fxc, #27); `LF_PRECOMP`, `LF_ENDPRECOMP` and `LF_TYPESERVER2` occur only in object files. The other added kinds have synthetic tests only (#29).
   - `LF_HLSL`: `cvinfo.h` says that bits 4-15 of the property word are zero. The Windows SDK `fxc` writes `0x07a0`, `0x07b0`, `0x07c0`, `0x4e50` and `0x6260`. pdbrs accepts any value, keeps the raw word and uses only bits 0-3 as the property count (`type_record/hlsl.rs`, #29, https://github.com/napbat/pdbrs/issues/29#issuecomment-6413480651).
   - `validate_type_references` accepts forward references (a reference to the same or a later record). Microsoft and LLVM do not write them. With forward references, it searches for a cycle with depth and work limits (`ReferenceLimits`, #29).
-  - The TPI and IPI hash streams follow one producer form (`types::HashLayout`): Microsoft or LLVM block rules for index offsets, and the Microsoft `Map::save` layout for hash adjusters (#29). No fixture has hash adjusters.
+  - The TPI and IPI hash streams follow one producer form (`types::HashLayout`): Microsoft or LLVM block rules for index offsets, and the Microsoft `Map::save` layout for hash adjusters (#29). `msvc-x64-fastlink-full` (`/DEBUG:FASTLINK`, then `mspdbcmf`) has 28 bytes of TPI hash adjusters, and its rebuild gives the same consumer output (#39).
   - In a PDB with the Info feature `NOTM` (`link /DEBUG:LAZY`, fixture `msvc-x64-lazy`), the TPI and IPI streams have 0 records. The module records are in streams that no directory entry, DBI field or named stream gives; `S_MOD_TYPEREF` names them. `TypeStream::from_records` makes a type stream from such a stream: first index 0x1000, no hash stream (#30, #32). The document does not describe this layout.
   - `types::type_size` (`native/types/size.rs`) gives the byte size of a type: primitive size, the `LF_POINTER` size bits, the numeric size of arrays, `LF_VECTOR`, `LF_MATRIX` and UDTs (a forward reference through `ForwardRefs`), and the size of the referenced type for `LF_MODIFIER`, `LF_ALIAS`, `LF_BITFIELD` and `LF_ENUM`. The symbol validation uses it for subfield def-ranges (`Rule::SubfieldOutsideType`, #30).
 
@@ -188,6 +191,7 @@ Common pdbrs facts used below:
 - Undocumented assumptions:
   - The based-pointer layout comes from `cvinfo.h` `lfPointer::pbase`; LLVM does not decode it and no fixture has it, so only synthetic tests cover it (#2, https://github.com/napbat/pdbrs/issues/2#issuecomment-6407739492, #29). pdbrs keeps the base symbol record as bytes (`BasedPointer::Symbol`); `symbol_record()` frames it.
   - The encoder rejects member or based data that does not match the kind and the mode (`pointer.rs:168-191`).
+  - `ml64` and `ml` 14.51 write 6 zero bytes after the attribute word of each `LF_POINTER` of a `TYPEDEF PTR`, then the `LF_PAD` run. `Pointer::trailing_zeros` keeps the count, and the encoder writes the bytes again; other bytes there stay `InvalidFormat` (`masm-x64-debug`, `masm-x86-debug`, #29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_mfunction.md`
 - Documents: `LF_MFUNCTION` (0x1009): return, class and `this` types, calling convention, a "reserved" byte, parameter count, argument list, `uint32_t this_adjust`.

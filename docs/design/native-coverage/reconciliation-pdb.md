@@ -31,7 +31,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - Each stored hash value must be less than the bucket count (`types/hash.rs`).
   - The three hash buffers must tile the hash stream without gaps, overlaps or trailing bytes (#3).
   - Producer forms of the hash stream (`HashLayout`, #29): Microsoft `tpi.cpp` writes values, index offsets and adjusters in this order, adds an index offset pair when a record start enters a new 8 KiB block (`TPI1::RecordTiOff`) and writes offset 0 and length 0xFFFFFFFF for each buffer when there is no hash stream. LLVM `TpiStreamBuilder` writes no adjusters, adds a pair when a record end enters a new 8 KiB block and writes length 0 when there is no hash stream. `HashLayout::of` reads the form from a header.
-  - Hash adjuster map (#29): the map starts with one slot, places a key by its low 16 bits with linear probing and grows when `count >= slots * 2 / 3 + 1`. No fixture has adjusters; tests check the layout against the pdbrs reader only.
+  - Hash adjuster map (#29): the map starts with one slot, places a key by its low 16 bits with linear probing and grows when `count >= slots * 2 / 3 + 1`. `msvc-x64-fastlink-full` (`mspdbcmf`) has 28 bytes of adjusters, and its rebuild gives the same consumer output (#39).
   - pdbrs also hashes the wide UDT forms `LF_CLASS2`, `LF_STRUCTURE2`, `LF_INTERFACE2` and `LF_UNION2` as UDTs (`types/hash.rs` `is_udt_kind`). No known producer writes these kinds (#29).
   - Field-list split (#29): `encode_field_list` splits a member list with `LF_INDEX` as LLVM `ContinuationRecordBuilder` does. LLVM uses a record limit of 0xFF00 (`LLVM_FIELD_LIST_LIMIT`). The MSVC fixtures match 0xFB00; Microsoft does not document this limit (inferred from 20 field-list chains).
   - Records with producer data at the end (`LF_OEM`, `LF_OEM2`, `LF_COBOL0`, `LF_SKIP` and unknown kinds) keep that data and get no padding. Numeric leaves keep their stored width, so a non-canonical width encodes to the same bytes (#29).
@@ -78,6 +78,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - Age (#32): image matching uses the DBI age. `IdentityPolicy` (`Preserve`, `IncrementAge`, `Replace`) writes the same age to the Info stream and the DBI header and returns the GUID and age for the `RSDS` entry.
   - Presence of the IPI stream: LLVM uses the VC140 feature; pdbrs loads stream 4 when the directory has it (`reader.rs` `ids`).
   - `NOTM` (0x4D544F4E, `link /DEBUG:LAZY`, fixture `msvc-x64-lazy`): TPI and IPI are empty, and the module symbols resolve against the module type streams (`ExternalDependencies::{no_type_merge, module_types}`, #32). `PdbBuilder` and `PdbEditor` keep the module type streams; a strip removes them and the `NOTM` code (#32).
+  - `link /SOURCELINK:<file>` writes one named stream `sourcelink$<n>` for each option, numbered from 1, and an empty stream with the next number after the last file. `NamedStreamKind::NumberedSourceLink` and `SourceLink::parse_numbered` read them (`msvc-x64-sourcelink`, #32).
 
 ### `microsoft-pdb-rs/docs/pdb/pdb.md`
 - Documents: an overview of the PDB: containers (MSF, MSFZ), fixed streams 1-4, DBI substreams, GSS/GSI/PSI, module streams, `/names`, named streams (NatVis, source files, Source Link), hashing, relationships and mini PDBs.
@@ -198,7 +199,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - `BA_OP_ChangeCodeOffsetBase` selects the `n`-th separated code chunk (the `n`-th `S_SEPCODE` whose parent is the procedure start) and sets the code offset to 0; the validation and `native::locate` use it (`InlineRange::chunk`, `SymbolLocator::code_chunks`, #30).
   - A def-range in an inline site must overlap or touch the code of its innermost site or of an enclosing site (`DefRangeOutsideInlineSite`); a def-range with the `CV_RANGEATTR` "may have no name" bit is not checked. Annotations without valid ranges give `InlineSiteAnnotations`. A subfield def-range offset must be less than the size of the local type (`SubfieldOutsideType`, `types::type_size`) (#30).
   - `lines::validate_cross_scope` checks the cross-scope exports and imports; bit 31 of a local ID selects IPI (#31).
-  - `S_MOD_TYPEREF` flags: `fNone` 0x01, `fOwnTMR` 0x08, `fOwnTM` 0x10 (type stream and ID stream), `fRefTM` 0x20 (index of the module that owns the records) (`ModuleTypeSource`, #32).
+  - `S_MOD_TYPEREF` flags: `fNone` 0x01, `fOwnTMR` 0x08, `fOwnTM` 0x10 (type stream and ID stream), `fRefTM` 0x20 (index of the module that owns the records) (`ModuleTypeSource`, #32). With `/Z7` precompiled headers, the `/Yc` object has 0x0c and `word0` names its records after `LF_ENDPRECOMP`; a `/Yu` object has 0x0a and `word1` names the owner module. The precompiled types stay in the object file of the owner, so `Pdb::external_dependencies` lists them (`object_precompiled_types`) and the type indices of these modules are not checked (`msvc-x64-pch-lazy`, #30).
 
 ### `microsoft-pdb-rs/docs/pdb/ipi_stream.md`
 - Documents: the IPI stream (stream 4): same header, framing and hash structures as TPI; only ID records; sequential lookup by `ItemId`.
