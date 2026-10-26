@@ -138,6 +138,28 @@ fn bucket_count_follows_the_minimal_debug_info_feature() {
     let hash = hash_string_v1(b"main");
     assert_eq!(BucketCount::Standard.bucket_of(b"main"), hash % 4096);
     assert_eq!(BucketCount::Minimal.bucket_of(b"main"), hash % 0x3ffff);
+    // The producer truncates the bucket to 16 bits (`HASH` is `USHORT`).
+    let hash = hash_string_v1(b"__chkstk");
+    assert_eq!(hash % 0x3ffff, 0x372ae);
+    assert_eq!(BucketCount::Minimal.bucket_of(b"__chkstk"), 0x72ae);
+    assert_eq!(BucketCount::Standard.bucket_of(b"__chkstk"), hash % 4096);
+}
+
+#[test]
+fn minimal_lookup_uses_the_16_bit_bucket() {
+    let names: [&[u8]; 2] = [b"main", b"__chkstk"];
+    let (stream, offsets) = symbols(&names);
+    // `main` is in bucket 0xddbe; `__chkstk` is in bucket 0x72ae, not 0x372ae.
+    let records = [(offsets[1] + 1, 1), (offsets[0] + 1, 1)];
+    let bytes = table(&records, &[(0x72ae, 0), (0xddbe, 1)], BucketCount::Minimal);
+    let index = GlobalSymbolIndex::parse(bytes, INDEX, BucketCount::Minimal).unwrap();
+    let table = index.hash_table();
+    for (name, &offset) in names.iter().zip(&offsets) {
+        let found: Vec<_> = table.lookup(name).map(|record| record.symbol).collect();
+        assert_eq!(found, [SymbolOffset(offset)]);
+        assert_eq!(SymbolOffset(offset).record(&stream).unwrap().offset, offset);
+    }
+    assert_eq!(table.bucket(0x372ae).count(), 0);
 }
 
 #[test]

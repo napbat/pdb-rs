@@ -114,10 +114,16 @@ impl BucketCount {
         }
     }
 
-    /// Return the bucket of a name: `hash_string_v1(name) % count`.
+    /// Return the bucket of a name: `(hash_string_v1(name) % count) & 0xffff`.
+    ///
+    /// The producer truncates the bucket to 16 bits: `GSI1::hashSz` in
+    /// `PDB/dbi/gsi.cpp` returns `HASH`, which `PDB/include/pdbtypdefs.h`
+    /// defines as `USHORT`. The truncation has no effect for
+    /// [`BucketCount::Standard`]. For [`BucketCount::Minimal`], writers never
+    /// use buckets `0x10000` and higher.
     #[must_use]
     pub fn bucket_of(self, name: &[u8]) -> u32 {
-        hash_string_v1(name) % self.get()
+        (hash_string_v1(name) % self.get()) & 0xffff
     }
 }
 
