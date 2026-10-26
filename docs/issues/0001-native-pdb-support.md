@@ -4,7 +4,8 @@ Status: open
 
 Baseline: `2c6957b` (`pdbrs: add native container and core stream readers`).
 
-This is a repository-local tracking ticket. No Git remote or hosted issue destination is configured.
+GitHub issue: [napbat/pdbrs#1](https://github.com/napbat/pdbrs/issues/1).
+Use the GitHub issue for live progress. Keep this file as the repository-local scope and acceptance record.
 
 ## Goal and boundaries
 
