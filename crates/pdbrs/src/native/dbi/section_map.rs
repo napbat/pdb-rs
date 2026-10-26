@@ -5,9 +5,12 @@
 //! are `SecMapHeader` and `SecMapEntry` in LLVM `RawTypes.h`. The flag bits
 //! are `OMFSegDescFlags` in LLVM `RawConstants.h`.
 
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::words::{halves, word};
+use super::to_u16;
+use crate::native::output::{Output, no_memory};
 use crate::{Error, ErrorKind, Result};
 
 /// The number of 4-byte words in one descriptor.
@@ -41,8 +44,7 @@ impl SegmentFlags {
 }
 
 /// One section map descriptor.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SectionMapEntry {
     /// The descriptor flags.
     pub flags: SegmentFlags,
@@ -79,6 +81,24 @@ impl SectionMapEntry {
             offset: word(record, 3),
             length: word(record, 4),
         }
+    }
+
+    /// Append the 20-byte descriptor to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let mut output = Output::new(out);
+        output.reserve(WORDS * 4)?;
+        output.u16(self.flags.0)?;
+        output.u16(self.overlay)?;
+        output.u16(self.group)?;
+        output.u16(self.frame)?;
+        output.u16(self.section_name)?;
+        output.u16(self.class_name)?;
+        output.u32(self.offset)?;
+        output.u32(self.length)
     }
 }
 
@@ -149,6 +169,73 @@ impl<'a> SectionMap<'a> {
             records: self.records.iter(),
         }
     }
+
+    /// Append the substream to `out`: the header and the descriptors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        encode_section_map(self.logical_count, self.iter(), out)
+    }
+}
+
+/// An owned section map that a writer can fill.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct OwnedSectionMap {
+    /// The number of logical segment descriptors for the header.
+    pub logical_count: u16,
+    /// The descriptors in substream order.
+    pub entries: Vec<SectionMapEntry>,
+}
+
+impl OwnedSectionMap {
+    /// Copy a decoded section map.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
+    pub fn from_map(map: &SectionMap<'_>) -> Result<Self> {
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(map.len())
+            .map_err(|_| no_memory())?;
+        entries.extend(map.iter());
+        Ok(Self {
+            logical_count: map.logical_count(),
+            entries,
+        })
+    }
+
+    /// Append the substream to `out`: the header and the descriptors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the map has more than 65535
+    /// descriptors or if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        encode_section_map(self.logical_count, self.entries.iter().copied(), out)
+    }
+}
+
+/// Append a section map header and its descriptors to `out`.
+fn encode_section_map(
+    logical_count: u16,
+    entries: impl ExactSizeIterator<Item = SectionMapEntry>,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    let count = to_u16(
+        entries.len(),
+        "DBI section map has more than 65535 descriptors",
+    )?;
+    let mut output = Output::new(out);
+    output.reserve(entries.len().saturating_mul(WORDS * 4).saturating_add(4))?;
+    output.u16(count)?;
+    output.u16(logical_count)?;
+    for entry in entries {
+        entry.encode(out)?;
+    }
+    Ok(())
 }
 
 impl<'a> IntoIterator for &SectionMap<'a> {

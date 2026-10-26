@@ -2,11 +2,15 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::hash::hash_buffer_v8;
+use pdbrs::native::hash_table::HashTableProducer;
 use pdbrs::native::injected_source::{
-    HEADER_BLOCK_STREAM_NAME, SOURCE_FILE_STREAM_PREFIX, SOURCE_VERSION_ONE, SourceCompression,
-    SourceHeaderBlock, content_stream_name,
+    CHECKSUM_SHA1, DOCUMENT_TYPE_TEXT, DotNetDocument, HEADER_BLOCK_STREAM_NAME, InjectedFile,
+    LANGUAGE_CSHARP, SOURCE_FILE_STREAM_PREFIX, SOURCE_VERSION_ONE, SourceCompression,
+    SourceHeaderBlock, SourceHeaderBlockBuilder, VENDOR_MICROSOFT, content_stream_name,
 };
 use pdbrs::native::msf::StreamId;
+use pdbrs::native::names::{HashVersion, StringTable, StringTableBuilder};
+use pdbrs::portable::embedded::EmbeddedSource;
 
 const STREAM: StreamId = StreamId(84);
 const CONTENTS: [&[u8]; 4] = [b"<a/>", b"<AutoVisualizer/>", b"", b"<b>\r\n</b>"];
@@ -247,4 +251,172 @@ fn content_stream_names_use_the_exact_virtual_name_bytes() {
     let name = content_stream_name(b"c:\\x\\Lib.natvis\xff").unwrap();
     assert_eq!(name, b"/src/files/c:\\x\\Lib.natvis\xff");
     assert!(name.starts_with(SOURCE_FILE_STREAM_PREFIX));
+}
+
+fn encode_block(builder: &SourceHeaderBlockBuilder) -> Vec<u8> {
+    let mut out = Vec::new();
+    builder.encode(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn decoded_blocks_encode_again_and_copy_into_a_builder() {
+    let bytes = sample();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
+    let mut out = Vec::new();
+    block.encode(&mut out).unwrap();
+    assert_eq!(out, bytes);
+    for producer in [HashTableProducer::Microsoft, HashTableProducer::Llvm] {
+        let copy = SourceHeaderBlockBuilder::from_block(&block, producer).unwrap();
+        assert_eq!(encode_block(&copy), bytes);
+    }
+}
+
+#[test]
+fn the_model_inserts_entries_in_virtual_name_offset_order() {
+    let bytes = sample();
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
+    let mut sources: Vec<_> = block.entries().iter().map(|entry| entry.value).collect();
+    sources.sort_by_key(|source| source.virtual_file_name_offset);
+    let header = block.header();
+    let mut builder =
+        SourceHeaderBlockBuilder::new(HashTableProducer::Microsoft, header.file_time, header.age)
+            .unwrap();
+    for source in &sources {
+        assert_eq!(builder.insert(*source).unwrap(), None);
+    }
+    assert_eq!(builder.table().capacity(), 6);
+    assert_eq!(encode_block(&builder), bytes);
+    // A second insertion of a key replaces the entry.
+    let mut changed = sources[0];
+    changed.is_virtual = true;
+    assert_eq!(builder.insert(changed).unwrap(), Some(sources[0]));
+    assert_eq!(
+        builder.remove(changed.virtual_file_name_offset).unwrap(),
+        Some(changed)
+    );
+    assert_eq!(
+        builder.remove(changed.virtual_file_name_offset).unwrap(),
+        None
+    );
+    let removed = encode_block(&builder);
+    let decoded = SourceHeaderBlock::parse(&removed, STREAM).unwrap().unwrap();
+    assert_eq!(decoded.entries().len(), 3);
+    assert_eq!(decoded.header().size, u32::try_from(removed.len()).unwrap());
+}
+
+#[test]
+fn add_file_inserts_names_and_computes_crc_and_size() {
+    let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
+    let mut builder = SourceHeaderBlockBuilder::new(HashTableProducer::Llvm, 0, 0).unwrap();
+    let content = b"<AutoVisualizer/>\r\n";
+    let file = InjectedFile {
+        file_name: b"C:\\Src\\App.natvis",
+        object_name: b"",
+        virtual_file_name: b"c:\\src\\app.natvis",
+        compression: SourceCompression::None,
+        is_virtual: false,
+        stream: content,
+    };
+    let source = builder.add_file(&mut names, &file).unwrap();
+    assert_eq!(source.crc, hash_buffer_v8(content));
+    assert_eq!(source.file_size, 19);
+    assert_eq!(names.get(source.file_name_offset).unwrap(), file.file_name);
+    assert_eq!(
+        names.get(source.virtual_file_name_offset).unwrap(),
+        file.virtual_file_name
+    );
+    assert_eq!(names.get(source.object_name_offset).unwrap(), b"");
+    assert!(source.file_name_offset < source.virtual_file_name_offset);
+    // LLVM starts the table with 2 buckets.
+    assert_eq!(builder.table().capacity(), 2);
+
+    let bytes = encode_block(&builder);
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
+    assert_eq!(block.entries()[0].value, source);
+    assert_eq!(block.header().file_time, 0);
+    source.verify_natvis(content, STREAM).unwrap();
+    let mut table = Vec::new();
+    names.encode(&mut table).unwrap();
+    let names = StringTable::parse(&table).unwrap();
+    assert_eq!(
+        names.get(block.entries()[0].key).unwrap(),
+        file.virtual_file_name
+    );
+    assert_eq!(
+        content_stream_name(file.virtual_file_name).unwrap(),
+        b"/src/files/c:\\src\\app.natvis"
+    );
+}
+
+#[test]
+fn add_file_rejects_other_compression_and_empty_virtual_names() {
+    let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
+    let mut builder = SourceHeaderBlockBuilder::new(HashTableProducer::Microsoft, 1, 1).unwrap();
+    let file = InjectedFile {
+        file_name: b"a",
+        object_name: b"o",
+        virtual_file_name: b"a",
+        compression: SourceCompression::Lz,
+        is_virtual: false,
+        stream: b"x",
+    };
+    let error = builder.add_file(&mut names, &file).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    let empty = InjectedFile {
+        virtual_file_name: b"",
+        compression: SourceCompression::DotNet,
+        ..file
+    };
+    let error = builder.add_file(&mut names, &empty).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    let nul = InjectedFile {
+        virtual_file_name: b"a\0b",
+        compression: SourceCompression::None,
+        ..file
+    };
+    assert!(builder.add_file(&mut names, &nul).is_err());
+    assert!(builder.table().is_empty());
+    // The header gets the file time and the age of the builder.
+    builder.set_header(0x1234, 7);
+    let bytes = encode_block(&builder);
+    let block = SourceHeaderBlock::parse(&bytes, STREAM).unwrap().unwrap();
+    assert_eq!((block.header().file_time, block.header().age), (0x1234, 7));
+    assert_eq!(block.entries().len(), 0);
+}
+
+#[test]
+fn dotnet_documents_encode_the_decoded_bytes_again() {
+    let checksum = [7; 20];
+    let cases = [
+        None,
+        Some(EmbeddedSource::Raw(b"class A {}")),
+        Some(EmbeddedSource::Raw(b"")),
+        Some(EmbeddedSource::Deflate {
+            size: 3,
+            data: &[0x01, 0x03, 0x00, 0xfc, 0xff, b'a', b'b', b'c'],
+        }),
+    ];
+    for embedded in cases {
+        let document = DotNetDocument::new(
+            LANGUAGE_CSHARP,
+            VENDOR_MICROSOFT,
+            DOCUMENT_TYPE_TEXT,
+            CHECKSUM_SHA1,
+            &checksum,
+            embedded,
+        );
+        let mut bytes = Vec::new();
+        document.encode(&mut bytes).unwrap();
+        let decoded = DotNetDocument::parse(&bytes).unwrap();
+        assert_eq!(decoded, document);
+        let mut again = Vec::new();
+        decoded.encode(&mut again).unwrap();
+        assert_eq!(again, bytes);
+    }
+    let mut empty = Vec::new();
+    DotNetDocument::new([0; 16], [0; 16], [0; 16], [0; 16], &[], None)
+        .encode(&mut empty)
+        .unwrap();
+    assert_eq!(empty, [0; 72]);
 }

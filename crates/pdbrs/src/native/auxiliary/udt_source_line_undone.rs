@@ -8,8 +8,11 @@
 //! `LF_UDT_MOD_SRC_LINE` record in the IPI stream refers to it. This meaning is an observation,
 //! not a documented contract. The reader does not check the indices against the TPI stream.
 
+use alloc::vec::Vec;
+
 use crate::native::codeview::index::TypeIndex;
 use crate::native::msf::StreamId;
+use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// A decoded `/UDTSRCLINEUNDONE` stream, borrowed from the stream bytes.
@@ -55,5 +58,30 @@ impl<'a> UdtSourceLineUndone<'a> {
             .0
             .iter()
             .map(|word| TypeIndex(u32::from_le_bytes(*word)))
+    }
+
+    /// Append the stream bytes to `out`. A decoded stream gives the same bytes again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        Output::new(out).bytes(self.bytes)
+    }
+
+    /// Append the stream bytes of `indices` to `out`, in iteration order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode_indices(
+        indices: impl IntoIterator<Item = TypeIndex>,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut output = Output::new(out);
+        for index in indices {
+            output.u32(index.0)?;
+        }
+        Ok(())
     }
 }
