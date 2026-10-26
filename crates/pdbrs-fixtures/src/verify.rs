@@ -3,6 +3,8 @@
 //! `verify-portable` prints the canonical dump of each Portable PDB of the fixture manifest
 //! twice: with pdbrs and with the .NET verifier (`System.Reflection.Metadata`). It writes both
 //! dumps to `target/verify-portable/` below the workspace root and compares them line by line.
+//! For an embedded Portable PDB, pdbrs decodes the `MPDB` payload file with `decode_embedded`,
+//! and the verifier reads the image with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`.
 //!
 //! `detect` opens each output of the fixture manifest with the format facade `pdbrs::Pdb`
 //! and compares the detected format with the kind that the manifest records. The CLI metadata
@@ -71,6 +73,54 @@ fn outputs(fixtures: &Path) -> Result<Vec<Output>, String> {
     Ok(outputs)
 }
 
+/// The inputs of one comparison.
+enum Input {
+    /// A standalone Portable PDB. Both readers read this file.
+    Standalone(PathBuf),
+    /// An embedded Portable PDB. pdbrs reads the payload file, the verifier reads the image.
+    Embedded { payload: PathBuf, image: PathBuf },
+}
+
+/// One comparison of the pdbrs and verifier dumps.
+struct Comparison {
+    fixture: String,
+    input: Input,
+}
+
+/// Return the comparisons of the outputs: one for each `portable-pdb` output and one for each
+/// `embedded-pdb-payload` output with the `embedded-in-image` output of its fixture.
+fn comparisons(outputs: &[Output]) -> Result<Vec<Comparison>, String> {
+    let mut comparisons = Vec::new();
+    for output in outputs {
+        let input = match output.kind.as_str() {
+            "portable-pdb" => Input::Standalone(output.path.clone()),
+            "embedded-pdb-payload" => {
+                let image = outputs
+                    .iter()
+                    .find(|image| {
+                        image.fixture == output.fixture && image.kind == "embedded-in-image"
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "{}: the payload has no embedded-in-image output",
+                            output.fixture
+                        )
+                    })?;
+                Input::Embedded {
+                    payload: output.path.clone(),
+                    image: image.path.clone(),
+                }
+            }
+            _ => continue,
+        };
+        comparisons.push(Comparison {
+            fixture: output.fixture.clone(),
+            input,
+        });
+    }
+    Ok(comparisons)
+}
+
 /// Compare the pdbrs and verifier dumps of each Portable PDB fixture.
 ///
 /// Return `false` if a dump fails or the dumps differ.
@@ -78,20 +128,19 @@ pub fn verify_portable(workspace: &Path, fixtures: &Path) -> Result<bool, String
     let assembly = tools::built_tool(workspace, verifier::NAME)?;
     let out = workspace.join("target").join("verify-portable");
     fs::create_dir_all(&out).map_err(|error| format!("cannot make {}: {error}", out.display()))?;
-    let pdbs: Vec<Output> = outputs(fixtures)?
-        .into_iter()
-        .filter(|output| output.kind == "portable-pdb")
-        .collect();
-    if pdbs.is_empty() {
-        return Err("the fixture manifest has no portable-pdb output".to_owned());
+    let comparisons = comparisons(&outputs(fixtures)?)?;
+    if comparisons.is_empty() {
+        return Err(
+            "the fixture manifest has no portable-pdb or embedded-pdb-payload output".to_owned(),
+        );
     }
     let mut passed = true;
-    for pdb in &pdbs {
-        match compare(&assembly, pdb, &out) {
+    for comparison in &comparisons {
+        match compare(&assembly, comparison, &out) {
             Ok(true) => {}
             Ok(false) => passed = false,
             Err(error) => {
-                println!("{}: error: {error}", pdb.fixture);
+                println!("{}: error: {error}", comparison.fixture);
                 passed = false;
             }
         }
@@ -100,14 +149,25 @@ pub fn verify_portable(workspace: &Path, fixtures: &Path) -> Result<bool, String
     Ok(passed)
 }
 
+/// Read a file of the fixture manifest.
+fn read(path: &Path) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))
+}
+
 /// Dump one Portable PDB with both readers, write the dumps and print the differences.
-fn compare(assembly: &Path, pdb: &Output, out: &Path) -> Result<bool, String> {
-    let bytes = fs::read(&pdb.path)
-        .map_err(|error| format!("cannot read {}: {error}", pdb.path.display()))?;
+fn compare(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, String> {
+    let (bytes, mut command) = match &comparison.input {
+        Input::Standalone(path) => (read(path)?, verifier::command(assembly, path)),
+        Input::Embedded { payload, image } => (
+            decode_embedded(&read(payload)?, EMBEDDED_LIMIT)
+                .map_err(|error| format!("pdbrs: {error}"))?,
+            verifier::embedded_command(assembly, image),
+        ),
+    };
     let ours = pdbrs::portable::Pdb::parse(&bytes)
         .and_then(|reader| dump::dump(&reader))
         .map_err(|error| format!("pdbrs: {error}"))?;
-    let output = verifier::command(assembly, &pdb.path)
+    let output = command
         .output()
         .map_err(|error| format!("cannot run the verifier: {error}"))?;
     if !output.status.success() {
@@ -120,7 +180,7 @@ fn compare(assembly: &Path, pdb: &Output, out: &Path) -> Result<bool, String> {
     let theirs = String::from_utf8(output.stdout)
         .map_err(|error| format!("the verifier output is not UTF-8: {error}"))?;
     for (suffix, text) in [("pdbrs", &ours), ("srm", &theirs)] {
-        let path = out.join(format!("{}.{suffix}.txt", pdb.fixture));
+        let path = out.join(format!("{}.{suffix}.txt", comparison.fixture));
         fs::write(&path, text)
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     }
@@ -128,7 +188,7 @@ fn compare(assembly: &Path, pdb: &Output, out: &Path) -> Result<bool, String> {
     let differences = differences(&ours, &theirs);
     println!(
         "{}: {} lines, {} different lines",
-        pdb.fixture,
+        comparison.fixture,
         theirs.lines().count(),
         differences.len()
     );
@@ -262,7 +322,18 @@ fn outcome(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::differences;
+    use std::path::PathBuf;
+
+    use super::{Input, Output, comparisons, differences};
+
+    fn output(fixture: &str, kind: &str, path: &str) -> Output {
+        Output {
+            fixture: fixture.to_owned(),
+            managed: true,
+            kind: kind.to_owned(),
+            path: PathBuf::from(path),
+        }
+    }
 
     #[test]
     fn differences_include_changed_and_missing_lines() {
@@ -271,5 +342,27 @@ mod tests {
             differences("a\nb\n", "a\nc\nd\n"),
             vec![(2, "b", "c"), (3, "<none>", "d")]
         );
+    }
+
+    #[test]
+    fn embedded_payloads_pair_with_the_image_of_their_fixture() {
+        let outputs = [
+            output("portable", "image", "p.dll"),
+            output("portable", "portable-pdb", "p.pdb"),
+            output("other", "embedded-in-image", "o.dll"),
+            output("embedded", "embedded-in-image", "e.dll"),
+            output("embedded", "embedded-pdb-payload", "e.mpdb"),
+        ];
+        let found = comparisons(&outputs).unwrap();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].fixture, "portable");
+        assert!(matches!(&found[0].input, Input::Standalone(path) if path == "p.pdb"));
+        assert_eq!(found[1].fixture, "embedded");
+        assert!(matches!(
+            &found[1].input,
+            Input::Embedded { payload, image } if payload == "e.mpdb" && image == "e.dll"
+        ));
+        // A payload without its image is an error.
+        assert!(comparisons(&outputs[4..]).is_err());
     }
 }

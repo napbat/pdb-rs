@@ -77,3 +77,10 @@ pub fn command(assembly: &Path, pdb: &Path) -> Command {
     command.arg(assembly).arg(pdb);
     command
 }
+
+/// The command that runs the verifier assembly on the embedded Portable PDB of `image`.
+pub fn embedded_command(assembly: &Path, image: &Path) -> Command {
+    let mut command = Command::new(PathBuf::from("dotnet"));
+    command.arg(assembly).arg("--embedded").arg(image);
+    command
+}

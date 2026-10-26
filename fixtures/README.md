@@ -229,16 +229,23 @@ Otherwise DIA2Dump reads the file as an executable. `llvm-pdbutil` does not read
 
 `PortableVerifier` reads a Portable PDB with `System.Reflection.Metadata` (SRM) and prints a
 canonical text dump. pdbrs prints the same format. Compare the two dumps of each `portable-pdb`
-output of `manifest.json` with this command:
+and each `embedded-pdb-payload` output of `manifest.json` with this command:
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
 ```
 
+For an `embedded-pdb-payload` output, pdbrs decodes the `.mpdb` file with
+`portable::embedded::decode_embedded`. The verifier reads the `embedded-in-image` output of the
+same fixture with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`. The verifier also
+decompresses the payload with `DeflateStream` to read the stream headers, and checks that its
+length is equal to the SRM metadata length.
+
 The command writes `<fixture>.pdbrs.txt` and `<fixture>.srm.txt` to `target/verify-portable/`.
 It prints the line count and the number of different lines for each fixture, and the first
 different lines. It exits with a failure code if a dump fails or the dumps differ. Run the
-verifier alone with `dotnet target/tools/bin/portable-verifier/PortableVerifier.dll <file.pdb>`.
+verifier alone with `dotnet target/tools/bin/portable-verifier/PortableVerifier.dll <file.pdb>`,
+or with `--embedded <image.dll>` for an embedded Portable PDB.
 
 SRM does not expose the stream headers, the `#~` header fields or the external row counts of
 the `#Pdb` stream. The verifier reads these values from the bytes and checks them against SRM:

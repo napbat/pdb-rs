@@ -14,9 +14,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -36,22 +39,30 @@ internal static class Program
                 + RuntimeInformation.FrameworkDescription);
             return 0;
         }
-        if (args.Length != 1)
+        bool embedded = args is ["--embedded", _];
+        if (args.Length != 1 && !embedded)
         {
-            Console.Error.WriteLine("usage: PortableVerifier <file.pdb> | --version");
+            Console.Error.WriteLine("usage: PortableVerifier <file.pdb> | --embedded <image.dll> | --version");
             return 2;
         }
         try
         {
-            byte[] bytes = File.ReadAllBytes(args[0]);
-            using MetadataReaderProvider provider =
-                MetadataReaderProvider.FromPortablePdbImage(ImmutableArray.Create(bytes));
-            MetadataReader reader = provider.GetMetadataReader();
-            var output = new StringBuilder();
-            new Dump(bytes, reader, output).Write();
-            byte[] text = Encoding.UTF8.GetBytes(output.ToString());
-            using Stream stdout = Console.OpenStandardOutput();
-            stdout.Write(text, 0, text.Length);
+            (byte[] bytes, MetadataReaderProvider provider) =
+                embedded ? ReadEmbedded(args[1]) : ReadStandalone(args[0]);
+            using (provider)
+            {
+                MetadataReader reader = provider.GetMetadataReader();
+                if (reader.MetadataLength != bytes.Length)
+                {
+                    throw new InvalidDataException(
+                        $"SRM reads {reader.MetadataLength} bytes of metadata, the decoded PDB has {bytes.Length}");
+                }
+                var output = new StringBuilder();
+                new Dump(bytes, reader, output).Write();
+                byte[] text = Encoding.UTF8.GetBytes(output.ToString());
+                using Stream stdout = Console.OpenStandardOutput();
+                stdout.Write(text, 0, text.Length);
+            }
             return 0;
         }
         catch (Exception error) when (error is BadImageFormatException or InvalidDataException
@@ -60,6 +71,43 @@ internal static class Program
             Console.Error.WriteLine($"error: {error.Message}");
             return 1;
         }
+    }
+
+    /// <summary>Read a standalone Portable PDB file.</summary>
+    private static (byte[], MetadataReaderProvider) ReadStandalone(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        return (bytes, MetadataReaderProvider.FromPortablePdbImage(ImmutableArray.Create(bytes)));
+    }
+
+    /// <summary>
+    /// Read the embedded Portable PDB of an image with
+    /// <see cref="PEReader.ReadEmbeddedPortablePdbDebugDirectoryData"/>.
+    /// </summary>
+    /// <remarks>
+    /// SRM does not expose the decompressed bytes. The dump reads the stream headers from the
+    /// bytes, so this method also decompresses the payload of the debug directory entry with
+    /// <see cref="DeflateStream"/>. <see cref="Main"/> checks its length against SRM.
+    /// </remarks>
+    private static (byte[], MetadataReaderProvider) ReadEmbedded(string path)
+    {
+        byte[] image = File.ReadAllBytes(path);
+        using var pe = new PEReader(ImmutableArray.Create(image));
+        DebugDirectoryEntry entry = pe.ReadDebugDirectory()
+            .FirstOrDefault(entry => entry.Type == DebugDirectoryEntryType.EmbeddedPortablePdb);
+        if (entry.Type != DebugDirectoryEntryType.EmbeddedPortablePdb)
+        {
+            throw new InvalidDataException("the image has no embedded Portable PDB entry");
+        }
+        MetadataReaderProvider provider = pe.ReadEmbeddedPortablePdbDebugDirectoryData(entry);
+        // The payload is `MPDB`, the uncompressed size and the DEFLATE data.
+        var data = new MemoryStream(image, entry.DataPointer + 8, entry.DataSize - 8);
+        var pdb = new MemoryStream();
+        using (var deflate = new DeflateStream(data, CompressionMode.Decompress))
+        {
+            deflate.CopyTo(pdb);
+        }
+        return (pdb.ToArray(), provider);
     }
 }
 
