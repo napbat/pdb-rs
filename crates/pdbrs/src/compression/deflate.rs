@@ -27,10 +27,6 @@ use crate::{Error, ErrorKind, Result};
 /// - [`ErrorKind::UnexpectedEof`] if `input` ends before the final block ends.
 /// - [`ErrorKind::InvalidFormat`] if the stream is corrupt, if it produces fewer
 ///   or more bytes than `declared`, or if bytes follow the final block.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "first user: #14 .NET embedded source decoding")
-)]
 pub(crate) fn decode(input: &[u8], declared: u64, limit: usize) -> Result<Vec<u8>> {
     let mut output = output_buffer(declared, limit)?;
     let mut decompressor = DecompressorOxide::new();
@@ -71,13 +67,6 @@ pub(crate) fn decode(input: &[u8], declared: u64, limit: usize) -> Result<Vec<u8
 ///
 /// - [`ErrorKind::LimitExceeded`] if the output allocation fails.
 /// - [`ErrorKind::InvalidFormat`] if the encoder does not finish the stream.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "first user: #17 Portable PDB embedded source encoding"
-    )
-)]
 pub(crate) fn encode(input: &[u8]) -> Result<Vec<u8>> {
     let mut compressor =
         CompressorOxide::with_format_and_level(DataFormat::Raw, CompressionLevel::DefaultLevel);

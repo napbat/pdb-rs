@@ -7,13 +7,6 @@
 use sha2::{Digest as _, Sha256, Sha384, Sha512};
 
 /// Return the SHA-256 digest of `data`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "first user: #14 .NET document checksum verification"
-    )
-)]
 pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }

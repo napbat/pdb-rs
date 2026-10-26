@@ -66,6 +66,7 @@ macro_rules! values {
 mod annotation;
 mod compile;
 mod global;
+mod managed;
 mod procedure;
 mod scope;
 mod variable;
@@ -76,6 +77,10 @@ pub use compile::{
     Strings,
 };
 pub use global::{CoffGroup, ProcedureReference, Public, PublicFlags, Section};
+pub use managed::{
+    MANAGED_ATTRIBUTE_OEM_ID, ManagedConstant, ManagedConstantValue, ManagedProcedure, ManagedSlot,
+    Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_TOKENREF,
+};
 pub use procedure::{
     Block, CallSiteInfo, FramePointer, FrameProcedure, FrameProcedureFlags, IdList, IdListIter,
     InlineSite, JumpTable, JumpTableEntry, Label, Procedure, ProcedureFlags, ProcedureType, Thunk,
@@ -272,8 +277,17 @@ pub enum SymbolData<'a> {
     Constant(Constant<'a>),
     /// [`S_PUB32`].
     Public(Public<'a>),
-    /// [`S_PROCREF`] and [`S_LPROCREF`].
+    /// [`S_PROCREF`], [`S_LPROCREF`] and [`S_TOKENREF`]. An `S_TOKENREF`
+    /// record names a managed procedure.
     ProcedureReference(ProcedureReference<'a>),
+    /// [`S_GMANPROC`] and [`S_LMANPROC`].
+    ManagedProcedure(ManagedProcedure<'a>),
+    /// [`S_MANSLOT`].
+    ManagedSlot(ManagedSlot<'a>),
+    /// [`S_MANCONSTANT`].
+    ManagedConstant(ManagedConstant<'a>),
+    /// [`S_OEM`].
+    Oem(Oem<'a>),
     /// [`S_SKIP`]: filler bytes without fields.
     ///
     /// Microsoft tools use the record to reserve space for incremental
@@ -345,6 +359,9 @@ impl<'a> Symbol<'a> {
             SymbolData::Constant(value) => Some(value.name),
             SymbolData::Public(value) => Some(value.name),
             SymbolData::ProcedureReference(value) => Some(value.name),
+            SymbolData::ManagedProcedure(value) => Some(value.name),
+            SymbolData::ManagedSlot(value) => Some(value.name),
+            SymbolData::ManagedConstant(value) => Some(value.name),
             _ => None,
         }
     }
@@ -366,6 +383,7 @@ impl<'a> Symbol<'a> {
             SymbolData::Public(value) => Some(value.address),
             SymbolData::CoffGroup(value) => Some(value.address),
             SymbolData::CallSiteInfo(value) => Some(value.address),
+            SymbolData::ManagedProcedure(value) => Some(value.address),
             _ => None,
         }
     }
@@ -388,6 +406,7 @@ impl<'a> Symbol<'a> {
             SymbolData::Data(value) => Some(value.type_index),
             SymbolData::Constant(value) => Some(value.type_index),
             SymbolData::CallSiteInfo(value) => Some(value.type_index),
+            SymbolData::Oem(value) => Some(value.type_index),
             _ => None,
         }
     }
@@ -412,7 +431,7 @@ impl<'a> Symbol<'a> {
 
     /// Return the module and offset of the referenced procedure.
     ///
-    /// Only [`S_PROCREF`] and [`S_LPROCREF`] give a value.
+    /// Only [`S_PROCREF`], [`S_LPROCREF`] and [`S_TOKENREF`] give a value.
     #[must_use]
     pub const fn procedure_reference(&self) -> Option<ProcedureReference<'a>> {
         match self.data {
@@ -423,7 +442,8 @@ impl<'a> Symbol<'a> {
 
     /// Return the parent and end links, if the record starts a scope.
     ///
-    /// Procedures, blocks, thunks and inline sites start a scope.
+    /// Procedures, managed procedures, blocks, thunks and inline sites start
+    /// a scope.
     #[must_use]
     pub const fn scope(&self) -> Option<ScopeLinks> {
         let (parent, end) = match self.data {
@@ -431,6 +451,7 @@ impl<'a> Symbol<'a> {
             SymbolData::Block(value) => (value.parent, value.end),
             SymbolData::Thunk(value) => (value.parent, value.end),
             SymbolData::InlineSite(value) => (value.parent, value.end),
+            SymbolData::ManagedProcedure(value) => (value.parent, value.end),
             _ => return None,
         };
         Some(ScopeLinks { parent, end })
@@ -480,7 +501,13 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
         S_GDATA32 | S_LDATA32 => SymbolData::Data(Data::read(fields)?),
         S_CONSTANT => SymbolData::Constant(Constant::read(fields)?),
         S_PUB32 => SymbolData::Public(Public::read(fields)?),
-        S_PROCREF | S_LPROCREF => SymbolData::ProcedureReference(ProcedureReference::read(fields)?),
+        S_PROCREF | S_LPROCREF | S_TOKENREF => {
+            SymbolData::ProcedureReference(ProcedureReference::read(fields)?)
+        }
+        S_GMANPROC | S_LMANPROC => SymbolData::ManagedProcedure(ManagedProcedure::read(fields)?),
+        S_MANSLOT => SymbolData::ManagedSlot(ManagedSlot::read(fields)?),
+        S_MANCONSTANT => SymbolData::ManagedConstant(ManagedConstant::read(fields)?),
+        S_OEM => SymbolData::Oem(Oem::read(fields)?),
         S_SKIP => SymbolData::Skip(fields.rest()),
         _ => SymbolData::Unsupported(fields.rest()),
     })

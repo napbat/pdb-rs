@@ -14,24 +14,32 @@ use std::error::Error;
 use pdbrs::io::FileReader;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, SectionOffset};
-use pdbrs::native::auxiliary::{LinkInfo, NamedStreamKind, TmCache, UdtSourceLineUndone};
+use pdbrs::native::auxiliary::{
+    LinkInfo, NamedStreamKind, SourceLink, TmCache, UdtSourceLineUndone,
+};
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{Annotation, ModuleSymbols, Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::dbi::{Dbi, DebugStream};
-use pdbrs::native::injected_source::{SourceHeaderBlock, content_stream_name};
+use pdbrs::native::injected_source::{
+    ChecksumCheck, InjectedSource, SourceCompression, SourceHeaderBlock, content_stream_name,
+};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::msf::{OldDirectory, StreamId};
 use pdbrs::native::names::StringTable;
 use pdbrs::native::section::SectionHeaders;
 use pdbrs::native::symbols::{HashTable, RecordOffsets};
 use pdbrs::native::types::{ForwardRefs, HEADER_SIZE, TypeHashes, TypeStream, TypeTable};
+use pdbrs::portable::embedded::EmbeddedFormat;
 use pdbrs::{ErrorKind, Result as PdbResult};
 
 /// The deepest scope nesting that the example accepts in a module.
 const MAX_SCOPE_DEPTH: usize = 256;
+
+/// The largest embedded source that the example decodes.
+const MAX_EMBEDDED_SOURCE: usize = 64 << 20;
 
 type Outcome<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -220,6 +228,10 @@ fn named_streams(
                 }
                 report.add("UDT source lines undone", list.len());
             }
+            NamedStreamKind::SourceLink => {
+                SourceLink::parse(&bytes, named.stream)?;
+                report.add("Source Link streams", 1);
+            }
             NamedStreamKind::SourceHeaderBlock => {
                 let parsed = SourceHeaderBlock::parse(&bytes, named.stream);
                 let Some(Some(block)) = report.supported(parsed, "/src/headerblock")? else {
@@ -235,7 +247,7 @@ fn named_streams(
                         .named_stream(&stream_name)
                         .ok_or("injected source has no content stream")?;
                     let content = pdb.stream_bytes(id)?;
-                    report.supported(source.verify_content(&content, id), "injected source")?;
+                    injected_source(&source, &content, id, report)?;
                     handled.insert(id);
                 }
                 report.add("injected sources", block.entries().len());
@@ -255,6 +267,46 @@ fn named_streams(
             report.undecoded("injected source stream without a header entry".to_owned());
         }
     }
+    Ok(())
+}
+
+/// Verify one injected source stream: file contents or a .NET document record.
+fn injected_source(
+    source: &InjectedSource,
+    content: &[u8],
+    id: StreamId,
+    report: &mut Report,
+) -> Outcome {
+    if source.compression != SourceCompression::DotNet {
+        report.supported(source.verify_content(content, id), "injected source")?;
+        return Ok(());
+    }
+    let document = source.verify_document(content, id)?;
+    report.add(".NET document records", 1);
+    let Some(embedded) = document.embedded else {
+        report.add(".NET document records without embedded source", 1);
+        return Ok(());
+    };
+    let decoded = embedded
+        .decode(MAX_EMBEDDED_SOURCE)
+        .map_err(|error| error.with_stream(id.0, 0))?;
+    report.add(
+        match embedded.format() {
+            EmbeddedFormat::Raw => ".NET embedded sources (raw)",
+            EmbeddedFormat::Deflate => ".NET embedded sources (DEFLATE)",
+        },
+        1,
+    );
+    let check = document
+        .verify_checksum(&decoded)
+        .map_err(|error| error.with_stream(id.0, 0))?;
+    report.add(
+        match check {
+            ChecksumCheck::Verified => ".NET document checksums verified (SHA-256)",
+            ChecksumCheck::NotVerified => ".NET document checksums not verified",
+        },
+        1,
+    );
     Ok(())
 }
 
@@ -521,7 +573,7 @@ fn modules(
                 SymbolData::Unsupported(_) => {
                     report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
                 }
-                SymbolData::Procedure(_) => {
+                SymbolData::Procedure(_) | SymbolData::ManagedProcedure(_) => {
                     procedures.offsets.insert((index, scoped.offset));
                 }
                 SymbolData::InlineSite(site) => {

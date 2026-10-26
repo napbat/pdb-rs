@@ -57,15 +57,15 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot | Writing and repacking |
-| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock` and verified uncompressed injected sources | Non-empty `/TMCache`, `/LinkInfo` version 1, .NET document records (compression byte 101) and run-length, Huffman or LZ injected sources |
+| PDB Info and named streams | Identity, `niMac`, feature codes, named-stream slot placement, `/LinkInfo` version 2, empty `/TMCache`, `/UDTSRCLINEUNDONE`, `/src/headerblock`, verified uncompressed injected sources, .NET document records (compression byte 101) with CRC, size and SHA-256 checks through the shared `portable::embedded` codec, and `sourcelink` JSON bytes | Non-empty `/TMCache`, `/LinkInfo` version 1 and run-length, Huffman or LZ injected sources |
 | TPI and IPI | Modern headers, indexed record iteration, typed TPI leaves (including `LF_VFTABLE` and `LF_LABEL`) and field lists, offset-table lookup, continuation chains, forward-reference resolution, hash values, index offsets and hash adjusters | 32-bit-option UDT leaves, based-pointer data, auxiliary hash streams and type graphs |
 | DBI | Modern header, module records, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, empty type server map and EC names | Non-empty type server maps |
 | String tables | `/names` and EC layout, offset lookup, version 1 hash lookup and bucket checks | Version 2 hashing |
 | Sections and addresses | Section header streams and section-offset to RVA translation in both directions; end-of-section offsets translate to RVAs | OMAP translation |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates, address maps, thunk maps and section starts | Pre-compressed-bucket hash layouts |
-| Symbols | Typed decoding of 39 symbol kinds, including every kind in the Rust sample PDBs and the LLD `S_SKIP` filler; zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) |
+| Symbols | Typed decoding of 45 symbol kinds, including every kind in the Rust sample PDBs, the LLD `S_SKIP` filler and the managed kinds of .NET Windows PDBs (`S_GMANPROC`, `S_LMANPROC`, `S_MANSLOT`, `S_MANCONSTANT`, `S_TOKENREF`, raw `S_OEM` data); zero-padding checks, module scope-link checks, def-range gaps and inline-site binary annotations | Other symbol kinds (kept raw as `Unsupported`) and the Roslyn custom debug information in `S_OEM` |
 | Module lines | Region bounds, C13 subsection framing, line blocks with columns, file checksums, inlinee lines and checksum reference validation | String table, frame data, cross-scope, IL line and token-map subsections |
-| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists | Non-integer leaves |
+| Numeric leaves | Immediate and signed/unsigned integer leaves through 128 bits, with suffix-preserving decoding, in typed records and field lists; `S_MANCONSTANT` also keeps `LF_VARSTRING` and fixed-size real, complex, decimal and date leaves | Non-integer leaves in other records |
 
 Unknown record kinds retain their raw payloads. Names remain bytes; display code chooses how to decode them.
 Header validation does not validate every record payload. Iterate records to check their framing.
@@ -685,7 +685,10 @@ The full-read example read all 17 native fixtures to the end. It reported these 
   FASTLINK PDBs add `S_FASTLINK` and C13 subsection `0xfd`.
 - .NET Windows PDBs (#14): managed procedures and slots, `S_OEM`, `S_MANCONSTANT`, `S_TOKENREF`,
   .NET document records in `/src/files/` streams (compression byte 101) and the `sourcelink` named stream.
-  `llvm-pdbutil` 22.1.6 cannot dump their symbols.
+  `llvm-pdbutil` 22.1.6 cannot dump their symbols. pdbrs now decodes all of them. Its managed procedures
+  (32), blocks (12), slots (11), constants (2) and token references (32) agree with DIA2Dump. The five
+  document records have a correct entry CRC and size. The two embedded sources (one raw, one DEFLATE) match
+  their SHA-256 checksums.
 
 The fixtures also exposed two producer defects that pdbrs reports without failing:
 
@@ -696,7 +699,7 @@ The fixtures also exposed two producer defects that pdbrs reports without failin
 
 The fixtures found two reader defects, now fixed. Incremental links give end markers and empty COFF groups an
 offset equal to the section size; `AddressMap::rva` now accepts the end of a section. Managed procedures open
-scopes; the scope walker now reports them as undecoded instead of reporting a corrupt scope end.
+scopes; the scope walker now decodes them and checks their links instead of reporting a corrupt scope end.
 An empty `/src/headerblock` stream now means that the PDB has no injected sources.
 
 The signature probe was also exercised against a .NET-produced Portable PDB, an embedded PDB payload and ordinary CLI assembly metadata.

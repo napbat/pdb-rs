@@ -1,9 +1,12 @@
 //! A walk over a module symbol stream that checks the scope links.
 //!
-//! Procedures, blocks, thunks and inline sites start a scope. `S_END` or
-//! `S_PROC_ID_END` ends a procedure, block or thunk scope. `S_INLINESITE_END`
-//! ends an inline site scope. These rules follow `symbolOpensScope` and
-//! `symbolEndsScope` in LLVM `SymbolRecordHelpers.h`.
+//! Procedures, managed procedures, blocks, thunks and inline sites start a
+//! scope. `S_END` or `S_PROC_ID_END` ends a procedure, block or thunk scope.
+//! `S_INLINESITE_END` ends an inline site scope. These rules follow
+//! `symbolOpensScope` and `symbolEndsScope` in LLVM `SymbolRecordHelpers.h`.
+//! LLVM does not list the managed procedures `S_GMANPROC` and `S_LMANPROC`,
+//! but `MANPROCSYM` in `cvinfo.h` has parent and end links, and `S_END` ends
+//! their scope.
 //!
 //! The parent and end links are offsets in the module stream. A module
 //! stream starts with a 4-byte signature, so the offset of a record is its
@@ -20,11 +23,8 @@ use crate::{Error, ErrorKind, Result};
 /// Kinds that start a scope but that this crate does not decode.
 ///
 /// The list comes from `symbolOpensScope` and `getScopeEndOffset` in LLVM:
-/// `S_SEPCODE`, `S_LPROC32_DPC`, `S_LPROC32_DPC_ID` and `S_INLINESITE2`. It
-/// adds the managed procedures `S_GMANPROC` and `S_LMANPROC`
-/// (`MANPROCSYM` in `cvinfo.h` has parent and end links). Roslyn writes them
-/// in Windows PDBs of .NET assemblies.
-const UNDECODED_SCOPE_KINDS: [u16; 6] = [0x1132, 0x1155, 0x1156, 0x115d, 0x112a, 0x112b];
+/// `S_SEPCODE`, `S_LPROC32_DPC`, `S_LPROC32_DPC_ID` and `S_INLINESITE2`.
+const UNDECODED_SCOPE_KINDS: [u16; 4] = [0x1132, 0x1155, 0x1156, 0x115d];
 
 /// A symbol with its place in the scope tree.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

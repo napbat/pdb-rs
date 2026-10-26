@@ -17,6 +17,16 @@
 //! lowercase virtual file name with backslashes. The original file name keeps its case.
 //!
 //! This module does not decode the `/names` string table. The caller resolves the name offsets.
+//!
+//! The .NET symbol writers use the compression byte 101 ([`SourceCompression::DotNet`]). Their
+//! streams hold a [`DotNetDocument`] record, not the file contents.
+
+mod document;
+
+pub use document::{
+    CHECKSUM_SHA1, CHECKSUM_SHA256, ChecksumCheck, DOCUMENT_TYPE_TEXT, DotNetDocument,
+    LANGUAGE_CSHARP, VENDOR_MICROSOFT,
+};
 
 use alloc::vec::Vec;
 
@@ -54,7 +64,11 @@ pub enum SourceCompression {
     Huffman,
     /// LZ compression (`srccompressLZ`). This reader does not decode it.
     Lz,
-    /// A value that `pdb.h` does not define.
+    /// A .NET document record (the value 101, LLVM `PDB_SourceCompression::DotNet`).
+    ///
+    /// It is not a compression method: the stream holds a [`DotNetDocument`].
+    DotNet,
+    /// A value that `pdb.h` and LLVM do not define.
     Unknown(u8),
 }
 
@@ -67,6 +81,7 @@ impl SourceCompression {
             1 => Self::RunLength,
             2 => Self::Huffman,
             3 => Self::Lz,
+            101 => Self::DotNet,
             other => Self::Unknown(other),
         }
     }
@@ -77,9 +92,11 @@ impl SourceCompression {
 /// The record size (40) and the version ([`SOURCE_VERSION_ONE`]) are checked and not stored.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InjectedSource {
-    /// The CRC of the file contents: [`hash_buffer_v8`].
+    /// The CRC of the file contents: [`hash_buffer_v8`]. For
+    /// [`SourceCompression::DotNet`], the CRC of the stream bytes.
     pub crc: u32,
-    /// The size of the file contents after decompression.
+    /// The size of the file contents after decompression. For
+    /// [`SourceCompression::DotNet`], the size of the stream.
     pub file_size: u32,
     /// The `/names` offset of the original file name.
     pub file_name_offset: u32,
@@ -163,34 +180,76 @@ impl InjectedSource {
     ///
     /// Errors have the stream ID and logical offset 0.
     ///
-    /// - [`ErrorKind::UnsupportedVersion`] if the entry uses compression.
+    /// - [`ErrorKind::UnsupportedVersion`] if the entry uses compression or holds a
+    ///   .NET document record.
     /// - [`ErrorKind::InvalidFormat`] if the size or the CRC differs.
     pub fn verify_content<'c>(&self, content: &'c [u8], stream: StreamId) -> Result<&'c [u8]> {
-        let fail = |kind, context| {
-            Error::new(kind, None)
-                .with_context(context)
-                .with_stream(stream.0, 0)
-        };
         if self.compression != SourceCompression::None {
-            return Err(fail(
+            return Err(stream_error(
                 ErrorKind::UnsupportedVersion,
                 "injected source compression is not supported",
+                stream,
             ));
         }
+        self.verify_stream(content, stream)?;
+        Ok(content)
+    }
+
+    /// Check the stream of a .NET document entry and decode its record.
+    ///
+    /// `content` holds the full stream `stream`. The entry must have the compression
+    /// [`SourceCompression::DotNet`]. The entry file size and CRC apply to the stream bytes.
+    /// Decode the embedded source with [`EmbeddedSource::decode`](crate::portable::embedded::EmbeddedSource::decode)
+    /// and check it with [`DotNetDocument::verify_checksum`].
+    ///
+    /// # Errors
+    ///
+    /// Errors have the stream ID and logical offset 0.
+    ///
+    /// - [`ErrorKind::UnsupportedVersion`] if the entry has another compression.
+    /// - [`ErrorKind::InvalidFormat`] if the size or the CRC differs.
+    /// - The errors of [`DotNetDocument::parse`].
+    pub fn verify_document<'c>(
+        &self,
+        content: &'c [u8],
+        stream: StreamId,
+    ) -> Result<DotNetDocument<'c>> {
+        if self.compression != SourceCompression::DotNet {
+            return Err(stream_error(
+                ErrorKind::UnsupportedVersion,
+                "injected source does not hold a .NET document record",
+                stream,
+            ));
+        }
+        self.verify_stream(content, stream)?;
+        DotNetDocument::parse(content).map_err(|error| error.with_stream(stream.0, 0))
+    }
+
+    /// Check the size and the CRC of the stream bytes.
+    fn verify_stream(&self, content: &[u8], stream: StreamId) -> Result<()> {
         if u64::try_from(content.len()).ok() != Some(u64::from(self.file_size)) {
-            return Err(fail(
+            return Err(stream_error(
                 ErrorKind::InvalidFormat,
                 "injected source size differs from its entry",
+                stream,
             ));
         }
         if hash_buffer_v8(content) != self.crc {
-            return Err(fail(
+            return Err(stream_error(
                 ErrorKind::InvalidFormat,
                 "injected source CRC differs from its entry",
+                stream,
             ));
         }
-        Ok(content)
+        Ok(())
     }
+}
+
+/// Return an error at logical offset 0 of `stream`.
+fn stream_error(kind: ErrorKind, context: &'static str, stream: StreamId) -> Error {
+    Error::new(kind, None)
+        .with_context(context)
+        .with_stream(stream.0, 0)
 }
 
 /// The header of the `/src/headerblock` stream (`SrcHeaderBlock`).

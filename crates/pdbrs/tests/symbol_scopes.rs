@@ -1,8 +1,8 @@
 //! Tests for the scope checks of module symbol streams.
 
 use pdbrs::native::codeview::symbol::{
-    ModuleSymbols, S_BLOCK32, S_END, S_GPROC32, S_INLINESITE, S_INLINESITE_END, S_LABEL32, S_LOCAL,
-    S_PROC_ID_END, S_THUNK32, ScopedSymbol,
+    ModuleSymbols, S_BLOCK32, S_END, S_GMANPROC, S_GPROC32, S_INLINESITE, S_INLINESITE_END,
+    S_LABEL32, S_LMANPROC, S_LOCAL, S_PROC_ID_END, S_THUNK32, ScopedSymbol, SymbolData,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::{Error, ErrorKind};
@@ -53,6 +53,7 @@ impl Builder {
             S_INLINESITE => payload.extend_from_slice(&0x1001_u32.to_le_bytes()),
             S_BLOCK32 => payload.extend_from_slice(&[0; 10]),
             S_THUNK32 => payload.extend_from_slice(&[0; 13]),
+            S_GMANPROC | S_LMANPROC => payload.extend_from_slice(&[0; 29]),
             _ => payload.extend_from_slice(&[0; 27]),
         }
         if kind != S_INLINESITE {
@@ -261,16 +262,56 @@ fn enforces_the_depth_limit() {
 
 #[test]
 fn rejects_scope_kinds_that_are_not_decoded() {
-    // S_SEPCODE and the managed procedures S_GMANPROC and S_LMANPROC start a
-    // scope, but this crate does not decode them. A later S_END must not be
-    // reported as a scope end without an open scope.
-    for kind in [0x1132, 0x112a, 0x112b] {
+    // S_SEPCODE and S_LPROC32_DPC start a scope, but this crate does not
+    // decode them. A later S_END must not be reported as a scope end without
+    // an open scope.
+    for kind in [0x1132, 0x1155] {
         let mut builder = Builder::default();
         builder.label();
         let opener = builder.push(kind, &[0; 24]);
         assert_eq!(
             failure(&builder, 4),
             (ErrorKind::UnsupportedVersion, u64::from(opener)),
+            "kind {kind:#x}"
+        );
+    }
+}
+
+#[test]
+fn walks_managed_procedure_scopes() {
+    // Roslyn writes `S_GMANPROC { S_BLOCK32 { } } S_END`. `S_END` also ends
+    // a module-local managed procedure.
+    for kind in [S_GMANPROC, S_LMANPROC] {
+        let mut builder = Builder::default();
+        let procedure = builder.open(kind, 0);
+        let block = builder.open(S_BLOCK32, procedure);
+        let block_end = builder.close(S_END, block);
+        let procedure_end = builder.close(S_END, procedure);
+        let symbols: Vec<ScopedSymbol<'_>> =
+            builder.walk(2).into_iter().map(Result::unwrap).collect();
+        let places: Vec<(u32, usize, Option<u32>)> = symbols
+            .iter()
+            .map(|symbol| (symbol.offset, symbol.depth, symbol.scope))
+            .collect();
+        let expected = [
+            (procedure, 0, None),
+            (block, 1, Some(procedure)),
+            (block_end, 2, Some(block)),
+            (procedure_end, 1, Some(procedure)),
+        ];
+        assert_eq!(places, expected, "kind {kind:#x}");
+        assert!(matches!(
+            symbols[0].symbol.data(),
+            SymbolData::ManagedProcedure(_)
+        ));
+
+        // An inline site end cannot end a managed procedure.
+        let mut builder = Builder::default();
+        let procedure = builder.open(kind, 0);
+        let end = builder.close(S_INLINESITE_END, procedure);
+        assert_eq!(
+            failure(&builder, 2),
+            (ErrorKind::InvalidFormat, u64::from(end)),
             "kind {kind:#x}"
         );
     }
