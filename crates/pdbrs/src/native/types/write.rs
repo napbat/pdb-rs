@@ -205,7 +205,8 @@ pub fn serialize_hash_adjusters(adjusters: &[HashAdjuster]) -> Result<Vec<u8>> {
         .rposition(Option::is_some)
         .map_or(0, |last| last / 32);
     let words = used + 1;
-    let size = 4 * (5 + words) + 8 * count;
+    // The count, the slot count, the two bit vector lengths and the words.
+    let size = 4 * (4 + words) + 8 * count;
     let mut out = Vec::new();
     out.try_reserve_exact(size).map_err(|_| no_memory())?;
     let to_u32 = |value: usize| {

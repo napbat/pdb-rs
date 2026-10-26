@@ -170,7 +170,7 @@ fn decodes_procedure_and_member_function() {
 fn rejects_unknown_calling_convention() {
     let data = bytes(&[
         &0x0003_u32.to_le_bytes(),
-        &[0x06, 0x00],
+        &[0x1a, 0x00],
         &0_u16.to_le_bytes(),
         &0x1004_u32.to_le_bytes(),
     ]);
@@ -274,12 +274,24 @@ fn decodes_array_with_numeric_leaf_size() {
 }
 
 #[test]
-fn rejects_non_integer_numeric_leaf() {
-    // `LF_REAL32` is not an integer.
+fn decodes_real_size_and_rejects_unknown_numeric_tag() {
+    // `LF_REAL32` decodes and keeps its bytes.
     let data = bytes(&[
         &0x0070_u32.to_le_bytes(),
         &0x0023_u32.to_le_bytes(),
         &0x8005_u16.to_le_bytes(),
+        &1.5_f32.to_le_bytes(),
+        &[0],
+    ]);
+    let TypeLeaf::Array(array) = decode(LF_ARRAY, &data) else {
+        panic!("not an array");
+    };
+    assert_eq!(array.size.real32(), Some(1.5));
+    // Tag 0x8011 is not defined.
+    let data = bytes(&[
+        &0x0070_u32.to_le_bytes(),
+        &0x0023_u32.to_le_bytes(),
+        &0x8011_u16.to_le_bytes(),
         &[0; 4],
         &[0],
     ]);

@@ -177,7 +177,9 @@ fn build_graph(
                 return Err(invalid("type reference of this role is not T_NOTYPE"));
             }
             if index.is_primitive() {
-                index.primitive()?;
+                index
+                    .primitive()
+                    .map_err(|_| invalid("type reference is an unknown primitive type"))?;
                 if !matches!(reference.role, ReferenceRole::Type) && index != TypeIndex::NONE {
                     return Err(invalid("type reference of this role is a primitive type"));
                 }
