@@ -99,9 +99,82 @@ The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` 
 an `MPDB` payload in the PE debug directory. The manifest also records the workspace commit
 and the host.
 
+The `consumer_tools` section of `manifest.json` copies the tool records of
+`target/tools/manifest.json` (see [Consumer tools](#consumer-tools)). If that file is missing,
+or a file of a built tool is missing, the section records the tool as `unavailable` with the
+reason. The consumer tools never change the result of the fixture build. The section always
+reads `target/tools/` below the workspace root, also with `--out`.
+
 Do not commit generated files. The `target/` directory is ignored by git. The only build
 input in this directory that Cargo writes is `rust/Cargo.lock`. It is committed, and the
 generator builds with `--locked`, so Cargo does not change it.
+
+## Consumer tools
+
+The `tools` command makes two independent consumers of PDB files. Other work compares the
+output of pdbrs with the output of these tools (#21).
+
+| Tool | Source | Use |
+| --- | --- | --- |
+| `pdbtool` | The `pdbtool` crate 0.1.22 from crates.io. This is the version at the pinned `microsoft/pdb-rs` revision `2081a0dd` in `docs/reference/SOURCES.json`. | `check`, `pdz-encode`, `copy`, `compare`, `container` |
+| `DIA2Dump` | The DIA SDK sample of the latest Visual Studio installation with the x64 C++ tools. | Dumps a PDB or an MSFZ file through `msdia140.dll`. |
+
+Run this command from the workspace root. It takes no other arguments:
+
+```sh
+cargo run -p pdbrs-fixtures -- tools
+```
+
+The command does these steps:
+
+1. It runs `cargo install pdbtool --version 0.1.22 --locked --force` with `--root target/tools`
+   and `--target-dir target/tools/pdbtool-build`. A later run only links the executable again.
+2. It reads the installed version from `cargo install --list`.
+3. It finds Visual Studio with `vswhere.exe`.
+4. It deletes `target/tools/dia2dump/` and copies `<VS>/DIA SDK/Samples/DIA2Dump` into it.
+   It never writes to the Visual Studio installation.
+5. In `DIA2Dump.cpp` of the copy, it replaces `CoCreateInstance(__uuidof(DiaSource), ...)`
+   with `NoRegCoCreate(L"msdia140.dll", __uuidof(DiaSource), __uuidof(IDiaDataSource), ...)`.
+   `msdia140.dll` is not registered, so `CoCreateInstance` fails with `0x80040154`.
+6. In `stdafx.h` of the copy, it includes `diacreate.h` and links
+   `<VS>/DIA SDK/lib/amd64/diaguids.lib` with `#pragma comment(lib, ...)`.
+7. It builds the copy with `<VS>/MSBuild/Current/Bin/MSBuild.exe` for `Release|x64`. The
+   platform toolset comes from the `Microsoft.VCToolsVersion.v<NNN>.default.txt` file of the
+   installation, for example `v145` for Visual Studio 18.
+8. It copies `<VS>/DIA SDK/bin/amd64/msdia140.dll` next to `DIA2Dump.exe`.
+9. It writes `target/tools/manifest.json`.
+
+The outputs are in `target/tools/bin/`: `pdbtool.exe`, `DIA2Dump.exe`, `DIA2Dump.pdb` and
+`msdia140.dll`. Each tool writes its command output to `target/tools/<tool>.log`.
+
+`target/tools/manifest.json` has the generator, the workspace commit, the host and one
+record for each tool. Each record has:
+
+- the name, the status (`built`, `failed` or `unavailable`) and the reason
+- the path of the executable and the list of files that the tool needs
+- the version: the crate version and `cargo -V` for `pdbtool`; the Visual Studio version, the
+  platform toolset and the `msdia140.dll` file version for `DIA2Dump`
+- the source: the crate, its repository and the pinned revision for `pdbtool`; the Visual
+  Studio, sample, `diaguids.lib`, `msdia140.dll`, MSBuild and copy paths and the two changes
+  for `DIA2Dump`
+- each command with its working directory
+
+A tool without a prerequisite, for example Visual Studio or the DIA SDK, is `unavailable`. A
+tool whose step fails, for example `cargo install` without network access, is `failed`. The
+command writes the manifest in all cases. It exits with a failure code only if a tool is
+`failed`.
+
+Use the tools like this:
+
+```sh
+target/tools/bin/pdbtool check target/fixtures/msvc-x64-debug/demo.pdb
+target/tools/bin/pdbtool pdz-encode target/fixtures/msvc-x64-debug/demo.pdb target/scratch/demo-msfz.pdb
+target/tools/bin/DIA2Dump -m target/scratch/demo-msfz.pdb
+```
+
+`pdbtool check` exits with code 0 also when a PDB has errors. Read the line
+`Number of PDBs with errors` of its output. Give an MSFZ file a name that ends in `.pdb`.
+Otherwise DIA2Dump reads the file as an executable. `llvm-pdbutil` does not read MSFZ files.
 
 ## Read the fixtures
 

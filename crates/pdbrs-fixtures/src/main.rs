@@ -3,6 +3,9 @@
 //! The generator builds each fixture of the matrix in its own directory below the output
 //! root. It writes `manifest.json` with the status, tool versions, commands and outputs of
 //! each fixture. It exits with a failure code if a fixture with an available toolchain fails.
+//!
+//! The `tools` command installs `pdbtool` and builds `DIA2Dump` into `target/tools/bin`. The
+//! fixture manifest copies the tool records of `target/tools/manifest.json`.
 
 mod args;
 mod classify;
@@ -13,11 +16,11 @@ mod matrix;
 mod plan;
 mod step;
 mod toolchain;
+mod tools;
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::ExitCode;
 
 use crate::args::{Action, Options, USAGE};
 use crate::classify::classify;
@@ -25,7 +28,7 @@ use crate::manifest::{Header, Output, Record, Status, relative_path};
 use crate::matrix::{FIXTURES, Fixture};
 use crate::plan::{Paths, Plan};
 use crate::step::StepError;
-use crate::toolchain::{Toolchains, capture};
+use crate::toolchain::Toolchains;
 
 fn main() -> ExitCode {
     match args::parse(std::env::args().skip(1)) {
@@ -42,17 +45,23 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Ok(Action::Build(options)) => match build(options) {
-            Ok(true) => ExitCode::SUCCESS,
-            Ok(false) => ExitCode::FAILURE,
-            Err(error) => {
-                eprintln!("error: {error}");
-                ExitCode::FAILURE
-            }
-        },
+        Ok(Action::Build(options)) => exit_code(build(options)),
+        Ok(Action::Tools) => exit_code(tools::run(&workspace_root())),
         Err(error) => {
             eprintln!("error: {error}\n\n{USAGE}");
             ExitCode::from(2)
+        }
+    }
+}
+
+/// The exit code of a command that returns `false` if a part failed.
+fn exit_code(result: Result<bool, String>) -> ExitCode {
+    match result {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
         }
     }
 }
@@ -98,22 +107,14 @@ fn build(options: Options) -> Result<bool, String> {
         records.push(record);
     }
 
-    let commit = capture(
-        Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(&workspace),
-    )
-    .ok();
-    let header = Header {
-        commit: commit.as_deref().map(str::trim),
-        out: &out,
-        unix_seconds: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_secs()),
-    };
+    let header = Header::now(&workspace, &out);
+    let consumer_tools = tools::consumer_tools(&workspace);
     let manifest = out.join("manifest.json");
-    fs::write(&manifest, manifest::render(&header, &records))
-        .map_err(|error| format!("cannot write {}: {error}", manifest.display()))?;
+    fs::write(
+        &manifest,
+        manifest::render(&header, &records, consumer_tools),
+    )
+    .map_err(|error| format!("cannot write {}: {error}", manifest.display()))?;
     println!("wrote {}", manifest.display());
     Ok(records.iter().all(|record| record.status != Status::Failed))
 }

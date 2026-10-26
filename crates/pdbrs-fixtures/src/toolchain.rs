@@ -21,6 +21,22 @@ impl VisualStudio {
         self.root.join(r"VC\Auxiliary\Build\vcvarsall.bat")
     }
 
+    /// The installation version, for example `18.9.12112.369`, from `vswhere`.
+    pub fn installation_version(&self) -> Result<String, String> {
+        let root = self.root.to_string_lossy();
+        let text = capture(Command::new(vswhere()?).args([
+            "-path",
+            &root,
+            "-property",
+            "installationVersion",
+        ]))?;
+        text.lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("vswhere printed no installation version for {root}"))
+    }
+
     /// The directory of the LLVM tools for the host architecture.
     pub fn llvm_bin(&self) -> PathBuf {
         let host = if std::env::consts::ARCH == "aarch64" {
@@ -180,24 +196,34 @@ pub fn capture(command: &mut Command) -> Result<String, String> {
     }
 }
 
-fn find_visual_studio(studio: Studio) -> Result<VisualStudio, String> {
+/// The path of `vswhere.exe`, if it exists.
+fn vswhere() -> Result<PathBuf, String> {
     let program_files = std::env::var_os("ProgramFiles(x86)")
         .map_or_else(|| PathBuf::from(r"C:\Program Files (x86)"), PathBuf::from);
     let vswhere = program_files.join(r"Microsoft Visual Studio\Installer\vswhere.exe");
-    if !vswhere.is_file() {
-        return Err(format!(
+    if vswhere.is_file() {
+        Ok(vswhere)
+    } else {
+        Err(format!(
             "{} is missing; Visual Studio is not installed",
             vswhere.display()
-        ));
+        ))
     }
-    let text = capture(Command::new(&vswhere).args(studio.vswhere_filter()).args([
-        "-products",
-        "*",
-        "-requires",
-        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-        "-property",
-        "installationPath",
-    ]))?;
+}
+
+fn find_visual_studio(studio: Studio) -> Result<VisualStudio, String> {
+    let text = capture(
+        Command::new(vswhere()?)
+            .args(studio.vswhere_filter())
+            .args([
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ]),
+    )?;
     let root = text
         .lines()
         .map(str::trim)

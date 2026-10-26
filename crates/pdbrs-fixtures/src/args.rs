@@ -5,12 +5,17 @@ use std::path::PathBuf;
 /// The usage text.
 pub const USAGE: &str = "\
 usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
+       cargo run -p pdbrs-fixtures -- tools
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
                  The default is target/fixtures/ below the workspace root.
   --only <name>  Build only the named fixture. Give the option again for more fixtures.
   --list         Print the fixture names and stop.
-  --help         Print this text and stop.";
+  --help         Print this text and stop.
+
+  tools          Install pdbtool and build DIA2Dump into target/tools/bin/ below the
+                 workspace root, and write target/tools/manifest.json. The command takes
+                 no other arguments.";
 
 /// What the program must do.
 #[derive(Debug, PartialEq, Eq)]
@@ -21,6 +26,8 @@ pub enum Action {
     List,
     /// Build fixtures.
     Build(Options),
+    /// Install and build the consumer tools.
+    Tools,
 }
 
 /// The options of a build.
@@ -39,7 +46,14 @@ where
 {
     let mut options = Options::default();
     let mut list = false;
-    let mut arguments = arguments.into_iter();
+    let mut arguments = arguments.into_iter().peekable();
+    if arguments.next_if(|argument| argument == "tools").is_some() {
+        return match arguments.next().as_deref() {
+            None => Ok(Action::Tools),
+            Some("--help" | "-h") => Ok(Action::Help),
+            Some(other) => Err(format!("`tools` takes no arguments; found `{other}`")),
+        };
+    }
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--help" | "-h" => return Ok(Action::Help),
@@ -105,6 +119,20 @@ mod tests {
     fn list_and_help_stop_the_build() {
         assert_eq!(run(&["--only", "a", "--list"]), Ok(Action::List));
         assert_eq!(run(&["--list", "--help"]), Ok(Action::Help));
+    }
+
+    #[test]
+    fn tools_is_a_command_without_options() {
+        assert_eq!(run(&["tools"]), Ok(Action::Tools));
+        assert_eq!(run(&["tools", "--help"]), Ok(Action::Help));
+        assert_eq!(
+            run(&["tools", "--out", "x"]),
+            Err("`tools` takes no arguments; found `--out`".to_owned())
+        );
+        assert_eq!(
+            run(&["--list", "tools"]),
+            Err("unknown argument `tools`".to_owned())
+        );
     }
 
     #[test]

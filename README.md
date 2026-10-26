@@ -102,12 +102,27 @@ cargo run -p pdbrs-fixtures
 The tool finds MSVC and Clang through the Visual Studio installation. Generated files are not
 committed. Automated tests do not read them; they use synthetic data.
 
+## Consumer tools
+
+Compare the output of pdbrs with two independent consumers: Microsoft's `pdbtool` and
+`DIA2Dump` from the Visual Studio DIA SDK. This command installs `pdbtool` 0.1.22 and builds
+`DIA2Dump` into `target/tools/bin/`:
+
+```sh
+cargo run -p pdbrs-fixtures -- tools
+```
+
+The command finds Visual Studio through `vswhere` and builds a changed copy of the DIA2Dump
+sample. It writes the version, source and path of each tool to `target/tools/manifest.json`.
+The fixture manifest copies these records. [fixtures/README.md](fixtures/README.md#consumer-tools)
+gives the steps and the use of the tools.
+
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `crates/pdbrs/` | The library, its examples and its integration tests. |
-| `crates/pdbrs-fixtures/` | The fixture generator. |
+| `crates/pdbrs-fixtures/` | The fixture generator and the `tools` command for the consumer tools. |
 | `fixtures/` | Demo program sources for the fixtures. |
 | `docs/design/` | The reader and writer design and the implementation evidence. |
 | `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
