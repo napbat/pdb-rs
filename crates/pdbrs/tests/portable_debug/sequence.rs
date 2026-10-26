@@ -4,7 +4,8 @@
 use pdbrs::ErrorKind;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
-    HIDDEN_LINE, SequencePoint, SequencePoints, SourceSpan, encode_sequence_points,
+    EncodedSequencePoints, HIDDEN_LINE, LocalSignatureForm, SequencePoint, SequencePoints,
+    SourceSpan, encode_sequence_points,
 };
 use pdbrs::portable::metadata::{DocumentId, IlOffset, MethodDebugInformationId, StandAloneSigId};
 
@@ -41,11 +42,20 @@ fn decode(blob: &[u8], document: u32) -> pdbrs::Result<Vec<SequencePoint>> {
     SequencePoints::decode(blob, DocumentId::new(document))?.collect()
 }
 
+/// Encode with the `LocalSignature` row form of the specification.
+fn encode(signature: u32, points: &[SequencePoint]) -> pdbrs::Result<EncodedSequencePoints> {
+    encode_sequence_points(
+        StandAloneSigId::new(signature),
+        LocalSignatureForm::Row,
+        points,
+    )
+}
+
 #[test]
 fn hidden_points_and_signed_deltas_decode() {
     let decoded = SequencePoints::decode(&SINGLE, DocumentId::new(1)).unwrap();
     assert_eq!(decoded.local_signature(), StandAloneSigId::new(1));
-    assert!(!decoded.local_signature_is_token());
+    assert_eq!(decoded.local_signature_form(), LocalSignatureForm::Row);
     let points: Vec<_> = decoded.collect::<Result<_, _>>().unwrap();
     assert_eq!(
         points,
@@ -77,16 +87,16 @@ fn document_records_change_the_document() {
 #[test]
 fn the_encoder_writes_the_roslyn_form() {
     let single = decode(&SINGLE, 1).unwrap();
-    let encoded = encode_sequence_points(StandAloneSigId::new(1), &single).unwrap();
+    let encoded = encode(1, &single).unwrap();
     assert_eq!(encoded.document, DocumentId::new(1));
     assert_eq!(encoded.blob, SINGLE);
 
     let multi = decode(&MULTI, 0).unwrap();
-    let encoded = encode_sequence_points(StandAloneSigId::new(0), &multi).unwrap();
+    let encoded = encode(0, &multi).unwrap();
     assert_eq!(encoded.document, DocumentId::new(0));
     assert_eq!(encoded.blob, MULTI);
 
-    let empty = encode_sequence_points(StandAloneSigId::new(3), &[]).unwrap();
+    let empty = encode(3, &[]).unwrap();
     assert_eq!(empty.document, DocumentId::new(0));
     assert_eq!(empty.blob, []);
 }
@@ -100,10 +110,10 @@ fn large_values_and_deltas_round_trip() {
         point(0x1fff_fffe, 1, None),
     ];
     // The last two points have the same IL offset, so the encoder rejects them.
-    let error = encode_sequence_points(StandAloneSigId::new(0), &points).unwrap_err();
+    let error = encode(0, &points).unwrap_err();
     expect(&error, ErrorKind::InvalidFormat, "do not increase");
     let points = &points[..3];
-    let encoded = encode_sequence_points(StandAloneSigId::new(2), points).unwrap();
+    let encoded = encode(2, points).unwrap();
     assert_eq!(encoded.document, DocumentId::new(0));
     assert_eq!(decode(&encoded.blob, 0).unwrap(), points);
 }
@@ -181,30 +191,38 @@ fn bounds_and_record_rules_are_checked() {
 }
 
 #[test]
-fn the_fsharp_token_form_of_the_local_signature_decodes() {
+fn the_fsharp_token_form_of_the_local_signature_round_trips() {
     let blob = [0xd1, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00];
     let decoded = SequencePoints::decode(&blob, DocumentId::new(1)).unwrap();
     assert_eq!(decoded.local_signature(), StandAloneSigId::new(4));
-    assert!(decoded.local_signature_is_token());
+    let form = decoded.local_signature_form();
+    assert_eq!(form, LocalSignatureForm::Token);
+    let points: Vec<_> = decoded.collect::<Result<_, _>>().unwrap();
+    let encoded = encode_sequence_points(StandAloneSigId::new(4), form, &points).unwrap();
+    assert_eq!(encoded.blob, blob);
+    // The row form writes the row; a nil row is 0 in both forms.
+    assert_eq!(encode(4, &points).unwrap().blob[0], 0x04);
+    let nil = encode_sequence_points(StandAloneSigId::new(0), LocalSignatureForm::Token, &points);
+    assert_eq!(nil.unwrap().blob[0], 0x00);
 }
 
 #[test]
 fn the_encoder_checks_its_input() {
     let nil = [point(0, 0, None)];
     expect(
-        &encode_sequence_points(StandAloneSigId::new(0), &nil).unwrap_err(),
+        &encode(0, &nil).unwrap_err(),
         ErrorKind::InvalidFormat,
         "nil",
     );
     let backwards = [point(0, 1, Some((2, 5, 2, 5)))];
     expect(
-        &encode_sequence_points(StandAloneSigId::new(0), &backwards).unwrap_err(),
+        &encode(0, &backwards).unwrap_err(),
         ErrorKind::InvalidFormat,
         "ends before",
     );
     let hidden = [point(0, 1, Some((HIDDEN_LINE, 0, HIDDEN_LINE, 1)))];
     expect(
-        &encode_sequence_points(StandAloneSigId::new(0), &hidden).unwrap_err(),
+        &encode(0, &hidden).unwrap_err(),
         ErrorKind::InvalidFormat,
         "hidden line",
     );

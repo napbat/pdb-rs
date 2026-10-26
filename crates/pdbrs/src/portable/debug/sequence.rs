@@ -146,11 +146,15 @@ impl<'a> SequencePoints<'a> {
         StandAloneSigId::new(self.local_signature & MAX_ROW)
     }
 
-    /// Return `true` if the header has the `LocalSignature` as a full token (the F# form),
-    /// not as a row.
+    /// Return the form of the `LocalSignature` field in the header. A nil row has the row
+    /// form.
     #[must_use]
-    pub const fn local_signature_is_token(&self) -> bool {
-        self.local_signature > MAX_ROW
+    pub const fn local_signature_form(&self) -> LocalSignatureForm {
+        if self.local_signature > MAX_ROW {
+            LocalSignatureForm::Token
+        } else {
+            LocalSignatureForm::Row
+        }
     }
 
     /// Return the document of the first sequence point.
@@ -252,6 +256,17 @@ impl Iterator for SequencePoints<'_> {
 
 impl FusedIterator for SequencePoints<'_> {}
 
+/// The form of the `LocalSignature` field in a sequence point header.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum LocalSignatureForm {
+    /// The `StandAloneSig` row, as the specification and Roslyn write it.
+    #[default]
+    Row,
+    /// The full `StandAloneSig` token (`0x11` in the high byte), as the F# compiler writes it.
+    /// A nil row is 0 in both forms.
+    Token,
+}
+
 /// The result of [`encode_sequence_points`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EncodedSequencePoints {
@@ -266,7 +281,9 @@ pub struct EncodedSequencePoints {
 ///
 /// If all points have the same document, the blob has no document and the result gives the
 /// document for the `Document` column. Otherwise, the header has the initial document and a
-/// document record comes before each point with a different document.
+/// document record comes before each point with a different document. `form` selects how the
+/// header stores `local_signature`; use [`SequencePoints::local_signature_form`] to keep the
+/// form of a decoded blob.
 ///
 /// # Errors
 ///
@@ -276,6 +293,7 @@ pub struct EncodedSequencePoints {
 ///   a compressed integer.
 pub fn encode_sequence_points(
     local_signature: StandAloneSigId,
+    form: LocalSignatureForm,
     points: &[SequencePoint],
 ) -> Result<EncodedSequencePoints> {
     let Some(first) = points.first() else {
@@ -286,7 +304,14 @@ pub fn encode_sequence_points(
     };
     let single = points.iter().all(|point| point.document == first.document);
     let mut writer = Writer::new();
-    writer.unsigned(local_signature.get())?;
+    let header = match form {
+        LocalSignatureForm::Token if !local_signature.is_nil() => local_signature
+            .token()
+            .ok_or_else(|| invalid("LocalSignature row does not fit in a token"))?
+            .get(),
+        _ => local_signature.get(),
+    };
+    writer.unsigned(header)?;
     let mut document = if single { Some(first.document) } else { None };
     let mut previous_offset: Option<u32> = None;
     let mut previous_start: Option<(u32, u16)> = None;

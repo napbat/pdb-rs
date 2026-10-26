@@ -7,10 +7,9 @@ use std::collections::BTreeMap;
 
 use pdbrs::io::FileReader;
 use pdbrs::portable::Pdb;
-use pdbrs::portable::compressed::encode_unsigned;
 use pdbrs::portable::debug::{
-    DocumentName, Import, LocalConstantSignature, Outcome as RuleOutcome, ValidateOptions,
-    encode_imports, encode_sequence_points, split_document_name,
+    DocumentName, Import, LocalConstantSignature, LocalSignatureForm, Outcome as RuleOutcome,
+    ValidateOptions, encode_imports, encode_sequence_points, split_document_name,
 };
 use pdbrs::portable::metadata::BlobOffset;
 
@@ -104,7 +103,13 @@ fn sequence_points(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
         };
         counts.add("methods with sequence points", 1);
         let signature = decoded.local_signature();
-        let token = decoded.local_signature_is_token();
+        let form = decoded.local_signature_form();
+        if form == LocalSignatureForm::Token {
+            counts.add(
+                "sequence point headers with a LocalSignature token (F# form)",
+                1,
+            );
+        }
         let points = decoded
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| method.blob_error(error))?;
@@ -116,41 +121,25 @@ fn sequence_points(pdb: &Pdb<FileReader>, counts: &mut Counts) -> Outcome {
             .filter(|pair| pair[0].document != pair[1].document)
             .count();
         counts.add("sequence point document changes", changes);
-        let encoded = encode_sequence_points(signature, &points)?;
+        // Keep the header form of the decoded blob, so an F# blob also gives the same bytes.
+        let encoded = encode_sequence_points(signature, form, &points)?;
         let what = format!("MethodDebugInformation row {}", method.id().get());
         let original = method.sequence_points_blob();
-        if encoded.document != method.document() {
-            compare(
-                counts,
-                &what,
-                &[],
-                original,
-                "the Document column is not the Roslyn form",
-            );
-        } else if token {
-            // Put the full token into the header of the encoded blob, as F# does.
-            let row = encode_unsigned(signature.get())?;
-            let token = signature.token().ok_or("LocalSignature row is too large")?;
-            let mut fsharp = encode_unsigned(token.get())?.as_bytes().to_vec();
-            fsharp.extend_from_slice(&encoded.blob[row.as_bytes().len()..]);
-            compare(
-                counts,
-                &what,
-                &encoded.blob,
-                original,
-                "the header has the LocalSignature as a full token (F# form), not as a row",
-            );
-            if fsharp != original {
-                counts.add("F# sequence point blobs with other differences", 1);
-                println!("{what}: the blob has differences other than the LocalSignature form");
-            }
-        } else {
+        if encoded.document == method.document() {
             compare(
                 counts,
                 &what,
                 &encoded.blob,
                 original,
                 "the record order or the integer sizes are not the Roslyn form",
+            );
+        } else {
+            compare(
+                counts,
+                &what,
+                &[],
+                original,
+                "the Document column is not the Roslyn form",
             );
         }
     }

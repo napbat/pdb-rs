@@ -56,7 +56,7 @@ pub use document::{
 pub use imports::{Import, ImportScope, Imports, encode_imports};
 pub use scope::{LocalScope, LocalVariable, StateMachineMethod};
 pub use sequence::{
-    EncodedSequencePoints, HIDDEN_LINE, MAX_COLUMN, MAX_IL_OFFSET, MAX_LINE,
+    EncodedSequencePoints, HIDDEN_LINE, LocalSignatureForm, MAX_COLUMN, MAX_IL_OFFSET, MAX_LINE,
     MethodDebugInformation, SequencePoint, SequencePoints, SourceSpan, encode_sequence_points,
 };
 pub use validate::{Outcome, Rule, RuleReport, ValidateOptions, ValidationReport};

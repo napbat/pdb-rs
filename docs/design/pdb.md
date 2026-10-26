@@ -130,8 +130,8 @@ The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `S
 `cargo run -p pdbrs-fixtures -- verify-portable` compares it with the pdbrs dump; `fixtures/README.md` describes the format.
 The dump has the raw rows, the decoded debug tables (#23) and the decoded custom debug information (#24).
 Evidence ([#22](https://github.com/napbat/pdbrs/issues/22), [#23](https://github.com/napbat/pdbrs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
-The encoders give the same bytes for every debug table blob of the C# and VB fixtures.
-For F#, 26 sequence point blobs differ only in the `LocalSignature` header: the F# compiler writes a full `StandAloneSig` token, not a row. The decoder accepts both forms.
+The encoders give the same bytes for every debug table blob of the four standalone fixtures (62, 62, 25 and 45 blobs).
+In 26 F# sequence point blobs, the `LocalSignature` header is a full `StandAloneSig` token, not a row. `SequencePoints::local_signature_form` reports the form, and `encode_sequence_points` takes a `LocalSignatureForm` to keep it.
 `cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
 It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
 
