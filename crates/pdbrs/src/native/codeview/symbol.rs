@@ -88,6 +88,8 @@ pub use variable::{
     DefRangeRegisterRelativeIndirect, Local, LocalFlags, RegisterRelative, UserDefinedType,
 };
 
+/// The kind of a filler record that reserves space (`S_SKIP`).
+pub const S_SKIP: u16 = 0x0007;
 /// The kind of the end of a procedure, block or thunk scope (`S_END`).
 pub const S_END: u16 = 0x0006;
 /// The kind of a frame procedure record (`S_FRAMEPROC`).
@@ -272,6 +274,12 @@ pub enum SymbolData<'a> {
     Public(Public<'a>),
     /// [`S_PROCREF`] and [`S_LPROCREF`].
     ProcedureReference(ProcedureReference<'a>),
+    /// [`S_SKIP`]: filler bytes without fields.
+    ///
+    /// Microsoft tools use the record to reserve space for incremental
+    /// builds. LLD replaces a record that it cannot remap with a zero-filled
+    /// `S_SKIP` record of the same size. The value is the whole payload.
+    Skip(&'a [u8]),
     /// A kind that this crate does not decode. The value is the raw payload
     /// after the kind field, with its padding.
     Unsupported(&'a [u8]),
@@ -290,7 +298,7 @@ impl<'a> Symbol<'a> {
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let mut fields = Fields::new(record.data, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
         let data = decode_data(record.kind, &mut fields)?;
-        if !matches!(data, SymbolData::Unsupported(_)) {
+        if !matches!(data, SymbolData::Unsupported(_) | SymbolData::Skip(_)) {
             fields.finish_zero_padding()?;
         }
         Ok(Self { record, data })
@@ -473,6 +481,7 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
         S_CONSTANT => SymbolData::Constant(Constant::read(fields)?),
         S_PUB32 => SymbolData::Public(Public::read(fields)?),
         S_PROCREF | S_LPROCREF => SymbolData::ProcedureReference(ProcedureReference::read(fields)?),
+        S_SKIP => SymbolData::Skip(fields.rest()),
         _ => SymbolData::Unsupported(fields.rest()),
     })
 }

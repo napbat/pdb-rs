@@ -21,15 +21,19 @@ mod udt;
 
 pub use super::field_list::FieldList;
 pub use attributes::{
-    CallingConvention, ClassOptions, FunctionOptions, HfaKind, MemberAccess, MemberAttributes,
-    MemberPointerRepresentation, MethodKind, MocomKind, ModifierOptions, PointerAttributes,
-    PointerKind, PointerMode, VtableSlotKind,
+    CallingConvention, ClassOptions, FunctionOptions, HfaKind, LabelMode, MemberAccess,
+    MemberAttributes, MemberPointerRepresentation, MethodKind, MocomKind, ModifierOptions,
+    PointerAttributes, PointerKind, PointerMode, VtableSlotKind,
 };
-pub use list::{ArgumentList, MethodList, MethodListEntry, MethodListIter, VtableShape};
+pub use list::{
+    ArgumentList, MethodList, MethodListEntry, MethodListIter, VirtualFunctionTable, VtableShape,
+};
 pub use udt::{Class, ClassKind, Enum, Tag, Union};
 
 /// The kind of a virtual function table shape (`LF_VTSHAPE`).
 pub const LF_VTSHAPE: u16 = 0x000a;
+/// The kind of a code label type (`LF_LABEL`).
+pub const LF_LABEL: u16 = 0x000e;
 /// The kind of a type with modifiers (`LF_MODIFIER`).
 pub const LF_MODIFIER: u16 = 0x1001;
 /// The kind of a pointer type (`LF_POINTER`).
@@ -58,6 +62,8 @@ pub const LF_UNION: u16 = 0x1506;
 pub const LF_ENUM: u16 = 0x1507;
 /// The kind of an interface type (`LF_INTERFACE`).
 pub const LF_INTERFACE: u16 = 0x1519;
+/// The kind of a virtual function table with method names (`LF_VFTABLE`).
+pub const LF_VFTABLE: u16 = 0x151d;
 
 /// The error context for a payload that ends before its last field.
 pub(crate) const TRUNCATED: &str = "type record payload is truncated";
@@ -97,6 +103,10 @@ pub enum TypeLeaf<'a> {
     Enum(Enum<'a>),
     /// `LF_VTSHAPE`.
     VtableShape(VtableShape<'a>),
+    /// `LF_VFTABLE`.
+    VirtualFunctionTable(VirtualFunctionTable<'a>),
+    /// `LF_LABEL`: the addressing mode of a code label.
+    Label(LabelMode),
     /// A kind without a decoder in this crate.
     ///
     /// The record keeps the kind and the payload, including padding. ID
@@ -135,6 +145,8 @@ impl<'a> TypeLeaf<'a> {
             LF_UNION => Self::Union(Union::decode(data)?),
             LF_ENUM => Self::Enum(Enum::decode(data)?),
             LF_VTSHAPE => Self::VtableShape(VtableShape::decode(data)?),
+            LF_VFTABLE => Self::VirtualFunctionTable(VirtualFunctionTable::decode(data)?),
+            LF_LABEL => Self::Label(decode_label(data)?),
             _ => Self::Unsupported(record),
         })
     }
@@ -152,6 +164,14 @@ impl<'a> TypeLeaf<'a> {
             _ => None,
         }
     }
+}
+
+/// Decode the payload of an `LF_LABEL` record: a `u16` addressing mode.
+fn decode_label(data: &[u8]) -> Result<LabelMode> {
+    let mut fields = fields(data);
+    let mode = LabelMode::from_raw(fields.u16()?)?;
+    fields.finish_type_padding()?;
+    Ok(mode)
 }
 
 /// An `LF_MODIFIER` record: a type with `const`, `volatile` or `__unaligned`.

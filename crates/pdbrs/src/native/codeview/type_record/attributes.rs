@@ -384,6 +384,16 @@ raw_enum! {
     }
 }
 
+raw_enum! {
+    /// The addressing mode of a code label type (`CV_LABEL_TYPE_e`).
+    LabelMode: u16, "label type has an unknown addressing mode" {
+        /// A near label.
+        Near = 0x00,
+        /// A far label.
+        Far = 0x04,
+    }
+}
+
 /// The attribute word of an `LF_POINTER` record (`lfPointerAttr`).
 ///
 /// The layout is: kind in bits 0 to 4, mode in bits 5 to 7, the modifier

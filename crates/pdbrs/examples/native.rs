@@ -3,7 +3,9 @@
 //! The example decodes each stream role, checks the references between
 //! streams and prints counts. It stops at the first malformed structure.
 //! At the end, it fails if a record kind, a subsection kind or a stream has
-//! no typed decoder. The library keeps names as bytes.
+//! no typed decoder. It reports producer defects that do not stop reading,
+//! for example an index record outside the bucket of its name, without
+//! failing. The library keeps names as bytes.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
@@ -40,6 +42,8 @@ struct Report {
     counts: BTreeMap<&'static str, usize>,
     /// Descriptions of data without a typed decoder.
     undecoded: Vec<String>,
+    /// Decoded data that breaks a producer rule but does not stop reading.
+    inconsistencies: Vec<String>,
 }
 
 impl Report {
@@ -53,6 +57,10 @@ impl Report {
 
     fn undecoded(&mut self, what: String) {
         self.undecoded.push(what);
+    }
+
+    fn inconsistency(&mut self, what: String) {
+        self.inconsistencies.push(what);
     }
 }
 
@@ -560,7 +568,7 @@ fn shared_symbols(
     if let Some(globals) = pdb.global_symbols(dbi)? {
         report.claim(dbi.header().global_stream.ok_or("missing global stream")?);
         globals.hash_table().check_records(&offsets)?;
-        check_lookup(globals.hash_table(), &bytes, &mut indexed)?;
+        check_lookup("global", globals.hash_table(), &bytes, &mut indexed, report)?;
         report.add("global index records", globals.hash_table().len());
     }
     if let Some(publics) = pdb.public_symbols(dbi)? {
@@ -574,7 +582,7 @@ fn shared_symbols(
             })?;
             Ok((address.section, address.offset))
         })?;
-        check_lookup(publics.hash_table(), &bytes, &mut indexed)?;
+        check_lookup("public", publics.hash_table(), &bytes, &mut indexed, report)?;
         report.add("public index records", publics.hash_table().len());
     }
     report.add(
@@ -585,7 +593,16 @@ fn shared_symbols(
 }
 
 /// Make sure that name lookup finds every record of a symbol hash table.
-fn check_lookup(table: HashTable<'_>, bytes: &[u8], indexed: &mut HashSet<u32>) -> Outcome {
+///
+/// A record outside the bucket of its name is a producer defect: lookup by
+/// name cannot find it. The example reports it and continues.
+fn check_lookup(
+    label: &str,
+    table: HashTable<'_>,
+    bytes: &[u8],
+    indexed: &mut HashSet<u32>,
+    report: &mut Report,
+) -> Outcome {
     for entry in table.records() {
         let symbol = entry.symbol.record(bytes)?.symbol()?;
         let name = symbol.name().ok_or("indexed symbol has no name")?;
@@ -593,7 +610,11 @@ fn check_lookup(table: HashTable<'_>, bytes: &[u8], indexed: &mut HashSet<u32>) 
             .lookup(name)
             .any(|candidate| candidate.symbol == entry.symbol)
         {
-            return Err("name lookup does not find an indexed symbol".into());
+            report.inconsistency(format!(
+                "{label} index record at symbol offset {} is outside the bucket of {}",
+                entry.symbol.0,
+                String::from_utf8_lossy(name)
+            ));
         }
         indexed.insert(entry.symbol.0);
     }
@@ -617,6 +638,10 @@ fn print(report: &Report) {
     }
     println!("undecoded items: {}", report.undecoded.len());
     for item in &report.undecoded {
+        println!("  {item}");
+    }
+    println!("inconsistencies: {}", report.inconsistencies.len());
+    for item in &report.inconsistencies {
         println!("  {item}");
     }
 }

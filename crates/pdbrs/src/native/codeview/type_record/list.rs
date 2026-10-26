@@ -1,5 +1,5 @@
-//! Type records that hold a list: argument lists, method overload lists and
-//! virtual function table shapes.
+//! Type records that hold a list: argument lists, method overload lists,
+//! virtual function table shapes and virtual function table names.
 
 use core::iter::FusedIterator;
 
@@ -223,5 +223,68 @@ impl<'a> VtableShape<'a> {
             };
             VtableSlotKind::from_raw(nibble).ok()
         })
+    }
+}
+
+/// An `LF_VFTABLE` record: a virtual function table and its method names.
+///
+/// The payload has the complete class, the overridden table, the offset of
+/// the table pointer, a `u32` byte length and then that many bytes of
+/// NUL-terminated names (`lfVftable` in `cvinfo.h`, `VFTableRecord` in
+/// LLVM). The first name is the table name; the others are method names.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct VirtualFunctionTable<'a> {
+    /// The class or structure that owns the table.
+    pub complete_class: TypeIndex,
+    /// The table that this table overrides, if any.
+    pub overridden_table: Option<TypeIndex>,
+    /// The offset of the table pointer in the object layout.
+    pub table_pointer_offset: u32,
+    /// The names, each with its NUL terminator.
+    names: &'a [u8],
+}
+
+impl<'a> VirtualFunctionTable<'a> {
+    /// Decode and validate the payload of an `LF_VFTABLE` record.
+    ///
+    /// The name bytes must hold at least the table name, and every name must
+    /// end with a NUL byte inside the declared length.
+    pub(super) fn decode(data: &'a [u8]) -> Result<Self> {
+        let mut fields = fields(data);
+        let complete_class = fields.type_index()?;
+        let overridden = fields.type_index()?;
+        let table_pointer_offset = fields.u32()?;
+        let length = usize::try_from(fields.u32()?)
+            .map_err(|_| Error::new(ErrorKind::InvalidFormat, None).with_context(TRUNCATED))?;
+        let names = fields.bytes(length)?;
+        fields.finish_type_padding()?;
+        if names.last() != Some(&0) {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("virtual function table names do not end with a NUL byte"));
+        }
+        Ok(Self {
+            complete_class,
+            overridden_table: (overridden != TypeIndex::NONE).then_some(overridden),
+            table_pointer_offset,
+            names,
+        })
+    }
+
+    /// Return the name of the table.
+    #[must_use]
+    pub fn table_name(&self) -> &'a [u8] {
+        self.all_names().next().unwrap_or_default()
+    }
+
+    /// Return an iterator over the method names, in table order.
+    pub fn method_names(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
+        self.all_names().skip(1)
+    }
+
+    /// Return all names, the table name first.
+    fn all_names(&self) -> impl Iterator<Item = &'a [u8]> + 'a {
+        // `decode` makes sure that the bytes end with a NUL byte.
+        let names = self.names;
+        names[..names.len() - 1].split(|&byte| byte == 0)
     }
 }

@@ -6,10 +6,10 @@ use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{
     CallingConvention, ClassKind, ClassOptions, FunctionOptions, HfaKind, LF_ARGLIST, LF_ARRAY,
-    LF_BITFIELD, LF_CLASS, LF_ENUM, LF_INTERFACE, LF_METHODLIST, LF_MFUNCTION, LF_MODIFIER,
-    LF_POINTER, LF_PROCEDURE, LF_STRUCTURE, LF_UNION, LF_VTSHAPE, MemberAccess, MemberAttributes,
-    MemberPointerRepresentation, MethodKind, MocomKind, PointerAttributes, PointerKind,
-    PointerMode, TypeLeaf, VtableSlotKind,
+    LF_BITFIELD, LF_CLASS, LF_ENUM, LF_INTERFACE, LF_LABEL, LF_METHODLIST, LF_MFUNCTION,
+    LF_MODIFIER, LF_POINTER, LF_PROCEDURE, LF_STRUCTURE, LF_UNION, LF_VFTABLE, LF_VTSHAPE,
+    LabelMode, MemberAccess, MemberAttributes, MemberPointerRepresentation, MethodKind, MocomKind,
+    PointerAttributes, PointerKind, PointerMode, TypeLeaf, VtableSlotKind,
 };
 
 /// Add `LF_PAD` bytes so that `payload` plus the 4-byte prefix is aligned to 4.
@@ -447,6 +447,8 @@ fn rejects_truncated_leaves() {
         (LF_UNION, 9),
         (LF_ENUM, 11),
         (LF_VTSHAPE, 1),
+        (LF_VFTABLE, 15),
+        (LF_LABEL, 1),
     ] {
         assert_eq!(
             decode_error(kind, &vec![0; length]),
@@ -482,4 +484,65 @@ fn rejects_invalid_padding_and_missing_terminators() {
         b"abc",
     ]);
     assert_eq!(decode_error(LF_ARRAY, &data), ErrorKind::InvalidFormat);
+}
+
+fn vftable(overridden: u32, names: &[u8], length: u32) -> Vec<u8> {
+    padded(bytes(&[
+        &0x1895_u32.to_le_bytes(),
+        &overridden.to_le_bytes(),
+        &8_u32.to_le_bytes(),
+        &length.to_le_bytes(),
+        names,
+    ]))
+}
+
+#[test]
+fn decodes_virtual_function_table_names() {
+    let names = b"??_7type_info@@6B@\0??_Etype_info@@UEAAPEAXI@Z\0";
+    let data = vftable(0, names, u32::try_from(names.len()).unwrap());
+    let TypeLeaf::VirtualFunctionTable(table) = decode(LF_VFTABLE, &data) else {
+        panic!("not a virtual function table");
+    };
+    assert_eq!(table.complete_class, TypeIndex(0x1895));
+    assert_eq!(table.overridden_table, None);
+    assert_eq!(table.table_pointer_offset, 8);
+    assert_eq!(table.table_name(), b"??_7type_info@@6B@");
+    let methods: Vec<_> = table.method_names().collect();
+    assert_eq!(methods, [&b"??_Etype_info@@UEAAPEAXI@Z"[..]]);
+
+    let data = vftable(0x1001, b"t\0", 2);
+    let TypeLeaf::VirtualFunctionTable(table) = decode(LF_VFTABLE, &data) else {
+        panic!("not a virtual function table");
+    };
+    assert_eq!(table.overridden_table, Some(TypeIndex(0x1001)));
+    assert_eq!(table.method_names().count(), 0);
+}
+
+#[test]
+fn rejects_virtual_function_table_names_outside_their_length() {
+    // The declared length excludes the terminator of the last name.
+    assert_eq!(
+        decode_error(LF_VFTABLE, &vftable(0, b"t\0", 1)),
+        ErrorKind::InvalidFormat
+    );
+    // The declared length passes the end of the record.
+    assert_eq!(
+        decode_error(LF_VFTABLE, &vftable(0, b"t\0", 9)),
+        ErrorKind::InvalidFormat
+    );
+    // No table name.
+    assert_eq!(
+        decode_error(LF_VFTABLE, &vftable(0, b"", 0)),
+        ErrorKind::InvalidFormat
+    );
+}
+
+#[test]
+fn decodes_label_modes_and_rejects_unknown_modes() {
+    for (raw, mode) in [(0_u16, LabelMode::Near), (4, LabelMode::Far)] {
+        let data = padded(raw.to_le_bytes().to_vec());
+        assert_eq!(decode(LF_LABEL, &data), TypeLeaf::Label(mode));
+    }
+    let data = padded(2_u16.to_le_bytes().to_vec());
+    assert_eq!(decode_error(LF_LABEL, &data), ErrorKind::InvalidFormat);
 }

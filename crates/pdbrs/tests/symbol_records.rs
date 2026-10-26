@@ -12,8 +12,8 @@ use pdbrs::native::codeview::symbol::{
     S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_DEFRANGE_REGISTER_REL,
     S_DEFRANGE_REGISTER_REL_INDIR, S_END, S_ENVBLOCK, S_FRAMEPROC, S_INLINEES, S_INLINESITE,
     S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROCREF, S_OBJNAME, S_PROC_ID_END, S_PROCREF,
-    S_REGREL32, S_SECTION, S_THUNK32, S_UDT, S_UNAMESPACE, SourceLanguage, Symbol, SymbolData,
-    ThunkOrdinal,
+    S_REGREL32, S_SECTION, S_SKIP, S_THUNK32, S_UDT, S_UNAMESPACE, SourceLanguage, Symbol,
+    SymbolData, ThunkOrdinal,
 };
 
 /// A builder for little-endian symbol payloads.
@@ -676,4 +676,17 @@ fn decodes_procedure_references() {
     decode(S_PROCREF, &payload, |symbol| {
         assert_eq!(symbol.procedure_reference().unwrap().module_index(), None);
     });
+}
+
+#[test]
+fn keeps_skip_filler_without_padding_rules() {
+    // LLD fills a replaced record with zero bytes; other writers can leave any bytes.
+    for filler in [&[0_u8; 22][..], b"\x01\x02\x03\x04\x05\x06"] {
+        let bytes = unpadded(S_SKIP, filler);
+        let record = Records::new(&bytes).next().unwrap().unwrap();
+        let symbol = record.symbol().unwrap();
+        assert_eq!(*symbol.data(), SymbolData::Skip(filler));
+        assert_eq!(symbol.name(), None);
+        assert_eq!(symbol.address(), None);
+    }
 }
