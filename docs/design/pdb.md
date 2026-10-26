@@ -80,6 +80,8 @@ Unknown record kinds retain their raw payloads. Names remain bytes; display code
 Header validation does not validate every record payload. Iterate records to check their framing.
 Unsupported container and stream versions return `UnsupportedVersion`; no heuristic fallback parses them as modern data.
 Full native support remains required. This coverage table does not reduce the scope below.
+The [native coverage](native-coverage.md) document gives the state of each record kind, stream version and container feature.
+It also reconciles each imported reference document with the implementation.
 
 Read a complete native PDB with:
 
