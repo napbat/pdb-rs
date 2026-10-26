@@ -4,7 +4,7 @@
 //! any external file. The caller decides what to load.
 //!
 //! - Type servers: the entries of the DBI type-server map. A module uses the type server in
-//!   its type-server index. Current linkers write an empty map.
+//!   its type-server index (`iTSM`). Current linkers write an empty map and index 0.
 //! - Precompiled types: a module with a non-zero `S_OBJNAME` signature was compiled with a
 //!   precompiled header (`/Yc` or `/Yu`). The modules with the same signature share the
 //!   precompiled types. In a full PDB, the linker merged these types into the TPI stream. In a
@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 
 use super::Pdb;
 use super::codeview::symbol::{S_FASTLINK, S_OBJNAME, SymbolData};
-use super::dbi::Dbi;
+use super::dbi::{Dbi, TypeServer};
 use super::info::Feature;
 use super::output::no_memory;
 use crate::Result;
@@ -47,12 +47,26 @@ pub struct FastLinkObject {
     pub references: usize,
 }
 
+/// A module that uses an entry of the DBI type-server map.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct ModuleTypeServer {
+    /// The index of the module.
+    pub module: u32,
+    /// The index of the entry in [`ExternalDependencies::type_servers`] (`iTSM`).
+    pub type_server: u8,
+}
+
 /// The external dependencies of a PDB.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ExternalDependencies {
     /// `true` if the PDB has the `MINI` feature code of a FASTLINK PDB.
     pub mini_pdb: bool,
+    /// The entries of the DBI type-server map: PDBs that hold types of the modules.
+    pub type_servers: Vec<TypeServer>,
+    /// The modules with a non-zero type-server index, in module order.
+    pub type_server_modules: Vec<ModuleTypeServer>,
     /// The precompiled-header groups, in the order of their first module.
     pub precompiled: Vec<PrecompiledTypes>,
     /// The modules with `S_FASTLINK` records, in module order.
@@ -63,7 +77,10 @@ impl ExternalDependencies {
     /// Return `true` if the PDB has no external dependency of these kinds.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.precompiled.is_empty() && self.fastlink_objects.is_empty()
+        self.type_servers.is_empty()
+            && self.type_server_modules.is_empty()
+            && self.precompiled.is_empty()
+            && self.fastlink_objects.is_empty()
     }
 }
 
@@ -74,15 +91,26 @@ impl<S: ReadAt> Pdb<S> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`Dbi::modules`], [`Pdb::module_stream`] and of the decoding of
+    /// Returns the errors of [`Dbi::type_server_map`], [`Dbi::modules`], [`Pdb::module_stream`]
+    /// and of the decoding of
     /// `S_OBJNAME` records, and [`crate::ErrorKind::LimitExceeded`] if an allocation fails.
     pub fn external_dependencies(&self, dbi: &Dbi) -> Result<ExternalDependencies> {
         let mut dependencies = ExternalDependencies {
             mini_pdb: self.info().has_feature(Feature::MinimalDebugInfo),
+            type_servers: dbi.type_server_map()?,
             ..ExternalDependencies::default()
         };
         for module in dbi.modules() {
             let module = module?;
+            let type_server = module.type_server_index();
+            if type_server != 0 {
+                let modules = &mut dependencies.type_server_modules;
+                modules.try_reserve(1).map_err(|_| no_memory())?;
+                modules.push(ModuleTypeServer {
+                    module: module.index,
+                    type_server,
+                });
+            }
             let Some(stream) = self.module_stream(&module)? else {
                 continue;
             };

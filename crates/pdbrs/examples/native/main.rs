@@ -31,7 +31,7 @@ use pdbrs::native::names::StringTable;
 use pdbrs::native::section::SectionHeaders;
 use pdbrs::{ErrorKind, Result as PdbResult};
 
-use dbi::{debug_info_tables, frame_data, section_header_bytes};
+use dbi::{debug_info_tables, frame_data, reencode_dbi, section_header_bytes};
 use external::external_dependencies;
 use named::{info_and_names, named_streams};
 use symbols::{modules, shared_symbols};
@@ -155,6 +155,7 @@ fn main() -> Outcome {
 
     let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
     report.claim(StreamId(3));
+    reencode_dbi(&pdb, &dbi, &mut report)?;
     let info_age = pdb.info().identity().age();
     if dbi.header().age != info_age {
         // `pdbstr -w` increments only the Info age; the image matches the DBI age.

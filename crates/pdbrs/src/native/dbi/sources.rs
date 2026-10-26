@@ -18,9 +18,13 @@
 //! Nothing marks the end of the names buffer. Alignment padding can follow
 //! the last name, so [`SourceInfo::names`] includes that padding.
 
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::super::codeview::Fields;
+use super::to_u16;
+use crate::native::output::{Output, no_memory, to_u32};
 use crate::{Error, ErrorKind, Result};
 
 /// A decoded source file info substream.
@@ -71,6 +75,23 @@ impl<'a> SourceInfo<'a> {
             offsets,
             names: fields.rest(),
         })
+    }
+
+    /// Append the substream to `out` with all raw values as stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let module_count = to_u16(self.starts.len(), "DBI source info module count")?;
+        let mut output = Output::new(out);
+        output.reserve(4 + self.starts.len() * 4 + self.offsets.len() * 4 + self.names.len())?;
+        output.u16(module_count)?;
+        output.u16(self.raw_file_count)?;
+        output.bytes(self.starts.as_flattened())?;
+        output.bytes(self.counts.as_flattened())?;
+        output.bytes(self.offsets.as_flattened())?;
+        output.bytes(self.names)
     }
 
     /// Return the number of modules.
@@ -219,6 +240,164 @@ impl<'a> Iterator for ModuleSourceIter<'a> {
 impl ExactSizeIterator for ModuleSourceIter<'_> {}
 
 impl FusedIterator for ModuleSourceIter<'_> {}
+
+/// The owned file list of one module in an [`OwnedSourceInfo`].
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct OwnedModuleSources {
+    /// The 16-bit start index for the substream.
+    ///
+    /// Microsoft writers store the low 16 bits of the index of the first file
+    /// entry. LLVM writers store the module index. Readers ignore the value.
+    pub raw_start: u16,
+    /// The offset of each file name in the names buffer.
+    pub name_offsets: Vec<u32>,
+}
+
+/// An owned source file info substream that a writer can fill.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct OwnedSourceInfo {
+    /// The 16-bit source file count for the header.
+    pub raw_file_count: u16,
+    /// The file list of each module, in module order.
+    pub modules: Vec<OwnedModuleSources>,
+    /// The names buffer, with the padding to the next 4-byte boundary.
+    pub names: Vec<u8>,
+}
+
+impl OwnedSourceInfo {
+    /// Copy a decoded substream with all raw values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
+    pub fn from_info(info: &SourceInfo<'_>) -> Result<Self> {
+        let mut modules = Vec::new();
+        modules
+            .try_reserve_exact(info.module_count())
+            .map_err(|_| no_memory())?;
+        for module in info.modules() {
+            let mut name_offsets = Vec::new();
+            name_offsets
+                .try_reserve_exact(module.file_count())
+                .map_err(|_| no_memory())?;
+            name_offsets.extend(module.name_offsets());
+            modules.push(OwnedModuleSources {
+                raw_start: module.raw_start,
+                name_offsets,
+            });
+        }
+        let mut names = Vec::new();
+        names
+            .try_reserve_exact(info.names().len())
+            .map_err(|_| no_memory())?;
+        names.extend_from_slice(info.names());
+        Ok(Self {
+            raw_file_count: info.raw_file_count(),
+            modules,
+            names,
+        })
+    }
+
+    /// Build a substream from the file names of each module.
+    ///
+    /// The function follows Microsoft `DBI1::QueryFileInfo`:
+    ///
+    /// 1. Each distinct name goes once into the names buffer, in the order of
+    ///    its first use.
+    /// 2. The start index of a module is the low 16 bits of the number of file
+    ///    entries of the modules before it.
+    /// 3. The header count is the low 16 bits of the number of all file entries.
+    /// 4. Zero bytes pad the names buffer to a 4-byte boundary.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if a name contains a NUL byte.
+    /// - [`ErrorKind::LimitExceeded`] if the names buffer or the number of
+    ///   file entries does not fit in `u32`, or if an allocation fails.
+    pub fn from_file_names<'n, M, F>(modules: M) -> Result<Self>
+    where
+        M: IntoIterator<Item = F>,
+        F: IntoIterator<Item = &'n [u8]>,
+    {
+        let mut info = Self::default();
+        let mut known = BTreeMap::<&'n [u8], u32>::new();
+        let mut total = 0_u32;
+        for files in modules {
+            let mut module = OwnedModuleSources {
+                raw_start: low16(total),
+                name_offsets: Vec::new(),
+            };
+            for name in files {
+                let offset = if let Some(&offset) = known.get(name) {
+                    offset
+                } else {
+                    let offset = to_u32(info.names.len(), "DBI source names buffer is too large")?;
+                    Output::new(&mut info.names).c_string(name)?;
+                    known.insert(name, offset);
+                    offset
+                };
+                module
+                    .name_offsets
+                    .try_reserve(1)
+                    .map_err(|_| no_memory())?;
+                module.name_offsets.push(offset);
+                total = total.checked_add(1).ok_or_else(|| {
+                    Error::new(ErrorKind::LimitExceeded, None)
+                        .with_context("DBI source info has too many file entries")
+                })?;
+            }
+            info.modules.try_reserve(1).map_err(|_| no_memory())?;
+            info.modules.push(module);
+        }
+        let padding = info.names.len().next_multiple_of(4) - info.names.len();
+        Output::new(&mut info.names).zeros(padding)?;
+        to_u32(info.names.len(), "DBI source names buffer is too large")?;
+        info.raw_file_count = low16(total);
+        Ok(info)
+    }
+
+    /// Append the substream to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the substream has more than
+    /// 65535 modules, if a module has more than 65535 files or if the output
+    /// cannot grow.
+    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
+        let module_count = to_u16(
+            self.modules.len(),
+            "DBI source info has more than 65535 modules",
+        )?;
+        let files: usize = self
+            .modules
+            .iter()
+            .map(|module| module.name_offsets.len())
+            .sum();
+        let mut output = Output::new(out);
+        output.reserve(4 + self.modules.len() * 4 + files * 4 + self.names.len())?;
+        output.u16(module_count)?;
+        output.u16(self.raw_file_count)?;
+        for module in &self.modules {
+            output.u16(module.raw_start)?;
+        }
+        for module in &self.modules {
+            output.u16(to_u16(
+                module.name_offsets.len(),
+                "DBI source info module has more than 65535 files",
+            )?)?;
+        }
+        for offset in self.modules.iter().flat_map(|module| &module.name_offsets) {
+            output.u32(*offset)?;
+        }
+        output.bytes(&self.names)
+    }
+}
+
+/// Return the low 16 bits of `value`, as Microsoft writers store them.
+fn low16(value: u32) -> u16 {
+    let [low, high, _, _] = value.to_le_bytes();
+    u16::from_le_bytes([low, high])
+}
 
 /// Return the NUL-terminated name at `offset` of `names`.
 fn file_name(names: &[u8], offset: u32) -> Result<&[u8]> {
