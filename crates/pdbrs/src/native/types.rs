@@ -175,6 +175,12 @@ impl TypeStream {
         &self.bytes
     }
 
+    /// Return the full stream bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     /// Return an iterator over the records and their indices.
     #[must_use]
     pub fn records(&self) -> TypeRecords<'_> {

@@ -8,6 +8,7 @@ pub mod auxiliary;
 pub mod codeview;
 pub mod dbi;
 pub mod debug_stream;
+pub mod edit;
 pub mod external;
 pub mod fpo;
 pub mod hash;
@@ -26,6 +27,7 @@ mod words;
 pub mod write;
 
 mod reader;
+pub use edit::{PdbEditPlan, PdbEditor};
 pub use reader::{Pdb, ReadOptions};
 
 /// The matching identity of a native PDB and its PE debug reference.

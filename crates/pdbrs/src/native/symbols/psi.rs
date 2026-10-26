@@ -169,6 +169,12 @@ impl PublicSymbolIndex {
         &self.header
     }
 
+    /// Return the stream bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     /// Return the name hash table of the `S_PUB32` records.
     #[must_use]
     pub const fn hash_table(&self) -> HashTable<'_> {
