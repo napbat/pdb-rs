@@ -5,12 +5,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::validate::{
     ModuleRecord, ValidationContext, ValidationReport, validate_module_symbols,
     validate_shared_symbols,
 };
+use pdbrs::native::codeview::{LeafKind, Records, SymbolKind};
 use pdbrs::native::dbi::ModuleStream;
 use pdbrs::native::msf::StreamId;
 
@@ -20,9 +20,9 @@ use crate::{Context, Outcome, Report};
 #[derive(Default)]
 pub(crate) struct ModuleRecords {
     /// The kind of each record by module index and module stream offset.
-    kinds: HashMap<(u16, u32), u16>,
+    kinds: HashMap<(ModuleIndex, ModuleSymbolOffset), SymbolKind>,
     /// The modules with a symbol stream.
-    read: HashSet<u16>,
+    read: HashSet<ModuleIndex>,
 }
 
 /// Return the virtual size of each image section.
@@ -40,8 +40,8 @@ fn section_lengths(context: &Context<'_>) -> Vec<u32> {
 }
 
 /// Return the IPI record kind of `id`.
-fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<u16> {
-    context.ids.get(id).map(|record| record.kind)
+fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<LeafKind> {
+    context.ids.record(id).map(|record| LeafKind(record.kind))
 }
 
 /// Make the library context from the example context.
@@ -50,7 +50,7 @@ fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<u16> {
 /// the type and ID indices, as the builder does.
 fn validation_context<'c>(
     context: &'c Context<'_>,
-    id_kinds: &'c dyn Fn(IdIndex) -> Option<u16>,
+    id_kinds: &'c dyn Fn(IdIndex) -> Option<LeafKind>,
     lengths: &'c [u32],
 ) -> ValidationContext<'c> {
     let base = if context.indices_checked {
@@ -97,13 +97,15 @@ pub(crate) fn module(
     records: &mut ModuleRecords,
     report: &mut Report,
 ) -> Outcome {
-    let base = u32::try_from(stream.symbol_offset())?;
+    let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
+    let index = ModuleIndex(u32::from(index));
     records.read.insert(index);
     for record in Records::new(stream.symbol_data()) {
         let Ok(record) = record else { break };
-        records
-            .kinds
-            .insert((index, base + record.offset), record.kind);
+        records.kinds.insert(
+            (index, ModuleSymbolOffset(base.0 + record.offset)),
+            SymbolKind(record.kind),
+        );
     }
     let lengths = section_lengths(context);
     let id_kinds = |id| id_kind(context, id);

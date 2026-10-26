@@ -11,6 +11,7 @@ use crate::native::auxiliary::{
 };
 use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdRecord;
+use crate::native::codeview::index::{ModuleIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{
     ModuleTypeReference, ProcedureReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_MOD_TYPEREF,
     S_PROCREF, S_TOKENREF, Symbol, SymbolData,
@@ -235,7 +236,7 @@ impl PdbContents {
             let base = u32::try_from(stream.symbol_offset()).unwrap_or(u32::MAX);
             for record in stream.symbols() {
                 let record = record?;
-                let symbol = record.symbol()?;
+                let symbol = Symbol::decode(record)?;
                 let handle = match module_type_reference(&symbol, type_streams)? {
                     Some((reference, streams)) => {
                         target.push_symbol_with(move |resolver, out| {
@@ -264,15 +265,19 @@ impl PdbContents {
         let mut handles = BTreeMap::new();
         for record in Records::new(&self.symbols) {
             let record = record?;
-            let symbol = record.symbol()?;
+            let symbol = Symbol::decode(record)?;
             let handle = match module_target(&symbol, modules) {
                 Some((reference, target)) => {
                     let kind = symbol.kind();
                     let wide = matches!(symbol.data(), SymbolData::SymbolReference(_));
                     builder.add_symbol_with(move |resolver, out| {
                         let mut reference = reference;
-                        reference.offset = resolver.module_symbol_offset(target)?;
-                        reference.module = resolver.module_number(target.module())?;
+                        reference.offset =
+                            ModuleSymbolOffset(resolver.module_symbol_offset(target)?);
+                        reference.module = resolver
+                            .module_number(target.module())?
+                            .checked_sub(1)
+                            .map(|index| ModuleIndex(u32::from(index)));
                         let data = if wide {
                             SymbolData::SymbolReference(reference)
                         } else {
@@ -424,8 +429,8 @@ fn module_target<'a>(
     ) {
         return None;
     }
-    let module = reference.module_index()?;
-    let target = *modules.get(&(module, reference.offset))?;
+    let module = u16::try_from(reference.module?.0).ok()?;
+    let target = *modules.get(&(module, reference.offset.0))?;
     Some((reference, target))
 }
 

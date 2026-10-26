@@ -2,6 +2,7 @@
 //! boundaries.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::LeafKind;
 use pdbrs::native::codeview::numeric::{
     Decimal, Integer, IntegerKind, IntegerLeaf, LF_CHAR, LF_COMPLEX32, LF_COMPLEX64, LF_COMPLEX80,
     LF_COMPLEX128, LF_DATE, LF_DECIMAL, LF_LONG, LF_OCTWORD, LF_QUADWORD, LF_REAL16, LF_REAL32,
@@ -10,8 +11,8 @@ use pdbrs::native::codeview::numeric::{
 };
 
 /// Encode a tag and a value.
-fn leaf(tag: u16, value: &[u8]) -> Vec<u8> {
-    let mut bytes = tag.to_le_bytes().to_vec();
+fn leaf(tag: LeafKind, value: &[u8]) -> Vec<u8> {
+    let mut bytes = tag.0.to_le_bytes().to_vec();
     bytes.extend_from_slice(value);
     bytes
 }
@@ -30,7 +31,7 @@ fn round_trip(encoded: &[u8]) -> Numeric<'_> {
     for end in 0..encoded.len() {
         let error = Numeric::parse_prefix(&encoded[..end]).unwrap_err();
         // A truncated UTF-8 string has no terminator.
-        let utf8 = end >= 2 && encoded[..2] == LF_UTF8STRING.to_le_bytes();
+        let utf8 = end >= 2 && encoded[..2] == LF_UTF8STRING.0.to_le_bytes();
         let expected = if utf8 {
             ErrorKind::InvalidFormat
         } else {
@@ -167,12 +168,14 @@ fn decimal_and_date_leaves_give_their_fields() {
     let value = round_trip(&encoded);
     assert_eq!(
         value.decimal(),
-        Some(Decimal {
-            reserved: 0,
-            scale: 2,
-            sign: 0x80,
-            high: 7,
-            low: 12345,
+        Some({
+            let mut decimal = Decimal::default();
+            decimal.reserved = 0;
+            decimal.scale = 2;
+            decimal.sign = 0x80;
+            decimal.high = 7;
+            decimal.low = 12345;
+            decimal
         })
     );
     let encoded = leaf(LF_DATE, &36526.5_f64.to_le_bytes());
@@ -225,7 +228,7 @@ fn string_encoders_check_their_limits() {
 #[test]
 fn unknown_tags_are_unsupported() {
     for tag in [0x8011_u16, 0x8016, 0x801d, 0xffff] {
-        let error = Numeric::parse_prefix(&leaf(tag, &[0; 16])).unwrap_err();
+        let error = Numeric::parse_prefix(&leaf(LeafKind(tag), &[0; 16])).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnsupportedVersion, "tag {tag:#x}");
     }
 }
@@ -233,8 +236,8 @@ fn unknown_tags_are_unsupported() {
 #[test]
 fn integers_get_the_smallest_encoding() {
     for (value, tag, length) in [
-        (Integer::Unsigned(0), 0, 2),
-        (Integer::Signed(0x7fff), 0x7fff, 2),
+        (Integer::Unsigned(0), LeafKind(0), 2),
+        (Integer::Signed(0x7fff), LeafKind(0x7fff), 2),
         (Integer::Unsigned(0x8000), LF_USHORT, 4),
         (Integer::Unsigned(0x1_0000), LF_ULONG, 6),
         (Integer::Unsigned(0x1_0000_0000), LF_UQUADWORD, 10),
@@ -283,7 +286,7 @@ fn integer_leaf_checks_the_range_of_its_kind() {
 #[test]
 fn integer_parser_rejects_non_integer_tags_without_reading_values() {
     for tag in [LF_REAL32, LF_DATE, LF_VARSTRING, LF_UTF8STRING] {
-        let error = Integer::parse_prefix(&tag.to_le_bytes()).unwrap_err();
+        let error = Integer::parse_prefix(&tag.0.to_le_bytes()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnsupportedVersion);
     }
 }

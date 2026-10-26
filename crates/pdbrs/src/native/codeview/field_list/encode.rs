@@ -8,6 +8,7 @@ use super::{
     LF_IVBCLASS, LF_MEMBER, LF_MEMBERMODIFY, LF_METHOD, LF_NESTTYPE, LF_NESTTYPEEX, LF_ONEMETHOD,
     LF_STMEMBER, LF_VBCLASS, LF_VFUNCOFF, LF_VFUNCTAB, Member,
 };
+use crate::native::codeview::LeafKind;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::type_record::{LF_FIELDLIST, encode_vtable_offset};
 use crate::native::codeview::writer::Padding;
@@ -30,7 +31,7 @@ const CONTINUATION_SIZE: usize = 8;
 impl Member<'_> {
     /// Return the member kind.
     #[must_use]
-    pub const fn kind(&self) -> u16 {
+    pub const fn kind(&self) -> LeafKind {
         match self {
             Self::BaseClass(_) => LF_BCLASS,
             Self::BaseInterface(_) => LF_BINTERFACE,
@@ -72,7 +73,7 @@ impl Member<'_> {
     /// Append the member and its padding with `writer`.
     pub(crate) fn encode_into(&self, writer: &mut Output<'_>) -> Result<()> {
         let start = writer.position();
-        writer.u16(self.kind())?;
+        writer.u16(self.kind().0)?;
         self.encode_fields(writer)?;
         writer.pad(start, Padding::Type)
     }
@@ -81,12 +82,12 @@ impl Member<'_> {
     fn encode_fields(&self, writer: &mut Output<'_>) -> Result<()> {
         match self {
             Self::BaseClass(base) | Self::BaseInterface(base) => {
-                writer.u16(base.attributes.bits())?;
+                writer.u16(base.attributes.raw())?;
                 writer.type_index(base.base_type)?;
                 base.offset.encode(writer.out())
             }
             Self::VirtualBaseClass(base) => {
-                writer.u16(base.attributes.bits())?;
+                writer.u16(base.attributes.raw())?;
                 writer.type_index(base.base_type)?;
                 writer.type_index(base.vbptr_type)?;
                 base.vbptr_offset.encode(writer.out())?;
@@ -109,18 +110,18 @@ impl Member<'_> {
                 writer.c_string(value.name)
             }
             Self::Enumerator(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 value.value.encode(writer.out())?;
                 writer.c_string(value.name)
             }
             Self::DataMember(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 writer.type_index(value.member_type)?;
                 value.offset.encode(writer.out())?;
                 writer.c_string(value.name)
             }
             Self::StaticMember(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 writer.type_index(value.member_type)?;
                 writer.c_string(value.name)
             }
@@ -135,17 +136,17 @@ impl Member<'_> {
                 writer.c_string(value.name)
             }
             Self::NestedTypeEx(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 writer.type_index(value.nested_type)?;
                 writer.c_string(value.name)
             }
             Self::MemberModify(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 writer.type_index(value.base_type)?;
                 writer.c_string(value.name)
             }
             Self::OneMethod(value) => {
-                writer.u16(value.attributes.bits())?;
+                writer.u16(value.attributes.raw())?;
                 writer.type_index(value.method_type)?;
                 encode_vtable_offset(writer, value.attributes, value.vtable_offset)?;
                 writer.c_string(value.name)
@@ -165,7 +166,8 @@ impl FieldList<'_> {
 }
 
 /// The records that [`encode_field_list`] appended.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FieldListRecords {
     /// The index of the first member: the record that a type refers to.
     pub head: TypeIndex,

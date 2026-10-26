@@ -13,33 +13,32 @@
 //! layout with a 2-byte `CV_EXPROCFLAGS` in place of the 1-byte
 //! `CV_PROCFLAGS`.
 
-use core::iter::FusedIterator;
-
-use super::super::Fields;
-use super::super::index::{IdIndex, TypeIndex};
+use super::super::id_record::IdList;
+use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
+use super::super::{Fields, SymbolKind};
 use super::{BinaryAnnotations, SectionOffset};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a module-local data-parallel C++ procedure start (`S_LPROC32_DPC`).
-pub const S_LPROC32_DPC: u16 = 0x1155;
+pub const S_LPROC32_DPC: SymbolKind = SymbolKind(0x1155);
 /// The kind of a module-local data-parallel C++ procedure start with an ID
 /// index (`S_LPROC32_DPC_ID`).
-pub const S_LPROC32_DPC_ID: u16 = 0x1156;
+pub const S_LPROC32_DPC_ID: SymbolKind = SymbolKind(0x1156);
 /// The kind of a list of callers (`S_CALLERS`).
-pub const S_CALLERS: u16 = 0x115b;
+pub const S_CALLERS: SymbolKind = SymbolKind(0x115b);
 /// The kind of an inline site start with an invocation count (`S_INLINESITE2`).
-pub const S_INLINESITE2: u16 = 0x115d;
+pub const S_INLINESITE2: SymbolKind = SymbolKind(0x115d);
 /// The kind of a global procedure start with extended flags (`S_GPROC32EX`).
-pub const S_GPROC32EX: u16 = 0x1172;
+pub const S_GPROC32EX: SymbolKind = SymbolKind(0x1172);
 /// The kind of a module-local procedure start with extended flags (`S_LPROC32EX`).
-pub const S_LPROC32EX: u16 = 0x1173;
+pub const S_LPROC32EX: SymbolKind = SymbolKind(0x1173);
 /// The kind of a global procedure start with extended flags and an ID index
 /// (`S_GPROC32EX_ID`).
-pub const S_GPROC32EX_ID: u16 = 0x1174;
+pub const S_GPROC32EX_ID: SymbolKind = SymbolKind(0x1174);
 /// The kind of a module-local procedure start with extended flags and an ID
 /// index (`S_LPROC32EX_ID`).
-pub const S_LPROC32EX_ID: u16 = 0x1175;
+pub const S_LPROC32EX_ID: SymbolKind = SymbolKind(0x1175);
 
 flags! {
     /// The flags of a procedure or a label (`CV_PROCFLAGS`).
@@ -96,14 +95,15 @@ flags! {
 /// [`S_LPROC32`](super::S_LPROC32), [`S_LPROC32_DPC`], the `_ID` kinds of
 /// these and the `EX` kinds, for example [`S_GPROC32EX`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Procedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the record that ends this scope.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0. The
     /// scope check does not use this value.
-    pub next: u32,
+    pub next: ModuleSymbolOffset,
     /// The length of the procedure code in bytes.
     pub code_length: u32,
     /// The offset of the end of the prologue, relative to the procedure start.
@@ -123,12 +123,33 @@ pub struct Procedure<'a> {
 }
 
 impl<'a> Procedure<'a> {
+    /// Make a record with `signature`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(signature: ProcedureType) -> Self {
+        Self {
+            parent: ModuleSymbolOffset(0),
+            end: ModuleSymbolOffset(0),
+            next: ModuleSymbolOffset(0),
+            code_length: 0,
+            debug_start: 0,
+            debug_end: 0,
+            signature,
+            address: SectionOffset {
+                section: 0,
+                offset: 0,
+            },
+            flags: ProcedureFlags(0),
+            extended_flags: None,
+            name: &[],
+        }
+    }
+
     /// Read the fields. Set `id` for the `_ID` kinds and `extended` for the
     /// `EX` kinds.
     pub(super) fn read(fields: &mut Fields<'a>, id: bool, extended: bool) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
-        let next = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
+        let next = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let debug_start = fields.u32()?;
         let debug_end = fields.u32()?;
@@ -162,9 +183,9 @@ impl<'a> Procedure<'a> {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
-        out.u32(self.next)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
+        out.u32(self.next.0)?;
         out.u32(self.code_length)?;
         out.u32(self.debug_start)?;
         out.u32(self.debug_end)?;
@@ -269,7 +290,8 @@ impl FrameProcedureFlags {
 }
 
 /// A frame procedure record (`S_FRAMEPROC`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FrameProcedure {
     /// The size of the stack frame in bytes.
     pub frame_size: u32,
@@ -316,12 +338,13 @@ impl FrameProcedure {
 }
 
 /// A block start record (`S_BLOCK32`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Block<'a> {
     /// The module stream offset of the enclosing scope record.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the `S_END` record of this block.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The length of the block code in bytes.
     pub code_length: u32,
     /// The start address.
@@ -333,8 +356,8 @@ pub struct Block<'a> {
 impl<'a> Block<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
         let name = fields.name()?;
@@ -349,8 +372,8 @@ impl<'a> Block<'a> {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
         out.c_string(self.name)
@@ -358,7 +381,8 @@ impl<'a> Block<'a> {
 }
 
 /// A code label record (`S_LABEL32`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Label<'a> {
     /// The address.
     pub address: SectionOffset,
@@ -410,14 +434,15 @@ values! {
 }
 
 /// A thunk start record (`S_THUNK32`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Thunk<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the `S_END` record of this thunk.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next record in the chain, or 0.
-    pub next: u32,
+    pub next: ModuleSymbolOffset,
     /// The start address.
     pub address: SectionOffset,
     /// The length of the thunk code in bytes.
@@ -438,9 +463,9 @@ pub struct Thunk<'a> {
 impl<'a> Thunk<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
-        let next = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
+        let next = ModuleSymbolOffset(fields.u32()?);
         let address = SectionOffset::read(fields)?;
         let length = fields.u16()?;
         let ordinal = ThunkOrdinal(fields.u8()?);
@@ -471,9 +496,9 @@ impl<'a> Thunk<'a> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("standard S_THUNK32 record has variant data"));
         }
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
-        out.u32(self.next)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
+        out.u32(self.next.0)?;
         self.address.write(out)?;
         out.u16(self.length)?;
         out.u8(self.ordinal.0)?;
@@ -483,12 +508,13 @@ impl<'a> Thunk<'a> {
 }
 
 /// An inline site start record (`S_INLINESITE` and [`S_INLINESITE2`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct InlineSite<'a> {
     /// The module stream offset of the enclosing scope record.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the `S_INLINESITE_END` record.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The ID index of the inlined function in the IPI stream.
     pub inlinee: IdIndex,
     /// The entry count of an [`S_INLINESITE2`] record, or `None` for an
@@ -501,11 +527,11 @@ pub struct InlineSite<'a> {
 impl<'a> InlineSite<'a> {
     /// Read the fields. Set `counted` for [`S_INLINESITE2`].
     pub(super) fn read(fields: &mut Fields<'a>, counted: bool) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
         let inlinee = fields.id_index()?;
         let invocations = if counted { Some(fields.u32()?) } else { None };
-        let annotations = BinaryAnnotations::new(fields.rest())?;
+        let annotations = BinaryAnnotations::parse(fields.rest())?;
         fields.bytes(fields.rest().len())?;
         Ok(Self {
             parent,
@@ -518,8 +544,8 @@ impl<'a> InlineSite<'a> {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
         out.id_index(self.inlinee)?;
         if let Some(invocations) = self.invocations {
             out.u32(invocations)?;
@@ -533,7 +559,8 @@ impl<'a> InlineSite<'a> {
 ///
 /// The counts parallel the functions. `cvinfo.h` says that the count array
 /// can be shorter than the function list: a missing count is zero.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FunctionList<'a> {
     /// The ID indices of the functions.
     functions: IdList<'a>,
@@ -547,7 +574,7 @@ impl<'a> FunctionList<'a> {
     /// The counts fill whole 4-byte units of the rest of the record, up to
     /// the number of functions.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let functions = IdList::read(fields)?;
+        let functions = read_id_list(fields)?;
         let count = functions.len().min(fields.rest().len() / 4);
         let (invocations, _) = fields.bytes(count * 4)?.as_chunks();
         Ok(Self {
@@ -590,7 +617,7 @@ impl<'a> FunctionList<'a> {
 
     /// Write the count, the functions and the invocation counts.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        self.functions.write(out)?;
+        write_id_list(&self.functions, out)?;
         for entry in self.invocations {
             out.bytes(entry)?;
         }
@@ -598,120 +625,30 @@ impl<'a> FunctionList<'a> {
     }
 }
 
-/// A counted list of ID indices (`S_INLINEES` and the functions of a
-/// [`FunctionList`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct IdList<'a> {
-    /// The little-endian 32-bit indices.
-    entries: &'a [[u8; 4]],
+/// Read a `u32` count and then the ID indices (`S_INLINEES` and the
+/// functions of a [`FunctionList`]).
+pub(super) fn read_id_list<'a>(fields: &mut Fields<'a>) -> Result<IdList<'a>> {
+    let count = fields.u32()?;
+    let length = usize::try_from(count)
+        .ok()
+        .and_then(|count| count.checked_mul(4))
+        .filter(|&length| length <= fields.rest().len())
+        .ok_or_else(|| {
+            Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("symbol index list count exceeds the record")
+        })?;
+    IdList::parse(fields.bytes(length)?)
 }
 
-impl<'a> IdList<'a> {
-    /// Read a `u32` count and then the indices.
-    pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let count = fields.u32()?;
-        let length = usize::try_from(count)
-            .ok()
-            .and_then(|count| count.checked_mul(4))
-            .filter(|&length| length <= fields.rest().len())
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidFormat, None)
-                    .with_context("symbol index list count exceeds the record")
-            })?;
-        let (entries, _) = fields.bytes(length)?.as_chunks();
-        Ok(Self { entries })
-    }
-
-    /// Return the number of indices.
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Return `true` if the list has no indices.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Return an iterator over the indices.
-    #[must_use]
-    pub fn iter(&self) -> IdListIter<'a> {
-        IdListIter {
-            entries: self.entries.iter(),
-        }
-    }
-
-    /// Create a list from little-endian 32-bit indices without a count.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
-    /// a multiple of 4.
-    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
-        let (entries, rest) = bytes.as_chunks();
-        if !rest.is_empty() {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("symbol index list is not a multiple of 4 bytes"));
-        }
-        Ok(Self { entries })
-    }
-
-    /// Write the `u32` count and then the indices.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(count_u32(self.entries.len())?)?;
-        for entry in self.entries {
-            out.bytes(entry)?;
-        }
-        Ok(())
-    }
+/// Write the `u32` count and then the ID indices.
+pub(super) fn write_id_list(list: &IdList<'_>, out: &mut Output<'_>) -> Result<()> {
+    out.u32(count_u32(list.len())?)?;
+    out.bytes(list.as_bytes())
 }
-
-impl<'a> IntoIterator for IdList<'a> {
-    type Item = IdIndex;
-    type IntoIter = IdListIter<'a>;
-
-    fn into_iter(self) -> IdListIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &IdList<'a> {
-    type Item = IdIndex;
-    type IntoIter = IdListIter<'a>;
-
-    fn into_iter(self) -> IdListIter<'a> {
-        self.iter()
-    }
-}
-
-/// An iterator over the indices of an [`IdList`].
-#[derive(Clone, Debug)]
-pub struct IdListIter<'a> {
-    /// The 4-byte indices that are not returned yet.
-    entries: core::slice::Iter<'a, [u8; 4]>,
-}
-
-impl Iterator for IdListIter<'_> {
-    type Item = IdIndex;
-
-    fn next(&mut self) -> Option<IdIndex> {
-        self.entries
-            .next()
-            .map(|&bytes| IdIndex(u32::from_le_bytes(bytes)))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.entries.size_hint()
-    }
-}
-
-impl ExactSizeIterator for IdListIter<'_> {}
-
-impl FusedIterator for IdListIter<'_> {}
 
 /// A call site record (`S_CALLSITEINFO`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CallSiteInfo {
     /// The address of the call instruction.
     pub address: SectionOffset,
@@ -771,7 +708,8 @@ values! {
 }
 
 /// A jump table record (`S_ARMSWITCHTABLE`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct JumpTable {
     /// The base address that the entries are relative to.
     pub base: SectionOffset,

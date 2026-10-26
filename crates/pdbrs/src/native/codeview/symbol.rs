@@ -19,8 +19,9 @@
 //! [`SymbolData::encode`] and [`Symbol::encode`] write a record again. A
 //! decoded record encodes to its original bytes.
 
-use super::index::{IdIndex, TypeIndex};
-use super::{Fields, Record};
+use super::id_record::IdList;
+use super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
+use super::{Fields, Record, SymbolKind};
 use crate::native::address::SectionOffset;
 use crate::native::output::Output;
 use crate::{ErrorKind, Result};
@@ -58,7 +59,7 @@ macro_rules! values {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
         pub struct $name(pub $raw);
 
         impl $name {
@@ -131,20 +132,20 @@ pub use linker::{
     S_POGODATA, S_SOURCELINK,
 };
 pub use managed::{
-    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,
+    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncSteps, AsyncStepsIter,
     AttributeValue, CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData,
     CustomDebugInfoKind, CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal,
-    DynamicLocalIter, DynamicLocals, HoistedLocalScope, HoistedLocalScopes,
-    MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant, ManagedProcedure, ManagedSlot, Oem,
-    S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_TOKENREF, SymbolAttribute,
-    TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter, UsingGroups, Utf8NameIter,
-    Utf8Names,
+    DynamicLocals, DynamicLocalsIter, HoistedLocalScope, HoistedLocalScopes,
+    HoistedLocalScopesIter, MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, ManagedConstant,
+    ManagedProcedure, ManagedSlot, Oem, S_GMANPROC, S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM,
+    S_TOKENREF, SymbolAttribute, TupleElementNames, TupleElementNamesEntry, TupleElementNamesIter,
+    UsingGroups, UsingGroupsIter, Utf8Names, Utf8NamesIter,
 };
 pub use procedure::{
     Block, CallSiteInfo, ExtendedProcedureFlags, FramePointer, FrameProcedure, FrameProcedureFlags,
-    FunctionList, IdList, IdListIter, InlineSite, JumpTable, JumpTableEntry, Label, Procedure,
-    ProcedureFlags, ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2,
-    S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
+    FunctionList, InlineSite, JumpTable, JumpTableEntry, Label, Procedure, ProcedureFlags,
+    ProcedureType, S_CALLERS, S_GPROC32EX, S_GPROC32EX_ID, S_INLINESITE2, S_LPROC32_DPC,
+    S_LPROC32_DPC_ID, S_LPROC32EX, S_LPROC32EX_ID, Thunk, ThunkOrdinal,
 };
 pub use scope::{ModuleSymbolWriter, ModuleSymbols, ScopedSymbol};
 pub use storage::{
@@ -153,118 +154,118 @@ pub use storage::{
     S_REGREL32_INDIR_ENCTMP,
 };
 pub use variable::{
-    AddressGap, AddressGapIter, AddressGaps, AddressRange, Constant, Data,
+    AddressGap, AddressGaps, AddressGapsIter, AddressRange, Constant, Data,
     DefRangeFramePointerRelative, DefRangeRegister, DefRangeRegisterRelative,
     DefRangeRegisterRelativeIndirect, DefRangeSubfieldRegister, Local, LocalFlags,
     RegisterRelative, S_COBOLUDT, UserDefinedType,
 };
 
 /// The kind of a filler record that reserves space (`S_SKIP`).
-pub const S_SKIP: u16 = 0x0007;
+pub const S_SKIP: SymbolKind = SymbolKind(0x0007);
 /// The kind of the end of a procedure, block or thunk scope (`S_END`).
-pub const S_END: u16 = 0x0006;
+pub const S_END: SymbolKind = SymbolKind(0x0006);
 /// The kind of a frame procedure record (`S_FRAMEPROC`).
-pub const S_FRAMEPROC: u16 = 0x1012;
+pub const S_FRAMEPROC: SymbolKind = SymbolKind(0x1012);
 /// The kind of an object file name (`S_OBJNAME`).
-pub const S_OBJNAME: u16 = 0x1101;
+pub const S_OBJNAME: SymbolKind = SymbolKind(0x1101);
 /// The kind of a thunk start (`S_THUNK32`).
-pub const S_THUNK32: u16 = 0x1102;
+pub const S_THUNK32: SymbolKind = SymbolKind(0x1102);
 /// The kind of a block start (`S_BLOCK32`).
-pub const S_BLOCK32: u16 = 0x1103;
+pub const S_BLOCK32: SymbolKind = SymbolKind(0x1103);
 /// The kind of a code label (`S_LABEL32`).
-pub const S_LABEL32: u16 = 0x1105;
+pub const S_LABEL32: SymbolKind = SymbolKind(0x1105);
 /// The kind of a register variable (`S_REGISTER`).
-pub const S_REGISTER: u16 = 0x1106;
+pub const S_REGISTER: SymbolKind = SymbolKind(0x1106);
 /// The kind of a constant (`S_CONSTANT`).
-pub const S_CONSTANT: u16 = 0x1107;
+pub const S_CONSTANT: SymbolKind = SymbolKind(0x1107);
 /// The kind of a user-defined type name (`S_UDT`).
-pub const S_UDT: u16 = 0x1108;
+pub const S_UDT: SymbolKind = SymbolKind(0x1108);
 /// The kind of a frame-pointer-relative variable (`S_BPREL32`).
-pub const S_BPREL32: u16 = 0x110b;
+pub const S_BPREL32: SymbolKind = SymbolKind(0x110b);
 /// The kind of a module-local data symbol (`S_LDATA32`).
-pub const S_LDATA32: u16 = 0x110c;
+pub const S_LDATA32: SymbolKind = SymbolKind(0x110c);
 /// The kind of a global data symbol (`S_GDATA32`).
-pub const S_GDATA32: u16 = 0x110d;
+pub const S_GDATA32: SymbolKind = SymbolKind(0x110d);
 /// The kind of a public symbol (`S_PUB32`).
-pub const S_PUB32: u16 = 0x110e;
+pub const S_PUB32: SymbolKind = SymbolKind(0x110e);
 /// The kind of a module-local procedure start (`S_LPROC32`).
-pub const S_LPROC32: u16 = 0x110f;
+pub const S_LPROC32: SymbolKind = SymbolKind(0x110f);
 /// The kind of a global procedure start (`S_GPROC32`).
-pub const S_GPROC32: u16 = 0x1110;
+pub const S_GPROC32: SymbolKind = SymbolKind(0x1110);
 /// The kind of a register-relative variable (`S_REGREL32`).
-pub const S_REGREL32: u16 = 0x1111;
+pub const S_REGREL32: SymbolKind = SymbolKind(0x1111);
 /// The kind of a module-local thread storage symbol (`S_LTHREAD32`).
-pub const S_LTHREAD32: u16 = 0x1112;
+pub const S_LTHREAD32: SymbolKind = SymbolKind(0x1112);
 /// The kind of a global thread storage symbol (`S_GTHREAD32`).
-pub const S_GTHREAD32: u16 = 0x1113;
+pub const S_GTHREAD32: SymbolKind = SymbolKind(0x1113);
 /// The kind of a compile record, version 2 (`S_COMPILE2`).
-pub const S_COMPILE2: u16 = 0x1116;
+pub const S_COMPILE2: SymbolKind = SymbolKind(0x1116);
 /// The kind of a using-namespace record (`S_UNAMESPACE`).
-pub const S_UNAMESPACE: u16 = 0x1124;
+pub const S_UNAMESPACE: SymbolKind = SymbolKind(0x1124);
 /// The kind of a reference to a global procedure (`S_PROCREF`).
-pub const S_PROCREF: u16 = 0x1125;
+pub const S_PROCREF: SymbolKind = SymbolKind(0x1125);
 /// The kind of a reference to a module-local procedure (`S_LPROCREF`).
-pub const S_LPROCREF: u16 = 0x1127;
+pub const S_LPROCREF: SymbolKind = SymbolKind(0x1127);
 /// The kind of a trampoline thunk (`S_TRAMPOLINE`).
-pub const S_TRAMPOLINE: u16 = 0x112c;
+pub const S_TRAMPOLINE: SymbolKind = SymbolKind(0x112c);
 /// The kind of an image section record (`S_SECTION`).
-pub const S_SECTION: u16 = 0x1136;
+pub const S_SECTION: SymbolKind = SymbolKind(0x1136);
 /// The kind of a COFF group record (`S_COFFGROUP`).
-pub const S_COFFGROUP: u16 = 0x1137;
+pub const S_COFFGROUP: SymbolKind = SymbolKind(0x1137);
 /// The kind of a call site record (`S_CALLSITEINFO`).
-pub const S_CALLSITEINFO: u16 = 0x1139;
+pub const S_CALLSITEINFO: SymbolKind = SymbolKind(0x1139);
 /// The kind of a security cookie record (`S_FRAMECOOKIE`).
-pub const S_FRAMECOOKIE: u16 = 0x113a;
+pub const S_FRAMECOOKIE: SymbolKind = SymbolKind(0x113a);
 /// The kind of a compile record, version 3 (`S_COMPILE3`).
-pub const S_COMPILE3: u16 = 0x113c;
+pub const S_COMPILE3: SymbolKind = SymbolKind(0x113c);
 /// The kind of a build environment block (`S_ENVBLOCK`).
-pub const S_ENVBLOCK: u16 = 0x113d;
+pub const S_ENVBLOCK: SymbolKind = SymbolKind(0x113d);
 /// The kind of a local variable (`S_LOCAL`).
-pub const S_LOCAL: u16 = 0x113e;
+pub const S_LOCAL: SymbolKind = SymbolKind(0x113e);
 /// The kind of a register def-range (`S_DEFRANGE_REGISTER`).
-pub const S_DEFRANGE_REGISTER: u16 = 0x1141;
+pub const S_DEFRANGE_REGISTER: SymbolKind = SymbolKind(0x1141);
 /// The kind of a frame-pointer-relative def-range (`S_DEFRANGE_FRAMEPOINTER_REL`).
-pub const S_DEFRANGE_FRAMEPOINTER_REL: u16 = 0x1142;
+pub const S_DEFRANGE_FRAMEPOINTER_REL: SymbolKind = SymbolKind(0x1142);
 /// The kind of a register def-range for a part of a variable
 /// (`S_DEFRANGE_SUBFIELD_REGISTER`).
-pub const S_DEFRANGE_SUBFIELD_REGISTER: u16 = 0x1143;
+pub const S_DEFRANGE_SUBFIELD_REGISTER: SymbolKind = SymbolKind(0x1143);
 /// The kind of a full-scope frame-pointer-relative def-range
 /// (`S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE`).
-pub const S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE: u16 = 0x1144;
+pub const S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE: SymbolKind = SymbolKind(0x1144);
 /// The kind of a register-relative def-range (`S_DEFRANGE_REGISTER_REL`).
-pub const S_DEFRANGE_REGISTER_REL: u16 = 0x1145;
+pub const S_DEFRANGE_REGISTER_REL: SymbolKind = SymbolKind(0x1145);
 /// The kind of a module-local procedure start with an ID index (`S_LPROC32_ID`).
-pub const S_LPROC32_ID: u16 = 0x1146;
+pub const S_LPROC32_ID: SymbolKind = SymbolKind(0x1146);
 /// The kind of a global procedure start with an ID index (`S_GPROC32_ID`).
-pub const S_GPROC32_ID: u16 = 0x1147;
+pub const S_GPROC32_ID: SymbolKind = SymbolKind(0x1147);
 /// The kind of a build information reference (`S_BUILDINFO`).
-pub const S_BUILDINFO: u16 = 0x114c;
+pub const S_BUILDINFO: SymbolKind = SymbolKind(0x114c);
 /// The kind of an inline site start (`S_INLINESITE`).
-pub const S_INLINESITE: u16 = 0x114d;
+pub const S_INLINESITE: SymbolKind = SymbolKind(0x114d);
 /// The kind of the end of an inline site scope (`S_INLINESITE_END`).
-pub const S_INLINESITE_END: u16 = 0x114e;
+pub const S_INLINESITE_END: SymbolKind = SymbolKind(0x114e);
 /// The kind of the end of a procedure scope with an ID index (`S_PROC_ID_END`).
-pub const S_PROC_ID_END: u16 = 0x114f;
+pub const S_PROC_ID_END: SymbolKind = SymbolKind(0x114f);
 /// The kind of a file-static variable (`S_FILESTATIC`).
-pub const S_FILESTATIC: u16 = 0x1153;
+pub const S_FILESTATIC: SymbolKind = SymbolKind(0x1153);
 /// The kind of a jump table record (`S_ARMSWITCHTABLE`).
-pub const S_ARMSWITCHTABLE: u16 = 0x1159;
+pub const S_ARMSWITCHTABLE: SymbolKind = SymbolKind(0x1159);
 /// The kind of a list of callees (`S_CALLEES`).
-pub const S_CALLEES: u16 = 0x115a;
+pub const S_CALLEES: SymbolKind = SymbolKind(0x115a);
 /// The kind of a heap allocation call site (`S_HEAPALLOCSITE`).
-pub const S_HEAPALLOCSITE: u16 = 0x115e;
+pub const S_HEAPALLOCSITE: SymbolKind = SymbolKind(0x115e);
 /// The kind of a frame register record (`S_FRAMEREG`).
-pub const S_FRAMEREG: u16 = 0x1166;
+pub const S_FRAMEREG: SymbolKind = SymbolKind(0x1166);
 /// The kind of a FASTLINK reference (`S_FASTLINK`).
-pub const S_FASTLINK: u16 = 0x1167;
+pub const S_FASTLINK: SymbolKind = SymbolKind(0x1167);
 /// The kind of a list of inlinees (`S_INLINEES`).
-pub const S_INLINEES: u16 = 0x1168;
+pub const S_INLINEES: SymbolKind = SymbolKind(0x1168);
 /// The kind of an indirect register-relative def-range
 /// (`S_DEFRANGE_REGISTER_REL_INDIR`).
-pub const S_DEFRANGE_REGISTER_REL_INDIR: u16 = 0x1177;
+pub const S_DEFRANGE_REGISTER_REL_INDIR: SymbolKind = SymbolKind(0x1177);
 /// The kind of a register-relative compiler temporary for Edit and Continue
 /// (`S_REGREL32_ENCTMP`).
-pub const S_REGREL32_ENCTMP: u16 = 0x1179;
+pub const S_REGREL32_ENCTMP: SymbolKind = SymbolKind(0x1179);
 
 /// The error context for a payload that is too short for its fields.
 const SHORT_PAYLOAD: &str = "symbol record payload is shorter than its fields";
@@ -288,12 +289,13 @@ impl SectionOffset {
 ///
 /// Both values are offsets in the module stream. They include the 4-byte
 /// signature at the start of the stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ScopeLinks {
     /// The offset of the record of the enclosing scope, or 0 at the top level.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The offset of the record that ends this scope.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
 }
 
 /// A decoded symbol record.
@@ -304,7 +306,7 @@ pub struct Symbol<'a> {
     /// The typed fields of the kind.
     data: SymbolData<'a>,
     /// The number of zero bytes after the fields.
-    padding: usize,
+    trailing_zeros: usize,
 }
 
 /// The typed fields of a symbol record.
@@ -517,8 +519,8 @@ impl<'a> Symbol<'a> {
     /// known. The error does not have a file offset.
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let mut fields = Fields::new(record.data, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
-        let data = decode_data(record.kind, &mut fields)?;
-        let padding = match data {
+        let data = decode_data(SymbolKind(record.kind), &mut fields)?;
+        let trailing_zeros = match data {
             SymbolData::Unsupported(_) | SymbolData::Skip(_) => 0,
             _ if fields.rest().iter().any(|&byte| byte != 0) => {
                 return Err(crate::Error::new(ErrorKind::InvalidFormat, None)
@@ -529,7 +531,7 @@ impl<'a> Symbol<'a> {
         Ok(Self {
             record,
             data,
-            padding,
+            trailing_zeros,
         })
     }
 
@@ -538,8 +540,8 @@ impl<'a> Symbol<'a> {
     /// The value is usually below 4. [`SymbolData::Unsupported`] and
     /// [`SymbolData::Skip`] keep these bytes in their value and give 0.
     #[must_use]
-    pub const fn padding(&self) -> usize {
-        self.padding
+    pub const fn trailing_zeros(&self) -> usize {
+        self.trailing_zeros
     }
 
     /// Return the original record.
@@ -550,8 +552,8 @@ impl<'a> Symbol<'a> {
 
     /// Return the record kind, for example [`S_GPROC32`].
     #[must_use]
-    pub const fn kind(&self) -> u16 {
-        self.record.kind
+    pub const fn kind(&self) -> SymbolKind {
+        SymbolKind(self.record.kind)
     }
 
     /// Return the typed fields.
@@ -562,7 +564,7 @@ impl<'a> Symbol<'a> {
 }
 
 /// Decode the fields of `kind`. Do not check the padding.
-fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>> {
+fn decode_data<'a>(kind: SymbolKind, fields: &mut Fields<'a>) -> Result<SymbolData<'a>> {
     if let Some(data) = decode_variable(kind, fields)? {
         return Ok(data);
     }
@@ -602,7 +604,7 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
         S_INLINESITE => SymbolData::InlineSite(InlineSite::read(fields, false)?),
         S_INLINESITE2 => SymbolData::InlineSite(InlineSite::read(fields, true)?),
         S_INLINESITE_END => SymbolData::InlineSiteEnd,
-        S_INLINEES => SymbolData::Inlinees(IdList::read(fields)?),
+        S_INLINEES => SymbolData::Inlinees(procedure::read_id_list(fields)?),
         S_CALLEES => SymbolData::Callees(FunctionList::read(fields)?),
         S_CALLERS => SymbolData::Callers(FunctionList::read(fields)?),
         S_CALLSITEINFO => SymbolData::CallSiteInfo(CallSiteInfo::read(fields)?),
@@ -643,7 +645,10 @@ fn decode_data<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<SymbolData<'a>>
 /// Decode the fields of a variable, data or def-range kind.
 ///
 /// Return `None` for the other kinds.
-fn decode_variable<'a>(kind: u16, fields: &mut Fields<'a>) -> Result<Option<SymbolData<'a>>> {
+fn decode_variable<'a>(
+    kind: SymbolKind,
+    fields: &mut Fields<'a>,
+) -> Result<Option<SymbolData<'a>>> {
     Ok(Some(match kind {
         S_LOCAL => SymbolData::Local(Local::read(fields)?),
         S_DEFRANGE => SymbolData::DefRangeProgram(DefRangeProgram::read(fields, false)?),

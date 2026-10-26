@@ -38,7 +38,7 @@
 //!    streams in the order of their addition and the streams without a name.
 //! 3. It encodes the TPI and IPI records and checks their references with
 //!    [`validate_type_references`](crate::native::types::validate_type_references)
-//!    and [`IdTable::validate`](crate::native::codeview::id_record::IdTable::validate).
+//!    and [`IdTable::check`](crate::native::codeview::id_record::IdTable::check).
 //! 4. It encodes the module symbols with scope links, then the symbol record
 //!    stream. A shared record can resolve the offset of a module record. It
 //!    checks the symbol references with
@@ -76,6 +76,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use crate::native::codeview::SymbolKind;
 use crate::native::codeview::id_record::IdRecord;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::native::codeview::type_record::TypeLeaf;
@@ -595,7 +596,11 @@ impl<'a> PdbBuilder<'a> {
     /// # Errors
     ///
     /// Returns the errors of [`PdbBuilder::add_symbol`].
-    pub fn add_symbol_fields(&mut self, kind: u16, data: SymbolData<'a>) -> Result<SymbolHandle> {
+    pub fn add_symbol_fields(
+        &mut self,
+        kind: SymbolKind,
+        data: SymbolData<'a>,
+    ) -> Result<SymbolHandle> {
         self.push_symbol(SymbolEntry::Fields(kind, data))
     }
 

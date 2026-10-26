@@ -6,11 +6,13 @@
 use core::iter::FusedIterator;
 
 use super::super::Fields;
+use super::CpuType;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// An object file name record (`S_OBJNAME`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ObjectName<'a> {
     /// The signature of the object file. Compilers usually write 0.
     pub signature: u32,
@@ -133,12 +135,13 @@ impl CompileFlags {
 }
 
 /// A compile record, version 2 (`S_COMPILE2`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Compile2<'a> {
     /// The flags and the source language.
     pub flags: CompileFlags,
     /// The target CPU (`CV_CPU_TYPE_e`), for example `0xd0` for x64.
-    pub machine: u16,
+    pub machine: CpuType,
     /// The front-end version: major, minor and build.
     pub frontend: [u16; 3],
     /// The back-end version: major, minor and build.
@@ -153,7 +156,7 @@ impl<'a> Compile2<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let flags = CompileFlags(fields.u32()?);
-        let machine = fields.u16()?;
+        let machine = CpuType(fields.u16()?);
         let frontend = [fields.u16()?, fields.u16()?, fields.u16()?];
         let backend = [fields.u16()?, fields.u16()?, fields.u16()?];
         let version = fields.name()?;
@@ -171,7 +174,7 @@ impl<'a> Compile2<'a> {
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
-        out.u16(self.machine)?;
+        out.u16(self.machine.0)?;
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
@@ -181,19 +184,20 @@ impl<'a> Compile2<'a> {
 }
 
 /// A compile record, version 3 (`S_COMPILE3`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Compile3<'a> {
     /// The flags and the source language.
     pub flags: CompileFlags,
     /// The target CPU (`CV_CPU_TYPE_e`), for example `0xd0` for x64.
-    pub machine: u16,
+    pub machine: CpuType,
     /// The front-end version: major, minor, build and QFE.
     pub frontend: [u16; 4],
     /// The back-end version: major, minor, build and QFE.
     pub backend: [u16; 4],
     /// The compiler version string.
     pub version: &'a [u8],
-    /// The number of zero bytes after the NUL terminator of the version
+    /// The count of zero bytes after the NUL terminator of the version
     /// string, with the record padding.
     ///
     /// The encoder writes these bytes and then pads the record. Most
@@ -210,7 +214,7 @@ impl<'a> Compile3<'a> {
     /// bytes after the string. This decoder accepts them only if all are zero.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let flags = CompileFlags(fields.u32()?);
-        let machine = fields.u16()?;
+        let machine = CpuType(fields.u16()?);
         let frontend = [fields.u16()?, fields.u16()?, fields.u16()?, fields.u16()?];
         let backend = [fields.u16()?, fields.u16()?, fields.u16()?, fields.u16()?];
         let version = fields.name()?;
@@ -232,7 +236,7 @@ impl<'a> Compile3<'a> {
     /// Write the fields and the trailing zero bytes.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
-        out.u16(self.machine)?;
+        out.u16(self.machine.0)?;
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
@@ -247,7 +251,8 @@ impl<'a> Compile3<'a> {
 /// A build environment record (`S_ENVBLOCK`).
 ///
 /// The strings are key and value pairs, for example `cwd` and a directory.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct EnvironmentBlock<'a> {
     /// The flags byte. Bit 0 is reserved (`rev`). `cvinfo.h` requires the
     /// other bits to be zero; the decoder keeps the byte raw.
@@ -328,7 +333,7 @@ impl<'a> StringList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if `bytes` does not end with a
     /// NUL byte or holds an empty string.
-    pub fn new(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let valid = bytes.is_empty()
             || (bytes.first() != Some(&0)
                 && bytes.last() == Some(&0)

@@ -1,7 +1,7 @@
 //! Tests for type sizes, module type streams and `S_MOD_TYPEREF` sources.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     ModuleTypeReference, ModuleTypeReferenceFlags, ModuleTypeSource,
 };
@@ -110,11 +110,11 @@ fn computes_type_sizes() {
 
 /// Return a reference with `flags` and the two words.
 fn reference(flags: u32, word0: u16, word1: u16) -> ModuleTypeReference {
-    ModuleTypeReference {
-        flags: ModuleTypeReferenceFlags(flags),
-        word0,
-        word1,
-    }
+    let mut reference = ModuleTypeReference::default();
+    reference.flags = ModuleTypeReferenceFlags(flags);
+    reference.word0 = word0;
+    reference.word1 = word1;
+    reference
 }
 
 #[test]
@@ -135,12 +135,16 @@ fn gives_the_source_of_module_type_records() {
     );
     assert_eq!(
         reference(0x20, 3, 0).source(),
-        ModuleTypeSource::OtherModule { module: 3 }
+        ModuleTypeSource::OtherModule {
+            module: ModuleIndex(3)
+        }
     );
     // Reserved bits do not change the source.
     assert_eq!(
         reference(0x8000_0020, 3, 0).source(),
-        ModuleTypeSource::OtherModule { module: 3 }
+        ModuleTypeSource::OtherModule {
+            module: ModuleIndex(3)
+        }
     );
     for flags in [0, 0x02, 0x04, 0x06, 0x0e, 0x18, 0x21] {
         let value = reference(flags, 1, 2);
@@ -166,7 +170,7 @@ fn gives_the_source_of_precompiled_type_modules() {
         user,
         ModuleTypeSource::PrecompiledTypeUser {
             stream: StreamId(39),
-            owner: 0
+            owner: ModuleIndex(0)
         }
     );
     for source in [owner, user] {

@@ -117,7 +117,7 @@ impl PdbBuilder<'_> {
     ) -> Result<PlannedTypes> {
         let bytes = records(&self.ids, resolver, encode_id)?;
         let planned = write(&bytes, &adjusters(&self.ids)?, options, hash_stream)?;
-        IdTable::new(&planned.parsed)?.validate(TypeIndex(tpi.index_end()))?;
+        IdTable::new(&planned.parsed)?.check(TypeIndex(tpi.index_end()))?;
         Ok(planned)
     }
 }

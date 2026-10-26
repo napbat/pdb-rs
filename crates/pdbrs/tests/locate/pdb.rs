@@ -21,6 +21,7 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{Rva, SectionOffset};
+use pdbrs::native::codeview::SymbolKind;
 use pdbrs::native::codeview::id_record::LF_FUNC_ID;
 use pdbrs::native::codeview::index::IdIndex;
 use pdbrs::native::codeview::symbol::{
@@ -44,7 +45,7 @@ const FILE_A: u32 = 0;
 const FILE_B: u32 = 8;
 
 /// Frame a symbol record: pad the payload with zeros to 4 bytes.
-fn symbol(kind: u16, mut payload: Vec<u8>) -> Vec<u8> {
+fn symbol(kind: SymbolKind, mut payload: Vec<u8>) -> Vec<u8> {
     while !(payload.len() + 4).is_multiple_of(4) {
         payload.push(0);
     }
@@ -52,7 +53,7 @@ fn symbol(kind: u16, mut payload: Vec<u8>) -> Vec<u8> {
         .unwrap()
         .to_le_bytes()
         .to_vec();
-    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(&kind.0.to_le_bytes());
     bytes.extend_from_slice(&payload);
     bytes
 }
@@ -257,7 +258,7 @@ fn id_records() -> Vec<u8> {
             payload.push(0xf0 + u8::try_from(left).unwrap());
         }
         body.extend_from_slice(&u16::try_from(payload.len() + 2).unwrap().to_le_bytes());
-        body.extend_from_slice(&LF_FUNC_ID.to_le_bytes());
+        body.extend_from_slice(&LF_FUNC_ID.0.to_le_bytes());
         body.extend_from_slice(&payload);
     }
     body

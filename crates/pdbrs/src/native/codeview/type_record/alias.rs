@@ -11,7 +11,8 @@ use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
 
 /// An `LF_ALIAS` record: a `typedef` name.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Alias<'a> {
     /// The underlying type.
     pub underlying_type: TypeIndex,
@@ -39,7 +40,8 @@ impl<'a> Alias<'a> {
 }
 
 /// An `LF_DEFARG` record: a default argument value.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefaultArgument<'a> {
     /// The type of the expression.
     pub argument_type: TypeIndex,

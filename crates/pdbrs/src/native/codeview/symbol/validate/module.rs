@@ -10,7 +10,7 @@ mod inline_site;
 use alloc::vec::Vec;
 
 use super::super::{
-    AddressGaps, AddressRange, Annotation, BinaryAnnotations, ChunkRange, LocalFlags,
+    AddressGaps, AddressRange, Annotation, BinaryAnnotations, ChunkRange, CpuType, LocalFlags,
     ModuleSymbols, S_BLOCK32, S_END, S_INLINESITE, S_INLINESITE2, S_PROC_ID_END, S_SEPCODE,
     S_THUNK32, ScopedSymbol, Symbol, SymbolData, separated_chunks,
 };
@@ -19,7 +19,8 @@ use super::{
     ValidationContext, ValidationReport, Violation, check_references, register,
 };
 use crate::native::address::SectionOffset;
-use crate::native::codeview::index::TypeIndex;
+use crate::native::codeview::SymbolKind;
+use crate::native::codeview::index::{ModuleSymbolOffset, TypeIndex};
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
@@ -27,14 +28,14 @@ use crate::{Error, ErrorKind, Result};
 const RESERVED_LOCAL_FLAGS: u16 = 0xf800;
 
 /// The scope kinds that are always in a procedure.
-const NESTED_SCOPES: &[u16] = &[S_BLOCK32, S_INLINESITE, S_INLINESITE2];
+const NESTED_SCOPES: &[SymbolKind] = &[S_BLOCK32, S_INLINESITE, S_INLINESITE2];
 
 /// The scope kinds that can hold a parameter local directly, other than the
 /// procedure kinds.
 ///
 /// `cvinfo.h` does not say where separated code puts its parameters, so the
 /// check accepts them in `S_SEPCODE` scopes.
-const PARAMETER_SCOPES: &[u16] = &[S_INLINESITE, S_INLINESITE2, S_SEPCODE];
+const PARAMETER_SCOPES: &[SymbolKind] = &[S_INLINESITE, S_INLINESITE2, S_SEPCODE];
 
 /// A code range in one section. The end is exclusive.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -90,14 +91,14 @@ struct DeferredSite {
     /// The offset of the def-range record.
     offset: u32,
     /// The kind of the def-range record.
-    kind: u16,
+    kind: SymbolKind,
 }
 
 /// An open scope with its code range.
 #[derive(Clone, Copy, Debug)]
 struct Frame {
     /// The record kind of the scope start.
-    kind: u16,
+    kind: SymbolKind,
     /// The code range, if the kind has one and the range is valid.
     range: Option<CodeRange>,
     /// `true` if the scope covers no code: a code range of length 0, or an
@@ -129,18 +130,18 @@ struct Checker<'r, 'c> {
     /// The open scopes, innermost last.
     stack: Vec<Frame>,
     /// The offset and kind of each scope start, in stream order.
-    starts: Vec<(u32, u16)>,
+    starts: Vec<(u32, SymbolKind)>,
     /// The offset, kind and `next` link of each procedure and thunk with a
     /// link that is not 0.
-    nexts: Vec<(u32, u16, u32)>,
+    nexts: Vec<(u32, SymbolKind, u32)>,
     /// The procedure start, code range, offset and kind of each def-range
     /// outside its procedure. [`Checker::finish`] checks them against the
     /// separated code of the procedure.
-    outside: Vec<(SectionOffset, CodeRange, u32, u16)>,
+    outside: Vec<(SectionOffset, CodeRange, u32, SymbolKind)>,
     /// The parent address and the code range of each `S_SEPCODE` scope.
     separated: Vec<(SectionOffset, CodeRange)>,
     /// The CPU of the first compile record.
-    cpu: Option<u16>,
+    cpu: Option<CpuType>,
     /// The flags of the local that the next def-range record belongs to.
     local: Option<LocalFlags>,
     /// The type of that local.
@@ -155,7 +156,7 @@ struct Checker<'r, 'c> {
 pub(super) fn validate(
     symbols: &[u8],
     stream: StreamId,
-    base: u32,
+    base: ModuleSymbolOffset,
     context: &ValidationContext<'_>,
 ) -> Result<ValidationReport> {
     let mut checker = Checker {
@@ -215,14 +216,15 @@ fn scope_code(symbol: &Symbol<'_>) -> Option<(SectionOffset, u32)> {
 
 /// Return the `next` link of a procedure or a thunk.
 fn next_link(symbol: &Symbol<'_>) -> Option<u32> {
-    match symbol.data() {
-        SymbolData::Procedure(value) => Some(value.next),
-        SymbolData::MipsProcedure(value) => Some(value.header.next),
-        SymbolData::Ia64Procedure(value) => Some(value.header.next),
-        SymbolData::ManagedProcedure(value) => Some(value.next),
-        SymbolData::Thunk(value) => Some(value.next),
-        _ => None,
-    }
+    let next = match symbol.data() {
+        SymbolData::Procedure(value) => value.next,
+        SymbolData::MipsProcedure(value) => value.header.next,
+        SymbolData::Ia64Procedure(value) => value.header.next,
+        SymbolData::ManagedProcedure(value) => value.next,
+        SymbolData::Thunk(value) => value.next,
+        _ => return None,
+    };
+    Some(next.0)
 }
 
 /// Return the register number of a record, if it has one.
@@ -332,7 +334,7 @@ fn inline_site_is_empty(annotations: BinaryAnnotations<'_>) -> bool {
 }
 
 /// Return `true` if a record of `kind` is a procedure or a thunk start.
-fn is_procedure_or_thunk(kind: u16) -> bool {
+fn is_procedure_or_thunk(kind: SymbolKind) -> bool {
     kind == S_THUNK32
         || GLOBAL_PROCEDURES.contains(&kind)
         || LOCAL_PROCEDURES.contains(&kind)
@@ -340,7 +342,7 @@ fn is_procedure_or_thunk(kind: u16) -> bool {
 }
 
 /// Return `true` if a parameter local can be directly in a scope of `kind`.
-fn holds_parameters(kind: u16) -> bool {
+fn holds_parameters(kind: SymbolKind) -> bool {
     PARAMETER_SCOPES.contains(&kind)
         || GLOBAL_PROCEDURES.contains(&kind)
         || LOCAL_PROCEDURES.contains(&kind)
@@ -349,14 +351,14 @@ fn holds_parameters(kind: u16) -> bool {
 
 impl Checker<'_, '_> {
     /// Add a violation of `rule` at the record at `offset`.
-    fn violate(&mut self, rule: Rule, offset: u32, kind: u16) -> Result<()> {
+    fn violate(&mut self, rule: Rule, offset: u32, kind: SymbolKind) -> Result<()> {
         self.report.violate(rule, offset, kind)
     }
 
     /// Check one record and update the state.
     fn record(&mut self, scoped: &ScopedSymbol<'_>) -> Result<()> {
         let symbol = &scoped.symbol;
-        let (offset, kind) = (scoped.offset, symbol.kind());
+        let (offset, kind) = (scoped.offset.0, symbol.kind());
         self.report.records += 1;
         check_references(symbol, offset, self.context, &mut self.report)?;
         match symbol.data() {
@@ -397,7 +399,7 @@ impl Checker<'_, '_> {
                 }
             }
         }
-        if symbol.scope().is_some() {
+        if symbol.scope_links().is_some() {
             self.open(symbol, offset)?;
         } else if matches!(
             symbol.data(),
@@ -409,7 +411,7 @@ impl Checker<'_, '_> {
     }
 
     /// Check an `S_LOCAL` record and start its def-range sequence.
-    fn local_record(&mut self, flags: LocalFlags, offset: u32, kind: u16) -> Result<()> {
+    fn local_record(&mut self, flags: LocalFlags, offset: u32, kind: SymbolKind) -> Result<()> {
         self.local = Some(flags);
         if flags.0 & RESERVED_LOCAL_FLAGS != 0 {
             self.violate(Rule::LocalFlagsReserved, offset, kind)?;
@@ -424,7 +426,7 @@ impl Checker<'_, '_> {
     }
 
     /// Check a def-range record against its local and its scopes.
-    fn def_range(&mut self, def_range: &DefRange<'_>, offset: u32, kind: u16) -> Result<()> {
+    fn def_range(&mut self, def_range: &DefRange<'_>, offset: u32, kind: SymbolKind) -> Result<()> {
         match self.local {
             None => self.violate(Rule::DefRangeWithoutLocal, offset, kind)?,
             Some(flags) if flags.contains(LocalFlags::OPTIMIZED_OUT) => {
@@ -482,7 +484,7 @@ impl Checker<'_, '_> {
         range: AddressRange,
         gaps: Option<AddressGaps<'_>>,
         offset: u32,
-        kind: u16,
+        kind: SymbolKind,
     ) -> Result<()> {
         let site = self.stack.iter().rev().find_map(|frame| frame.site);
         let (Some(SiteRanges::Valid { end, .. }), Some(procedure)) =
@@ -532,7 +534,7 @@ impl Checker<'_, '_> {
 
     /// Check the parent offset of a subfield def-range against the size of
     /// the type of its local.
-    fn subfield(&mut self, symbol: &Symbol<'_>, offset: u32, kind: u16) -> Result<()> {
+    fn subfield(&mut self, symbol: &Symbol<'_>, offset: u32, kind: SymbolKind) -> Result<()> {
         let (Some(parent_offset), Some(local_type), Some(type_size)) = (
             subfield_offset(symbol),
             self.local_type,
@@ -547,7 +549,13 @@ impl Checker<'_, '_> {
     }
 
     /// Check the gaps of a def-range with a range of `length` bytes.
-    fn gaps(&mut self, gaps: AddressGaps<'_>, length: u16, offset: u32, kind: u16) -> Result<()> {
+    fn gaps(
+        &mut self,
+        gaps: AddressGaps<'_>,
+        length: u16,
+        offset: u32,
+        kind: SymbolKind,
+    ) -> Result<()> {
         let mut previous_end = 0_u32;
         for gap in gaps {
             let start = u32::from(gap.start);
@@ -570,7 +578,7 @@ impl Checker<'_, '_> {
     ///
     /// Section 0 names no image section. Symbols of discarded or absolute
     /// code use it, so the check accepts it.
-    fn check_section(&mut self, code: &CodeRange, offset: u32, kind: u16) -> Result<()> {
+    fn check_section(&mut self, code: &CodeRange, offset: u32, kind: SymbolKind) -> Result<()> {
         let Some(lengths) = self.context.section_lengths else {
             return Ok(());
         };
@@ -634,7 +642,7 @@ impl Checker<'_, '_> {
         &mut self,
         annotations: BinaryAnnotations<'_>,
         offset: u32,
-        kind: u16,
+        kind: SymbolKind,
     ) -> Result<SiteRanges> {
         let start = self.site_ranges.len();
         if inline_site::site_ranges(annotations, &mut self.site_ranges)? {
@@ -647,7 +655,7 @@ impl Checker<'_, '_> {
     }
 
     /// Check an end record and pop the frame of its scope.
-    fn close(&mut self, offset: u32, kind: u16) -> Result<()> {
+    fn close(&mut self, offset: u32, kind: SymbolKind) -> Result<()> {
         // `ModuleSymbols` makes sure that an open scope exists.
         let Some(frame) = self.stack.pop() else {
             return Ok(());

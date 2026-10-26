@@ -24,6 +24,7 @@
 use super::super::super::Fields;
 use super::custom_debug_info::CustomDebugInfo;
 use super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::portable::metadata::{IlOffset, MetadataToken};
 use crate::{ErrorKind, Result};
 
 /// The name of the custom debug information attribute (`MD2`), as UTF-16LE bytes.
@@ -36,7 +37,8 @@ pub const ASYNC_METHOD_INFO_ATTRIBUTE: &[u8] = b"a\0s\0y\0n\0c\0M\0e\0t\0h\0o\0d
 const STEP_SIZE: usize = 12;
 
 /// A symbol attribute in the user data of an `S_OEM` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SymbolAttribute<'a> {
     /// The name as UTF-16LE bytes, without the NUL code unit. The bytes are
     /// not converted to text.
@@ -100,14 +102,15 @@ pub enum AttributeValue<'a> {
 /// The layout is `u32` kickoff method token, `u32` catch handler IL offset,
 /// `u32` step count and the steps. Roslyn writes the catch handler offset
 /// only if it is not negative; the native writer then stores `0xffffffff`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AsyncMethodInfo<'a> {
     /// The metadata token of the kickoff method: the `async` method that
     /// creates the state machine.
-    pub kickoff_method: u32,
+    pub kickoff_method: MetadataToken,
     /// The IL offset of the catch handler that the compiler generated, or
     /// `None` for `0xffffffff`.
-    pub catch_handler_offset: Option<u32>,
+    pub catch_handler_offset: Option<IlOffset>,
     /// The steps.
     pub steps: AsyncSteps<'a>,
 }
@@ -122,8 +125,10 @@ impl<'a> AsyncMethodInfo<'a> {
     /// the steps. The error has no location.
     pub fn parse(value: &'a [u8]) -> Result<Self> {
         let mut fields = Fields::new(value, ErrorKind::InvalidFormat, SHORT_VALUE);
-        let kickoff_method = fields.u32()?;
-        let catch_handler_offset = Some(fields.u32()?).filter(|&offset| offset != u32::MAX);
+        let kickoff_method = MetadataToken::from_raw(fields.u32()?);
+        let catch_handler_offset = Some(fields.u32()?)
+            .filter(|&offset| offset != u32::MAX)
+            .map(IlOffset::new);
         let len = count(fields.u32()?)?;
         let size = len
             .checked_mul(STEP_SIZE)
@@ -139,18 +144,19 @@ impl<'a> AsyncMethodInfo<'a> {
 }
 
 /// One await point of an async method.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AsyncStep {
     /// The IL offset where the method yields.
-    pub yield_offset: u32,
+    pub yield_offset: IlOffset,
     /// The metadata token of the method that resumes: the `MoveNext` method.
-    pub resume_method: u32,
+    pub resume_method: MetadataToken,
     /// The IL offset where the method resumes.
-    pub resume_offset: u32,
+    pub resume_offset: IlOffset,
 }
 
 /// The steps of an [`AsyncMethodInfo`], 12 bytes each.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct AsyncSteps<'a> {
     /// The step bytes. The length is a multiple of 12.
     bytes: &'a [u8],
@@ -171,24 +177,24 @@ impl<'a> AsyncSteps<'a> {
 
     /// Return an iterator over the steps.
     #[must_use]
-    pub fn iter(&self) -> AsyncStepIter<'a> {
-        AsyncStepIter::new(self.bytes)
+    pub fn iter(&self) -> AsyncStepsIter<'a> {
+        AsyncStepsIter::new(self.bytes)
     }
 }
 
-iterable!(AsyncSteps, AsyncStepIter);
+iterable!(AsyncSteps, AsyncStepsIter);
 
 chunk_iter!(
     /// An iterator over [`AsyncSteps`].
-    AsyncStepIter,
+    AsyncStepsIter,
     STEP_SIZE,
     AsyncStep,
     |step: &[u8; STEP_SIZE]| {
         let word = |at: usize| u32::from_le_bytes([step[at], step[at + 1], step[at + 2], step[at + 3]]);
         AsyncStep {
-            yield_offset: word(0),
-            resume_method: word(4),
-            resume_offset: word(8),
+            yield_offset: IlOffset::new(word(0)),
+            resume_method: MetadataToken::from_raw(word(4)),
+            resume_offset: IlOffset::new(word(8)),
         }
     }
 );

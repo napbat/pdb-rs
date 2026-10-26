@@ -17,7 +17,7 @@ use super::super::table::write::{
     HashEntry, IndexProducer, allocation_failed, append_table, scaled, too_large,
 };
 use super::{HEADER_SIZE, PublicSymbolIndex, SECTION_OFFSET_SIZE, SectionStart};
-use crate::native::codeview::symbol::SymbolData;
+use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
 /// The incremental thunk table of a public symbol index.
@@ -146,7 +146,7 @@ fn address_map<'a>(
         .try_reserve_exact(entries.len())
         .map_err(|_| allocation_failed())?;
     for entry in entries {
-        let symbol = entry.symbol.record(symbol_records)?.symbol()?;
+        let symbol = Symbol::decode(entry.symbol.record(symbol_records)?)?;
         let SymbolData::Public(public) = symbol.data() else {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("public symbol index entry is not an S_PUB32 record"));

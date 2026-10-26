@@ -159,7 +159,12 @@ pub(crate) fn walk_module(stream: &ModuleStream) {
         }
     }
     let base = u32::try_from(stream.symbol_offset()).unwrap_or(u32::MAX);
-    let symbols = ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+    let symbols = ModuleSymbols::new(
+        stream.symbol_data(),
+        stream.stream(),
+        pdbrs::native::codeview::index::ModuleSymbolOffset(base),
+        MAX_SCOPE_DEPTH,
+    );
     for scoped in symbols.take(MAX_ITEMS) {
         let Some(scoped) = ok(scoped) else {
             break;

@@ -4,37 +4,39 @@
 //! `_ID` kinds use the same layouts with an ID index in place of the type
 //! index, as `S_GPROC32_ID` does for `PROCSYM32`.
 
-use super::super::Fields;
+use super::super::index::ModuleSymbolOffset;
+use super::super::{Fields, SymbolKind};
 use super::{ProcedureFlags, ProcedureType, SectionOffset};
 use crate::Result;
 use crate::native::output::Output;
 
 /// The kind of a module-local MIPS procedure start (`S_LPROCMIPS`).
-pub const S_LPROCMIPS: u16 = 0x1114;
+pub const S_LPROCMIPS: SymbolKind = SymbolKind(0x1114);
 /// The kind of a global MIPS procedure start (`S_GPROCMIPS`).
-pub const S_GPROCMIPS: u16 = 0x1115;
+pub const S_GPROCMIPS: SymbolKind = SymbolKind(0x1115);
 /// The kind of a module-local IA64 procedure start (`S_LPROCIA64`).
-pub const S_LPROCIA64: u16 = 0x1118;
+pub const S_LPROCIA64: SymbolKind = SymbolKind(0x1118);
 /// The kind of a global IA64 procedure start (`S_GPROCIA64`).
-pub const S_GPROCIA64: u16 = 0x1119;
+pub const S_GPROCIA64: SymbolKind = SymbolKind(0x1119);
 /// The kind of a module-local MIPS procedure start with an ID index (`S_LPROCMIPS_ID`).
-pub const S_LPROCMIPS_ID: u16 = 0x1148;
+pub const S_LPROCMIPS_ID: SymbolKind = SymbolKind(0x1148);
 /// The kind of a global MIPS procedure start with an ID index (`S_GPROCMIPS_ID`).
-pub const S_GPROCMIPS_ID: u16 = 0x1149;
+pub const S_GPROCMIPS_ID: SymbolKind = SymbolKind(0x1149);
 /// The kind of a module-local IA64 procedure start with an ID index (`S_LPROCIA64_ID`).
-pub const S_LPROCIA64_ID: u16 = 0x114a;
+pub const S_LPROCIA64_ID: SymbolKind = SymbolKind(0x114a);
 /// The kind of a global IA64 procedure start with an ID index (`S_GPROCIA64_ID`).
-pub const S_GPROCIA64_ID: u16 = 0x114b;
+pub const S_GPROCIA64_ID: SymbolKind = SymbolKind(0x114b);
 
 /// The links and the code range that all procedure records start with.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ProcedureHeader {
     /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the record that ends this scope.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0.
-    pub next: u32,
+    pub next: ModuleSymbolOffset,
     /// The length of the procedure code in bytes.
     pub code_length: u32,
     /// The offset of the end of the prologue, relative to the procedure start.
@@ -44,12 +46,22 @@ pub struct ProcedureHeader {
 }
 
 impl ProcedureHeader {
+    /// A header with all fields zero.
+    const ZERO: Self = Self {
+        parent: ModuleSymbolOffset(0),
+        end: ModuleSymbolOffset(0),
+        next: ModuleSymbolOffset(0),
+        code_length: 0,
+        debug_start: 0,
+        debug_end: 0,
+    };
+
     /// Read the six `u32` fields.
     fn read(fields: &mut Fields<'_>) -> Result<Self> {
         Ok(Self {
-            parent: fields.u32()?,
-            end: fields.u32()?,
-            next: fields.u32()?,
+            parent: ModuleSymbolOffset(fields.u32()?),
+            end: ModuleSymbolOffset(fields.u32()?),
+            next: ModuleSymbolOffset(fields.u32()?),
             code_length: fields.u32()?,
             debug_start: fields.u32()?,
             debug_end: fields.u32()?,
@@ -59,9 +71,9 @@ impl ProcedureHeader {
     /// Write the six `u32` fields.
     fn write(self, out: &mut Output<'_>) -> Result<()> {
         for value in [
-            self.parent,
-            self.end,
-            self.next,
+            self.parent.0,
+            self.end.0,
+            self.next.0,
             self.code_length,
             self.debug_start,
             self.debug_end,
@@ -84,6 +96,7 @@ fn read_signature(fields: &mut Fields<'_>, id: bool) -> Result<ProcedureType> {
 /// A MIPS procedure start record ([`S_GPROCMIPS`], [`S_LPROCMIPS`] and their
 /// `_ID` kinds).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MipsProcedure<'a> {
     /// The links and the code range.
     pub header: ProcedureHeader,
@@ -108,6 +121,26 @@ pub struct MipsProcedure<'a> {
 }
 
 impl<'a> MipsProcedure<'a> {
+    /// Make a record with `signature`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(signature: ProcedureType) -> Self {
+        Self {
+            header: ProcedureHeader::ZERO,
+            integer_save_mask: 0,
+            float_save_mask: 0,
+            integer_save_offset: 0,
+            float_save_offset: 0,
+            signature,
+            address: SectionOffset {
+                section: 0,
+                offset: 0,
+            },
+            return_register: 0,
+            frame_register: 0,
+            name: &[],
+        }
+    }
+
     /// Read the fields. Set `id` for the `_ID` kinds.
     pub(super) fn read(fields: &mut Fields<'a>, id: bool) -> Result<Self> {
         let header = ProcedureHeader::read(fields)?;
@@ -152,6 +185,7 @@ impl<'a> MipsProcedure<'a> {
 /// An IA64 procedure start record ([`S_GPROCIA64`], [`S_LPROCIA64`] and
 /// their `_ID` kinds).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Ia64Procedure<'a> {
     /// The links and the code range.
     pub header: ProcedureHeader,
@@ -168,6 +202,22 @@ pub struct Ia64Procedure<'a> {
 }
 
 impl<'a> Ia64Procedure<'a> {
+    /// Make a record with `signature`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(signature: ProcedureType) -> Self {
+        Self {
+            header: ProcedureHeader::ZERO,
+            signature,
+            address: SectionOffset {
+                section: 0,
+                offset: 0,
+            },
+            return_register: 0,
+            flags: ProcedureFlags(0),
+            name: &[],
+        }
+    }
+
     /// Read the fields. Set `id` for the `_ID` kinds.
     pub(super) fn read(fields: &mut Fields<'a>, id: bool) -> Result<Self> {
         let header = ProcedureHeader::read(fields)?;

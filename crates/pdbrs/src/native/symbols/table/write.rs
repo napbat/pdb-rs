@@ -22,6 +22,7 @@ use core::cmp::Ordering;
 
 use super::super::{BucketCount, SymbolOffset};
 use super::{HEADER_SIZE, HashRecord, MAX_SIGNED, OFFSET_SCALE, RECORD_SIZE, SIGNATURE, VERSION};
+use crate::native::codeview::symbol::Symbol;
 use crate::{Error, ErrorKind, Result};
 
 /// The producer conventions that a symbol index builder follows.
@@ -193,9 +194,7 @@ pub(in crate::native::symbols) fn append_table(
 /// - The errors of [`SymbolOffset::record`] and of the symbol decoder.
 /// - [`ErrorKind::InvalidFormat`] for a record without a name.
 pub fn indexed_name(symbol_records: &[u8], symbol: SymbolOffset) -> Result<&[u8]> {
-    symbol
-        .record(symbol_records)?
-        .symbol()?
+    Symbol::decode(symbol.record(symbol_records)?)?
         .name()
         .ok_or_else(|| {
             Error::new(ErrorKind::InvalidFormat, None)

@@ -3,8 +3,8 @@
 use alloc::vec::Vec;
 
 use super::{IdRecord, LF_STRING_ID, LF_SUBSTR_LIST};
-use crate::native::codeview::Record;
 use crate::native::codeview::index::{IdIndex, TypeIndex};
+use crate::native::codeview::{LeafKind, Record};
 use crate::native::msf::StreamId;
 use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable};
 use crate::{Error, ErrorKind, Result};
@@ -77,7 +77,7 @@ impl<'a> IdTable<'a> {
 
     /// Return the framed record of `id`, or `None` if `id` is out of range.
     #[must_use]
-    pub fn get(&self, id: IdIndex) -> Option<Record<'a>> {
+    pub fn record(&self, id: IdIndex) -> Option<Record<'a>> {
         self.table.id_record(id).ok().map(|record| record.record)
     }
 
@@ -88,8 +88,8 @@ impl<'a> IdTable<'a> {
     /// Returns [`ErrorKind::InvalidReference`] if `id` is out of range.
     /// Returns the errors of [`IdRecord::decode`] with the IPI stream
     /// location of the record.
-    pub fn decode(&self, id: IdIndex) -> Result<IdRecord<'a>> {
-        let record = self.get(id).ok_or_else(|| {
+    pub fn leaf(&self, id: IdIndex) -> Result<IdRecord<'a>> {
+        let record = self.record(id).ok_or_else(|| {
             Error::new(ErrorKind::InvalidReference, None)
                 .with_context("IPI index is outside the IPI stream")
         })?;
@@ -114,7 +114,7 @@ impl<'a> IdTable<'a> {
     /// - [`ErrorKind::LimitExceeded`] if the nesting is deeper than
     ///   [`MAX_STRING_DEPTH`], if the resolution visits more records than the
     ///   table holds, or if `out` cannot grow.
-    /// - The errors of [`IdTable::decode`].
+    /// - The errors of [`IdTable::leaf`].
     pub fn resolve_string(&self, id: IdIndex, out: &mut Vec<u8>) -> Result<()> {
         let mut stack = Vec::new();
         push(&mut stack, Pending::Id(id, 0))?;
@@ -136,7 +136,7 @@ impl<'a> IdTable<'a> {
                 return Err(Error::new(ErrorKind::LimitExceeded, None)
                     .with_context("IPI string resolution visits too many records"));
             }
-            let IdRecord::String(string) = self.decode(id)? else {
+            let IdRecord::String(string) = self.leaf(id)? else {
                 return Err(Error::new(ErrorKind::InvalidReference, None)
                     .with_context("IPI string reference is not an LF_STRING_ID record"));
             };
@@ -148,7 +148,7 @@ impl<'a> IdTable<'a> {
                 return Err(Error::new(ErrorKind::LimitExceeded, None)
                     .with_context("IPI substring lists are nested too deeply"));
             }
-            let IdRecord::SubstringList(list) = self.decode(list_id)? else {
+            let IdRecord::SubstringList(list) = self.leaf(list_id)? else {
                 return Err(Error::new(ErrorKind::InvalidReference, None)
                     .with_context("IPI substring reference is not an LF_SUBSTR_LIST record"));
             };
@@ -182,7 +182,7 @@ impl<'a> IdTable<'a> {
     /// - [`ErrorKind::UnsupportedVersion`] if a record has a kind that
     ///   [`IdRecord::decode`] does not support.
     /// - The errors of [`IdRecord::decode`].
-    pub fn validate(&self, type_index_end: TypeIndex) -> Result<()> {
+    pub fn check(&self, type_index_end: TypeIndex) -> Result<()> {
         for record in self.table.stream().records() {
             let record = record?.record;
             self.validate_record(record, type_index_end)
@@ -229,12 +229,12 @@ impl<'a> IdTable<'a> {
     }
 
     /// Make sure that `id` refers to a record of one of `kinds`.
-    fn check_kind(&self, id: IdIndex, kinds: &[u16]) -> Result<()> {
-        let record = self.get(id).ok_or_else(|| {
+    fn check_kind(&self, id: IdIndex, kinds: &[LeafKind]) -> Result<()> {
+        let record = self.record(id).ok_or_else(|| {
             Error::new(ErrorKind::InvalidReference, None)
                 .with_context("IPI index is outside the IPI stream")
         })?;
-        if kinds.contains(&record.kind) {
+        if kinds.contains(&LeafKind(record.kind)) {
             Ok(())
         } else {
             Err(Error::new(ErrorKind::InvalidReference, None)

@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 
 use super::hash::{is_udt_kind, tag_hash, type_record_hash};
 use super::{TypeHashes, TypeTable};
+use crate::native::codeview::LeafKind;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::type_record::{Tag, TypeLeaf};
 use crate::{Error, ErrorKind, Result};
@@ -70,7 +71,7 @@ impl<'t, 'a> ForwardRefs<'t, 'a> {
         }
         let mut count = 0_usize;
         for record in stream.records() {
-            count += usize::from(is_udt_kind(record?.record.kind));
+            count += usize::from(is_udt_kind(LeafKind(record?.record.kind)));
         }
         let mut entries = Vec::new();
         entries.try_reserve_exact(count).map_err(|_| {
@@ -79,7 +80,7 @@ impl<'t, 'a> ForwardRefs<'t, 'a> {
         })?;
         for record in stream.records() {
             let record = record?;
-            if !is_udt_kind(record.record.kind) {
+            if !is_udt_kind(LeafKind(record.record.kind)) {
                 continue;
             }
             let bucket = match stored.and_then(|hashes| hashes.hash_value(record.index)) {

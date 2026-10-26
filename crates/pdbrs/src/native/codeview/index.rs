@@ -12,7 +12,7 @@ use crate::{Error, ErrorKind, Result};
 pub const FIRST_RECORD_INDEX: u32 = 0x1000;
 
 /// An index in the TPI stream, or a primitive type.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TypeIndex(pub u32);
 
 impl TypeIndex {
@@ -55,7 +55,7 @@ impl TypeIndex {
 }
 
 /// An index in the IPI stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct IdIndex(pub u32);
 
 impl IdIndex {
@@ -87,6 +87,7 @@ pub struct ChecksumOffset(pub u32);
 
 /// A decoded primitive type index.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Primitive {
     /// The value type.
     pub kind: PrimitiveKind,
@@ -95,6 +96,12 @@ pub struct Primitive {
 }
 
 impl Primitive {
+    /// Make a record with a kind and a mode.
+    #[must_use]
+    pub const fn new(kind: PrimitiveKind, mode: PrimitiveMode) -> Self {
+        Self { kind, mode }
+    }
+
     /// Return the type index of the primitive type.
     #[must_use]
     pub fn index(self) -> TypeIndex {
@@ -116,6 +123,7 @@ impl Primitive {
 
 /// The pointer mode of a primitive type index (`CV_prmode_e`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum PrimitiveMode {
     /// The value itself, not a pointer.
     Direct,
@@ -186,6 +194,7 @@ macro_rules! primitive_kinds {
     ($($(#[$meta:meta])* $name:ident = $value:literal,)*) => {
         /// The value type of a primitive type index (`TYPE_ENUM_e`).
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[non_exhaustive]
         pub enum PrimitiveKind {
             $($(#[$meta])* $name,)*
         }

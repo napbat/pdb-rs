@@ -11,8 +11,8 @@ use super::{
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::address::{AddressMap, SectionOffset};
-use crate::native::codeview::index::IdIndex;
-use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, SymbolData};
+use crate::native::codeview::index::{IdIndex, ModuleSymbolOffset};
+use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, Symbol, SymbolData};
 use crate::native::dbi::{DebugStream, Module};
 use crate::native::info::Feature;
 use crate::native::lines::{LineSubsection, ModuleLines};
@@ -225,8 +225,12 @@ impl Lists {
     ) -> Result<Option<u32>> {
         let base = u32::try_from(stream.symbol_offset())
             .map_err(|_| invalid("module symbol offset does not fit in 32 bits"))?;
-        let symbols =
-            ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
+        let symbols = ModuleSymbols::new(
+            stream.symbol_data(),
+            stream.stream(),
+            ModuleSymbolOffset(base),
+            MAX_SCOPE_DEPTH,
+        );
         // The address and the record offset of each procedure.
         let mut starts = Vec::new();
         let mut walk_end = None;
@@ -243,14 +247,14 @@ impl Lists {
             };
             let (address, length) = match scoped.symbol.data() {
                 SymbolData::Procedure(value) => {
-                    push(&mut starts, (value.address, scoped.offset), LIMIT)?;
+                    push(&mut starts, (value.address, scoped.offset.0), LIMIT)?;
                     (value.address, value.code_length)
                 }
                 SymbolData::ManagedProcedure(value) => (value.address, value.code_length),
                 SymbolData::Thunk(value) => (value.address, u32::from(value.length)),
                 SymbolData::SeparatedCode(value) => {
                     let chunk = SeparatedChunk {
-                        offset: scoped.offset,
+                        offset: scoped.offset.0,
                         address: value.address,
                         length: value.code_length,
                     };
@@ -275,7 +279,7 @@ impl Lists {
             if let Some(start) = optional_rva(map, address)? {
                 let key = ProcedureKey {
                     module: index,
-                    offset: scoped.offset,
+                    offset: scoped.offset.0,
                 };
                 push(&mut self.procedures, span(start.0, length, key), LIMIT)?;
             }
@@ -306,7 +310,7 @@ fn public_spans(
 ) -> Result<Vec<Span<crate::native::symbols::SymbolOffset>>> {
     let mut spans = Vec::new();
     for offset in index.address_map() {
-        let symbol = offset.record(symbol_records)?.symbol()?;
+        let symbol = Symbol::decode(offset.record(symbol_records)?)?;
         let SymbolData::Public(public) = symbol.data() else {
             return Err(Error::new(ErrorKind::InvalidReference, None)
                 .with_context("public address map entry is not an S_PUB32 record"));

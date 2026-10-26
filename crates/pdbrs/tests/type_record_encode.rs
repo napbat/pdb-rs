@@ -1,7 +1,6 @@
 //! Each type leaf kind: decoding, exact re-encoding and boundaries.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Record;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::type_record::{
@@ -14,6 +13,7 @@ use pdbrs::native::codeview::type_record::{
     LF_UNION2, LF_VECTOR, LF_VFTABLE, LF_VFTPATH, LF_VTSHAPE, ModifierEx, Pointer,
     PointerAttributes, TypeLeaf, VirtualFunctionTable, VtableShape,
 };
+use pdbrs::native::codeview::{LeafKind, Record};
 
 /// Concatenate fields.
 fn bytes(fields: &[&[u8]]) -> Vec<u8> {
@@ -26,8 +26,8 @@ fn u32le(value: u32) -> [u8; 4] {
 }
 
 /// Frame `payload` as a record of `kind` with `LF_PAD` padding.
-fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
-    let mut body = kind.to_le_bytes().to_vec();
+fn record(kind: LeafKind, payload: &[u8]) -> Vec<u8> {
+    let mut body = kind.0.to_le_bytes().to_vec();
     body.extend_from_slice(payload);
     let count = (4 - (body.len() + 2) % 4) % 4;
     for left in (1..=count).rev() {
@@ -40,54 +40,46 @@ fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
 
 /// Decode the record of `full`.
 fn decode(full: &[u8]) -> TypeLeaf<'_> {
-    TypeLeaf::decode(Record {
-        offset: 0,
-        kind: u16::from_le_bytes([full[2], full[3]]),
-        data: &full[4..],
-    })
+    TypeLeaf::decode(Record::new(
+        0,
+        u16::from_le_bytes([full[2], full[3]]),
+        &full[4..],
+    ))
     .unwrap()
 }
 
 /// Decode a padded record of `kind`, check that it encodes to the same bytes
 /// and that each shorter payload is an error.
-fn check(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn check(kind: LeafKind, payload: &[u8]) -> Vec<u8> {
     let full = record(kind, payload);
     let leaf = decode(&full);
     assert_eq!(leaf.kind(), kind);
-    assert!(!matches!(leaf, TypeLeaf::Unsupported(_)), "{kind:#x}");
+    assert!(!matches!(leaf, TypeLeaf::Unsupported(_)), "{:#x}", kind.0);
     let mut out = vec![0xaa];
     leaf.encode(&mut out).unwrap();
-    assert_eq!(out[1..], full[..], "kind {kind:#x}");
+    assert_eq!(out[1..], full[..], "kind {:#x}", kind.0);
     for end in 0..payload.len() {
-        let result = TypeLeaf::decode(Record {
-            offset: 0,
-            kind,
-            data: &payload[..end],
-        });
-        assert!(result.is_err(), "kind {kind:#x} prefix {end} decodes");
+        let result = TypeLeaf::decode(Record::new(0, kind.0, &payload[..end]));
+        assert!(result.is_err(), "kind {:#x} prefix {end} decodes", kind.0);
     }
     full
 }
 
 /// Decode and re-encode a record whose payload keeps raw data at its end.
-fn check_raw_tail(kind: u16, fixed: &[u8], tail: &[u8]) -> Vec<u8> {
+fn check_raw_tail(kind: LeafKind, fixed: &[u8], tail: &[u8]) -> Vec<u8> {
     let payload = bytes(&[fixed, tail]);
     let mut full = (u16::try_from(payload.len() + 2).unwrap())
         .to_le_bytes()
         .to_vec();
-    full.extend_from_slice(&kind.to_le_bytes());
+    full.extend_from_slice(&kind.0.to_le_bytes());
     full.extend_from_slice(&payload);
     let leaf = decode(&full);
     let mut out = Vec::new();
     leaf.encode(&mut out).unwrap();
-    assert_eq!(out, full, "kind {kind:#x}");
+    assert_eq!(out, full, "kind {:#x}", kind.0);
     for end in 0..fixed.len() {
-        let result = TypeLeaf::decode(Record {
-            offset: 0,
-            kind,
-            data: &fixed[..end],
-        });
-        assert!(result.is_err(), "kind {kind:#x} prefix {end} decodes");
+        let result = TypeLeaf::decode(Record::new(0, kind.0, &fixed[..end]));
+        assert!(result.is_err(), "kind {:#x} prefix {end} decodes", kind.0);
     }
     full
 }
@@ -153,7 +145,7 @@ fn simple_records_round_trip() {
 #[test]
 fn udt_records_round_trip() {
     let names = b"S\0.?AUS@@\0";
-    let unique = ClassOptions::HAS_UNIQUE_NAME.to_le_bytes();
+    let unique = ClassOptions::HAS_UNIQUE_NAME.0.to_le_bytes();
     for kind in [LF_CLASS, LF_STRUCTURE, LF_INTERFACE] {
         check(
             kind,
@@ -255,39 +247,24 @@ fn pointer_records_round_trip_with_their_base_data() {
     ));
 }
 
+/// A pointer to `int` with `attributes` and `based`.
+fn pointer(attributes: PointerAttributes, based: Option<BasedPointer<'_>>) -> Pointer<'_> {
+    let mut pointer = Pointer::default();
+    pointer.referent_type = TypeIndex(0x74);
+    pointer.attributes = attributes;
+    pointer.based = based;
+    pointer
+}
+
 #[test]
 fn pointer_encoder_rejects_data_that_does_not_match_the_kind() {
     let near64 = PointerAttributes::from_raw(0x0c | 8 << 13).unwrap();
     let segment = PointerAttributes::from_raw(0x03 | 8 << 13).unwrap();
     for pointer in [
-        Pointer {
-            referent_type: TypeIndex(0x74),
-            attributes: near64,
-            member: None,
-            based: Some(BasedPointer::Segment(1)),
-            trailing_zeros: 0,
-        },
-        Pointer {
-            referent_type: TypeIndex(0x74),
-            attributes: segment,
-            member: None,
-            based: None,
-            trailing_zeros: 0,
-        },
-        Pointer {
-            referent_type: TypeIndex(0x74),
-            attributes: segment,
-            member: None,
-            based: Some(BasedPointer::SelfBased),
-            trailing_zeros: 0,
-        },
-        Pointer {
-            referent_type: TypeIndex(0x74),
-            attributes: segment,
-            member: None,
-            based: Some(BasedPointer::Symbol(&[2, 0])),
-            trailing_zeros: 0,
-        },
+        pointer(near64, Some(BasedPointer::Segment(1))),
+        pointer(segment, None),
+        pointer(segment, Some(BasedPointer::SelfBased)),
+        pointer(segment, Some(BasedPointer::Symbol(&[2, 0]))),
     ] {
         let error = TypeLeaf::Pointer(pointer)
             .encode(&mut Vec::new())
@@ -316,12 +293,7 @@ fn masm_pointer_keeps_its_trailing_zero_bytes() {
     // A byte other than zero after the pointer data is still an error.
     let mut bad = full;
     bad[15] = 1;
-    let error = TypeLeaf::decode(Record {
-        offset: 0,
-        kind: LF_POINTER,
-        data: &bad[4..],
-    })
-    .unwrap_err();
+    let error = TypeLeaf::decode(Record::new(0, LF_POINTER.0, &bad[4..])).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }
 
@@ -438,11 +410,11 @@ fn raw_tail_records_keep_their_data() {
 fn dimension_bounds_need_a_primitive_integer_type() {
     for index_type in [0x40_u32, 0x1000, 0x0474] {
         let payload = bytes(&[&u32le(index_type), &[1, 0], &u32le(10)]);
-        let error = TypeLeaf::decode(Record {
-            offset: 0,
-            kind: LF_DIMCONU,
-            data: &record(LF_DIMCONU, &payload)[4..],
-        })
+        let error = TypeLeaf::decode(Record::new(
+            0,
+            LF_DIMCONU.0,
+            &record(LF_DIMCONU, &payload)[4..],
+        ))
         .unwrap_err();
         assert_eq!(
             error.kind(),
@@ -511,23 +483,17 @@ fn list_constructors_validate_their_bytes() {
 }
 
 fn class<'a>(name: &'a [u8], unique_name: Option<&'a [u8]>, options: u16) -> TypeLeaf<'a> {
-    TypeLeaf::Class(Class {
-        kind: ClassKind::Structure,
-        member_count: 0,
-        options: ClassOptions(options),
-        field_list: TypeIndex::NONE,
-        derivation_list: TypeIndex::NONE,
-        vtable_shape: TypeIndex::NONE,
-        size: Numeric::from_integer(Integer::Unsigned(0)),
-        name,
-        unique_name,
-        producer_padding: &[],
-    })
+    let mut class = Class::new(ClassKind::Structure);
+    class.options = ClassOptions(options);
+    class.size = Numeric::from_integer(Integer::Unsigned(0));
+    class.name = name;
+    class.unique_name = unique_name;
+    TypeLeaf::Class(class)
 }
 
 #[test]
 fn encoders_reject_values_that_do_not_fit() {
-    let unique = ClassOptions::HAS_UNIQUE_NAME;
+    let unique = ClassOptions::HAS_UNIQUE_NAME.0;
     assert_eq!(
         class(b"S", None, unique)
             .encode(&mut Vec::new())
@@ -565,7 +531,7 @@ fn encoders_reject_values_that_do_not_fit() {
 
 #[test]
 fn unsupported_kinds_keep_their_payload() {
-    let full = record(0x1522, &[1, 2, 3, 4]);
+    let full = record(LeafKind(0x1522), &[1, 2, 3, 4]);
     let leaf = decode(&full);
     assert!(matches!(leaf, TypeLeaf::Unsupported(_)));
     let mut out = Vec::new();

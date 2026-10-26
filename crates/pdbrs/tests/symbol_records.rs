@@ -2,11 +2,11 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::id_record::IdList;
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    AddressGap, CompileFlags, FramePointer, FrameProcedureFlags, IdList, JumpTableEntry,
+    AddressGap, CompileFlags, CpuType, FramePointer, FrameProcedureFlags, JumpTableEntry,
     LocalFlags, ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO, S_CALLEES, S_CALLERS,
     S_CALLSITEINFO, S_COFFGROUP, S_COMPILE2, S_COMPILE3, S_CONSTANT, S_DEFRANGE_FRAMEPOINTER_REL,
     S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_DEFRANGE_REGISTER_REL,
@@ -15,6 +15,7 @@ use pdbrs::native::codeview::symbol::{
     S_REGREL32, S_SECTION, S_SKIP, S_THUNK32, S_UDT, S_UNAMESPACE, SourceLanguage, Symbol,
     SymbolData, ThunkOrdinal,
 };
+use pdbrs::native::codeview::{Records, SymbolKind};
 
 /// A builder for little-endian symbol payloads.
 #[derive(Default)]
@@ -48,7 +49,7 @@ impl Payload {
 }
 
 /// Serialize one record and add zero padding to a 4-byte boundary.
-fn padded(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn padded(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let mut payload = payload.to_vec();
     while !(payload.len() + 4).is_multiple_of(4) {
         payload.push(0);
@@ -57,27 +58,27 @@ fn padded(kind: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 /// Serialize one record without padding.
-fn unpadded(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn unpadded(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let length = u16::try_from(payload.len() + 2).unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&length.to_le_bytes());
-    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(&kind.0.to_le_bytes());
     bytes.extend_from_slice(payload);
     bytes
 }
 
 /// Decode the padded record and give the symbol to `check`.
-fn decode(kind: u16, payload: &Payload, check: impl FnOnce(Symbol<'_>)) {
+fn decode(kind: SymbolKind, payload: &Payload, check: impl FnOnce(Symbol<'_>)) {
     let bytes = padded(kind, &payload.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    check(record.symbol().unwrap());
+    check(Symbol::decode(record).unwrap());
 }
 
 /// Decode the unpadded record and return the error kind.
-fn error(kind: u16, payload: &Payload) -> ErrorKind {
+fn error(kind: SymbolKind, payload: &Payload) -> ErrorKind {
     let bytes = unpadded(kind, &payload.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    record.symbol().unwrap_err().kind()
+    Symbol::decode(record).unwrap_err().kind()
 }
 
 #[test]
@@ -108,7 +109,7 @@ fn decodes_compile3_flags_language_and_versions() {
         assert!(value.flags.contains(CompileFlags::SDL));
         assert!(value.flags.contains(CompileFlags::LTCG));
         assert!(!value.flags.contains(CompileFlags::PGO));
-        assert_eq!(value.machine, 0xd0);
+        assert_eq!(value.machine, CpuType(0xd0));
         assert_eq!(value.frontend, [1, 99, 0, 7]);
         assert_eq!(value.backend, [23_051, 0, 0, 3]);
         assert_eq!(value.version, b"rustc");
@@ -131,7 +132,7 @@ fn compile3_accepts_zero_bytes_after_the_version() {
     for tail in [&b""[..], b"\0", b"\0\0\0\0\0"] {
         let bytes = unpadded(S_COMPILE3, &compile3(tail).0);
         let record = Records::new(&bytes).next().unwrap().unwrap();
-        let SymbolData::Compile3(value) = *record.symbol().unwrap().data() else {
+        let SymbolData::Compile3(value) = *Symbol::decode(record).unwrap().data() else {
             panic!("expected S_COMPILE3");
         };
         assert_eq!(value.version, b"ML");
@@ -178,7 +179,7 @@ fn compile2_extra_strings_can_be_absent_or_empty() {
             unpadded(S_COMPILE2, &payload.0)
         };
         let record = Records::new(&bytes).next().unwrap().unwrap();
-        let SymbolData::Compile2(value) = *record.symbol().unwrap().data() else {
+        let SymbolData::Compile2(value) = *Symbol::decode(record).unwrap().data() else {
             panic!("expected S_COMPILE2");
         };
         assert!(value.extra_strings.is_empty());
@@ -188,7 +189,7 @@ fn compile2_extra_strings_can_be_absent_or_empty() {
     payload.0.truncate(payload.0.len() - 2);
     let bytes = unpadded(S_COMPILE2, &payload.bytes(b"\0").0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    let SymbolData::Compile2(value) = *record.symbol().unwrap().data() else {
+    let SymbolData::Compile2(value) = *Symbol::decode(record).unwrap().data() else {
         panic!("expected S_COMPILE2");
     };
     assert_eq!(value.version, b"LIN");
@@ -283,10 +284,14 @@ fn decodes_block_and_label() {
         let SymbolData::Block(value) = symbol.data() else {
             panic!("expected S_BLOCK32");
         };
-        assert_eq!((value.parent, value.end, value.code_length), (4, 96, 0x20));
+        let (parent, end) = (ModuleSymbolOffset(4), ModuleSymbolOffset(96));
+        assert_eq!(
+            (value.parent, value.end, value.code_length),
+            (parent, end, 0x20)
+        );
         assert_eq!(symbol.name(), Some(&b""[..]));
-        let scope = symbol.scope().unwrap();
-        assert_eq!((scope.parent, scope.end), (4, 96));
+        let scope = symbol.scope_links().unwrap();
+        assert_eq!((scope.parent, scope.end), (parent, end));
     });
     let label = Payload::default()
         .u32(0x30)
@@ -327,7 +332,7 @@ fn decodes_standard_thunk() {
             panic!("expected S_THUNK32");
         };
         assert_eq!(value.ordinal, ThunkOrdinal::STANDARD);
-        assert_eq!((value.end, value.length), (112, 6));
+        assert_eq!((value.end, value.length), (ModuleSymbolOffset(112), 6));
         assert_eq!(value.variant, b"");
         assert_eq!(symbol.name(), Some(&b"memset"[..]));
         assert_eq!(symbol.address().unwrap().offset, 0x1234);
@@ -379,7 +384,10 @@ fn decodes_inline_site() {
         let SymbolData::InlineSite(value) = symbol.data() else {
             panic!("expected S_INLINESITE");
         };
-        assert_eq!((value.parent, value.end), (4, 80));
+        assert_eq!(
+            (value.parent, value.end),
+            (ModuleSymbolOffset(4), ModuleSymbolOffset(80))
+        );
         assert_eq!(symbol.id_index(), Some(IdIndex(0x11fd)));
         assert_eq!(value.annotations.bytes(), [0x0b, 0x0c, 0x06, 0x21]);
         assert_eq!(value.annotations.iter().count(), 2);
@@ -696,15 +704,17 @@ fn decodes_procedure_references() {
         let payload = Payload::default().u32(0).u32(396).u16(3).bytes(b"main\0");
         decode(kind, &payload, |symbol| {
             let reference = symbol.procedure_reference().unwrap();
-            assert_eq!((reference.offset, reference.module), (396, 3));
-            assert_eq!(reference.module_index(), Some(2));
+            assert_eq!(
+                (reference.offset, reference.module),
+                (ModuleSymbolOffset(396), Some(ModuleIndex(2)))
+            );
             assert_eq!(reference.name_checksum, 0);
             assert_eq!(symbol.name(), Some(&b"main"[..]));
         });
     }
     let payload = Payload::default().u32(0).u32(4).u16(0).bytes(b"x\0");
     decode(S_PROCREF, &payload, |symbol| {
-        assert_eq!(symbol.procedure_reference().unwrap().module_index(), None);
+        assert_eq!(symbol.procedure_reference().unwrap().module, None);
     });
 }
 
@@ -714,7 +724,7 @@ fn keeps_skip_filler_without_padding_rules() {
     for filler in [&[0_u8; 22][..], b"\x01\x02\x03\x04\x05\x06"] {
         let bytes = unpadded(S_SKIP, filler);
         let record = Records::new(&bytes).next().unwrap().unwrap();
-        let symbol = record.symbol().unwrap();
+        let symbol = Symbol::decode(record).unwrap();
         assert_eq!(*symbol.data(), SymbolData::Skip(filler));
         assert_eq!(symbol.name(), None);
         assert_eq!(symbol.address(), None);

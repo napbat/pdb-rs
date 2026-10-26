@@ -31,6 +31,7 @@ pub fn udt<'a>(leaf: &TypeLeaf<'a>) -> Option<Udt<'a>> {
         ClassKind::Class => "class",
         ClassKind::Structure => "struct",
         ClassKind::Interface => "interface",
+        _ => "<unknown class kind>",
     };
     Some(match leaf {
         TypeLeaf::Class(class) => Udt {
@@ -87,6 +88,7 @@ const fn access(attributes: MemberAttributes) -> &'static str {
         MemberAccess::Private => "private ",
         MemberAccess::Protected => "protected ",
         MemberAccess::Public => "public ",
+        _ => "<unknown access> ",
     }
 }
 
@@ -100,6 +102,7 @@ const fn method_prefix(kind: MethodKind) -> &'static str {
         }
         MethodKind::Static => "static ",
         MethodKind::Friend => "friend ",
+        _ => "<unknown method kind> ",
     }
 }
 

@@ -181,7 +181,7 @@ impl<'a> BinaryAnnotations<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] for an opcode that is not known,
     /// a compressed integer with an invalid first byte, a truncated
     /// annotation, or zero bytes that are not valid padding.
-    pub fn new(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let mut rest = bytes;
         while let Some(&first) = rest.first() {
             if first == 0 {
@@ -231,7 +231,7 @@ impl<'a> IntoIterator for &BinaryAnnotations<'a> {
 
 /// An iterator over [`BinaryAnnotations`].
 ///
-/// [`BinaryAnnotations::new`] validates all bytes, so the iterator does not
+/// [`BinaryAnnotations::parse`] validates all bytes, so the iterator does not
 /// return errors.
 #[derive(Clone, Debug)]
 pub struct Annotations<'a> {

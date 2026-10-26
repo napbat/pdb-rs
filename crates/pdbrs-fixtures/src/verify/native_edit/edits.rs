@@ -257,14 +257,15 @@ fn indexes(pdb: &Pdb<&[u8]>) -> pdbrs::Result<Indexes> {
 fn first_unique<'r>(
     records: &'r [u8],
     table: HashTable<'_>,
-    select: impl Fn(u16) -> bool,
+    select: impl Fn(pdbrs::native::codeview::SymbolKind) -> bool,
 ) -> pdbrs::Result<Option<(&'r [u8], SymbolData<'r>)>> {
     let mut candidates = Vec::new();
     let mut names = std::collections::BTreeMap::<&[u8], usize>::new();
     for record in table.records() {
         let name = indexed_name(records, record.symbol)?;
         *names.entry(name).or_default() += 1;
-        let symbol = record.symbol.record(records)?.symbol()?;
+        let symbol =
+            pdbrs::native::codeview::symbol::Symbol::decode(record.symbol.record(records)?)?;
         if select(symbol.kind()) && !name.is_empty() && name.is_ascii() {
             let plain = name.len() <= 40
                 && name
@@ -299,19 +300,16 @@ fn add_symbols(
         address = public.address;
         flags = public.flags;
     }
-    editor.add_public(&Public {
-        flags,
-        address,
-        name: ADDED_PUBLIC.as_bytes(),
-    })?;
-    editor.add_global(
-        S_GDATA32,
-        &SymbolData::Data(Data {
-            type_index: T_INT4,
-            address,
-            name: ADDED_GLOBAL.as_bytes(),
-        }),
-    )?;
+    let mut public = Public::default();
+    public.flags = flags;
+    public.address = address;
+    public.name = ADDED_PUBLIC.as_bytes();
+    editor.add_public(&public)?;
+    let mut data = Data::default();
+    data.type_index = T_INT4;
+    data.address = address;
+    data.name = ADDED_GLOBAL.as_bytes();
+    editor.add_global(S_GDATA32, &SymbolData::Data(data))?;
     expect.publics.push(ADDED_PUBLIC.into());
     expect.globals.push(ADDED_GLOBAL.into());
     Ok(())
@@ -375,12 +373,12 @@ fn types(
     expect: &mut Expectation,
     notes: &mut Vec<String>,
 ) -> pdbrs::Result<()> {
-    let members = [Member::DataMember(DataMember {
-        attributes: MemberAttributes::from_raw(3)?,
-        member_type: T_INT4,
-        offset: number(0),
-        name: b"value",
-    })];
+    let mut member = DataMember::default();
+    member.attributes = MemberAttributes::from_raw(3)?;
+    member.member_type = T_INT4;
+    member.offset = number(0);
+    member.name = b"value";
+    let members = [Member::DataMember(member)];
     let mut bytes = Vec::new();
     encode_field_list(
         &members,
@@ -393,25 +391,21 @@ fn types(
             .with_context("field list has no record")
     })??;
     let field_list = editor.add_type(&TypeLeaf::decode(record)?)?;
-    let structure = editor.add_type(&TypeLeaf::Class(Class {
-        kind: ClassKind::Structure,
-        member_count: 1,
-        options: ClassOptions(0),
-        field_list,
-        derivation_list: TypeIndex::NONE,
-        vtable_shape: TypeIndex::NONE,
-        size: number(4),
-        name: ADDED_TYPE.as_bytes(),
-        unique_name: None,
-        producer_padding: &[],
-    }))?;
-    editor.add_global(
-        S_UDT,
-        &SymbolData::UserDefinedType(UserDefinedType {
-            type_index: structure,
-            name: ADDED_TYPE.as_bytes(),
-        }),
-    )?;
+    let mut class = Class::new(ClassKind::Structure);
+    class.member_count = 1;
+    class.options = ClassOptions(0);
+    class.field_list = field_list;
+    class.derivation_list = TypeIndex::NONE;
+    class.vtable_shape = TypeIndex::NONE;
+    class.size = number(4);
+    class.name = ADDED_TYPE.as_bytes();
+    class.unique_name = None;
+    class.trailing = &[];
+    let structure = editor.add_type(&TypeLeaf::Class(class))?;
+    let mut udt = UserDefinedType::default();
+    udt.type_index = structure;
+    udt.name = ADDED_TYPE.as_bytes();
+    editor.add_global(S_UDT, &SymbolData::UserDefinedType(udt))?;
     expect.types.push(ADDED_TYPE.into());
     expect.globals.push(ADDED_TYPE.into());
     let has_ipi = pdb
@@ -419,10 +413,10 @@ fn types(
         .stream(pdbrs::native::msf::StreamId(4))?
         .is_some_and(|stream| pdbrs::io::ReadAt::len(&stream).is_ok_and(|length| length != 0));
     if has_ipi {
-        editor.add_id(&IdRecord::String(StringId {
-            substrings: None,
-            string: ADDED_ID.as_bytes(),
-        }))?;
+        let mut id = StringId::default();
+        id.substrings = None;
+        id.string = ADDED_ID.as_bytes();
+        editor.add_id(&IdRecord::String(id))?;
         expect.ids.push(ADDED_ID.into());
     } else {
         notes.push("the PDB has no IPI stream".into());

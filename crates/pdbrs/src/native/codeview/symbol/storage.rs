@@ -12,31 +12,32 @@
 //! `BPREL32INDIRENCTMP` and `REGREL32INDIRENCTMP` for the layouts of
 //! `BPRELSYM32`, `BPRELSYM32INDIR` and `REGREL32INDIR`.
 
-use super::super::Fields;
-use super::super::index::TypeIndex;
+use super::super::index::{NameOffset, TypeIndex};
+use super::super::{Fields, SymbolKind};
 use super::LocalFlags;
 use crate::Result;
 use crate::native::output::Output;
 
 /// The kind of an indirect frame-relative variable (`S_BPREL32_INDIR`).
-pub const S_BPREL32_INDIR: u16 = 0x1170;
+pub const S_BPREL32_INDIR: SymbolKind = SymbolKind(0x1170);
 /// The kind of an indirect register-relative variable (`S_REGREL32_INDIR`).
-pub const S_REGREL32_INDIR: u16 = 0x1171;
+pub const S_REGREL32_INDIR: SymbolKind = SymbolKind(0x1171);
 /// The kind of a frame-relative compiler temporary for Edit and Continue
 /// (`S_BPREL32_ENCTMP`).
-pub const S_BPREL32_ENCTMP: u16 = 0x1178;
+pub const S_BPREL32_ENCTMP: SymbolKind = SymbolKind(0x1178);
 /// The kind of an indirect frame-relative compiler temporary for Edit and
 /// Continue (`S_BPREL32_INDIR_ENCTMP`).
-pub const S_BPREL32_INDIR_ENCTMP: u16 = 0x117a;
+pub const S_BPREL32_INDIR_ENCTMP: SymbolKind = SymbolKind(0x117a);
 /// The kind of an indirect register-relative compiler temporary for Edit
 /// and Continue (`S_REGREL32_INDIR_ENCTMP`).
-pub const S_REGREL32_INDIR_ENCTMP: u16 = 0x117b;
+pub const S_REGREL32_INDIR_ENCTMP: SymbolKind = SymbolKind(0x117b);
 
 /// A variable relative to the frame pointer (`S_BPREL32` and [`S_BPREL32_ENCTMP`]).
 ///
 /// x86 producers write this record for locals and parameters relative to
 /// `EBP`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct BasePointerRelative<'a> {
     /// The offset from the frame pointer. `cvinfo.h` gives a signed
     /// `CV_off32_t`.
@@ -69,7 +70,8 @@ impl<'a> BasePointerRelative<'a> {
 }
 
 /// A variable in a register (`S_REGISTER`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct RegisterVariable<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -103,12 +105,13 @@ impl<'a> RegisterVariable<'a> {
 /// A static variable of a source file (`S_FILESTATIC`).
 ///
 /// The def-range records that follow give the location of the variable.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FileStatic<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
     /// The byte offset of the module file name in the `/names` stream.
-    pub module_name_offset: u32,
+    pub module_name_offset: NameOffset,
     /// The flags.
     pub flags: LocalFlags,
     /// The name.
@@ -119,7 +122,7 @@ impl<'a> FileStatic<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
-        let module_name_offset = fields.u32()?;
+        let module_name_offset = NameOffset(fields.u32()?);
         let flags = LocalFlags(fields.u16()?);
         let name = fields.name()?;
         Ok(Self {
@@ -133,7 +136,7 @@ impl<'a> FileStatic<'a> {
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
-        out.u32(self.module_name_offset)?;
+        out.u32(self.module_name_offset.0)?;
         out.u16(self.flags.0)?;
         out.c_string(self.name)
     }
@@ -143,7 +146,8 @@ impl<'a> FileStatic<'a> {
 /// and [`S_BPREL32_INDIR_ENCTMP`]).
 ///
 /// The variable is at `*(frame + offset) + offset_in_udt`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct BasePointerRelativeIndirect<'a> {
     /// The offset of the pointer from the frame pointer (`off`, a `long`).
     pub offset: i32,
@@ -183,7 +187,8 @@ impl<'a> BasePointerRelativeIndirect<'a> {
 /// [`S_REGREL32_INDIR_ENCTMP`]).
 ///
 /// The variable is at `*(register + offset) + offset_in_udt`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct RegisterRelativeIndirect<'a> {
     /// The offset of the pointer from the register.
     pub offset: u32,

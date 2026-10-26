@@ -5,10 +5,11 @@ use pdbrs::ErrorKind;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::symbol::{
     ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AttributeValue, CustomDebugInfo,
-    CustomDebugInfoData, CustomDebugInfoKind, MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE,
+    CustomDebugInfoData, CustomDebugInfoKind, MANAGED_ATTRIBUTE_OEM_ID, MD2_ATTRIBUTE, Symbol,
     SymbolAttribute, SymbolData,
 };
 use pdbrs::portable::custom::{Lambda, LambdaClosure, LocalSlot, StateMachineState};
+use pdbrs::portable::metadata::{IlOffset, MetadataToken};
 
 /// The `S_OEM` payload with the `MD2` attribute of `ComputeAsync` in the
 /// `dotnet-csharp-full` fixture (module 0, offset 0x3c).
@@ -98,12 +99,7 @@ fn parse_error(value: &[u8]) -> ErrorKind {
 fn decodes_the_fixture_md2_attribute() {
     let payload = unhex(FIXTURE_MD2);
     let bytes = oem_record(&payload);
-    let symbol = Records::new(&bytes)
-        .next()
-        .unwrap()
-        .unwrap()
-        .symbol()
-        .unwrap();
+    let symbol = Symbol::decode(Records::new(&bytes).next().unwrap().unwrap()).unwrap();
     let SymbolData::Oem(oem) = symbol.data() else {
         panic!("expected S_OEM");
     };
@@ -173,12 +169,18 @@ fn decodes_the_fixture_async_method_info() {
     let AttributeValue::AsyncMethodInfo(info) = attribute.decode().unwrap() else {
         panic!("expected asyncMethodInfo");
     };
-    assert_eq!(info.kickoff_method, 0x0600_0001);
+    assert_eq!(info.kickoff_method, MetadataToken::from_raw(0x0600_0001));
     assert_eq!(info.catch_handler_offset, None);
     let steps: Vec<_> = info
         .steps
         .iter()
-        .map(|step| (step.yield_offset, step.resume_method, step.resume_offset))
+        .map(|step| {
+            (
+                step.yield_offset.get(),
+                step.resume_method.get(),
+                step.resume_offset.get(),
+            )
+        })
         .collect();
     assert_eq!(
         steps,
@@ -218,17 +220,12 @@ fn only_the_managed_oem_id_has_attributes() {
     let mut payload = unhex(FIXTURE_MD2);
     payload[0] ^= 1;
     let bytes = oem_record(&payload);
-    let symbol = Records::new(&bytes)
-        .next()
-        .unwrap()
-        .unwrap()
-        .symbol()
-        .unwrap();
+    let symbol = Symbol::decode(Records::new(&bytes).next().unwrap().unwrap()).unwrap();
     let SymbolData::Oem(oem) = symbol.data() else {
         panic!("expected S_OEM");
     };
     assert_ne!(oem.id, MANAGED_ATTRIBUTE_OEM_ID);
-    assert!(oem.attribute().is_none());
+    assert!(oem.attribute().unwrap().is_none());
 }
 
 #[test]
@@ -400,10 +397,16 @@ fn decodes_using_groups() {
 #[test]
 fn decodes_forward_records() {
     decode_one(1, &[5, 0, 0, 6], |data| {
-        assert_eq!(data, CustomDebugInfoData::ForwardMethod(0x0600_0005));
+        assert_eq!(
+            data,
+            CustomDebugInfoData::ForwardMethod(MetadataToken::from_raw(0x0600_0005))
+        );
     });
     decode_one(2, &[9, 0, 0, 6], |data| {
-        assert_eq!(data, CustomDebugInfoData::ForwardModule(0x0600_0009));
+        assert_eq!(
+            data,
+            CustomDebugInfoData::ForwardModule(MetadataToken::from_raw(0x0600_0009))
+        );
     });
     assert_eq!(decode_error(1, &[5, 0, 0]), ErrorKind::InvalidFormat);
     assert_eq!(
@@ -421,7 +424,7 @@ fn decodes_hoisted_local_scopes() {
         };
         let scopes: Vec<_> = scopes
             .iter()
-            .map(|scope| (scope.start, scope.end))
+            .map(|scope| (scope.start.get(), scope.end.get()))
             .collect();
         assert_eq!(scopes, [(0, 0), (5, 9)]);
     });
@@ -539,7 +542,10 @@ fn decodes_tuple_element_names() {
         assert_eq!((entries[0].slot, entries[0].name), (1, &b"t"[..]));
         assert_eq!(entries[1].element_names.len(), 3);
         assert_eq!(entries[1].slot, -1);
-        assert_eq!((entries[1].scope_start, entries[1].scope_end), (2, 10));
+        assert_eq!(
+            (entries[1].scope_start, entries[1].scope_end),
+            (IlOffset::new(2), IlOffset::new(10))
+        );
         assert_eq!(entries[1].name, b"c");
     });
     for length in 0..payload.len() {
@@ -621,10 +627,14 @@ fn async_info(catch: u32, steps: &[[u32; 3]]) -> Vec<u8> {
 fn decodes_async_method_info() {
     let value = async_info(0x298, &[[0x19a, 0x0600_004f, 0x1b8]]);
     let info = AsyncMethodInfo::parse(&value).unwrap();
-    assert_eq!(info.catch_handler_offset, Some(0x298));
+    assert_eq!(info.catch_handler_offset, Some(IlOffset::new(0x298)));
     let step = info.steps.iter().next().unwrap();
     assert_eq!(
-        (step.yield_offset, step.resume_method, step.resume_offset),
+        (
+            step.yield_offset.get(),
+            step.resume_method.get(),
+            step.resume_offset.get()
+        ),
         (0x19a, 0x0600_004f, 0x1b8)
     );
     // No steps, and zero record padding.

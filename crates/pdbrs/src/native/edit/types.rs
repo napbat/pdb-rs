@@ -80,7 +80,7 @@ pub(super) fn plan<S: ReadAt>(
     } else {
         let source = pdb.ids()?.ok_or_else(|| missing("PDB has no IPI stream"))?;
         let appended = append(pdb, &source, ids)?;
-        IdTable::new(&appended.stream)?.validate(type_end)?;
+        IdTable::new(&appended.stream)?.check(type_end)?;
         let end = IdIndex(appended.stream.header().index_end);
         store(appended, IPI_STREAM, changes)?;
         end

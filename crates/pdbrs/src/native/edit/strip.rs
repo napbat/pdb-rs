@@ -13,12 +13,12 @@ use super::{IPI_STREAM, TPI_STREAM, push, unsupported};
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache};
-use crate::native::codeview::Records;
-use crate::native::codeview::index::TypeIndex;
+use crate::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use crate::native::codeview::symbol::{
     ModuleSymbolWriter, Procedure, ProcedureReference, ProcedureType, S_END, S_LMANPROC, S_LPROC32,
     S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROCREF, S_PUB32, Symbol, SymbolData,
 };
+use crate::native::codeview::{Records, SymbolKind};
 use crate::native::dbi::{DbiBuilder, DebugStream, ModuleStreamParts, OwnedSourceInfo};
 use crate::native::info::{Feature, InfoBuilder};
 use crate::native::msf::StreamId;
@@ -31,7 +31,7 @@ use crate::native::types::{HashLayout, TypeHeader, TypeStreamOptions, write_type
 use crate::{Error, ErrorKind, Result};
 
 /// The module stream offset of the first symbol record: after the signature.
-const SYMBOL_BASE: u32 = 4;
+const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
 /// The DBI header flag of a stripped PDB (`fStripped`).
 const STRIPPED_FLAG: u16 = 1 << 1;
 
@@ -74,7 +74,7 @@ fn strip_types(id: StreamId, header: &TypeHeader, changes: &mut Changes) -> Resu
 
 /// Return the local procedure record of a stripped module: type 0, no
 /// links, and the kind without an ID index.
-fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(u16, SymbolData<'a>)> {
+fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(SymbolKind, SymbolData<'a>)> {
     match (symbol.kind(), *symbol.data()) {
         (
             S_LPROC32 | S_LPROC32_ID | S_LPROC32_DPC | S_LPROC32_DPC_ID,
@@ -88,9 +88,9 @@ fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(u16, SymbolData<'a>)> 
             Ok((
                 kind,
                 SymbolData::Procedure(Procedure {
-                    parent: 0,
-                    end: 0,
-                    next: 0,
+                    parent: ModuleSymbolOffset(0),
+                    end: ModuleSymbolOffset(0),
+                    next: ModuleSymbolOffset(0),
                     signature: ProcedureType::Type(TypeIndex::NONE),
                     ..procedure
                 }),
@@ -99,9 +99,9 @@ fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(u16, SymbolData<'a>)> 
         (S_LMANPROC, SymbolData::ManagedProcedure(procedure)) => Ok((
             S_LMANPROC,
             SymbolData::ManagedProcedure(crate::native::codeview::symbol::ManagedProcedure {
-                parent: 0,
-                end: 0,
-                next: 0,
+                parent: ModuleSymbolOffset(0),
+                end: ModuleSymbolOffset(0),
+                next: ModuleSymbolOffset(0),
                 ..procedure
             }),
         )),
@@ -117,6 +117,14 @@ fn local_reference<'a>(symbol: &Symbol<'a>) -> Option<ProcedureReference<'a>> {
         (S_LPROCREF, SymbolData::ProcedureReference(reference)) => Some(reference),
         _ => None,
     }
+}
+
+/// Return the 0-based module index of a reference as the `u16` key of the
+/// strip maps, or `None` for module number 0.
+fn reference_module(reference: &ProcedureReference<'_>) -> Option<u16> {
+    reference
+        .module
+        .map(|ModuleIndex(index)| u16::try_from(index).unwrap_or(u16::MAX))
 }
 
 /// Collect the records that the strip keeps, by source offset.
@@ -143,7 +151,7 @@ fn kept_records(
     if let Some(globals) = globals {
         for bucket in globals.hash_table().buckets() {
             for record in bucket.records {
-                let symbol = record.symbol.record(records)?.symbol()?;
+                let symbol = Symbol::decode(record.symbol.record(records)?)?;
                 if local_reference(&symbol).is_some() {
                     kept.insert(
                         record.symbol.0,
@@ -167,7 +175,7 @@ struct ModuleRegions {
     /// kept procedure.
     regions: Vec<Option<Vec<u8>>>,
     /// The new module offset of each kept procedure.
-    offsets: BTreeMap<(u16, u32), u32>,
+    offsets: BTreeMap<(u16, u32), ModuleSymbolOffset>,
 }
 
 /// Build the stripped symbol region of each module.
@@ -182,14 +190,13 @@ fn module_regions<S: ReadAt>(
         if !entry.global {
             continue;
         }
-        let symbol = SymbolOffset(offset).record(records)?.symbol()?;
+        let symbol = Symbol::decode(SymbolOffset(offset).record(records)?)?;
         let reference = local_reference(&symbol)
             .ok_or_else(|| unresolved("kept global record is not an S_LPROCREF record"))?;
-        let module = reference
-            .module_index()
+        let module = reference_module(&reference)
             .ok_or_else(|| unresolved("S_LPROCREF record has module number 0"))?;
         let list = targets.entry(module).or_default();
-        push(list, reference.offset)?;
+        push(list, reference.offset.0)?;
     }
     let mut regions = Vec::new();
     let mut offsets = BTreeMap::new();
@@ -214,7 +221,7 @@ fn module_regions<S: ReadAt>(
                 .and_then(|start| stream.symbol_data().get(start as usize..))
                 .and_then(|rest| Records::new(rest).next())
                 .ok_or_else(|| unresolved("S_LPROCREF offset is outside the module symbols"))??;
-            let (kind, data) = stripped_procedure(&record.symbol()?)?;
+            let (kind, data) = stripped_procedure(&Symbol::decode(record)?)?;
             let new = writer.push(kind, &data)?;
             writer.push(S_END, &SymbolData::ScopeEnd)?;
             offsets.insert((index, offset), new);
@@ -264,7 +271,7 @@ fn shared_records(
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("symbol record stream does not fit in 32 bits")
         })?);
-        let symbol = record.symbol()?;
+        let symbol = Symbol::decode(record)?;
         let hash = HashEntry {
             symbol: offset,
             reference_count: entry.reference_count,
@@ -273,10 +280,10 @@ fn shared_records(
         if entry.global {
             let mut reference = local_reference(&symbol)
                 .ok_or_else(|| unresolved("kept global record is not an S_LPROCREF record"))?;
-            let module = reference.module_index().unwrap_or(u16::MAX);
+            let module = reference_module(&reference).unwrap_or(u16::MAX);
             reference.offset = *modules
                 .offsets
-                .get(&(module, reference.offset))
+                .get(&(module, reference.offset.0))
                 .ok_or_else(|| unresolved("S_LPROCREF record names no kept procedure"))?;
             SymbolData::ProcedureReference(reference).encode(S_LPROCREF, &mut shared.bytes)?;
             push(&mut shared.globals, hash)?;

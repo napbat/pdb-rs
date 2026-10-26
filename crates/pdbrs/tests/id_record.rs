@@ -1,30 +1,26 @@
 //! Tests for IPI ID records, string resolution and reference validation.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Record;
 use pdbrs::native::codeview::id_record::{
     BuildInfoArgument, IdRecord, IdTable, LF_BUILDINFO, LF_FUNC_ID, LF_MFUNC_ID, LF_STRING_ID,
     LF_SUBSTR_LIST, LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE, MAX_STRING_DEPTH,
 };
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, NameOffset, TypeIndex};
+use pdbrs::native::codeview::{LeafKind, Record};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{HEADER_SIZE, TypeStream};
 
 /// A leaf kind that is a type leaf, not an ID leaf (`LF_PROCEDURE`).
-const LF_PROCEDURE: u16 = 0x1008;
+const LF_PROCEDURE: LeafKind = LeafKind(0x1008);
 
 /// A record kind and its payload, before framing.
-type RawRecord = (u16, Vec<u8>);
+type RawRecord = (LeafKind, Vec<u8>);
 
-fn record(kind: u16, data: &[u8]) -> Record<'_> {
-    Record {
-        offset: 0,
-        kind,
-        data,
-    }
+fn record(kind: LeafKind, data: &[u8]) -> Record<'_> {
+    Record::new(0, kind.0, data)
 }
 
-fn decode(kind: u16, data: &[u8]) -> pdbrs::Result<IdRecord<'_>> {
+fn decode(kind: LeafKind, data: &[u8]) -> pdbrs::Result<IdRecord<'_>> {
     IdRecord::decode(record(kind, data))
 }
 
@@ -66,12 +62,12 @@ fn list(count_size: usize, ids: &[u32]) -> Vec<u8> {
 }
 
 /// Build an IPI stream with `records` at indices from 0x1000.
-fn ipi(records: &[(u16, Vec<u8>)]) -> TypeStream {
+fn ipi(records: &[RawRecord]) -> TypeStream {
     let mut body = Vec::new();
     for (kind, payload) in records {
         let length = u16::try_from(payload.len() + 2).unwrap();
         body.extend_from_slice(&length.to_le_bytes());
-        body.extend_from_slice(&kind.to_le_bytes());
+        body.extend_from_slice(&kind.0.to_le_bytes());
         body.extend_from_slice(payload);
     }
     let count = u32::try_from(records.len()).unwrap();
@@ -183,9 +179,10 @@ fn source_line_records_keep_reference_kinds_apart() {
         panic!("expected a UDT module source line");
     };
     assert_eq!(line.udt, TypeIndex(0x1004));
-    assert_eq!(line.name_offset, 967);
+    assert_eq!(line.name_offset, NameOffset(967));
     assert_eq!(line.line, 610);
-    assert_eq!(line.module, 22);
+    // The record stores the 1-based module number 22.
+    assert_eq!(line.module, Some(ModuleIndex(21)));
 }
 
 #[test]
@@ -260,8 +257,8 @@ fn table_resolves_substrings_before_the_string() {
     assert_eq!(table.len(), 5);
     assert_eq!(table.index_begin(), IdIndex(0x1000));
     assert_eq!(table.index_end(), IdIndex(0x1005));
-    assert_eq!(table.get(IdIndex(0x1005)), None);
-    assert_eq!(table.get(IdIndex(0xfff)), None);
+    assert_eq!(table.record(IdIndex(0x1005)), None);
+    assert_eq!(table.record(IdIndex(0xfff)), None);
 
     let mut out = b"prefix:".to_vec();
     table.resolve_string(IdIndex(0x1003), &mut out).unwrap();
@@ -317,7 +314,7 @@ fn table_validates_references() {
     ]);
     IdTable::new(&valid)
         .unwrap()
-        .validate(TypeIndex(0x1011))
+        .check(TypeIndex(0x1011))
         .unwrap();
 
     let cases: [(&[RawRecord], ErrorKind); 6] = [
@@ -353,7 +350,7 @@ fn table_validates_references() {
         let stream = ipi(records);
         let error = IdTable::new(&stream)
             .unwrap()
-            .validate(TypeIndex(0x1011))
+            .check(TypeIndex(0x1011))
             .unwrap_err();
         assert_eq!(error.kind(), kind);
         assert_eq!(error.stream_location(), Some((StreamId(4), 56)));
@@ -367,10 +364,10 @@ fn table_adds_the_record_location_to_decode_errors() {
         (LF_FUNC_ID, vec![0, 0]),
     ]);
     let table = IdTable::new(&stream).unwrap();
-    let error = table.decode(IdIndex(0x1001)).unwrap_err();
+    let error = table.leaf(IdIndex(0x1001)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     // The first record has a 4-byte prefix and a 10-byte payload.
     assert_eq!(error.stream_location(), Some((StreamId(4), 56 + 14)));
-    let error = table.decode(IdIndex(0x1002)).unwrap_err();
+    let error = table.leaf(IdIndex(0x1002)).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }

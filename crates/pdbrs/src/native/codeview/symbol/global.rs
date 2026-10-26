@@ -4,15 +4,16 @@
 //! `CoffGroupSym` in LLVM `SymbolRecordMapping.cpp`. The reserved byte of
 //! `S_SECTION` comes from `SECTIONSYM` in `cvinfo.h`.
 
-use super::super::Fields;
+use super::super::index::{ModuleIndex, ModuleSymbolOffset};
+use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a reference to a data symbol in a module (`S_DATAREF`).
-pub const S_DATAREF: u16 = 0x1126;
+pub const S_DATAREF: SymbolKind = SymbolKind(0x1126);
 /// The kind of a reference to an annotation symbol in a module (`S_ANNOTATIONREF`).
-pub const S_ANNOTATIONREF: u16 = 0x1128;
+pub const S_ANNOTATIONREF: SymbolKind = SymbolKind(0x1128);
 
 flags! {
     /// The flags of a public symbol (`CV_PUBSYMFLAGS`).
@@ -29,7 +30,8 @@ flags! {
 }
 
 /// A public symbol record (`S_PUB32`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Public<'a> {
     /// The flags.
     pub flags: PublicFlags,
@@ -61,15 +63,17 @@ impl<'a> Public<'a> {
 }
 
 /// A reference to a procedure in a module (`S_PROCREF` and `S_LPROCREF`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ProcedureReference<'a> {
     /// The `SUC` name checksum. Linkers usually write 0.
     pub name_checksum: u32,
     /// The offset of the procedure record in the module stream. The offset
     /// includes the 4-byte signature at the start of the stream.
-    pub offset: u32,
-    /// The raw module number. It is the module index plus 1.
-    pub module: u16,
+    pub offset: ModuleSymbolOffset,
+    /// The index of the module in the DBI module list, or `None` if the
+    /// record does not give a module. The record stores the index plus 1.
+    pub module: Option<ModuleIndex>,
     /// The name.
     pub name: &'a [u8],
 }
@@ -78,8 +82,11 @@ impl<'a> ProcedureReference<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let name_checksum = fields.u32()?;
-        let offset = fields.u32()?;
-        let module = fields.u16()?;
+        let offset = ModuleSymbolOffset(fields.u32()?);
+        let module = fields
+            .u16()?
+            .checked_sub(1)
+            .map(|index| ModuleIndex(u32::from(index)));
         let name = fields.name()?;
         Ok(Self {
             name_checksum,
@@ -89,26 +96,32 @@ impl<'a> ProcedureReference<'a> {
         })
     }
 
-    /// Return the index of the module in the DBI module list.
-    ///
-    /// The index is [`ProcedureReference::module`] minus 1. The raw value 0
-    /// gives `None`.
-    #[must_use]
-    pub const fn module_index(&self) -> Option<u16> {
-        self.module.checked_sub(1)
-    }
-
     /// Write the fields.
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if the module number does not fit
+    /// in 16 bits.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
+        let module = match self.module {
+            None => 0,
+            Some(index) => index
+                .0
+                .checked_add(1)
+                .and_then(|number| u16::try_from(number).ok())
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::LimitExceeded, None)
+                        .with_context("procedure reference module does not fit in 16 bits")
+                })?,
+        };
         out.u32(self.name_checksum)?;
-        out.u32(self.offset)?;
-        out.u16(self.module)?;
+        out.u32(self.offset.0)?;
+        out.u16(module)?;
         out.c_string(self.name)
     }
 }
 
 /// An image section record (`S_SECTION`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Section<'a> {
     /// The section number.
     pub number: u16,
@@ -162,7 +175,8 @@ impl<'a> Section<'a> {
 /// A COFF group record (`S_COFFGROUP`).
 ///
 /// A COFF group is a part of an image section, for example `.text$mn`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CoffGroup<'a> {
     /// The length of the group in bytes.
     pub length: u32,

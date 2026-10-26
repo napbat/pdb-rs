@@ -14,7 +14,8 @@ use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// An `LF_DIMARRAY` record: an array with a dimension record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DimensionedArray<'a> {
     /// The element type.
     pub element_type: TypeIndex,
@@ -48,6 +49,7 @@ impl<'a> DimensionedArray<'a> {
 
 /// The bounds of one dimension.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DimensionBound {
     /// The lower bound. `LF_DIMCONU` has no lower bounds.
     pub lower: Option<Integer>,
@@ -55,11 +57,20 @@ pub struct DimensionBound {
     pub upper: Integer,
 }
 
+impl DimensionBound {
+    /// Make a record with `upper`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(upper: Integer) -> Self {
+        Self { lower: None, upper }
+    }
+}
+
 /// An `LF_DIMCONU` or `LF_DIMCONLU` record: constant dimension bounds.
 ///
 /// Each bound is a value of the index type. The index type must be a direct
 /// primitive integer type, because the record has no other size for a bound.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ConstantDimensions<'a> {
     /// `true` for `LF_DIMCONLU`: each dimension has a lower and an upper bound.
     pub lower_bounds: bool,
@@ -212,7 +223,8 @@ impl FusedIterator for DimensionBounds<'_> {}
 ///
 /// Each bound is a type index. `cvinfo.h` says that the referenced records
 /// are `LF_REFSYM` records or `T_VOID`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VariableDimensions<'a> {
     /// `true` for `LF_DIMVARLU`: each dimension has a lower and an upper bound.
     pub lower_bounds: bool,
@@ -263,7 +275,8 @@ impl<'a> VariableDimensions<'a> {
 }
 
 /// An `LF_STRIDED_ARRAY` record: an array with a stride between elements.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StridedArray<'a> {
     /// The element type.
     pub element_type: TypeIndex,

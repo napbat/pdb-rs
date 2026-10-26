@@ -46,7 +46,7 @@ pub struct Rva(pub u32);
 pub struct PdbRva(pub u32);
 
 /// An address as a section number and a byte offset in the section.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SectionOffset {
     /// The 1-based section number. Symbols can use 0 for an absolute or
     /// discarded address; such an address has no RVA.

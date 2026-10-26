@@ -16,7 +16,7 @@ Common pdbrs facts used below:
 - Encoders: `TypeLeaf::encode` (`codeview/type_record.rs:357-443`), `Member::encode` and `encode_field_list` (`codeview/field_list/encode.rs`) and `IdRecord::encode` (`codeview/id_record/encode.rs`) write each decoded record to the same bytes (#29). They pad to a multiple of 4 bytes with `LF_PAD` bytes. `types::write_type_stream` (`native/types/write.rs`) writes the TPI and IPI streams and their hash streams. `native::PdbBuilder` (#33) and `native::PdbEditor` (#34) use these encoders.
 - Names: NUL-terminated bytes (`Fields::name`), not decoded as text.
 - Numeric leaves in type records, field-list members, `S_CONSTANT` and `S_MANCONSTANT`: `Numeric::parse_prefix` (`codeview/numeric.rs:337-415`) decodes every leaf tag of `cvinfo.h` and keeps the tag and the exact value bytes (#29). An unknown tag is `UnsupportedVersion`.
-- Reference checks: `types::validate_type_references` (`native/types/validate.rs`) checks each TPI type index by its role (`codeview/type_record/references.rs`). `IdTable::validate` (`codeview/id_record/table.rs:162-258`) checks the IPI references.
+- Reference checks: `types::validate_type_references` (`native/types/validate.rs`) checks each TPI type index by its role (`codeview/type_record/references.rs`). `IdTable::check` (`codeview/id_record/table.rs`) checks the IPI references.
 
 
 ## Top level
@@ -131,7 +131,7 @@ Common pdbrs facts used below:
 - Undocumented assumptions:
   - `LF_UNION2` (0x160a, LLVM `CodeViewTypes.def:58`) is not described. pdbrs decodes it as `WideUnion` (`udt.rs:286-344`): a `u32` property word (low 16 bits are `ClassOptions`), the field list, a numeric member count and a numeric size (LLVM `TypeRecordMapping.cpp`; `cvinfo.h` does not define it). No producer is known; only synthetic tests cover it (#29).
   - The encoder rejects a unique name without the unique-name flag, and the flag without a unique name (`udt.rs:52-67`).
-  - `LF_UNION` and `LF_UNION2` accept the MASM end padding and keep it in `producer_padding`, as `lf_class.md` describes (#29).
+  - `LF_UNION` and `LF_UNION2` accept the MASM end padding and keep it in `trailing`, as `lf_class.md` describes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_vtshape.md`
 - Documents: `LF_VTSHAPE` (0x000a): a `u16` count and 4-bit slot descriptors with values 0-6.
@@ -241,7 +241,7 @@ Common pdbrs facts used below:
   - None found against pdbrs.
 - Undocumented assumptions:
   - pdbrs does not check that the underlying type is primitive or that the field list holds only `LF_ENUMERATE`. `validate_type_references` requires the field list to be 0 or an `LF_FIELDLIST` record and accepts any type for the underlying type (`references.rs:161-164`, #29).
-  - `LF_ENUM` accepts the MASM end padding and keeps it in `producer_padding`, as `lf_class.md` describes (#29).
+  - `LF_ENUM` accepts the MASM end padding and keeps it in `trailing`, as `lf_class.md` describes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_endprecomp.md`
 - Documents: `LF_ENDPRECOMP` (0x0014): a `u32` signature that ends the precompiled types of a creator object.
@@ -260,7 +260,7 @@ Common pdbrs facts used below:
 - Undocumented assumptions:
   - pdbrs does not check that `derivation_list` is zero. `validate_type_references` requires the field list to be 0 or an `LF_FIELDLIST` record and the vshape to be 0 or an `LF_VTSHAPE` record (`references.rs:149-158`, #29).
   - `LF_CLASS2`, `LF_STRUCTURE2` and `LF_INTERFACE2`: a `u32` property word (low 16 bits are `ClassOptions`), field list, derivation list, vshape, a numeric member count and a numeric size (LLVM `TypeRecordMapping.cpp`; `cvinfo.h` does not define them). No producer is known; only synthetic tests cover them (#29).
-  - MASM end padding: `ml64` 14.50 writes `f1` and two stale bytes after a name of odd length (with the NUL) in `LF_STRUCTURE` records of the static CRT (`handlers.obj` in `libvcruntime(d).lib`, for example `00 f1 6d 65` after `CsFrameEncoded`). `link.exe` and `lld-link` copy the record without a change. LLVM (`CodeViewRecordIO::endRecord`), DIA2Dump and `pdbtool` accept it. The UDT decoders (`Class`, `WideClass`, `Union`, `WideUnion`, `Enum`) accept 1 to 3 bytes that start with 0xf1-0xf3 and keep them in `producer_padding` (`udt.rs:43-100`); `TypeLeaf::producer_padding` returns them, and the encoder writes them again. Other records keep the strict check. Fixture `clang-lld-x64-static` (`/MTd`) has these records; `tests/type_record_producer.rs` uses the library bytes (#29).
+  - MASM end padding: `ml64` 14.50 writes `f1` and two stale bytes after a name of odd length (with the NUL) in `LF_STRUCTURE` records of the static CRT (`handlers.obj` in `libvcruntime(d).lib`, for example `00 f1 6d 65` after `CsFrameEncoded`). `link.exe` and `lld-link` copy the record without a change. LLVM (`CodeViewRecordIO::endRecord`), DIA2Dump and `pdbtool` accept it. The UDT decoders (`Class`, `WideClass`, `Union`, `WideUnion`, `Enum`) accept 1 to 3 bytes that start with 0xf1-0xf3 and keep them in `trailing` (`udt.rs`); `TypeLeaf::trailing` returns them, and the encoder writes them again. Other records keep the strict check. Fixture `clang-lld-x64-static` (`/MTd`) has these records; `tests/type_record_producer.rs` uses the library bytes (#29).
 
 ### `microsoft-pdb-rs/docs/codeview/types/lf_bitfield.md`
 - Documents: `LF_BITFIELD` (0x1205): type, `u8 length`, `u8 position`.
@@ -296,7 +296,7 @@ Common pdbrs facts used below:
   - Document internal: the link `./lf_func_id.md.md` is broken. The table lists 0x1607 before 0x1606.
   - Document vs pdbrs: the document describes a linear scan to find a record; pdbrs builds an offset table (`native/types.rs` `TypeTable`, 4 bytes per record). No format difference.
 - Undocumented assumptions:
-  - `IdTable::validate` checks each type index against the primitive table or TPI `index_end`, and each ID reference against the IPI range and the expected kind (`table.rs:162-258`). It does not check the backward-reference rule that `lf_buildinfo.md` states. An IPI record of an unknown kind is `UnsupportedVersion` there.
+  - `IdTable::check` checks each type index against the primitive table or TPI `index_end`, and each ID reference against the IPI range and the expected kind (`table.rs`). It does not check the backward-reference rule that `lf_buildinfo.md` states. An IPI record of an unknown kind is `UnsupportedVersion` there.
   - IPI hash values: `LF_UDT_SRC_LINE` and `LF_UDT_MOD_SRC_LINE` hash the 4 bytes of their UDT index with `hash_string_v1`; the other ID records use `hash_buffer_v8` of the record bytes (`native/types/hash.rs:591-647`, #29).
 
 ### `microsoft-pdb-rs/docs/codeview/items/lf_buildinfo.md`
@@ -359,10 +359,10 @@ Common pdbrs facts used below:
 
 ### `microsoft-pdb-rs/docs/codeview/items/lf_udt_mod_src_line.md`
 - Documents: `LF_UDT_MOD_SRC_LINE` (0x1607): UDT type, `/names` file name offset, line, `u16` module index.
-- pdbrs: implemented — `id_record.rs:130-136,254-270` (`UdtModuleSourceLine`: `name_offset` u32, `line`, `module` u16 raw, `padded`). `table.rs:224` checks only the UDT index; pdbrs does not check the `/names` offset here.
+- pdbrs: implemented — `id_record.rs` (`UdtModuleSourceLine`: `name_offset` (`NameOffset`), `line`, `module` (`Option<ModuleIndex>`), `padded`). `table.rs` checks only the UDT index; pdbrs does not check the `/names` offset here.
 - Conflicts:
   - Document internal error: "the same as `LF_MOD_SRC_LINE`"; the record it extends is `LF_UDT_SRC_LINE`, and the two differ in more than `module_index`: `LF_UDT_SRC_LINE` uses an IPI ID for the file, this record uses a `/names` offset (`cvinfo.h:1707-1713`).
-  - Document omissions: two `TODO`/Determinism blocks on `module_index`; the document does not say whether the module index is 0-based or 1-based. pdbrs keeps the raw value.
+  - Document omissions: two `TODO`/Determinism blocks on `module_index`; the document does not say whether the module index is 0-based or 1-based. pdbrs reads it as a 1-based module number: the decoder gives a 0-based `ModuleIndex`, and the value 0 gives `None`.
 - Undocumented assumptions:
   - The record has 14 payload bytes. Microsoft `link.exe` writes it without end padding (18 bytes), so later IPI records start at non-4-aligned offsets (see `lf_func_id.md`). pdbrs accepts 0 padding bytes. `UdtModuleSourceLine::padded` keeps the form, so the encoder writes the same bytes (#29, https://github.com/napbat/pdbrs/issues/29#issuecomment-6413170447).
   - The IPI hash of the record is `hash_string_v1` of the 4 UDT index bytes (`types/hash.rs:591-605`, #29).

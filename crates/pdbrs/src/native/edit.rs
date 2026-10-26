@@ -115,6 +115,7 @@ use alloc::vec::Vec;
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::NamedStreamKind;
+use crate::native::codeview::SymbolKind;
 use crate::native::codeview::id_record::IdRecord;
 use crate::native::codeview::index::{IdIndex, TypeIndex};
 use crate::native::codeview::symbol::{
@@ -396,7 +397,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     ///
     /// - [`ErrorKind::UnsupportedVersion`] for another kind.
     /// - The errors of [`SymbolData::encode`].
-    pub fn add_global(&mut self, kind: u16, data: &SymbolData<'_>) -> Result<()> {
+    pub fn add_global(&mut self, kind: SymbolKind, data: &SymbolData<'_>) -> Result<()> {
         if !matches!(
             kind,
             S_GDATA32 | S_LDATA32 | S_GTHREAD32 | S_LTHREAD32 | S_CONSTANT | S_UDT

@@ -19,11 +19,24 @@ use crate::{Error, ErrorKind, Result};
 
 /// The containing class of a pointer to member.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MemberPointer {
     /// The class that contains the member.
     pub containing_type: TypeIndex,
     /// The representation of the pointer.
     pub representation: MemberPointerRepresentation,
+}
+
+impl MemberPointer {
+    /// Make a record with `representation`. The other fields are zero or
+    /// empty.
+    #[must_use]
+    pub const fn new(representation: MemberPointerRepresentation) -> Self {
+        Self {
+            containing_type: TypeIndex::NONE,
+            representation,
+        }
+    }
 }
 
 /// The base of a based pointer (`lfPointer::pbase`).
@@ -123,7 +136,8 @@ impl<'a> BasedPointer<'a> {
 }
 
 /// An `LF_POINTER` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Pointer<'a> {
     /// The type that the pointer refers to.
     pub referent_type: TypeIndex,
@@ -138,7 +152,7 @@ pub struct Pointer<'a> {
     /// This value is present if [`PointerKind::is_based`] is `true` for the
     /// kind and the mode is not a member-pointer mode.
     pub based: Option<BasedPointer<'a>>,
-    /// The number of zero bytes after the pointer data and before the record
+    /// The count of zero bytes after the last field, before the record
     /// padding.
     ///
     /// Most producers write none. The Microsoft macro assemblers (`ml64` and
@@ -189,7 +203,7 @@ impl<'a> Pointer<'a> {
                 .with_context("pointer data does not match its kind and mode"));
         }
         writer.type_index(self.referent_type)?;
-        writer.u32(self.attributes.bits())?;
+        writer.u32(self.attributes.raw())?;
         if let Some(member) = self.member {
             writer.type_index(member.containing_type)?;
             writer.u16(member.representation.raw())?;

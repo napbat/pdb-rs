@@ -43,15 +43,11 @@ pub fn ids(data: &[u8]) {
 pub fn leaf(data: &[u8]) {
     let mut input = Input::new(data);
     let kind = input.u16();
-    let record = Record {
-        offset: 0,
-        kind,
-        data: input.rest(),
-    };
+    let record = Record::new(0, kind, input.rest());
     decode_leaf(record);
     let _ = IdRecord::decode(record);
-    let _ = record.symbol();
-    if let Some(list) = ok(FieldList::decode(record.data)) {
+    let _ = pdbrs::native::codeview::symbol::Symbol::decode(record);
+    if let Some(list) = ok(FieldList::parse(record.data)) {
         for member in list.members().take(MAX_RECORDS) {
             if member.is_err() {
                 break;
@@ -163,7 +159,7 @@ pub(crate) fn walk_ids(
     let Some(table) = ok(IdTable::new(stream)) else {
         return;
     };
-    let _ = table.validate(tpi_end);
+    let _ = table.check(tpi_end);
     let _ = (table.index_begin(), table.index_end(), table.len());
     let mut text = Vec::new();
     for record in stream.records().take(MAX_RECORDS) {
@@ -171,15 +167,15 @@ pub(crate) fn walk_ids(
             break;
         };
         let id = IdIndex(record.index);
-        assert!(table.get(id).is_some(), "a framed ID has a record");
-        match ok(table.decode(id)) {
+        assert!(table.record(id).is_some(), "a framed ID has a record");
+        match ok(table.leaf(id)) {
             Some(IdRecord::String(_) | IdRecord::SubstringList(_)) => {
                 text.clear();
                 let _ = table.resolve_string(id, &mut text);
             }
             Some(IdRecord::UdtModuleSourceLine(line)) => {
                 if let Some(names) = names {
-                    let _ = names.get(line.name_offset);
+                    let _ = names.get(line.name_offset.0);
                 }
             }
             Some(IdRecord::BuildInfo(info)) => {

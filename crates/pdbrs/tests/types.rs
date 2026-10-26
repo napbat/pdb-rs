@@ -1,6 +1,7 @@
 //! Tests for TPI and IPI stream parsing, record lookup and forward references.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::LeafKind;
 use pdbrs::native::codeview::field_list::{LF_ENUMERATE, LF_INDEX, Member};
 use pdbrs::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
 use pdbrs::native::codeview::numeric::Integer;
@@ -277,8 +278,8 @@ fn validates_hash_buffers_only_with_a_hash_stream() {
 }
 
 /// Frame `payload` as a record of `kind` and pad it to 4 bytes.
-fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
-    let mut body = kind.to_le_bytes().to_vec();
+fn record(kind: LeafKind, payload: &[u8]) -> Vec<u8> {
+    let mut body = kind.0.to_le_bytes().to_vec();
     body.extend_from_slice(payload);
     let count = (4 - (body.len() + 2) % 4) % 4;
     for left in (1..=count).rev() {
@@ -292,12 +293,12 @@ fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
 /// An `LF_FIELDLIST` record with one enumerator and an optional continuation.
 fn field_list(value: u16, continuation: Option<u32>) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&LF_ENUMERATE.to_le_bytes());
+    payload.extend_from_slice(&LF_ENUMERATE.0.to_le_bytes());
     payload.extend_from_slice(&3_u16.to_le_bytes());
     payload.extend_from_slice(&value.to_le_bytes());
     payload.extend_from_slice(b"E\0");
     if let Some(index) = continuation {
-        payload.extend_from_slice(&LF_INDEX.to_le_bytes());
+        payload.extend_from_slice(&LF_INDEX.0.to_le_bytes());
         payload.extend_from_slice(&0_u16.to_le_bytes());
         payload.extend_from_slice(&index.to_le_bytes());
     }
@@ -305,8 +306,8 @@ fn field_list(value: u16, continuation: Option<u32>) -> Vec<u8> {
 }
 
 /// A UDT record of `kind` with no members.
-fn udt(kind: u16, options: u16, name: &[u8], unique_name: Option<&[u8]>) -> Vec<u8> {
-    let options = options | unique_name.map_or(0, |_| ClassOptions::HAS_UNIQUE_NAME);
+fn udt(kind: LeafKind, options: u16, name: &[u8], unique_name: Option<&[u8]>) -> Vec<u8> {
+    let options = options | unique_name.map_or(0, |_| ClassOptions::HAS_UNIQUE_NAME.0);
     let mut payload = Vec::new();
     payload.extend_from_slice(&0_u16.to_le_bytes());
     payload.extend_from_slice(&options.to_le_bytes());
@@ -430,7 +431,7 @@ fn members_reject_continuation_to_another_kind() {
 
 /// Forward references and definitions for resolution tests.
 fn forward_records() -> Vec<Vec<u8>> {
-    let forward = ClassOptions::FORWARD_REFERENCE;
+    let forward = ClassOptions::FORWARD_REFERENCE.0;
     vec![
         // 0x1000: forward reference with a unique name.
         udt(LF_STRUCTURE, forward, b"S", Some(b"us")),
@@ -455,11 +456,11 @@ fn forward_records() -> Vec<Vec<u8>> {
         // 0x100b: a scoped forward reference resolves by its unique name.
         udt(
             LF_STRUCTURE,
-            forward | ClassOptions::SCOPED,
+            forward | ClassOptions::SCOPED.0,
             b"W",
             Some(b"uw"),
         ),
-        udt(LF_STRUCTURE, ClassOptions::SCOPED, b"W", Some(b"uw")),
+        udt(LF_STRUCTURE, ClassOptions::SCOPED.0, b"W", Some(b"uw")),
     ]
 }
 

@@ -9,6 +9,8 @@
 //!
 //! The CPU values come from `CPUType` in LLVM `CodeView.h`.
 
+use super::super::CpuType;
+
 /// The x86 register numbers (`CV_REG_*`).
 const X86: &[(u16, u16)] = &[
     (0, 34),
@@ -72,8 +74,8 @@ const MIPS: &[(u16, u16)] = &[(0, 0), (10, 43), (50, 51), (60, 92), (30000, 3001
 
 /// Return the register ranges of a CPU (`CV_CPU_TYPE_e`), or `None` if the
 /// CPU family has no table.
-const fn ranges(cpu: u16) -> Option<&'static [(u16, u16)]> {
-    match cpu {
+const fn ranges(cpu: CpuType) -> Option<&'static [(u16, u16)]> {
+    match cpu.0 {
         // Intel 8080 to Pentium III.
         0x00..=0x07 => Some(X86),
         // MIPS to MIPS V.
@@ -88,7 +90,7 @@ const fn ranges(cpu: u16) -> Option<&'static [(u16, u16)]> {
 
 /// Return `Some(true)` if `register` is a known register of `cpu`,
 /// `Some(false)` if it is not, and `None` if the CPU has no table.
-pub(super) fn known(cpu: u16, register: u16) -> Option<bool> {
+pub(super) fn known(cpu: CpuType, register: u16) -> Option<bool> {
     ranges(cpu).map(|ranges| {
         ranges
             .iter()

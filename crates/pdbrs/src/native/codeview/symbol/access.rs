@@ -210,7 +210,7 @@ impl<'a> Symbol<'a> {
     /// Procedures of all architectures, managed procedures, blocks, `with`
     /// blocks, separated code, thunks and inline sites start a scope.
     #[must_use]
-    pub const fn scope(&self) -> Option<ScopeLinks> {
+    pub const fn scope_links(&self) -> Option<ScopeLinks> {
         self.data.scope_links()
     }
 }
@@ -218,7 +218,7 @@ impl<'a> Symbol<'a> {
 impl SymbolData<'_> {
     /// Return the parent and end links, if the fields start a scope.
     ///
-    /// See [`Symbol::scope`].
+    /// See [`Symbol::scope_links`].
     #[must_use]
     pub const fn scope_links(&self) -> Option<ScopeLinks> {
         let (parent, end) = match *self {

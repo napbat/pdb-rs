@@ -20,7 +20,9 @@ use crate::native::codeview::Records;
 use crate::native::codeview::symbol::validate::{
     Rule, ValidationContext, ValidationReport, validate_shared_symbols,
 };
-use crate::native::codeview::symbol::{Constant, Data, Public, SymbolData, UserDefinedType};
+use crate::native::codeview::symbol::{
+    Constant, Data, Public, Symbol, SymbolData, UserDefinedType,
+};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::native::symbols::{
@@ -162,7 +164,7 @@ fn resolve<'r>(
     let mut targets = BTreeMap::new();
     for rename in renames {
         let offset = find(records, indexes.table(rename.index)?, &rename.old)?;
-        let symbol = offset.record(records)?.symbol()?;
+        let symbol = Symbol::decode(offset.record(records)?)?;
         if renamed(symbol.data(), rename.index, &rename.new).is_none() {
             return Err(unsupported(
                 "the editor renames only public, data, thread data, constant and UDT records",
@@ -198,10 +200,10 @@ fn rewrite(
         push(&mut pairs, (record.offset, new))?;
         match targets.get(&record.offset) {
             Some(&(index, name)) => {
-                let symbol = record.symbol()?;
+                let symbol = Symbol::decode(record)?;
                 let data = renamed(symbol.data(), index, name)
                     .ok_or_else(|| unsupported("renamed record has no name field"))?;
-                data.encode(record.kind, &mut out)?;
+                data.encode(symbol.kind(), &mut out)?;
             }
             // The record has a 2-byte length field and the kind and data.
             None => out.extend_from_slice(&records[start..start + 4 + record.data.len()]),

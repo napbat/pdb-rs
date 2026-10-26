@@ -1,5 +1,6 @@
 //! The validation rules and the violations that they report.
 
+use crate::native::codeview::SymbolKind;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind};
 
@@ -195,12 +196,12 @@ pub struct Violation {
     pub offset: u64,
     /// The kind of the record, or `None` if the walk stopped before the
     /// record was decoded.
-    pub record_kind: Option<u16>,
+    pub record_kind: Option<SymbolKind>,
 }
 
 impl Violation {
     /// Create a violation of `rule` at a record.
-    pub(super) fn new(rule: Rule, stream: StreamId, offset: u32, record_kind: u16) -> Self {
+    pub(super) fn new(rule: Rule, stream: StreamId, offset: u32, record_kind: SymbolKind) -> Self {
         Self {
             rule,
             error_kind: rule.error_kind(),

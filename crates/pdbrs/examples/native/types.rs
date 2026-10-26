@@ -141,7 +141,7 @@ pub(crate) fn types(tpi: &TypeStream, hash_bytes: Option<&[u8]>, report: &mut Re
         let Some(leaf) = report.supported(decoded, &what)? else {
             continue;
         };
-        let padding = leaf.producer_padding();
+        let padding = leaf.trailing();
         if !padding.is_empty() {
             report.inconsistency(format!(
                 "TPI record {:#x} ends with MASM padding {padding:02x?} instead of the LF_PAD run",
@@ -248,7 +248,7 @@ pub(crate) fn identifiers<'a>(
     }
     let ids = IdTable::new(ipi)?;
     report.supported(
-        ids.validate(TypeIndex(tpi.header().index_end)),
+        ids.check(TypeIndex(tpi.header().index_end)),
         "IPI references",
     )?;
     let mut text = Vec::new();
@@ -257,7 +257,7 @@ pub(crate) fn identifiers<'a>(
         let record = record?;
         let id = IdIndex(record.index);
         report.add("IPI records", 1);
-        let Some(decoded) = report.supported(ids.decode(id), "IPI record")? else {
+        let Some(decoded) = report.supported(ids.leaf(id), "IPI record")? else {
             continue;
         };
         let start = encoded.len();
@@ -275,7 +275,7 @@ pub(crate) fn identifiers<'a>(
                 ids.resolve_string(id, &mut text)?;
             }
             IdRecord::UdtModuleSourceLine(line) => {
-                names.get(line.name_offset)?;
+                names.get(line.name_offset.0)?;
             }
             _ => {}
         }

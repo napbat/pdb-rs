@@ -9,7 +9,7 @@
 //! records of all kinds, also kinds that this crate cannot decode. It keeps
 //! the padding at the end of a record as part of [`Record::data`].
 //!
-//! [`Record::symbol`] decodes a symbol record into a typed
+//! [`symbol::Symbol::decode`] decodes a symbol record into a typed
 //! [`symbol::Symbol`]. It does not demangle names.
 
 use core::iter::FusedIterator;
@@ -41,7 +41,8 @@ const MIN_RECORD_LEN: u16 = 2;
 /// One framed `CodeView` record.
 ///
 /// The record borrows its payload from the sequence that [`Records`] frames.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Record<'a> {
     /// The byte offset of the length field in the framed sequence.
     ///
@@ -57,22 +58,10 @@ pub struct Record<'a> {
 }
 
 impl<'a> Record<'a> {
-    /// Decode the record as a symbol.
-    ///
-    /// A kind that this crate does not decode gives
-    /// [`symbol::SymbolData::Unsupported`] with the raw payload. Do not use
-    /// this function on type records: type leaf kinds and symbol kinds use
-    /// different value spaces.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::InvalidFormat`] if the payload of a decoded kind
-    /// is too short for its fields, has a name without a NUL terminator, has
-    /// padding that is not zero, or breaks a rule of its kind. Returns
-    /// [`ErrorKind::UnsupportedVersion`] for a numeric leaf with a tag that
-    /// `cvinfo.h` does not define. The error does not have a file offset.
-    pub fn symbol(&self) -> Result<symbol::Symbol<'a>> {
-        symbol::Symbol::decode(*self)
+    /// Make a record with an offset, a kind and a payload.
+    #[must_use]
+    pub const fn new(offset: u32, kind: u16, data: &'a [u8]) -> Self {
+        Self { offset, kind, data }
     }
 }
 

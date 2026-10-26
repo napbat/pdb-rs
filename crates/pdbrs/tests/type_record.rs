@@ -1,7 +1,6 @@
 //! Tests for typed TPI leaf decoding.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Record;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{
@@ -11,6 +10,7 @@ use pdbrs::native::codeview::type_record::{
     LabelMode, MemberAccess, MemberAttributes, MemberPointerRepresentation, MethodKind, MocomKind,
     PointerAttributes, PointerKind, PointerMode, TypeLeaf, VtableSlotKind,
 };
+use pdbrs::native::codeview::{LeafKind, Record};
 
 /// Add `LF_PAD` bytes so that `payload` plus the 4-byte prefix is aligned to 4.
 fn padded(mut payload: Vec<u8>) -> Vec<u8> {
@@ -21,23 +21,14 @@ fn padded(mut payload: Vec<u8>) -> Vec<u8> {
     payload
 }
 
-fn decode(kind: u16, data: &[u8]) -> TypeLeaf<'_> {
-    TypeLeaf::decode(Record {
-        offset: 0,
-        kind,
-        data,
-    })
-    .unwrap()
+fn decode(kind: LeafKind, data: &[u8]) -> TypeLeaf<'_> {
+    TypeLeaf::decode(Record::new(0, kind.0, data)).unwrap()
 }
 
-fn decode_error(kind: u16, data: &[u8]) -> ErrorKind {
-    TypeLeaf::decode(Record {
-        offset: 0,
-        kind,
-        data,
-    })
-    .unwrap_err()
-    .kind()
+fn decode_error(kind: LeafKind, data: &[u8]) -> ErrorKind {
+    TypeLeaf::decode(Record::new(0, kind.0, data))
+        .unwrap_err()
+        .kind()
 }
 
 /// Concatenate little-endian fields.
@@ -134,7 +125,7 @@ fn rejects_unknown_pointer_kind_and_mode() {
 fn decodes_procedure_and_member_function() {
     let data = bytes(&[
         &0x0003_u32.to_le_bytes(),
-        &[0x00, FunctionOptions::CXX_RETURN_UDT],
+        &[0x00, FunctionOptions::CXX_RETURN_UDT.0],
         &2_u16.to_le_bytes(),
         &0x1004_u32.to_le_bytes(),
     ]);
@@ -312,7 +303,7 @@ fn class_payload(options: u16, names: &[u8]) -> Vec<u8> {
 
 #[test]
 fn decodes_class_kinds_and_unique_names() {
-    let options = ClassOptions::HAS_UNIQUE_NAME | ClassOptions::NESTED;
+    let options = ClassOptions::HAS_UNIQUE_NAME.0 | ClassOptions::NESTED.0;
     let data = class_payload(options, b"a::B\0.?AUB@a@@\0");
     for (kind, expected) in [
         (LF_CLASS, ClassKind::Class),
@@ -341,7 +332,7 @@ fn decodes_class_kinds_and_unique_names() {
     let data = class_payload(0, b"a::B\0.?AUB@a@@\0");
     assert_eq!(decode_error(LF_STRUCTURE, &data), ErrorKind::InvalidFormat);
     // With the flag, the unique name is required.
-    let data = class_payload(ClassOptions::HAS_UNIQUE_NAME, b"a::B\0");
+    let data = class_payload(ClassOptions::HAS_UNIQUE_NAME.0, b"a::B\0");
     assert_eq!(decode_error(LF_STRUCTURE, &data), ErrorKind::InvalidFormat);
 }
 
@@ -349,7 +340,7 @@ fn decodes_class_kinds_and_unique_names() {
 fn decodes_union_and_enum() {
     let data = padded(bytes(&[
         &3_u16.to_le_bytes(),
-        &ClassOptions::FORWARD_REFERENCE.to_le_bytes(),
+        &ClassOptions::FORWARD_REFERENCE.0.to_le_bytes(),
         &0_u32.to_le_bytes(),
         &0_u16.to_le_bytes(),
         b"U\0",
@@ -365,7 +356,7 @@ fn decodes_union_and_enum() {
 
     let data = padded(bytes(&[
         &2_u16.to_le_bytes(),
-        &ClassOptions::SCOPED.to_le_bytes(),
+        &ClassOptions::SCOPED.0.to_le_bytes(),
         &0x0074_u32.to_le_bytes(),
         &0x1009_u32.to_le_bytes(),
         b"E\0",
@@ -381,7 +372,7 @@ fn decodes_union_and_enum() {
 
 #[test]
 fn decodes_class_option_fields() {
-    let options = ClassOptions(0x2000 | (2 << 11) | (3 << 14) | ClassOptions::PACKED);
+    let options = ClassOptions(0x2000 | (2 << 11) | (3 << 14) | ClassOptions::PACKED.0);
     assert_eq!(options.hfa(), HfaKind::Double);
     assert_eq!(options.mocom(), MocomKind::Interface);
     assert!(options.contains(ClassOptions::INTRINSIC));
@@ -393,7 +384,7 @@ fn decodes_class_option_fields() {
 #[test]
 fn decodes_member_attribute_fields() {
     let attributes = MemberAttributes::from_raw(
-        2 | (6 << 2) | MemberAttributes::COMPILER_GENERATED | MemberAttributes::SEALED,
+        2 | (6 << 2) | MemberAttributes::COMPILER_GENERATED.raw() | MemberAttributes::SEALED.raw(),
     )
     .unwrap();
     assert_eq!(attributes.access(), MemberAccess::Protected);
@@ -433,15 +424,8 @@ fn decodes_vtable_shape_descriptors() {
 #[test]
 fn keeps_unsupported_kind_and_payload() {
     let data = [1, 2, 3];
-    let leaf = decode(0x1601, &data);
-    assert_eq!(
-        leaf,
-        TypeLeaf::Unsupported(Record {
-            offset: 0,
-            kind: 0x1601,
-            data: &data
-        })
-    );
+    let leaf = decode(LeafKind(0x1601), &data);
+    assert_eq!(leaf, TypeLeaf::Unsupported(Record::new(0, 0x1601, &data)));
     assert_eq!(leaf.tag(), None);
 }
 

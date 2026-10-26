@@ -1,20 +1,20 @@
 //! Each IPI record kind: exact re-encoding and encoder limits.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Record;
 use pdbrs::native::codeview::id_record::{
     IdList, IdRecord, LF_BUILDINFO, LF_FUNC_ID, LF_MFUNC_ID, LF_STRING_ID, LF_SUBSTR_LIST,
     LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE,
 };
-use pdbrs::native::codeview::index::IdIndex;
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex};
+use pdbrs::native::codeview::{LeafKind, Record};
 
 fn u32le(value: u32) -> [u8; 4] {
     value.to_le_bytes()
 }
 
 /// Frame a payload; pad it to 4 bytes if `pad` is `true`.
-fn record(kind: u16, payload: &[u8], pad: bool) -> Vec<u8> {
-    let mut body = kind.to_le_bytes().to_vec();
+fn record(kind: LeafKind, payload: &[u8], pad: bool) -> Vec<u8> {
+    let mut body = kind.0.to_le_bytes().to_vec();
     body.extend_from_slice(payload);
     let count = if pad {
         (4 - (body.len() + 2) % 4) % 4
@@ -30,16 +30,16 @@ fn record(kind: u16, payload: &[u8], pad: bool) -> Vec<u8> {
 }
 
 fn round_trip(full: &[u8]) -> IdRecord<'_> {
-    let decoded = IdRecord::decode(Record {
-        offset: 0,
-        kind: u16::from_le_bytes([full[2], full[3]]),
-        data: &full[4..],
-    })
+    let decoded = IdRecord::decode(Record::new(
+        0,
+        u16::from_le_bytes([full[2], full[3]]),
+        &full[4..],
+    ))
     .unwrap();
     let mut out = Vec::new();
     decoded.encode(&mut out).unwrap();
     assert_eq!(out, full);
-    assert_eq!(decoded.kind(), u16::from_le_bytes([full[2], full[3]]));
+    assert_eq!(decoded.kind().0, u16::from_le_bytes([full[2], full[3]]));
     decoded
 }
 
@@ -87,7 +87,7 @@ fn every_id_kind_re_encodes() {
             &[&u32le(0x1007)[..], &u32le(0x1008), &u32le(12)].concat(),
             true,
         ),
-        record(0x1520, &[1, 2, 3], false),
+        record(LeafKind(0x1520), &[1, 2, 3], false),
     ] {
         round_trip(&full);
     }
@@ -103,7 +103,7 @@ fn udt_module_source_line_keeps_its_padding_form() {
         panic!("not a UDT source line");
     };
     assert!(!line.padded);
-    assert_eq!(line.module, 3);
+    assert_eq!(line.module, Some(ModuleIndex(2)));
     // LLVM pads its records to 4 bytes.
     let padded = record(LF_UDT_MOD_SRC_LINE, &payload, true);
     assert_eq!(padded.len(), 20);
@@ -116,10 +116,10 @@ fn udt_module_source_line_keeps_its_padding_form() {
 #[test]
 fn id_lists_check_their_lengths() {
     assert_eq!(
-        IdList::from_bytes(&[0; 6]).unwrap_err().kind(),
+        IdList::parse(&[0; 6]).unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
-    let list = IdList::from_bytes(&[1, 0x10, 0, 0, 0, 0, 0, 0]).unwrap();
+    let list = IdList::parse(&[1, 0x10, 0, 0, 0, 0, 0, 0]).unwrap();
     assert_eq!(
         list.iter().collect::<Vec<_>>(),
         [IdIndex(0x1001), IdIndex(0)]
@@ -127,12 +127,7 @@ fn id_lists_check_their_lengths() {
     assert_eq!(list.as_bytes().len(), 8);
     // A list that makes the record longer than its `u16` length is an error.
     let data = [&u32le(0x1_0000)[..], &vec![0; 4 * 0x1_0000]].concat();
-    let decoded = IdRecord::decode(Record {
-        offset: 0,
-        kind: LF_SUBSTR_LIST,
-        data: &data,
-    })
-    .unwrap();
+    let decoded = IdRecord::decode(Record::new(0, LF_SUBSTR_LIST.0, &data)).unwrap();
     let IdRecord::SubstringList(list) = decoded else {
         panic!("not a list");
     };

@@ -2,13 +2,19 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     LocalFlags, MANAGED_ATTRIBUTE_OEM_ID, ProcedureFlags, S_GMANPROC, S_LMANPROC, S_MANCONSTANT,
-    S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, ScopeLinks, Symbol, SymbolData,
+    S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, Symbol, SymbolData,
 };
+use pdbrs::native::codeview::{Records, SymbolKind};
+use pdbrs::portable::metadata::MetadataToken;
+
+/// The module symbol offset `value`.
+const fn at(value: u32) -> ModuleSymbolOffset {
+    ModuleSymbolOffset(value)
+}
 
 /// A builder for little-endian symbol payloads.
 #[derive(Clone, Default)]
@@ -37,11 +43,11 @@ impl Payload {
 }
 
 /// Serialize one record with `payload` exactly.
-fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn record(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let length = u16::try_from(payload.len() + 2).unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&length.to_le_bytes());
-    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(&kind.0.to_le_bytes());
     bytes.extend_from_slice(payload);
     bytes
 }
@@ -56,21 +62,21 @@ fn padded(payload: &[u8]) -> Vec<u8> {
 }
 
 /// Decode the record of `kind` with `payload` exactly.
-fn decode(kind: u16, payload: &[u8], check: impl FnOnce(Symbol<'_>)) {
+fn decode(kind: SymbolKind, payload: &[u8], check: impl FnOnce(Symbol<'_>)) {
     let bytes = record(kind, payload);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    check(record.symbol().unwrap());
+    check(Symbol::decode(record).unwrap());
 }
 
 /// Decode the record of `kind` with `payload` exactly and return the error kind.
-fn error(kind: u16, payload: &[u8]) -> ErrorKind {
+fn error(kind: SymbolKind, payload: &[u8]) -> ErrorKind {
     let bytes = record(kind, payload);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    record.symbol().unwrap_err().kind()
+    Symbol::decode(record).unwrap_err().kind()
 }
 
 /// Make sure that each truncation of `payload` is an error of `expected`.
-fn rejects_truncation(kind: u16, payload: &[u8], expected: ErrorKind) {
+fn rejects_truncation(kind: SymbolKind, payload: &[u8], expected: ErrorKind) {
     for length in 0..payload.len() {
         assert_eq!(
             error(kind, &payload[..length]),
@@ -107,11 +113,11 @@ fn decodes_managed_procedures() {
             };
             assert_eq!(
                 (value.parent, value.end, value.next),
-                (0x10, 0xb0, u32::MAX)
+                (at(0x10), at(0xb0), at(u32::MAX))
             );
             assert_eq!(value.code_length, 0x38);
             assert_eq!((value.debug_start, value.debug_end), (1, 0x37));
-            assert_eq!(value.token, 0x0600_0001);
+            assert_eq!(value.token, MetadataToken::from_raw(0x0600_0001));
             let address = SectionOffset {
                 section: 1,
                 offset: u32::MAX,
@@ -123,13 +129,8 @@ fn decodes_managed_procedures() {
             assert_eq!(symbol.name(), Some(&b"ComputeAsync"[..]));
             assert_eq!(symbol.address(), Some(address));
             assert_eq!(symbol.type_index(), None);
-            assert_eq!(
-                symbol.scope(),
-                Some(ScopeLinks {
-                    parent: 0x10,
-                    end: 0xb0
-                })
-            );
+            let links = symbol.scope_links().unwrap();
+            assert_eq!((links.parent, links.end), (at(0x10), at(0xb0)));
         });
     }
 }
@@ -164,7 +165,7 @@ fn rejects_managed_procedure_padding_that_is_not_zero() {
     // Four zero bytes are padding that the decoder keeps (#30).
     let payload = managed_procedure(b"f\0").bytes(&[0; 4]).0;
     decode(S_LMANPROC, &payload, |symbol| {
-        assert!(symbol.padding() >= 4);
+        assert!(symbol.trailing_zeros() >= 4);
     });
 }
 
@@ -201,7 +202,7 @@ fn decodes_managed_slots() {
             // The token is not a TPI index, and the live address is not a symbol address.
             assert_eq!(symbol.type_index(), None);
             assert_eq!(symbol.address(), None);
-            assert_eq!(symbol.scope(), None);
+            assert_eq!(symbol.scope_links(), None);
         });
     }
 }
@@ -377,8 +378,8 @@ fn decodes_token_references_as_procedure_references() {
     let payload = padded(&token_reference(6).0);
     decode(S_TOKENREF, &payload, |symbol| {
         let reference = symbol.procedure_reference().unwrap();
-        assert_eq!((reference.offset, reference.module), (0x34, 6));
-        assert_eq!(reference.module_index(), Some(5));
+        assert_eq!(reference.offset, at(0x34));
+        assert_eq!(reference.module, Some(ModuleIndex(5)));
         assert_eq!(reference.name, b"06000017");
         assert_eq!(symbol.name(), Some(&b"06000017"[..]));
         assert!(matches!(symbol.data(), SymbolData::ProcedureReference(_)));
@@ -386,7 +387,7 @@ fn decodes_token_references_as_procedure_references() {
     });
     // The raw module number 0 has no module index.
     decode(S_TOKENREF, &token_reference(0).0, |symbol| {
-        assert_eq!(symbol.procedure_reference().unwrap().module_index(), None);
+        assert_eq!(symbol.procedure_reference().unwrap().module, None);
     });
 }
 

@@ -1,6 +1,7 @@
 //! Tests for the def-range checks against inline sites and type sizes (#30).
 
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::SymbolKind;
+use pdbrs::native::codeview::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::validate::{
     Rule, ValidationContext, ValidationReport, validate_module_symbols,
 };
@@ -32,7 +33,7 @@ struct Builder {
 
 impl Builder {
     /// Add a record with zero padding and return its stream offset.
-    fn push(&mut self, kind: u16, payload: &[u8]) -> u32 {
+    fn push(&mut self, kind: SymbolKind, payload: &[u8]) -> u32 {
         let offset = BASE + u32::try_from(self.bytes.len()).unwrap();
         let mut payload = payload.to_vec();
         while !payload.len().is_multiple_of(4) {
@@ -40,7 +41,7 @@ impl Builder {
         }
         let length = u16::try_from(payload.len() + 2).unwrap();
         self.bytes.extend_from_slice(&length.to_le_bytes());
-        self.bytes.extend_from_slice(&kind.to_le_bytes());
+        self.bytes.extend_from_slice(&kind.0.to_le_bytes());
         self.bytes.extend_from_slice(&payload);
         offset
     }
@@ -52,7 +53,7 @@ impl Builder {
     }
 
     /// Add an end record of `kind` for `scope`.
-    fn close(&mut self, kind: u16, scope: u32) {
+    fn close(&mut self, kind: SymbolKind, scope: u32) {
         let end = self.push(kind, &[]);
         self.patch_end(scope, end);
     }
@@ -89,7 +90,7 @@ impl Builder {
     /// Add a def-range of `kind` with `head`, a range in section 1 and `gaps`.
     fn ranged(
         &mut self,
-        kind: u16,
+        kind: SymbolKind,
         head: &[u8],
         start: u32,
         length: u16,
@@ -133,7 +134,7 @@ fn type_size(index: TypeIndex) -> Option<u64> {
 fn validate(builder: &Builder) -> ValidationReport {
     let context =
         ValidationContext::new(TypeIndex(0x1010), IdIndex(0x1003)).with_type_sizes(&type_size);
-    validate_module_symbols(&builder.bytes, STREAM, BASE, &context).unwrap()
+    validate_module_symbols(&builder.bytes, STREAM, ModuleSymbolOffset(BASE), &context).unwrap()
 }
 
 /// Return the broken rules and their record offsets.
@@ -294,6 +295,8 @@ fn checks_subfield_offsets_against_the_type_size() {
     );
     // Without type sizes, the check is not done.
     let context = ValidationContext::new(TypeIndex(0x1010), IdIndex(0x1003));
-    let report = validate_module_symbols(&builder.bytes, STREAM, BASE, &context).unwrap();
+    let report =
+        validate_module_symbols(&builder.bytes, STREAM, ModuleSymbolOffset(BASE), &context)
+            .unwrap();
     assert_eq!(rules(&report), []);
 }

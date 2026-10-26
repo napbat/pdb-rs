@@ -18,7 +18,8 @@ const PREFIX_SIZE: usize = 4;
 /// A decoded `DEBUG_S_SYMBOLS` subsection.
 ///
 /// [`SymbolsSubsection::decode`] frames all records. Use
-/// [`Record::symbol`] to decode the payload of a record.
+/// [`Symbol::decode`](crate::native::codeview::symbol::Symbol::decode) to
+/// decode the payload of a record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SymbolsSubsection<'a> {
     /// The framed records.

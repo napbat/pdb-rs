@@ -93,7 +93,7 @@ fn decodes_every_kind_in_every_mode() {
                 continue;
             }
             let primitive = index.primitive().unwrap().unwrap();
-            assert_eq!(primitive, Primitive { kind, mode });
+            assert_eq!(primitive, Primitive::new(kind, mode));
             assert_eq!(primitive.index(), index);
             assert_eq!(primitive.size(), pointer_size.or(kind_size));
             assert!(index.is_primitive());

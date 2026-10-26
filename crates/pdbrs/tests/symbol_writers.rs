@@ -2,6 +2,8 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::SymbolKind;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{
     ModuleSymbolWriter, ModuleSymbols, S_BLOCK32, S_END, S_GPROC32, S_INLINESITE, S_INLINESITE_END,
     S_PUB32, Symbol, SymbolData,
@@ -10,20 +12,20 @@ use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{SymbolOffset, SymbolRecordWriter};
 
 /// Frame one record with zero padding.
-fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn record(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let mut payload = payload.to_vec();
     while !(payload.len() + 4).is_multiple_of(4) {
         payload.push(0);
     }
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&u16::try_from(payload.len() + 2).unwrap().to_le_bytes());
-    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(&kind.0.to_le_bytes());
     bytes.extend_from_slice(&payload);
     bytes
 }
 
 /// A scope start payload with wrong links: parent 0x55 and end 0x66.
-fn scope_payload(kind: u16) -> Vec<u8> {
+fn scope_payload(kind: SymbolKind) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0x55_u32.to_le_bytes());
     payload.extend_from_slice(&0x66_u32.to_le_bytes());
@@ -40,12 +42,7 @@ fn scope_payload(kind: u16) -> Vec<u8> {
 
 /// Decode the single record in `bytes`.
 fn decode(bytes: &[u8]) -> Symbol<'_> {
-    Records::new(bytes)
-        .next()
-        .unwrap()
-        .unwrap()
-        .symbol()
-        .unwrap()
+    Symbol::decode(Records::new(bytes).next().unwrap().unwrap()).unwrap()
 }
 
 #[test]
@@ -55,7 +52,7 @@ fn module_writer_sets_scope_links() {
     let site = record(S_INLINESITE, &scope_payload(S_INLINESITE));
     let end = record(S_END, &[]);
     let site_end = record(S_INLINESITE_END, &[]);
-    let mut writer = ModuleSymbolWriter::new(4);
+    let mut writer = ModuleSymbolWriter::new(ModuleSymbolOffset(4));
     let mut offsets = Vec::new();
     for bytes in [&procedure, &block, &site, &site_end, &end, &end] {
         let symbol = decode(bytes);
@@ -63,16 +60,19 @@ fn module_writer_sets_scope_links() {
     }
     let out = writer.finish().unwrap();
     // The walker checks every parent and end link.
-    let walked: Vec<_> = ModuleSymbols::new(&out, StreamId(9), 4, 8)
+    let walked: Vec<_> = ModuleSymbols::new(&out, StreamId(9), ModuleSymbolOffset(4), 8)
         .map(Result::unwrap)
         .collect();
     assert_eq!(walked.len(), 6);
-    assert_eq!(walked[0].offset, 4);
-    let links = walked[0].symbol.scope().unwrap();
-    assert_eq!((links.parent, links.end), (0, offsets[5]));
-    let links = walked[1].symbol.scope().unwrap();
+    assert_eq!(walked[0].offset, ModuleSymbolOffset(4));
+    let links = walked[0].symbol.scope_links().unwrap();
+    assert_eq!(
+        (links.parent, links.end),
+        (ModuleSymbolOffset(0), offsets[5])
+    );
+    let links = walked[1].symbol.scope_links().unwrap();
     assert_eq!((links.parent, links.end), (offsets[0], offsets[4]));
-    let links = walked[2].symbol.scope().unwrap();
+    let links = walked[2].symbol.scope_links().unwrap();
     assert_eq!((links.parent, links.end), (offsets[1], offsets[3]));
 }
 
@@ -82,11 +82,11 @@ fn module_writer_rejects_unbalanced_scopes() {
     let site_end = record(S_INLINESITE_END, &[]);
     let procedure = record(S_GPROC32, &scope_payload(S_GPROC32));
     // An end without a scope.
-    let mut writer = ModuleSymbolWriter::new(4);
+    let mut writer = ModuleSymbolWriter::new(ModuleSymbolOffset(4));
     let symbol = decode(&end);
     let error = writer.push(symbol.kind(), symbol.data()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    assert_eq!(writer.next_offset().unwrap(), 4);
+    assert_eq!(writer.next_offset().unwrap(), ModuleSymbolOffset(4));
     // An inline site end for a procedure.
     let symbol = decode(&procedure);
     writer.push(symbol.kind(), symbol.data()).unwrap();
@@ -104,7 +104,7 @@ fn module_writer_rejects_unbalanced_scopes() {
 fn module_writer_checks_the_offset_width() {
     let procedure = record(S_GPROC32, &scope_payload(S_GPROC32));
     let symbol = decode(&procedure);
-    let mut writer = ModuleSymbolWriter::new(u32::MAX - 8);
+    let mut writer = ModuleSymbolWriter::new(ModuleSymbolOffset(u32::MAX - 8));
     writer.push(symbol.kind(), symbol.data()).unwrap();
     assert_eq!(
         writer
@@ -137,10 +137,7 @@ fn record_writer_returns_the_record_offsets() {
     let stream = writer.finish();
     assert_eq!(stream.offsets, [SymbolOffset(0), second]);
     assert_eq!(stream.bytes, [public.clone(), public].concat());
-    let SymbolData::Public(value) = *second
-        .record(&stream.bytes)
-        .unwrap()
-        .symbol()
+    let SymbolData::Public(value) = *Symbol::decode(second.record(&stream.bytes).unwrap())
         .unwrap()
         .data()
     else {
@@ -166,7 +163,7 @@ fn long_zero_padding_of_fxc_is_kept() {
     let bytes = fxc_local();
     let symbol = decode(&bytes);
     assert_eq!(symbol.name(), Some(&b"input"[..]));
-    assert_eq!(symbol.padding(), 32);
+    assert_eq!(symbol.trailing_zeros(), 32);
     let mut out = Vec::new();
     symbol.encode(&mut out).unwrap();
     assert_eq!(out, bytes);
@@ -175,7 +172,7 @@ fn long_zero_padding_of_fxc_is_kept() {
     symbol.data().encode(symbol.kind(), &mut out).unwrap();
     assert_eq!(out.len(), 16);
     // Both writers keep the producer form.
-    let mut module = ModuleSymbolWriter::new(4);
+    let mut module = ModuleSymbolWriter::new(ModuleSymbolOffset(4));
     module.push_symbol(&symbol).unwrap();
     assert_eq!(module.finish().unwrap(), bytes);
     let mut records = SymbolRecordWriter::new();
@@ -187,6 +184,6 @@ fn long_zero_padding_of_fxc_is_kept() {
 fn padding_must_be_zero() {
     let mut bytes = fxc_local();
     bytes[40] = 1;
-    let error = Records::new(&bytes).next().unwrap().unwrap().symbol();
+    let error = Symbol::decode(Records::new(&bytes).next().unwrap().unwrap());
     assert_eq!(error.unwrap_err().kind(), ErrorKind::InvalidFormat);
 }

@@ -29,7 +29,8 @@ values! {
 }
 
 /// A security cookie record (`S_FRAMECOOKIE`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FrameCookie {
     /// The offset of the cookie from the register. `cvinfo.h` gives a
     /// signed `CV_off32_t`.
@@ -67,7 +68,8 @@ impl FrameCookie {
 }
 
 /// A heap allocation call site (`S_HEAPALLOCSITE`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HeapAllocationSite {
     /// The address of the call instruction.
     pub address: SectionOffset,

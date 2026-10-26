@@ -12,14 +12,14 @@
 //! the same layout, and the flag bits `fThunk` (bit 5) and `fNamespace`
 //! (bit 6).
 
-use super::super::Fields;
 use super::super::index::TypeIndex;
+use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
 use crate::Result;
 use crate::native::output::Output;
 
 /// The kind of a reference to a record in a mini PDB (`S_REF_MINIPDB`).
-pub const S_REF_MINIPDB: u16 = 0x1160;
+pub const S_REF_MINIPDB: SymbolKind = SymbolKind(0x1160);
 
 values! {
     /// The kind of a trampoline.
@@ -32,7 +32,8 @@ values! {
 }
 
 /// A trampoline thunk record (`S_TRAMPOLINE`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Trampoline {
     /// The kind of the trampoline.
     pub kind: TrampolineKind,
@@ -109,7 +110,8 @@ flags! {
 ///
 /// A FASTLINK PDB keeps the full records in the object files. This record
 /// gives the name and the place of the full record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FastLink<'a> {
     /// The raw value (`isectCoff` or `typind` in `REFMINIPDB`).
     ///
@@ -119,8 +121,9 @@ pub struct FastLink<'a> {
     /// section that holds the full record. Use [`FastLink::type_index`]
     /// and [`FastLink::section`].
     pub value: u32,
-    /// The module index (`imod`) of an [`S_REF_MINIPDB`] record, or `None`
-    /// for an `S_FASTLINK` record.
+    /// The raw module index (`imod`) of an [`S_REF_MINIPDB`] record, or
+    /// `None` for an `S_FASTLINK` record. The base of the value (0 or 1) is
+    /// not known.
     pub module: Option<u16>,
     /// The flags.
     pub flags: FastLinkFlags,

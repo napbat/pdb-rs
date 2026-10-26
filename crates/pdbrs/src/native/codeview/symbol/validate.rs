@@ -26,9 +26,11 @@ mod rule;
 use alloc::vec::Vec;
 use core::fmt;
 
-use super::super::Records;
 use super::super::id_record::{LF_BUILDINFO, LF_FUNC_ID, LF_MFUNC_ID};
-use super::super::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use super::super::index::{
+    FIRST_RECORD_INDEX, IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex,
+};
+use super::super::{LeafKind, Records, SymbolKind};
 use super::{
     S_ANNOTATION, S_ANNOTATIONREF, S_BUILDINFO, S_DATAREF, S_GDATA32, S_GMANDATA, S_GMANPROC,
     S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,
@@ -46,7 +48,7 @@ pub use rule::{Rule, Violation};
 pub const DEFAULT_MAX_DEPTH: usize = 256;
 
 /// The global procedure kinds of all architectures.
-const GLOBAL_PROCEDURES: &[u16] = &[
+const GLOBAL_PROCEDURES: &[SymbolKind] = &[
     S_GPROC32,
     S_GPROC32_ID,
     S_GPROC32EX,
@@ -58,7 +60,7 @@ const GLOBAL_PROCEDURES: &[u16] = &[
 ];
 
 /// The module-local procedure kinds of all architectures.
-const LOCAL_PROCEDURES: &[u16] = &[
+const LOCAL_PROCEDURES: &[SymbolKind] = &[
     S_LPROC32,
     S_LPROC32_ID,
     S_LPROC32EX,
@@ -72,7 +74,7 @@ const LOCAL_PROCEDURES: &[u16] = &[
 ];
 
 /// The procedure kinds with an ID index. `S_PROC_ID_END` ends their scope.
-const ID_PROCEDURES: &[u16] = &[
+const ID_PROCEDURES: &[SymbolKind] = &[
     S_GPROC32_ID,
     S_LPROC32_ID,
     S_GPROC32EX_ID,
@@ -85,14 +87,14 @@ const ID_PROCEDURES: &[u16] = &[
 ];
 
 /// The managed procedure kinds.
-const MANAGED_PROCEDURES: &[u16] = &[S_GMANPROC, S_LMANPROC];
+const MANAGED_PROCEDURES: &[SymbolKind] = &[S_GMANPROC, S_LMANPROC];
 
 /// The record kinds that `S_PROCREF` can identify.
 ///
 /// The global procedure kinds come from LLVM. The .NET native PDB writer
 /// and the MSVC `/clr` linker also write `S_PROCREF` for `S_GMANPROC`
 /// records (.NET and MSVC `/clr` fixtures of #12).
-const GLOBAL_REFERENCE_TARGETS: &[u16] = &[
+const GLOBAL_REFERENCE_TARGETS: &[SymbolKind] = &[
     S_GPROC32,
     S_GPROC32_ID,
     S_GPROC32EX,
@@ -106,7 +108,7 @@ const GLOBAL_REFERENCE_TARGETS: &[u16] = &[
 
 /// The record kinds that `S_LPROCREF` can identify: the module-local
 /// procedure kinds and `S_LMANPROC`, as for [`GLOBAL_REFERENCE_TARGETS`].
-const LOCAL_REFERENCE_TARGETS: &[u16] = &[
+const LOCAL_REFERENCE_TARGETS: &[SymbolKind] = &[
     S_LPROC32,
     S_LPROC32_ID,
     S_LPROC32EX,
@@ -121,7 +123,7 @@ const LOCAL_REFERENCE_TARGETS: &[u16] = &[
 ];
 
 /// The data kinds that `S_DATAREF` can identify.
-const DATA: &[u16] = &[
+const DATA: &[SymbolKind] = &[
     S_LDATA32,
     S_GDATA32,
     S_LTHREAD32,
@@ -131,13 +133,14 @@ const DATA: &[u16] = &[
 ];
 
 /// The IPI kinds of a function ID.
-const FUNCTION_IDS: &[u16] = &[LF_FUNC_ID, LF_MFUNC_ID];
+const FUNCTION_IDS: &[LeafKind] = &[LF_FUNC_ID, LF_MFUNC_ID];
 
 /// What a module stream has at an offset.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ModuleRecord {
     /// A record of this kind starts at the offset.
-    Kind(u16),
+    Kind(SymbolKind),
     /// No record starts at the offset.
     Missing,
     /// The caller does not know the records of the module, for example
@@ -157,11 +160,11 @@ pub struct ValidationContext<'c> {
     /// The index after the last IPI record.
     id_index_end: IdIndex,
     /// The kind of the IPI record of an ID index.
-    id_kind: Option<&'c dyn Fn(IdIndex) -> Option<u16>>,
+    id_kind: Option<&'c dyn Fn(IdIndex) -> Option<LeafKind>>,
     /// The number of modules in the DBI stream.
     module_count: Option<usize>,
     /// The record at a module index and a module stream offset.
-    module_record: Option<&'c dyn Fn(u16, u32) -> ModuleRecord>,
+    module_record: Option<&'c dyn Fn(ModuleIndex, ModuleSymbolOffset) -> ModuleRecord>,
     /// The virtual size of each section, by section number minus 1.
     section_lengths: Option<&'c [u32]>,
     /// The size in bytes of a type.
@@ -208,7 +211,7 @@ impl<'c> ValidationContext<'c> {
     /// Add a function that gives the record kind of an ID index, for
     /// example `LF_FUNC_ID`, or `None` if the IPI stream has no such record.
     #[must_use]
-    pub const fn with_id_kinds(mut self, id_kind: &'c dyn Fn(IdIndex) -> Option<u16>) -> Self {
+    pub const fn with_id_kinds(mut self, id_kind: &'c dyn Fn(IdIndex) -> Option<LeafKind>) -> Self {
         self.id_kind = Some(id_kind);
         self
     }
@@ -221,12 +224,12 @@ impl<'c> ValidationContext<'c> {
     }
 
     /// Add a function that gives the record at a module index and a module
-    /// stream offset. The module index is the module number minus 1. The
-    /// offset includes the 4-byte signature.
+    /// stream offset. The module index is 0-based: the module number minus 1.
+    /// The offset includes the 4-byte signature.
     #[must_use]
     pub const fn with_module_records(
         mut self,
-        module_record: &'c dyn Fn(u16, u32) -> ModuleRecord,
+        module_record: &'c dyn Fn(ModuleIndex, ModuleSymbolOffset) -> ModuleRecord,
     ) -> Self {
         self.module_record = Some(module_record);
         self
@@ -301,7 +304,7 @@ impl ValidationReport {
     }
 
     /// Add a violation of `rule` at the record at `offset`.
-    fn violate(&mut self, rule: Rule, offset: u32, kind: u16) -> Result<()> {
+    fn violate(&mut self, rule: Rule, offset: u32, kind: SymbolKind) -> Result<()> {
         self.push(Violation::new(rule, self.stream, offset, kind))
     }
 }
@@ -326,7 +329,7 @@ impl ValidationReport {
 pub fn validate_module_symbols(
     symbols: &[u8],
     stream: StreamId,
-    base: u32,
+    base: ModuleSymbolOffset,
     context: &ValidationContext<'_>,
 ) -> Result<ValidationReport> {
     module::validate(symbols, stream, base, context)
@@ -431,9 +434,9 @@ fn check_references(
 /// Check that `id` is in the IPI stream and has one of the `expected` kinds.
 fn check_id(
     id: IdIndex,
-    expected: Option<&[u16]>,
+    expected: Option<&[LeafKind]>,
     offset: u32,
-    kind: u16,
+    kind: SymbolKind,
     context: &ValidationContext<'_>,
     report: &mut ValidationReport,
 ) -> Result<()> {
@@ -453,7 +456,7 @@ fn check_id(
 }
 
 /// Return the record kinds that a module reference of `kind` can identify.
-fn reference_targets(kind: u16) -> &'static [u16] {
+fn reference_targets(kind: SymbolKind) -> &'static [SymbolKind] {
     match kind {
         S_PROCREF => GLOBAL_REFERENCE_TARGETS,
         S_LPROCREF => LOCAL_REFERENCE_TARGETS,
@@ -466,19 +469,19 @@ fn reference_targets(kind: u16) -> &'static [u16] {
 
 /// Check the module number and the target record of a module reference.
 fn check_module_reference(
-    kind: u16,
-    module: u16,
-    target: u32,
+    kind: SymbolKind,
+    module: Option<ModuleIndex>,
+    target: ModuleSymbolOffset,
     offset: u32,
     context: &ValidationContext<'_>,
     report: &mut ValidationReport,
 ) -> Result<()> {
-    let Some(index) = module.checked_sub(1) else {
+    let Some(index) = module else {
         return report.violate(Rule::ModuleIndex, offset, kind);
     };
     if context
         .module_count
-        .is_some_and(|count| usize::from(index) >= count)
+        .is_some_and(|count| !usize::try_from(index.0).is_ok_and(|index| index < count))
     {
         return report.violate(Rule::ModuleIndex, offset, kind);
     }

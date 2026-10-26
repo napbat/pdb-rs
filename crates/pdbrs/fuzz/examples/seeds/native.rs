@@ -6,6 +6,7 @@ use pdbrs::ContainerKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::auxiliary::NamedStreamKind;
 use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{ModuleSymbols, SymbolData};
 use pdbrs::native::dbi::{Dbi, DebugStream};
 use pdbrs::native::injected_source::{SourceCompression, SourceHeaderBlock, content_stream_name};
@@ -227,7 +228,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
                 )?;
             }
         }
-        let base = u32::try_from(stream.symbol_offset())?;
+        let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
         for scoped in ModuleSymbols::new(stream.symbol_data(), id, base, 64) {
             let Ok(scoped) = scoped else {
                 break;
@@ -237,7 +238,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
                 corpus.add_parts("native_leaf", &record.kind.to_le_bytes(), &[], record.data)?;
             }
             if let SymbolData::Oem(oem) = scoped.symbol.data()
-                && let Some(Ok(attribute)) = oem.attribute()
+                && let Ok(Some(attribute)) = oem.attribute()
                 && kinds.take(4, u32::from(attribute.name.first().copied().unwrap_or(0)))
             {
                 attribute_seeds(oem.data, &attribute, corpus)?;

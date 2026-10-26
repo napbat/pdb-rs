@@ -3,12 +3,13 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     FrameProcedure, FrameProcedureFlags, Procedure, ProcedureFlags, ProcedureReference,
-    ProcedureType, Public, PublicFlags, S_END, S_FRAMEPROC, S_LPROC32, S_LPROCREF, SymbolData,
+    ProcedureType, Public, PublicFlags, S_END, S_FRAMEPROC, S_LPROC32, S_LPROCREF, Symbol,
+    SymbolData,
 };
+use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::OwnedModule;
 use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::write::PdbBuilder;
@@ -48,48 +49,42 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
         object_file: b"C:\\synthetic\\local.obj".to_vec(),
         name_padding: [0; 3],
     })?;
-    let procedure = module.push_symbol_fields(
-        S_LPROC32,
-        SymbolData::Procedure(Procedure {
-            parent: 0,
-            end: 0,
-            next: 0,
-            code_length: 0x10,
-            debug_start: 0,
-            debug_end: 0xf,
-            signature: ProcedureType::Type(T_INT4),
-            address: SectionOffset {
-                section: 1,
-                offset: 0x40,
-            },
-            flags: ProcedureFlags(0),
-            extended_flags: None,
-            name: LOCAL,
-        }),
-    )?;
-    module.push_symbol_fields(
-        S_FRAMEPROC,
-        SymbolData::FrameProcedure(FrameProcedure {
-            frame_size: 0,
-            padding_size: 0,
-            padding_offset: 0,
-            callee_saved_size: 0,
-            exception_handler: SectionOffset {
-                section: 0,
-                offset: 0,
-            },
-            flags: FrameProcedureFlags(0),
-        }),
-    )?;
+    let mut local = Procedure::new(ProcedureType::Type(T_INT4));
+    local.parent = ModuleSymbolOffset(0);
+    local.end = ModuleSymbolOffset(0);
+    local.next = ModuleSymbolOffset(0);
+    local.code_length = 0x10;
+    local.debug_start = 0;
+    local.debug_end = 0xf;
+    local.address = SectionOffset {
+        section: 1,
+        offset: 0x40,
+    };
+    local.flags = ProcedureFlags(0);
+    local.extended_flags = None;
+    local.name = LOCAL;
+    let procedure = module.push_symbol_fields(S_LPROC32, SymbolData::Procedure(local))?;
+    let mut frame = FrameProcedure::default();
+    frame.frame_size = 0;
+    frame.padding_size = 0;
+    frame.padding_offset = 0;
+    frame.callee_saved_size = 0;
+    frame.exception_handler = SectionOffset {
+        section: 0,
+        offset: 0,
+    };
+    frame.flags = FrameProcedureFlags(0);
+    module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
     module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
     let reference = builder.add_symbol_with(move |resolver, out| {
-        SymbolData::ProcedureReference(ProcedureReference {
-            name_checksum: 0,
-            offset: resolver.module_symbol_offset(procedure)?,
-            module: resolver.module_number(procedure.module())?,
-            name: LOCAL,
-        })
-        .encode(S_LPROCREF, out)
+        let number = resolver.module_number(procedure.module())?;
+        let mut reference = ProcedureReference::default();
+        reference.name_checksum = 0;
+        reference.offset = ModuleSymbolOffset(resolver.module_symbol_offset(procedure)?);
+        // The module number is the module index plus 1.
+        reference.module = Some(ModuleIndex(u32::from(number) - 1));
+        reference.name = LOCAL;
+        SymbolData::ProcedureReference(reference).encode(S_LPROCREF, out)
     })?;
     builder.index_global(reference, 1)
 }
@@ -127,18 +122,18 @@ fn strip_keeps_publics_and_local_procedures() {
         .expect("present");
     let kinds: Vec<_> = stream
         .symbols()
-        .map(|record| record.expect("framed").kind)
+        .map(|record| SymbolKind(record.expect("framed").kind))
         .collect();
     assert_eq!(kinds, [S_LPROC32, S_END]);
     let first = stream.symbols().next().expect("record").expect("framed");
-    let SymbolData::Procedure(procedure) = *first.symbol().expect("decoded").data() else {
+    let SymbolData::Procedure(procedure) = *Symbol::decode(first).expect("decoded").data() else {
         panic!("procedure");
     };
     assert_eq!(procedure.signature, ProcedureType::Type(TypeIndex::NONE));
     assert_eq!(
         (procedure.end, procedure.name),
         (
-            8 + u32::try_from(first.data.len()).expect("record size"),
+            ModuleSymbolOffset(8 + u32::try_from(first.data.len()).expect("record size")),
             LOCAL
         )
     );
@@ -151,13 +146,17 @@ fn strip_keeps_publics_and_local_procedures() {
         .expect("bytes");
     let reference = Records::new(&records)
         .map(|record| record.expect("framed"))
-        .find(|record| record.kind == S_LPROCREF)
+        .find(|record| SymbolKind(record.kind) == S_LPROCREF)
         .expect("S_LPROCREF");
-    let SymbolData::ProcedureReference(reference) = *reference.symbol().expect("decoded").data()
+    let SymbolData::ProcedureReference(reference) =
+        *Symbol::decode(reference).expect("decoded").data()
     else {
         panic!("reference");
     };
-    assert_eq!((reference.offset, reference.module), (4, 2));
+    assert_eq!(
+        (reference.offset, reference.module),
+        (ModuleSymbolOffset(4), Some(ModuleIndex(1)))
+    );
     let refs: Vec<_> = stream.global_refs().expect("refs").iter().collect();
     assert_eq!(refs.len(), 1);
 }
@@ -183,13 +182,15 @@ fn strip_with_another_edit_is_unsupported() {
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     editor.strip_private();
     editor
-        .add_public(&Public {
-            flags: PublicFlags(0),
-            address: SectionOffset {
+        .add_public(&{
+            let mut public = Public::default();
+            public.flags = PublicFlags(0);
+            public.address = SectionOffset {
                 section: 2,
                 offset: 0,
-            },
-            name: b"added",
+            };
+            public.name = b"added";
+            public
         })
         .expect("recorded");
     assert_eq!(

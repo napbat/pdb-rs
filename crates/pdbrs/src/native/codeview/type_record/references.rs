@@ -7,7 +7,7 @@
 
 use super::{
     LF_ARGLIST, LF_DIMCONLU, LF_DIMCONU, LF_DIMVARLU, LF_DIMVARU, LF_FIELDLIST, LF_METHODLIST,
-    LF_MFUNCTION, LF_VTSHAPE, TypeLeaf,
+    LF_MFUNCTION, LF_VTSHAPE, LeafKind, TypeLeaf,
 };
 use crate::Result;
 use crate::native::codeview::field_list::Member;
@@ -48,7 +48,7 @@ impl ReferenceRole {
     /// Return the record kinds that a record reference of this role can
     /// refer to, or `None` for any kind.
     #[must_use]
-    pub const fn kinds(self) -> Option<&'static [u16]> {
+    pub const fn kinds(self) -> Option<&'static [LeafKind]> {
         Some(match self {
             Self::Type => return None,
             Self::FieldList | Self::Continuation => &[LF_FIELDLIST],
@@ -63,11 +63,23 @@ impl ReferenceRole {
 
 /// One type index in a type record, with its role.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeReference {
     /// The type index.
     pub index: TypeIndex,
     /// The role of the index.
     pub role: ReferenceRole,
+}
+
+impl TypeReference {
+    /// Make a record with `role`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(role: ReferenceRole) -> Self {
+        Self {
+            index: TypeIndex::NONE,
+            role,
+        }
+    }
 }
 
 /// Visit a list of type indices with one role.

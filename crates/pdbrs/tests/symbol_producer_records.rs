@@ -5,13 +5,13 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::Records;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{NameOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     CookieKind, FastLinkFlags, LocalFlags, S_BPREL32, S_DEFRANGE_SUBFIELD_REGISTER, S_FASTLINK,
     S_FILESTATIC, S_FRAMECOOKIE, S_FRAMEREG, S_GTHREAD32, S_HEAPALLOCSITE, S_LTHREAD32, S_REGISTER,
     S_REGREL32, S_REGREL32_ENCTMP, S_TRAMPOLINE, Symbol, SymbolData, TrampolineKind,
 };
+use pdbrs::native::codeview::{Records, SymbolKind};
 
 /// A builder for little-endian symbol payloads.
 #[derive(Default)]
@@ -51,7 +51,7 @@ impl Payload {
 }
 
 /// Serialize one record and add zero padding to a 4-byte boundary.
-fn padded(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn padded(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let mut payload = payload.to_vec();
     while !(payload.len() + 4).is_multiple_of(4) {
         payload.push(0);
@@ -60,27 +60,27 @@ fn padded(kind: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 /// Serialize one record without padding.
-fn unpadded(kind: u16, payload: &[u8]) -> Vec<u8> {
+fn unpadded(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
     let length = u16::try_from(payload.len() + 2).unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&length.to_le_bytes());
-    bytes.extend_from_slice(&kind.to_le_bytes());
+    bytes.extend_from_slice(&kind.0.to_le_bytes());
     bytes.extend_from_slice(payload);
     bytes
 }
 
 /// Decode the padded record and give the symbol to `check`.
-fn decode(kind: u16, payload: &Payload, check: impl FnOnce(Symbol<'_>)) {
+fn decode(kind: SymbolKind, payload: &Payload, check: impl FnOnce(Symbol<'_>)) {
     let bytes = padded(kind, &payload.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    check(record.symbol().unwrap());
+    check(Symbol::decode(record).unwrap());
 }
 
 /// Decode the unpadded record and return the error kind.
-fn error(kind: u16, payload: &Payload) -> ErrorKind {
+fn error(kind: SymbolKind, payload: &Payload) -> ErrorKind {
     let bytes = unpadded(kind, &payload.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    record.symbol().unwrap_err().kind()
+    Symbol::decode(record).unwrap_err().kind()
 }
 
 fn heap_allocation_site() -> Payload {
@@ -212,7 +212,7 @@ fn decodes_file_static_with_name_offset() {
         let SymbolData::FileStatic(value) = *symbol.data() else {
             panic!("expected S_FILESTATIC");
         };
-        assert_eq!(value.module_name_offset, u32::MAX);
+        assert_eq!(value.module_name_offset, NameOffset(u32::MAX));
         assert!(value.flags.contains(LocalFlags::ENREGISTERED_GLOBAL));
         assert!(value.flags.contains(LocalFlags::ENREGISTERED_STATIC));
         assert_eq!(symbol.name(), Some(&b"s_c_calls"[..]));
@@ -380,7 +380,7 @@ fn decodes_empty_fastlink_record_and_rejects_bad_ones() {
     let empty = Payload::default().u32(0).u16(0).bytes(b"\0\0");
     let bytes = unpadded(S_FASTLINK, &empty.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    let SymbolData::FastLink(value) = *record.symbol().unwrap().data() else {
+    let SymbolData::FastLink(value) = *Symbol::decode(record).unwrap().data() else {
         panic!("expected S_FASTLINK");
     };
     assert_eq!((value.value, value.flags.0, value.name), (0, 0, &b""[..]));

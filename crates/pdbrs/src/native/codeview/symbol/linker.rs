@@ -6,26 +6,27 @@
 //! `MODTYPEREF` and `PDBMAP`, and they give `SOURCELINKSYM` as the layout
 //! of `BUILDINFOSYM`: one ID index.
 
-use super::super::Fields;
-use super::SymbolData;
+use super::super::index::ModuleIndex;
+use super::super::{Fields, SymbolKind};
+use super::{Symbol, SymbolData};
 use crate::native::codeview::Records;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an export record (`S_EXPORT`).
-pub const S_EXPORT: u16 = 0x1138;
+pub const S_EXPORT: SymbolKind = SymbolKind(0x1138);
 /// The kind of a record that the linker discarded (`S_DISCARDED`).
-pub const S_DISCARDED: u16 = 0x113b;
+pub const S_DISCARDED: SymbolKind = SymbolKind(0x113b);
 /// The kind of a profile-guided optimization record (`S_POGODATA`).
-pub const S_POGODATA: u16 = 0x115c;
+pub const S_POGODATA: SymbolKind = SymbolKind(0x115c);
 /// The kind of a module type reference (`S_MOD_TYPEREF`).
-pub const S_MOD_TYPEREF: u16 = 0x115f;
+pub const S_MOD_TYPEREF: SymbolKind = SymbolKind(0x115f);
 /// The kind of a map from one PDB file name to another (`S_PDBMAP`).
-pub const S_PDBMAP: u16 = 0x1161;
+pub const S_PDBMAP: SymbolKind = SymbolKind(0x1161);
 /// The kind of a Source Link reference (`S_SOURCELINK`). The record holds
 /// an ID index.
-pub const S_SOURCELINK: u16 = 0x117e;
+pub const S_SOURCELINK: SymbolKind = SymbolKind(0x117e);
 
 flags! {
     /// The flags of an export record.
@@ -46,7 +47,8 @@ flags! {
 }
 
 /// An export record ([`S_EXPORT`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Export<'a> {
     /// The ordinal.
     pub ordinal: u16,
@@ -91,7 +93,8 @@ values! {
 }
 
 /// A record that the linker discarded ([`S_DISCARDED`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Discarded<'a> {
     /// The reason in bits 0 to 7 and unused bits 8 to 31, raw.
     pub raw_reason: u32,
@@ -135,7 +138,8 @@ impl<'a> Discarded<'a> {
 }
 
 /// A profile-guided optimization record ([`S_POGODATA`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ProfileData {
     /// The number of calls of the function.
     pub invocations: u32,
@@ -190,7 +194,8 @@ flags! {
 }
 
 /// A module type reference ([`S_MOD_TYPEREF`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ModuleTypeReference {
     /// The flags. Bits 6 to 14 are reserved; the value keeps them.
     pub flags: ModuleTypeReferenceFlags,
@@ -231,7 +236,7 @@ pub enum ModuleTypeSource {
     /// The module uses the records of another module (`fRefTM`).
     OtherModule {
         /// The index of the module that holds the records (`word0`, 0-based).
-        module: u16,
+        module: ModuleIndex,
     },
     /// The module is the `/Yc` object of a `/Z7` precompiled header
     /// (`fOwnTMR | fOwnTMPCT`).
@@ -258,7 +263,7 @@ pub enum ModuleTypeSource {
         stream: StreamId,
         /// The index of the module that owns the precompiled types
         /// (`word1`, 0-based).
-        owner: u16,
+        owner: ModuleIndex,
     },
     /// Another combination of flags. No producer is known for it.
     Other(ModuleTypeReference),
@@ -311,13 +316,15 @@ impl ModuleTypeReference {
                 types: stream(self.word0),
                 ids: stream(self.word1),
             },
-            0x20 => ModuleTypeSource::OtherModule { module: self.word0 },
+            0x20 => ModuleTypeSource::OtherModule {
+                module: ModuleIndex(u32::from(self.word0)),
+            },
             0x0c => ModuleTypeSource::PrecompiledTypeOwner {
                 stream: stream(self.word0),
             },
             0x0a => ModuleTypeSource::PrecompiledTypeUser {
                 stream: stream(self.word0),
-                owner: self.word1,
+                owner: ModuleIndex(u32::from(self.word1)),
             },
             _ => ModuleTypeSource::Other(*self),
         }
@@ -370,8 +377,8 @@ impl ModuleTypeReference {
     pub fn find(symbols: &[u8]) -> Result<Option<Self>> {
         for record in Records::new(symbols) {
             let record = record?;
-            if record.kind == S_MOD_TYPEREF
-                && let SymbolData::ModuleTypeReference(reference) = record.symbol()?.data()
+            if SymbolKind(record.kind) == S_MOD_TYPEREF
+                && let SymbolData::ModuleTypeReference(reference) = Symbol::decode(record)?.data()
             {
                 return Ok(Some(*reference));
             }
@@ -403,7 +410,8 @@ impl ModuleTypeReference {
 ///
 /// Both names are UTF-16 strings with a NUL code unit at the end. The values
 /// hold the little-endian code units without the terminator.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct PdbMap<'a> {
     /// The source PDB file name.
     pub from: &'a [u8],

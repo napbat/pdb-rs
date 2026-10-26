@@ -4,10 +4,11 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::handle::Resolver;
-use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdRecord;
+use crate::native::codeview::index::ModuleSymbolOffset;
 use crate::native::codeview::symbol::{ModuleSymbolWriter, Symbol, SymbolData};
 use crate::native::codeview::type_record::TypeLeaf;
+use crate::native::codeview::{Records, SymbolKind};
 use crate::native::lines::LineSubsection;
 use crate::native::output::no_memory;
 use crate::native::symbols::{SymbolOffset, SymbolRecordWriter};
@@ -45,7 +46,7 @@ pub(super) enum SymbolEntry<'a> {
     /// A decoded record. The encoder keeps its padding.
     Decoded(Symbol<'a>),
     /// A kind and its fields.
-    Fields(u16, SymbolData<'a>),
+    Fields(SymbolKind, SymbolData<'a>),
     /// An encoder that resolves handles.
     Deferred(Deferred<'a>),
 }
@@ -113,10 +114,7 @@ pub(super) fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
 
 /// Decode the single record in `bytes` as a symbol.
 fn decode_one(bytes: &[u8]) -> Result<Symbol<'_>> {
-    Records::new(bytes)
-        .next()
-        .ok_or_else(not_one_record)??
-        .symbol()
+    Symbol::decode(Records::new(bytes).next().ok_or_else(not_one_record)??)
 }
 
 impl SymbolEntry<'_> {
@@ -126,7 +124,7 @@ impl SymbolEntry<'_> {
         &self,
         writer: &mut ModuleSymbolWriter,
         resolver: &Resolver<'_>,
-    ) -> Result<u32> {
+    ) -> Result<ModuleSymbolOffset> {
         match self {
             Self::Decoded(symbol) => writer.push_symbol(symbol),
             Self::Fields(kind, data) => writer.push(*kind, data),

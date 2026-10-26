@@ -29,8 +29,9 @@ use alloc::vec::Vec;
 use super::super::PdbBuilder;
 use super::super::entry::Entry;
 use super::StreamIds;
+use crate::native::codeview::LeafKind;
 use crate::native::codeview::id_record::IdTable;
-use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, ModuleIndex, TypeIndex};
 use crate::native::codeview::symbol::validate::ValidationContext;
 use crate::native::codeview::symbol::{ModuleTypeReference, ModuleTypeSource};
 use crate::native::msf::StreamId;
@@ -66,7 +67,7 @@ fn unresolved(context: &'static str) -> Error {
 /// `S_MOD_TYPEREF` record. `other` gives the source of another module.
 fn resolve(
     source: Option<ModuleTypeSource>,
-    other: impl Fn(u16) -> Result<Option<ModuleTypeSource>>,
+    other: impl Fn(ModuleIndex) -> Result<Option<ModuleTypeSource>>,
 ) -> Result<ModuleTypes> {
     let source = match source {
         Some(ModuleTypeSource::OtherModule { module }) => match other(module)? {
@@ -129,7 +130,7 @@ impl ModuleTypeStreams {
                 let types = self.streams.get(&types).ok_or_else(missing)?;
                 let ids = self.streams.get(&ids).ok_or_else(missing)?;
                 let table = IdTable::new(ids)?;
-                let id_kind = |id: IdIndex| table.get(id).map(|record| record.kind);
+                let id_kind = |id: IdIndex| table.record(id).map(|record| LeafKind(record.kind));
                 check(
                     &ValidationContext::new(
                         TypeIndex(types.header().index_end),
@@ -181,7 +182,7 @@ impl PdbBuilder<'_> {
         for source in &sources {
             let resolved = resolve(*source, |module| {
                 sources
-                    .get(usize::from(module))
+                    .get(usize::try_from(module.0).unwrap_or(usize::MAX))
                     .copied()
                     .ok_or_else(|| unresolved("S_MOD_TYPEREF names a missing module"))
             })?;

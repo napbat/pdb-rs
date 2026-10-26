@@ -1,6 +1,7 @@
 //! Tests for field-list member decoding.
 
 use pdbrs::ErrorKind;
+use pdbrs::native::codeview::LeafKind;
 use pdbrs::native::codeview::field_list::{
     FieldList, LF_BCLASS, LF_ENUMERATE, LF_INDEX, LF_IVBCLASS, LF_MEMBER, LF_METHOD, LF_NESTTYPE,
     LF_ONEMETHOD, LF_STMEMBER, LF_VBCLASS, LF_VFUNCTAB, Member,
@@ -10,8 +11,8 @@ use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{MemberAccess, MethodKind};
 
 /// Serialize one member and pad it to 4 bytes with `LF_PAD` bytes.
-fn member(kind: u16, fields: &[&[u8]]) -> Vec<u8> {
-    let mut bytes = kind.to_le_bytes().to_vec();
+fn member(kind: LeafKind, fields: &[&[u8]]) -> Vec<u8> {
+    let mut bytes = kind.0.to_le_bytes().to_vec();
     for field in fields {
         bytes.extend_from_slice(field);
     }
@@ -25,7 +26,7 @@ fn member(kind: u16, fields: &[&[u8]]) -> Vec<u8> {
 const PUBLIC: [u8; 2] = 3_u16.to_le_bytes();
 
 fn members(data: &[u8]) -> Vec<Member<'_>> {
-    FieldList::decode(data)
+    FieldList::parse(data)
         .unwrap()
         .members()
         .map(Result::unwrap)
@@ -33,7 +34,7 @@ fn members(data: &[u8]) -> Vec<Member<'_>> {
 }
 
 fn decode_error(data: &[u8]) -> ErrorKind {
-    FieldList::decode(data).unwrap_err().kind()
+    FieldList::parse(data).unwrap_err().kind()
 }
 
 #[test]
@@ -73,7 +74,7 @@ fn decodes_data_members_and_enumerators() {
     assert_eq!(static_member.name, b"s");
     assert_eq!(enumerator.value.integer(), Some(Integer::Signed(-1)));
     assert_eq!(enumerator.name, b"Minus");
-    assert_eq!(FieldList::decode(&data).unwrap().continuation(), None);
+    assert_eq!(FieldList::parse(&data).unwrap().continuation(), None);
 }
 
 #[test]
@@ -186,7 +187,7 @@ fn reports_final_continuation() {
         member(LF_INDEX, &[&0_u16.to_le_bytes(), &0x1020_u32.to_le_bytes()]),
     ]
     .concat();
-    let list = FieldList::decode(&data).unwrap();
+    let list = FieldList::parse(&data).unwrap();
     assert_eq!(list.continuation(), Some(TypeIndex(0x1020)));
     assert_eq!(list.data(), data.as_slice());
     assert_eq!(
@@ -221,7 +222,7 @@ fn rejects_member_after_continuation() {
 
 #[test]
 fn rejects_unknown_member_kind() {
-    let data = member(0x1403, &[&[0; 6]]);
+    let data = member(LeafKind(0x1403), &[&[0; 6]]);
     assert_eq!(decode_error(&data), ErrorKind::UnsupportedVersion);
 }
 
@@ -252,7 +253,7 @@ fn rejects_truncated_members_and_reserved_fields() {
     );
     // The name terminator is missing; the padding bytes are not a name.
     assert_eq!(decode_error(&data), ErrorKind::InvalidFormat);
-    let data = LF_MEMBER.to_le_bytes();
+    let data = LF_MEMBER.0.to_le_bytes();
     assert_eq!(decode_error(&data), ErrorKind::InvalidFormat);
     let data = member(
         LF_NESTTYPE,

@@ -120,18 +120,14 @@ fn id_record(record: &IdRecord<'_>) -> Vec<u8> {
 pub fn leaf(data: &[u8]) {
     let mut input = Input::new(data);
     let kind = input.u16();
-    let record = Record {
-        offset: 0,
-        kind,
-        data: input.rest(),
-    };
+    let record = Record::new(0, kind, input.rest());
     if let Some(leaf) = ok(TypeLeaf::decode(record)) {
         type_leaf(&leaf);
     }
     if let Some(id) = ok(IdRecord::decode(record)) {
         id_record(&id);
     }
-    if let Some(symbol) = ok(record.symbol()) {
+    if let Some(symbol) = ok(pdbrs::native::codeview::symbol::Symbol::decode(record)) {
         symbols::symbol(&symbol);
     }
     if let Some((numeric, rest)) = ok(Numeric::parse_prefix(record.data)) {
@@ -163,10 +159,8 @@ fn rebuild(
             return;
         };
         // A record offset is a location, not a value: decode the record at offset 0.
-        let Some((encoded, exact)) = encode(Record {
-            offset: 0,
-            ..record.record
-        }) else {
+        let Some((encoded, exact)) = encode(Record::new(0, record.record.kind, record.record.data))
+        else {
             return;
         };
         // The encoders give the input record again for a decoded record of a padded stream

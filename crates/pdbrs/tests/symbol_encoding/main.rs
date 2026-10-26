@@ -2,11 +2,12 @@
 //! the boundary and error cases of the encoders.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::id_record::IdList;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Annotation, BinaryAnnotations, FunctionList, IdList, RegisterList, Symbol, SymbolData,
+    Annotation, BinaryAnnotations, FunctionList, RegisterList, Symbol, SymbolData,
 };
+use pdbrs::native::codeview::{Records, SymbolKind};
 
 /// `S_ALTOBJNAME`: no reference gives its layout, so it stays raw.
 const S_ALTOBJNAME: u16 = 0x1181;
@@ -36,7 +37,7 @@ fn padded(kind: u16, payload: &[u8]) -> Vec<u8> {
 
 /// Decode the single record in `bytes`.
 fn decode(bytes: &[u8]) -> pdbrs::Result<Symbol<'_>> {
-    Records::new(bytes).next().unwrap()?.symbol()
+    Symbol::decode(Records::new(bytes).next().unwrap()?)
 }
 
 /// Encode `symbol` and return the bytes.
@@ -49,7 +50,7 @@ fn encode(symbol: &Symbol<'_>) -> pdbrs::Result<Vec<u8>> {
 /// Return the error kind of encoding `data` as `kind`.
 fn encode_error(data: &SymbolData<'_>, kind: u16) -> ErrorKind {
     let mut out = Vec::new();
-    data.encode(kind, &mut out).unwrap_err().kind()
+    data.encode(SymbolKind(kind), &mut out).unwrap_err().kind()
 }
 
 #[test]
@@ -165,7 +166,7 @@ fn records_longer_than_the_length_field_are_rejected() {
     let long = vec![b'x'; 0xfff4];
     public.name = &long;
     let mut out = vec![0xaa];
-    let error = SymbolData::Public(public).encode(0x110e, &mut out);
+    let error = SymbolData::Public(public).encode(SymbolKind(0x110e), &mut out);
     assert_eq!(error.unwrap_err().kind(), ErrorKind::LimitExceeded);
     // The output is unchanged after the error.
     assert_eq!(out, [0xaa]);
@@ -173,7 +174,9 @@ fn records_longer_than_the_length_field_are_rejected() {
     let fits = vec![b'x'; 0xfff1];
     public.name = &fits;
     out.clear();
-    SymbolData::Public(public).encode(0x110e, &mut out).unwrap();
+    SymbolData::Public(public)
+        .encode(SymbolKind(0x110e), &mut out)
+        .unwrap();
     assert_eq!(out.len(), 0x1_0000);
     assert_eq!(decode(&out).unwrap().name(), Some(&fits[..]));
 }
@@ -191,7 +194,7 @@ fn procedure_signature_must_match_the_kind() {
         assert_eq!(encode_error(symbol.data(), kind), ErrorKind::InvalidFormat);
     }
     let mut out = Vec::new();
-    symbol.data().encode(0x110f, &mut out).unwrap();
+    symbol.data().encode(SymbolKind(0x110f), &mut out).unwrap();
     assert_eq!(out[2..4], 0x110f_u16.to_le_bytes());
 }
 
@@ -212,7 +215,7 @@ fn constant_keeps_its_stored_leaf_and_encodes_new_values_canonically() {
     constant.value = Numeric::from_integer(Integer::Unsigned(8));
     let mut out = Vec::new();
     SymbolData::Constant(constant)
-        .encode(0x1107, &mut out)
+        .encode(SymbolKind(0x1107), &mut out)
         .unwrap();
     let expected = Payload::default().u32(0x74).u16(8).name(b"seven");
     assert_eq!(out, padded(0x1107, &expected.0));
@@ -244,22 +247,22 @@ fn thunk_variant_data_needs_a_variant_kind() {
 #[test]
 fn register_lists_check_their_count_width() {
     assert_eq!(
-        RegisterList::new(&[1, 2, 3], true).unwrap_err().kind(),
+        RegisterList::parse(&[1, 2, 3], true).unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        RegisterList::new(&[0; 256], false).unwrap_err().kind(),
+        RegisterList::parse(&[0; 256], false).unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
-    let list = RegisterList::new(&[0; 255], false).unwrap();
+    let list = RegisterList::parse(&[0; 255], false).unwrap();
     assert_eq!(list.len(), 255);
-    let wide = RegisterList::new(&[0x4c, 0x01, 0x4d, 0x01], true).unwrap();
+    let wide = RegisterList::parse(&[0x4c, 0x01, 0x4d, 0x01], true).unwrap();
     assert_eq!(wide.iter().collect::<Vec<_>>(), [0x14c, 0x14d]);
 }
 
 #[test]
 fn function_lists_check_their_counts() {
-    let functions = IdList::from_le_bytes(&[1, 0, 0, 0]).unwrap();
+    let functions = IdList::parse(&[1, 0, 0, 0]).unwrap();
     assert!(FunctionList::new(functions, &[5, 0, 0, 0]).is_ok());
     assert_eq!(
         FunctionList::new(functions, &[5, 0, 0, 0, 6, 0, 0, 0])
@@ -268,7 +271,7 @@ fn function_lists_check_their_counts() {
         ErrorKind::InvalidFormat
     );
     assert_eq!(
-        IdList::from_le_bytes(&[1, 0, 0]).unwrap_err().kind(),
+        IdList::parse(&[1, 0, 0]).unwrap_err().kind(),
         ErrorKind::InvalidFormat
     );
 }
@@ -301,7 +304,7 @@ fn annotations_encode_to_their_compressed_form() {
     for annotation in &annotations {
         annotation.encode(&mut bytes).unwrap();
     }
-    let decoded: Vec<Annotation> = BinaryAnnotations::new(&bytes).unwrap().iter().collect();
+    let decoded: Vec<Annotation> = BinaryAnnotations::parse(&bytes).unwrap().iter().collect();
     assert_eq!(decoded, annotations);
     assert_eq!(bytes[..2], [1, 0x7f]);
     assert_eq!(bytes[2..5], [3, 0x80, 0x80]);
@@ -365,7 +368,9 @@ fn narrow_hlsl_slots_must_fit_in_16_bits() {
     );
     // The 32-bit kind keeps the wide slot.
     let mut out = Vec::new();
-    SymbolData::HlslData(data).encode(0x1162, &mut out).unwrap();
+    SymbolData::HlslData(data)
+        .encode(SymbolKind(0x1162), &mut out)
+        .unwrap();
     let SymbolData::HlslData(wide) = *decode(&out).unwrap().data() else {
         panic!("expected HLSL data");
     };

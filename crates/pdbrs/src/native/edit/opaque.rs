@@ -21,7 +21,7 @@ use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache, TypeMapStream};
 use crate::native::codeview::Records;
-use crate::native::codeview::symbol::{ModuleTypeReference, SymbolData};
+use crate::native::codeview::symbol::{ModuleTypeReference, Symbol, SymbolData};
 use crate::native::lines::{LineSubsection, ModuleLines};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
@@ -171,7 +171,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
         let bytes = pdb.stream_bytes(id)?;
         for record in Records::new(&bytes) {
             let record = record?;
-            if matches!(record.symbol()?.data(), SymbolData::Unsupported(_)) {
+            if matches!(Symbol::decode(record)?.data(), SymbolData::Unsupported(_)) {
                 return Err(unknown_symbol().with_stream(id, u64::from(record.offset)));
             }
         }
@@ -184,7 +184,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
         let id = stream.stream().0;
         for record in stream.symbols() {
             let record = record?;
-            if matches!(record.symbol()?.data(), SymbolData::Unsupported(_)) {
+            if matches!(Symbol::decode(record)?.data(), SymbolData::Unsupported(_)) {
                 return Err(unknown_symbol().with_stream(StreamId(id), u64::from(record.offset)));
             }
         }

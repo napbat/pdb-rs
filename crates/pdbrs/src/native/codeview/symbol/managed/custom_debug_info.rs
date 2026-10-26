@@ -29,13 +29,14 @@ mod locals;
 use core::iter::FusedIterator;
 
 pub use locals::{
-    DynamicLocal, DynamicLocalIter, DynamicLocals, TupleElementNames, TupleElementNamesEntry,
-    TupleElementNamesIter, Utf8NameIter, Utf8Names,
+    DynamicLocal, DynamicLocals, DynamicLocalsIter, TupleElementNames, TupleElementNamesEntry,
+    TupleElementNamesIter, Utf8Names, Utf8NamesIter,
 };
 
 use super::super::super::Fields;
 use super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
 use crate::portable::custom::{EncLambdaAndClosureMap, EncLocalSlotMap, EncStateMachineStateMap};
+use crate::portable::metadata::{IlOffset, MetadataToken};
 use crate::{Error, ErrorKind, Result};
 
 values! {
@@ -74,7 +75,7 @@ const RECORD_HEADER_SIZE: usize = 8;
 const LAST_UNALIGNED_KIND: u8 = 5;
 
 /// Decoded custom debug information (`MD2`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CustomDebugInfo<'a> {
     /// The two reserved bytes of the global header, raw. Roslyn writes zeros.
@@ -144,7 +145,8 @@ impl<'a> CustomDebugInfo<'a> {
 }
 
 /// One framed custom debug information record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct CustomDebugInfoRecord<'a> {
     /// The record version. [`CustomDebugInfoRecord::decode`] supports version 4.
     pub version: u8,
@@ -291,9 +293,9 @@ pub enum CustomDebugInfoData<'a> {
     /// [`CustomDebugInfoKind::USING_GROUPS`].
     UsingGroups(UsingGroups<'a>),
     /// [`CustomDebugInfoKind::FORWARD_METHOD`]: a method token.
-    ForwardMethod(u32),
+    ForwardMethod(MetadataToken),
     /// [`CustomDebugInfoKind::FORWARD_MODULE`]: a method token.
-    ForwardModule(u32),
+    ForwardModule(MetadataToken),
     /// [`CustomDebugInfoKind::STATE_MACHINE_HOISTED_LOCAL_SCOPES`].
     StateMachineHoistedLocalScopes(HoistedLocalScopes<'a>),
     /// [`CustomDebugInfoKind::STATE_MACHINE_TYPE_NAME`]: UTF-16LE bytes
@@ -314,11 +316,11 @@ pub enum CustomDebugInfoData<'a> {
 }
 
 /// Read a method token and the zero padding.
-fn token(data: &[u8]) -> Result<u32> {
+fn token(data: &[u8]) -> Result<MetadataToken> {
     let mut fields = Fields::new(data, ErrorKind::InvalidFormat, SHORT_VALUE);
     let token = fields.u32()?;
     zero_padding(fields.rest(), "bytes follow the forward method token")?;
-    Ok(token)
+    Ok(MetadataToken::from_raw(token))
 }
 
 /// Read a state machine type name. Old compilers omit the NUL code unit.
@@ -337,7 +339,7 @@ fn type_name(data: &[u8]) -> Result<&[u8]> {
 ///
 /// Each value is the number of `S_UNAMESPACE` records of one namespace
 /// declaration, from the innermost declaration to the global namespace.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct UsingGroups<'a> {
     /// The `u16` sizes.
     bytes: &'a [u8],
@@ -367,16 +369,16 @@ impl<'a> UsingGroups<'a> {
 
     /// Return an iterator over the group sizes.
     #[must_use]
-    pub fn iter(&self) -> UsingGroupIter<'a> {
-        UsingGroupIter::new(self.bytes)
+    pub fn iter(&self) -> UsingGroupsIter<'a> {
+        UsingGroupsIter::new(self.bytes)
     }
 }
 
-iterable!(UsingGroups, UsingGroupIter);
+iterable!(UsingGroups, UsingGroupsIter);
 
 chunk_iter!(
     /// An iterator over [`UsingGroups`].
-    UsingGroupIter,
+    UsingGroupsIter,
     2,
     u16,
     |size: &[u8; 2]| u16::from_le_bytes(*size)
@@ -386,17 +388,18 @@ chunk_iter!(
 ///
 /// Both IL offsets are inclusive. The scope `[0, 0]` marks a synthesized
 /// variable (Roslyn `DecodeStateMachineHoistedLocalScopesRecord`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HoistedLocalScope {
     /// The first IL offset.
-    pub start: u32,
+    pub start: IlOffset,
     /// The last IL offset (inclusive).
-    pub end: u32,
+    pub end: IlOffset,
 }
 
 /// The hoisted local scopes of a state machine method, one for each hoisted
 /// variable slot.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct HoistedLocalScopes<'a> {
     /// The 8-byte scopes.
     bytes: &'a [u8],
@@ -427,20 +430,20 @@ impl<'a> HoistedLocalScopes<'a> {
 
     /// Return an iterator over the scopes.
     #[must_use]
-    pub fn iter(&self) -> HoistedLocalScopeIter<'a> {
-        HoistedLocalScopeIter::new(self.bytes)
+    pub fn iter(&self) -> HoistedLocalScopesIter<'a> {
+        HoistedLocalScopesIter::new(self.bytes)
     }
 }
 
-iterable!(HoistedLocalScopes, HoistedLocalScopeIter);
+iterable!(HoistedLocalScopes, HoistedLocalScopesIter);
 
 chunk_iter!(
     /// An iterator over [`HoistedLocalScopes`].
-    HoistedLocalScopeIter,
+    HoistedLocalScopesIter,
     8,
     HoistedLocalScope,
     |scope: &[u8; 8]| HoistedLocalScope {
-        start: u32::from_le_bytes([scope[0], scope[1], scope[2], scope[3]]),
-        end: u32::from_le_bytes([scope[4], scope[5], scope[6], scope[7]]),
+        start: IlOffset::new(u32::from_le_bytes([scope[0], scope[1], scope[2], scope[3]])),
+        end: IlOffset::new(u32::from_le_bytes([scope[4], scope[5], scope[6], scope[7]])),
     }
 );

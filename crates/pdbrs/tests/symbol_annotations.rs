@@ -4,11 +4,11 @@ use pdbrs::ErrorKind;
 use pdbrs::native::codeview::symbol::{Annotation, BinaryAnnotations};
 
 fn decode(bytes: &[u8]) -> Vec<Annotation> {
-    BinaryAnnotations::new(bytes).unwrap().iter().collect()
+    BinaryAnnotations::parse(bytes).unwrap().iter().collect()
 }
 
 fn error(bytes: &[u8]) -> ErrorKind {
-    BinaryAnnotations::new(bytes).unwrap_err().kind()
+    BinaryAnnotations::parse(bytes).unwrap_err().kind()
 }
 
 #[test]
@@ -92,12 +92,12 @@ fn decodes_compressed_integer_lengths() {
 #[test]
 fn accepts_trailing_zero_padding() {
     for bytes in [&[6, 2][..], &[6, 2, 0], &[6, 2, 0, 0], &[6, 2, 0, 0, 0]] {
-        let annotations = BinaryAnnotations::new(bytes).unwrap();
+        let annotations = BinaryAnnotations::parse(bytes).unwrap();
         assert_eq!(annotations.bytes(), [6, 2]);
         assert_eq!(annotations.iter().count(), 1);
     }
     for bytes in [&[0, 0][..], &[]] {
-        assert_eq!(BinaryAnnotations::new(bytes).unwrap().bytes(), b"");
+        assert_eq!(BinaryAnnotations::parse(bytes).unwrap().bytes(), b"");
     }
 }
 
@@ -126,7 +126,7 @@ fn rejects_invalid_and_truncated_integers() {
 
 #[test]
 fn iterator_works_by_value_and_by_reference() {
-    let annotations = BinaryAnnotations::new(&[3, 1, 3, 2]).unwrap();
+    let annotations = BinaryAnnotations::parse(&[3, 1, 3, 2]).unwrap();
     assert_eq!((&annotations).into_iter().count(), 2);
     assert_eq!(
         annotations.into_iter().last(),

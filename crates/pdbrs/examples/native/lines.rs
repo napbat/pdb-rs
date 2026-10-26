@@ -95,7 +95,7 @@ pub(crate) fn other_subsection(
     match data {
         LineSubsection::Symbols(symbols) => {
             for record in symbols.records() {
-                let symbol = record?.symbol()?;
+                let symbol = pdbrs::native::codeview::symbol::Symbol::decode(record?)?;
                 if matches!(
                     symbol.data(),
                     pdbrs::native::codeview::symbol::SymbolData::Unsupported(_)

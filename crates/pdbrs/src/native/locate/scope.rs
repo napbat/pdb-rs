@@ -92,7 +92,7 @@ impl SymbolLocator {
         Ok(ProcedureInfo {
             module: key.module,
             offset: key.offset,
-            kind: symbol.kind(),
+            kind: symbol.kind().0,
             name: symbol.name().unwrap_or_default(),
             address,
             start: optional_rva(&self.address_map()?, address)?,
@@ -167,7 +167,7 @@ impl SymbolLocator {
         let module = self.module_data(procedure.module)?;
         let mut scopes = Vec::new();
         let (data, end) = match module_symbol(module, procedure.offset)?.data() {
-            SymbolData::Procedure(value) => (records_at(module, procedure.offset)?, value.end),
+            SymbolData::Procedure(value) => (records_at(module, procedure.offset)?, value.end.0),
             _ => return Ok(scopes),
         };
         let map = self.address_map()?;
@@ -183,8 +183,8 @@ impl SymbolLocator {
             if offset >= end || module.walk_end.is_some_and(|stop| offset >= stop) {
                 break;
             }
-            let symbol = record.symbol()?;
-            let Some(links) = symbol.scope() else {
+            let symbol = Symbol::decode(record)?;
+            let Some(links) = symbol.scope_links() else {
                 continue;
             };
             let kind = match symbol.data() {
@@ -205,7 +205,7 @@ impl SymbolLocator {
             };
             let scope = ScopeRecord {
                 offset,
-                parent: links.parent,
+                parent: links.parent.0,
                 kind,
             };
             push(
@@ -357,7 +357,7 @@ pub(super) fn module_symbol(module: &ModuleData, offset: u32) -> Result<Symbol<'
         Error::new(ErrorKind::InvalidReference, None)
             .with_context("module symbol offset is outside the symbol records")
     })??;
-    record.symbol()
+    Symbol::decode(record)
 }
 
 /// Translate an address that can lie outside the image sections.

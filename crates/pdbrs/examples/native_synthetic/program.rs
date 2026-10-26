@@ -24,13 +24,13 @@ use pdbrs::Result;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::field_list::{DataMember, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{FunctionId, IdRecord};
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Compile3, CompileFlags, Data, FrameProcedure, FrameProcedureFlags, ObjectName, Procedure,
-    ProcedureFlags, ProcedureReference, ProcedureType, Public, PublicFlags, RegisterRelative,
-    S_COMPILE3, S_END, S_FRAMEPROC, S_GDATA32, S_GPROC32, S_OBJNAME, S_PROCREF, S_PUB32,
-    S_REGREL32, S_UDT, SymbolData, UserDefinedType,
+    Compile3, CompileFlags, CpuType, Data, FrameProcedure, FrameProcedureFlags, ObjectName,
+    Procedure, ProcedureFlags, ProcedureReference, ProcedureType, Public, PublicFlags,
+    RegisterRelative, S_COMPILE3, S_END, S_FRAMEPROC, S_GDATA32, S_GPROC32, S_OBJNAME, S_PROCREF,
+    S_PUB32, S_REGREL32, S_UDT, SymbolData, UserDefinedType,
 };
 use pdbrs::native::codeview::type_record::{
     ArgumentList, CallingConvention, Class, ClassKind, ClassOptions, FunctionOptions,
@@ -55,7 +55,7 @@ pub const SIGNATURE: u32 = 0x6533_3300;
 /// The x64 machine value.
 const MACHINE_AMD64: u16 = 0x8664;
 /// The `CV_CFL_AMD64` compile machine value.
-const CV_CFL_AMD64: u16 = 0xd0;
+const CV_CFL_AMD64: CpuType = CpuType::X64;
 /// The x64 register number of `RSP` (`CV_AMD64_RSP`).
 const CV_AMD64_RSP: u16 = 335;
 /// The `T_INT4` primitive type.
@@ -105,6 +105,35 @@ fn number(value: u32) -> Numeric<'static> {
     Numeric::from_integer(Integer::Unsigned(u128::from(value)))
 }
 
+/// Return the `Point` structure record with `options`, `field_list`, a member count and a size.
+fn point_class(
+    options: ClassOptions,
+    field_list: TypeIndex,
+    member_count: u16,
+    size: u32,
+) -> Class<'static> {
+    let mut class = Class::new(ClassKind::Structure);
+    class.member_count = member_count;
+    class.options = options;
+    class.field_list = field_list;
+    class.derivation_list = TypeIndex::NONE;
+    class.vtable_shape = TypeIndex::NONE;
+    class.size = number(size);
+    class.name = b"Point";
+    class.unique_name = None;
+    class
+}
+
+/// Return an `int` data member of `Point`.
+fn int_member(attributes: MemberAttributes, offset: u32, name: &'static [u8]) -> Member<'static> {
+    let mut member = DataMember::default();
+    member.attributes = attributes;
+    member.member_type = T_INT4;
+    member.offset = number(offset);
+    member.name = name;
+    Member::DataMember(member)
+}
+
 /// Build the synthetic PDB.
 ///
 /// # Errors
@@ -115,71 +144,44 @@ pub fn build() -> Result<PdbBuilder<'static>> {
     // The handle of the function ID of `sum` exists before its record and
     // before its type: the module records can refer to it at once.
     let sum_id = builder.reserve_id()?;
-    let point_forward = builder.add_type(TypeLeaf::Class(Class {
-        kind: ClassKind::Structure,
-        member_count: 0,
-        options: ClassOptions(ClassOptions::FORWARD_REFERENCE),
-        field_list: TypeIndex::NONE,
-        derivation_list: TypeIndex::NONE,
-        vtable_shape: TypeIndex::NONE,
-        size: number(0),
-        name: b"Point",
-        unique_name: None,
-        producer_padding: &[],
-    }))?;
+    let point_forward = builder.add_type(TypeLeaf::Class(point_class(
+        ClassOptions::FORWARD_REFERENCE,
+        TypeIndex::NONE,
+        0,
+        0,
+    )))?;
     let pointer = builder.add_type_with(move |resolver, out| {
-        TypeLeaf::Pointer(Pointer {
-            referent_type: resolver.type_index(point_forward)?,
-            // A 64-bit pointer (kind 0x0c) of 8 bytes.
-            attributes: PointerAttributes::from_raw(0x0c | (8 << 13))?,
-            member: None,
-            based: None,
-            trailing_zeros: 0,
-        })
-        .encode(out)
+        let mut pointer = Pointer::default();
+        pointer.referent_type = resolver.type_index(point_forward)?;
+        // A 64-bit pointer (kind 0x0c) of 8 bytes.
+        pointer.attributes = PointerAttributes::from_raw(0x0c | (8 << 13))?;
+        pointer.member = None;
+        pointer.based = None;
+        pointer.trailing_zeros = 0;
+        TypeLeaf::Pointer(pointer).encode(out)
     })?;
     let sum_arguments = builder.add_type_with(move |resolver, out| {
         let index = resolver.type_index(pointer)?.0.to_le_bytes();
-        TypeLeaf::ArgumentList(ArgumentList::from_bytes(&index)?).encode(out)
+        TypeLeaf::ArgumentList(ArgumentList::parse(&index)?).encode(out)
     })?;
     let sum_type = procedure_type(&mut builder, sum_arguments, 1)?;
     let fields = builder.add_type_with(|_, out| {
         let public = MemberAttributes::from_raw(3)?;
-        let members = [
-            Member::DataMember(DataMember {
-                attributes: public,
-                member_type: T_INT4,
-                offset: number(0),
-                name: b"x",
-            }),
-            Member::DataMember(DataMember {
-                attributes: public,
-                member_type: T_INT4,
-                offset: number(4),
-                name: b"y",
-            }),
-        ];
+        let members = [int_member(public, 0, b"x"), int_member(public, 4, b"y")];
         encode_field_list(&members, TypeIndex(0x1000), 0xff00, out).map(|_| ())
     })?;
     // The definition comes after its field list. The pointer refers to the
     // forward reference, as compilers write it.
     let point = builder.add_type_with(move |resolver, out| {
-        TypeLeaf::Class(Class {
-            kind: ClassKind::Structure,
-            member_count: 2,
-            options: ClassOptions(0),
-            field_list: resolver.type_index(fields)?,
-            derivation_list: TypeIndex::NONE,
-            vtable_shape: TypeIndex::NONE,
-            size: number(8),
-            name: b"Point",
-            unique_name: None,
-            producer_padding: &[],
-        })
+        TypeLeaf::Class(point_class(
+            ClassOptions(0),
+            resolver.type_index(fields)?,
+            2,
+            8,
+        ))
         .encode(out)
     })?;
-    let main_arguments =
-        builder.add_type(TypeLeaf::ArgumentList(ArgumentList::from_bytes(&[])?))?;
+    let main_arguments = builder.add_type(TypeLeaf::ArgumentList(ArgumentList::parse(&[])?))?;
     let main_type = procedure_type(&mut builder, main_arguments, 0)?;
     builder.define_id_with(sum_id, move |resolver, out| {
         function_id(resolver.type_index(sum_type)?, SUM.name).encode(out)
@@ -206,25 +208,23 @@ fn procedure_type(
     parameter_count: u16,
 ) -> Result<TypeHandle> {
     builder.add_type_with(move |resolver, out| {
-        TypeLeaf::Procedure(ProcedureLeaf {
-            return_type: T_INT4,
-            calling_convention: CallingConvention::NearC,
-            options: FunctionOptions(0),
-            parameter_count,
-            argument_list: resolver.type_index(arguments)?,
-        })
-        .encode(out)
+        let mut procedure = ProcedureLeaf::new(CallingConvention::NearC);
+        procedure.return_type = T_INT4;
+        procedure.options = FunctionOptions(0);
+        procedure.parameter_count = parameter_count;
+        procedure.argument_list = resolver.type_index(arguments)?;
+        TypeLeaf::Procedure(procedure).encode(out)
     })
 }
 
 /// Return an `LF_FUNC_ID` record at the global scope.
 fn function_id(function_type: TypeIndex, name: &[u8]) -> IdRecord<'_> {
-    IdRecord::Function(FunctionId {
-        scope: None,
-        function_type,
-        name,
-        decorated_name_hash: None,
-    })
+    let mut function = FunctionId::default();
+    function.scope = None;
+    function.function_type = function_type;
+    function.name = name;
+    function.decorated_name_hash = None;
+    IdRecord::Function(function)
 }
 
 /// Add the module with its symbols and lines. Return the procedure handles.
@@ -251,24 +251,18 @@ fn add_module(
         name_padding: [0; 3],
     })?;
     module.push_file(SOURCE)?;
-    module.push_symbol_fields(
-        S_OBJNAME,
-        SymbolData::ObjectName(ObjectName {
-            signature: 0,
-            name: b"C:\\synthetic\\synthetic.obj",
-        }),
-    )?;
-    module.push_symbol_fields(
-        S_COMPILE3,
-        SymbolData::Compile3(Compile3 {
-            flags: CompileFlags(0),
-            machine: CV_CFL_AMD64,
-            frontend: [19, 51, 0, 0],
-            backend: [19, 51, 0, 0],
-            version: b"pdbrs synthetic",
-            trailing_zeros: 0,
-        }),
-    )?;
+    let mut object = ObjectName::default();
+    object.signature = 0;
+    object.name = b"C:\\synthetic\\synthetic.obj";
+    module.push_symbol_fields(S_OBJNAME, SymbolData::ObjectName(object))?;
+    let mut compile = Compile3::default();
+    compile.flags = CompileFlags(0);
+    compile.machine = CV_CFL_AMD64;
+    compile.frontend = [19, 51, 0, 0];
+    compile.backend = [19, 51, 0, 0];
+    compile.version = b"pdbrs synthetic";
+    compile.trailing_zeros = 0;
+    module.push_symbol_fields(S_COMPILE3, SymbolData::Compile3(compile))?;
     let mut handles = [None, None];
     for ((function, (procedure_type, local_type)), local) in [SUM, MAIN]
         .iter()
@@ -276,41 +270,36 @@ fn add_module(
         .zip([b"p".as_slice(), b"p"])
     {
         let procedure = module.push_symbol_with(move |resolver, out| {
-            SymbolData::Procedure(Procedure {
-                parent: 0,
-                end: 0,
-                next: 0,
-                code_length: function.size,
-                debug_start: 0,
-                debug_end: function.size - 1,
-                signature: ProcedureType::Type(resolver.type_index(procedure_type)?),
-                address: at(1, function.offset),
-                flags: ProcedureFlags(0),
-                extended_flags: None,
-                name: function.name,
-            })
-            .encode(S_GPROC32, out)
+            let mut procedure =
+                Procedure::new(ProcedureType::Type(resolver.type_index(procedure_type)?));
+            procedure.parent = ModuleSymbolOffset(0);
+            procedure.end = ModuleSymbolOffset(0);
+            procedure.next = ModuleSymbolOffset(0);
+            procedure.code_length = function.size;
+            procedure.debug_start = 0;
+            procedure.debug_end = function.size - 1;
+            procedure.address = at(1, function.offset);
+            procedure.flags = ProcedureFlags(0);
+            procedure.extended_flags = None;
+            procedure.name = function.name;
+            SymbolData::Procedure(procedure).encode(S_GPROC32, out)
         })?;
-        module.push_symbol_fields(
-            S_FRAMEPROC,
-            SymbolData::FrameProcedure(FrameProcedure {
-                frame_size: 0x28,
-                padding_size: 0,
-                padding_offset: 0,
-                callee_saved_size: 0,
-                exception_handler: at(0, 0),
-                // The local and parameter base registers are RSP.
-                flags: FrameProcedureFlags((1 << 14) | (1 << 16)),
-            }),
-        )?;
+        let mut frame = FrameProcedure::default();
+        frame.frame_size = 0x28;
+        frame.padding_size = 0;
+        frame.padding_offset = 0;
+        frame.callee_saved_size = 0;
+        frame.exception_handler = at(0, 0);
+        // The local and parameter base registers are RSP.
+        frame.flags = FrameProcedureFlags((1 << 14) | (1 << 16));
+        module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
         module.push_symbol_with(move |resolver, out| {
-            SymbolData::RegisterRelative(RegisterRelative {
-                offset: 0x30,
-                type_index: resolver.type_index(local_type)?,
-                register: CV_AMD64_RSP,
-                name: local,
-            })
-            .encode(S_REGREL32, out)
+            let mut relative = RegisterRelative::default();
+            relative.offset = 0x30;
+            relative.type_index = resolver.type_index(local_type)?;
+            relative.register = CV_AMD64_RSP;
+            relative.name = local;
+            SymbolData::RegisterRelative(relative).encode(S_REGREL32, out)
         })?;
         module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
         let slot = usize::from(function.offset != 0);
@@ -356,31 +345,28 @@ fn add_globals(
 ) -> Result<()> {
     for (procedure, name) in procedures.into_iter().zip([SUM.name, MAIN.name]) {
         let reference = builder.add_symbol_with(move |resolver, out| {
-            SymbolData::ProcedureReference(ProcedureReference {
-                name_checksum: 0,
-                offset: resolver.module_symbol_offset(procedure)?,
-                module: resolver.module_number(procedure.module())?,
-                name,
-            })
-            .encode(S_PROCREF, out)
+            let number = resolver.module_number(procedure.module())?;
+            let mut reference = ProcedureReference::default();
+            reference.name_checksum = 0;
+            reference.offset = ModuleSymbolOffset(resolver.module_symbol_offset(procedure)?);
+            // The module number is the module index plus 1.
+            reference.module = Some(ModuleIndex(u32::from(number) - 1));
+            reference.name = name;
+            SymbolData::ProcedureReference(reference).encode(S_PROCREF, out)
         })?;
         builder.index_global(reference, 1)?;
     }
-    let data = builder.add_symbol_fields(
-        S_GDATA32,
-        SymbolData::Data(Data {
-            type_index: T_INT4,
-            address: at(2, 0),
-            name: b"g_value",
-        }),
-    )?;
+    let mut global = Data::default();
+    global.type_index = T_INT4;
+    global.address = at(2, 0);
+    global.name = b"g_value";
+    let data = builder.add_symbol_fields(S_GDATA32, SymbolData::Data(global))?;
     builder.index_global(data, 1)?;
     let udt = builder.add_symbol_with(move |resolver, out| {
-        SymbolData::UserDefinedType(UserDefinedType {
-            type_index: resolver.type_index(point)?,
-            name: b"Point",
-        })
-        .encode(S_UDT, out)
+        let mut udt = UserDefinedType::default();
+        udt.type_index = resolver.type_index(point)?;
+        udt.name = b"Point";
+        SymbolData::UserDefinedType(udt).encode(S_UDT, out)
     })?;
     builder.index_global(udt, 1)?;
     let function = PublicFlags(PublicFlags::FUNCTION.0 | PublicFlags::CODE.0);
@@ -389,14 +375,11 @@ fn add_globals(
         (MAIN.name, function, at(1, MAIN.offset)),
         (b"g_value".as_slice(), PublicFlags(0), at(2, 0)),
     ] {
-        let public = builder.add_symbol_fields(
-            S_PUB32,
-            SymbolData::Public(Public {
-                flags,
-                address,
-                name,
-            }),
-        )?;
+        let mut symbol = Public::default();
+        symbol.flags = flags;
+        symbol.address = address;
+        symbol.name = name;
+        let public = builder.add_symbol_fields(S_PUB32, SymbolData::Public(symbol))?;
         builder.index_public(public)?;
     }
     Ok(())

@@ -16,10 +16,10 @@
 
 use core::iter::FusedIterator;
 
-use super::Fields;
 use super::index::TypeIndex;
 use super::numeric::Numeric;
 use super::type_record::MemberAttributes;
+use super::{Fields, LeafKind};
 use crate::{Error, ErrorKind, Result};
 
 mod encode;
@@ -27,39 +27,39 @@ mod encode;
 pub use encode::{FieldListRecords, LLVM_FIELD_LIST_LIMIT, encode_field_list};
 
 /// The kind of a base class member (`LF_BCLASS`).
-pub const LF_BCLASS: u16 = 0x1400;
+pub const LF_BCLASS: LeafKind = LeafKind(0x1400);
 /// The kind of a direct virtual base class member (`LF_VBCLASS`).
-pub const LF_VBCLASS: u16 = 0x1401;
+pub const LF_VBCLASS: LeafKind = LeafKind(0x1401);
 /// The kind of an indirect virtual base class member (`LF_IVBCLASS`).
-pub const LF_IVBCLASS: u16 = 0x1402;
+pub const LF_IVBCLASS: LeafKind = LeafKind(0x1402);
 /// The kind of a field-list continuation member (`LF_INDEX`).
-pub const LF_INDEX: u16 = 0x1404;
+pub const LF_INDEX: LeafKind = LeafKind(0x1404);
 /// The kind of a virtual function table pointer member (`LF_VFUNCTAB`).
-pub const LF_VFUNCTAB: u16 = 0x1409;
+pub const LF_VFUNCTAB: LeafKind = LeafKind(0x1409);
 /// The kind of a friend class member (`LF_FRIENDCLS`).
-pub const LF_FRIENDCLS: u16 = 0x140a;
+pub const LF_FRIENDCLS: LeafKind = LeafKind(0x140a);
 /// The kind of a virtual function offset member (`LF_VFUNCOFF`).
-pub const LF_VFUNCOFF: u16 = 0x140c;
+pub const LF_VFUNCOFF: LeafKind = LeafKind(0x140c);
 /// The kind of an enumerator member (`LF_ENUMERATE`).
-pub const LF_ENUMERATE: u16 = 0x1502;
+pub const LF_ENUMERATE: LeafKind = LeafKind(0x1502);
 /// The kind of a friend function member (`LF_FRIENDFCN`).
-pub const LF_FRIENDFCN: u16 = 0x150c;
+pub const LF_FRIENDFCN: LeafKind = LeafKind(0x150c);
 /// The kind of a data member (`LF_MEMBER`).
-pub const LF_MEMBER: u16 = 0x150d;
+pub const LF_MEMBER: LeafKind = LeafKind(0x150d);
 /// The kind of a static data member (`LF_STMEMBER`).
-pub const LF_STMEMBER: u16 = 0x150e;
+pub const LF_STMEMBER: LeafKind = LeafKind(0x150e);
 /// The kind of an overloaded method member (`LF_METHOD`).
-pub const LF_METHOD: u16 = 0x150f;
+pub const LF_METHOD: LeafKind = LeafKind(0x150f);
 /// The kind of a nested type member (`LF_NESTTYPE`).
-pub const LF_NESTTYPE: u16 = 0x1510;
+pub const LF_NESTTYPE: LeafKind = LeafKind(0x1510);
 /// The kind of a single method member (`LF_ONEMETHOD`).
-pub const LF_ONEMETHOD: u16 = 0x1511;
+pub const LF_ONEMETHOD: LeafKind = LeafKind(0x1511);
 /// The kind of a nested type member with attributes (`LF_NESTTYPEEX`).
-pub const LF_NESTTYPEEX: u16 = 0x1512;
+pub const LF_NESTTYPEEX: LeafKind = LeafKind(0x1512);
 /// The kind of a member access change (`LF_MEMBERMODIFY`).
-pub const LF_MEMBERMODIFY: u16 = 0x1513;
+pub const LF_MEMBERMODIFY: LeafKind = LeafKind(0x1513);
 /// The kind of a base interface member (`LF_BINTERFACE`).
-pub const LF_BINTERFACE: u16 = 0x151a;
+pub const LF_BINTERFACE: LeafKind = LeafKind(0x151a);
 
 /// The smallest `LF_PAD` byte.
 const LF_PAD0: u8 = 0xf0;
@@ -71,7 +71,8 @@ fn invalid(context: &'static str) -> Error {
 
 /// An `LF_BCLASS` or `LF_BINTERFACE` member: a non-virtual base class or a
 /// base interface.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct BaseClass<'a> {
     /// The access of the base class.
     pub attributes: MemberAttributes,
@@ -82,7 +83,8 @@ pub struct BaseClass<'a> {
 }
 
 /// An `LF_VBCLASS` or `LF_IVBCLASS` member: a virtual base class.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VirtualBaseClass<'a> {
     /// `true` for `LF_IVBCLASS`, `false` for `LF_VBCLASS`.
     pub indirect: bool,
@@ -99,7 +101,8 @@ pub struct VirtualBaseClass<'a> {
 }
 
 /// An `LF_ENUMERATE` member: one enumerator.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Enumerator<'a> {
     /// The access of the enumerator.
     pub attributes: MemberAttributes,
@@ -110,7 +113,8 @@ pub struct Enumerator<'a> {
 }
 
 /// An `LF_MEMBER` member: a non-static data member.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DataMember<'a> {
     /// The access of the member.
     pub attributes: MemberAttributes,
@@ -123,7 +127,8 @@ pub struct DataMember<'a> {
 }
 
 /// An `LF_STMEMBER` member: a static data member.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StaticMember<'a> {
     /// The access of the member.
     pub attributes: MemberAttributes,
@@ -134,7 +139,8 @@ pub struct StaticMember<'a> {
 }
 
 /// An `LF_METHOD` member: a method name with an overload list.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OverloadedMethod<'a> {
     /// The number of overloads.
     pub overload_count: u16,
@@ -145,7 +151,8 @@ pub struct OverloadedMethod<'a> {
 }
 
 /// An `LF_NESTTYPE` member: a nested type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct NestedType<'a> {
     /// The nested type.
     pub nested_type: TypeIndex,
@@ -154,7 +161,8 @@ pub struct NestedType<'a> {
 }
 
 /// An `LF_NESTTYPEEX` member: a nested type with member attributes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct NestedTypeEx<'a> {
     /// The access of the nested type.
     pub attributes: MemberAttributes,
@@ -165,7 +173,8 @@ pub struct NestedTypeEx<'a> {
 }
 
 /// An `LF_MEMBERMODIFY` member: new attributes of an inherited member.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MemberModify<'a> {
     /// The new attributes.
     pub attributes: MemberAttributes,
@@ -176,7 +185,8 @@ pub struct MemberModify<'a> {
 }
 
 /// An `LF_FRIENDFCN` member: a friend function.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FriendFunction<'a> {
     /// The type of the friend function.
     pub function_type: TypeIndex,
@@ -185,7 +195,8 @@ pub struct FriendFunction<'a> {
 }
 
 /// An `LF_VFUNCOFF` member: a virtual function table pointer at an offset.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VirtualFunctionOffset {
     /// The type of the table pointer.
     pub pointer_type: TypeIndex,
@@ -194,7 +205,8 @@ pub struct VirtualFunctionOffset {
 }
 
 /// An `LF_ONEMETHOD` member: a method without overloads.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct OneMethod<'a> {
     /// The access and the method properties.
     pub attributes: MemberAttributes,
@@ -265,7 +277,7 @@ impl<'a> FieldList<'a> {
     ///   member follows an `LF_INDEX` member.
     /// - [`ErrorKind::UnsupportedVersion`] for a member kind without a
     ///   decoder or a numeric leaf with an unknown tag.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let mut continuation = None;
         for member in Members::new(data) {
             if let Member::Continuation(index) = member? {
@@ -290,7 +302,7 @@ impl<'a> FieldList<'a> {
     /// Return an iterator over the members of this record.
     ///
     /// The iterator includes an `LF_INDEX` member as [`Member::Continuation`].
-    /// It does not follow the continuation. [`FieldList::decode`] validates
+    /// It does not follow the continuation. [`FieldList::parse`] validates
     /// all members, so the iterator does not give errors for a decoded list.
     #[must_use]
     pub const fn members(&self) -> Members<'a> {
@@ -390,7 +402,7 @@ fn attributes(fields: &mut Fields<'_>) -> Result<MemberAttributes> {
 
 /// Decode one member, without the padding after it.
 fn decode_member<'a>(fields: &mut Fields<'a>) -> Result<Member<'a>> {
-    let kind = fields.u16()?;
+    let kind = LeafKind(fields.u16()?);
     Ok(match kind {
         LF_BCLASS | LF_BINTERFACE => {
             let base = BaseClass {

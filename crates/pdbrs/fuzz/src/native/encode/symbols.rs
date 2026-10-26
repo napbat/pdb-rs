@@ -2,6 +2,7 @@
 //! builders.
 
 use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{ModuleSymbolWriter, ModuleSymbols, Symbol};
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{
@@ -42,7 +43,7 @@ pub(crate) fn symbol(symbol: &Symbol<'_>) {
         .next()
         .expect("an encoded symbol frames")
         .expect("an encoded symbol frames");
-    let again = record.symbol().expect("an encoded symbol decodes");
+    let again = Symbol::decode(record).expect("an encoded symbol decodes");
     assert_eq!(again.data(), symbol.data());
 }
 
@@ -58,7 +59,7 @@ pub fn stream(data: &[u8]) {
         let Some(record) = ok(record) else {
             break;
         };
-        let Some(decoded) = ok(record.symbol()) else {
+        let Some(decoded) = ok(Symbol::decode(record)) else {
             break;
         };
         symbol(&decoded);
@@ -75,10 +76,10 @@ pub fn stream(data: &[u8]) {
         "the record writer keeps the records"
     );
 
-    let mut module = ModuleSymbolWriter::new(4);
+    let mut module = ModuleSymbolWriter::new(ModuleSymbolOffset(4));
     let mut used = 0;
     let mut complete = true;
-    for scoped in ModuleSymbols::new(data, STREAM, 4, 64).take(MAX_RECORDS) {
+    for scoped in ModuleSymbols::new(data, STREAM, ModuleSymbolOffset(4), 64).take(MAX_RECORDS) {
         let Some(scoped) = ok(scoped) else {
             complete = false;
             break;
@@ -88,7 +89,7 @@ pub fn stream(data: &[u8]) {
             .expect("a decoded module symbol writes");
         assert_eq!(offset, scoped.offset);
         let length = scoped.symbol.record().data.len() + 4;
-        used = usize::try_from(scoped.offset - 4).unwrap_or(0) + length;
+        used = usize::try_from(scoped.offset.0 - 4).unwrap_or(0) + length;
     }
     if complete && let Some(bytes) = ok(module.finish()) {
         assert_eq!(bytes, &data[..used], "the module writer keeps the records");

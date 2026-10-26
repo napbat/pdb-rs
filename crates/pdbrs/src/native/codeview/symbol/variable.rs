@@ -11,9 +11,9 @@
 
 use core::iter::FusedIterator;
 
-use super::super::Fields;
 use super::super::index::TypeIndex;
 use super::super::numeric::Numeric;
+use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
@@ -49,7 +49,8 @@ flags! {
 /// A local variable record (`S_LOCAL`).
 ///
 /// The def-range records that follow give the location of the variable.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Local<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -82,7 +83,8 @@ impl<'a> Local<'a> {
 
 /// The code range where a def-range location is valid
 /// (`LocalVariableAddrRange`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AddressRange {
     /// The first address of the range.
     pub start: SectionOffset,
@@ -107,7 +109,8 @@ impl AddressRange {
 
 /// A part of an [`AddressRange`] where the location is not valid
 /// (`LocalVariableAddrGap`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AddressGap {
     /// The start of the gap, relative to the start of the range.
     pub start: u16,
@@ -119,7 +122,8 @@ pub struct AddressGap {
 ///
 /// The gaps fill the rest of the record. Each gap has 4 bytes, so the
 /// record needs no padding.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AddressGaps<'a> {
     /// The 4-byte gaps.
     entries: &'a [[u8; 4]],
@@ -151,8 +155,8 @@ impl<'a> AddressGaps<'a> {
 
     /// Return an iterator over the gaps.
     #[must_use]
-    pub fn iter(&self) -> AddressGapIter<'a> {
-        AddressGapIter {
+    pub fn iter(&self) -> AddressGapsIter<'a> {
+        AddressGapsIter {
             entries: self.entries.iter(),
         }
     }
@@ -163,7 +167,7 @@ impl<'a> AddressGaps<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 4.
-    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let (entries, rest) = bytes.as_chunks();
         if !rest.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -183,30 +187,30 @@ impl<'a> AddressGaps<'a> {
 
 impl<'a> IntoIterator for AddressGaps<'a> {
     type Item = AddressGap;
-    type IntoIter = AddressGapIter<'a>;
+    type IntoIter = AddressGapsIter<'a>;
 
-    fn into_iter(self) -> AddressGapIter<'a> {
+    fn into_iter(self) -> AddressGapsIter<'a> {
         self.iter()
     }
 }
 
 impl<'a> IntoIterator for &AddressGaps<'a> {
     type Item = AddressGap;
-    type IntoIter = AddressGapIter<'a>;
+    type IntoIter = AddressGapsIter<'a>;
 
-    fn into_iter(self) -> AddressGapIter<'a> {
+    fn into_iter(self) -> AddressGapsIter<'a> {
         self.iter()
     }
 }
 
 /// An iterator over [`AddressGaps`].
 #[derive(Clone, Debug)]
-pub struct AddressGapIter<'a> {
+pub struct AddressGapsIter<'a> {
     /// The 4-byte gaps that are not returned yet.
     entries: core::slice::Iter<'a, [u8; 4]>,
 }
 
-impl Iterator for AddressGapIter<'_> {
+impl Iterator for AddressGapsIter<'_> {
     type Item = AddressGap;
 
     fn next(&mut self) -> Option<AddressGap> {
@@ -221,12 +225,13 @@ impl Iterator for AddressGapIter<'_> {
     }
 }
 
-impl ExactSizeIterator for AddressGapIter<'_> {}
+impl ExactSizeIterator for AddressGapsIter<'_> {}
 
-impl FusedIterator for AddressGapIter<'_> {}
+impl FusedIterator for AddressGapsIter<'_> {}
 
 /// A frame-pointer-relative def-range (`S_DEFRANGE_FRAMEPOINTER_REL`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeFramePointerRelative<'a> {
     /// The offset of the variable from the frame pointer.
     pub offset: i32,
@@ -258,7 +263,8 @@ impl<'a> DefRangeFramePointerRelative<'a> {
 }
 
 /// A register def-range (`S_DEFRANGE_REGISTER`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeRegister<'a> {
     /// The register that holds the variable. See the module documentation.
     pub register: u16,
@@ -303,7 +309,8 @@ impl<'a> DefRangeRegister<'a> {
 
 /// A def-range for a part of a variable in a register
 /// (`S_DEFRANGE_SUBFIELD_REGISTER`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeSubfieldRegister<'a> {
     /// The register that holds the part. See the module documentation.
     pub register: u16,
@@ -371,7 +378,8 @@ const fn offset_in_parent(flags: u16) -> u16 {
 }
 
 /// A register-relative def-range (`S_DEFRANGE_REGISTER_REL`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeRegisterRelative<'a> {
     /// The base register. See the module documentation.
     pub register: u16,
@@ -428,7 +436,8 @@ impl<'a> DefRangeRegisterRelative<'a> {
 /// An indirect register-relative def-range (`S_DEFRANGE_REGISTER_REL_INDIR`).
 ///
 /// The variable is at `*(register + base_offset) + offset_in_udt`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeRegisterRelativeIndirect<'a> {
     /// The base register. See the module documentation.
     pub register: u16,
@@ -493,7 +502,8 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
 /// `__$ReturnUdt`, in code compiled with `/ZI` (Edit and Continue). No
 /// reference gives its layout. The MSVC incremental fixture of #12 confirms
 /// the `S_REGREL32` layout (#13).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct RegisterRelative<'a> {
     /// The offset from the register. LLVM `RegRelativeSym` reads it as
     /// `uint32_t`.
@@ -534,7 +544,8 @@ impl<'a> RegisterRelative<'a> {
 ///
 /// For a thread-local record, the address is in the thread storage section,
 /// for example `.tls`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Data<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -566,7 +577,8 @@ impl<'a> Data<'a> {
 }
 
 /// A constant record (`S_CONSTANT`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Constant<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -599,10 +611,11 @@ impl<'a> Constant<'a> {
 
 /// The kind of a COBOL user-defined type name (`S_COBOLUDT`). It has the
 /// layout of `S_UDT` (`UDTSYM` in `cvinfo.h`).
-pub const S_COBOLUDT: u16 = 0x1109;
+pub const S_COBOLUDT: SymbolKind = SymbolKind(0x1109);
 
 /// A user-defined type name record (`S_UDT` and [`S_COBOLUDT`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct UserDefinedType<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,

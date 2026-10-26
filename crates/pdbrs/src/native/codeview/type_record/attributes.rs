@@ -13,45 +13,39 @@ fn unknown(context: &'static str) -> Error {
 }
 
 /// The properties of a class, structure, union or enumeration (`CV_prop_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct ClassOptions(pub u16);
 
 impl ClassOptions {
     /// The type has a packed layout.
-    pub const PACKED: u16 = 0x0001;
+    pub const PACKED: Self = Self(0x0001);
     /// The type has a constructor or a destructor.
-    pub const HAS_CONSTRUCTOR_OR_DESTRUCTOR: u16 = 0x0002;
+    pub const HAS_CONSTRUCTOR_OR_DESTRUCTOR: Self = Self(0x0002);
     /// The type has overloaded operators.
-    pub const HAS_OVERLOADED_OPERATOR: u16 = 0x0004;
+    pub const HAS_OVERLOADED_OPERATOR: Self = Self(0x0004);
     /// The type is nested in another type.
-    pub const NESTED: u16 = 0x0008;
+    pub const NESTED: Self = Self(0x0008);
     /// The type contains nested types.
-    pub const CONTAINS_NESTED_CLASS: u16 = 0x0010;
+    pub const CONTAINS_NESTED_CLASS: Self = Self(0x0010);
     /// The type has an overloaded assignment operator.
-    pub const HAS_OVERLOADED_ASSIGNMENT_OPERATOR: u16 = 0x0020;
+    pub const HAS_OVERLOADED_ASSIGNMENT_OPERATOR: Self = Self(0x0020);
     /// The type has conversion operators.
-    pub const HAS_CONVERSION_OPERATOR: u16 = 0x0040;
+    pub const HAS_CONVERSION_OPERATOR: Self = Self(0x0040);
     /// The record is a forward reference to an incomplete type.
-    pub const FORWARD_REFERENCE: u16 = 0x0080;
+    pub const FORWARD_REFERENCE: Self = Self(0x0080);
     /// The definition is scoped to a function or a block.
-    pub const SCOPED: u16 = 0x0100;
+    pub const SCOPED: Self = Self(0x0100);
     /// A unique (decorated) name follows the name.
-    pub const HAS_UNIQUE_NAME: u16 = 0x0200;
+    pub const HAS_UNIQUE_NAME: Self = Self(0x0200);
     /// The type cannot be a base class.
-    pub const SEALED: u16 = 0x0400;
+    pub const SEALED: Self = Self(0x0400);
     /// The type is an intrinsic type, for example `__m128d`.
-    pub const INTRINSIC: u16 = 0x2000;
+    pub const INTRINSIC: Self = Self(0x2000);
 
-    /// Return the raw flag word.
+    /// Return `true` if all bits of `other` are set.
     #[must_use]
-    pub const fn bits(self) -> u16 {
-        self.0
-    }
-
-    /// Return `true` if all bits of `flag` are set.
-    #[must_use]
-    pub const fn contains(self, flag: u16) -> bool {
-        self.0 & flag == flag
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
     }
 
     /// Return `true` if the record is a forward reference.
@@ -109,6 +103,7 @@ impl ClassOptions {
 
 /// The homogeneous floating-point aggregate kind of a type (`CV_HFA_e`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum HfaKind {
     /// The type is not a homogeneous aggregate.
     None,
@@ -122,6 +117,7 @@ pub enum HfaKind {
 
 /// The `WinRT` class kind of a type (`CV_MOCOM_UDT_e`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum MocomKind {
     /// Not a `WinRT` type.
     None,
@@ -134,64 +130,58 @@ pub enum MocomKind {
 }
 
 /// The modifiers of an `LF_MODIFIER` record (`CV_modifier_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct ModifierOptions(pub u16);
 
 impl ModifierOptions {
     /// `const`.
-    pub const CONST: u16 = 0x0001;
+    pub const CONST: Self = Self(0x0001);
     /// `volatile`.
-    pub const VOLATILE: u16 = 0x0002;
+    pub const VOLATILE: Self = Self(0x0002);
     /// `__unaligned`.
-    pub const UNALIGNED: u16 = 0x0004;
+    pub const UNALIGNED: Self = Self(0x0004);
 
-    /// Return the raw flag word.
+    /// Return `true` if all bits of `other` are set.
     #[must_use]
-    pub const fn bits(self) -> u16 {
-        self.0
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
     }
 
     /// Return `true` if the type is `const`.
     #[must_use]
     pub const fn is_const(self) -> bool {
-        self.0 & Self::CONST != 0
+        self.contains(Self::CONST)
     }
 
     /// Return `true` if the type is `volatile`.
     #[must_use]
     pub const fn is_volatile(self) -> bool {
-        self.0 & Self::VOLATILE != 0
+        self.contains(Self::VOLATILE)
     }
 
     /// Return `true` if the type is `__unaligned`.
     #[must_use]
     pub const fn is_unaligned(self) -> bool {
-        self.0 & Self::UNALIGNED != 0
+        self.contains(Self::UNALIGNED)
     }
 }
 
 /// The options of a procedure type (`CV_funcattr_t`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct FunctionOptions(pub u8);
 
 impl FunctionOptions {
     /// The function returns a C++ user-defined type.
-    pub const CXX_RETURN_UDT: u8 = 0x01;
+    pub const CXX_RETURN_UDT: Self = Self(0x01);
     /// The function is an instance constructor.
-    pub const CONSTRUCTOR: u8 = 0x02;
+    pub const CONSTRUCTOR: Self = Self(0x02);
     /// The function is a constructor of a class with virtual bases.
-    pub const CONSTRUCTOR_WITH_VIRTUAL_BASES: u8 = 0x04;
+    pub const CONSTRUCTOR_WITH_VIRTUAL_BASES: Self = Self(0x04);
 
-    /// Return the raw flag byte.
+    /// Return `true` if all bits of `other` are set.
     #[must_use]
-    pub const fn bits(self) -> u8 {
-        self.0
-    }
-
-    /// Return `true` if all bits of `flag` are set.
-    #[must_use]
-    pub const fn contains(self, flag: u8) -> bool {
-        self.0 & flag == flag
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
     }
 }
 
@@ -204,6 +194,7 @@ macro_rules! raw_enum {
     ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[non_exhaustive]
         pub enum $name {
             $($(#[$vmeta])* $variant,)*
         }
@@ -401,7 +392,7 @@ raw_enum! {
 /// The layout is: kind in bits 0 to 4, mode in bits 5 to 7, the modifier
 /// flags in bits 8 to 12, the size in bytes in bits 13 to 18, and the
 /// `WinRT`, `&` and `&&` flags in bits 19 to 21. Bits 22 to 31 are unused and
-/// stay available in [`PointerAttributes::bits`].
+/// stay available in [`PointerAttributes::raw`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PointerAttributes {
     /// The raw attribute word.
@@ -414,21 +405,30 @@ pub struct PointerAttributes {
 
 impl PointerAttributes {
     /// The pointer is a flat 0:32 pointer.
-    pub const FLAT32: u32 = 0x0000_0100;
+    pub const FLAT32: Self = Self::flag(0x0000_0100);
     /// The pointer is `volatile`.
-    pub const VOLATILE: u32 = 0x0000_0200;
+    pub const VOLATILE: Self = Self::flag(0x0000_0200);
     /// The pointer is `const`.
-    pub const CONST: u32 = 0x0000_0400;
+    pub const CONST: Self = Self::flag(0x0000_0400);
     /// The pointer is `__unaligned`.
-    pub const UNALIGNED: u32 = 0x0000_0800;
+    pub const UNALIGNED: Self = Self::flag(0x0000_0800);
     /// The pointer is `__restrict`.
-    pub const RESTRICT: u32 = 0x0000_1000;
+    pub const RESTRICT: Self = Self::flag(0x0000_1000);
     /// The pointer is a `WinRT` smart pointer (`^` or `%`).
-    pub const WINRT_SMART_POINTER: u32 = 0x0008_0000;
+    pub const WINRT_SMART_POINTER: Self = Self::flag(0x0008_0000);
     /// The pointer is the `this` pointer of a `&`-qualified member function.
-    pub const LVALUE_REF_THIS_POINTER: u32 = 0x0010_0000;
+    pub const LVALUE_REF_THIS_POINTER: Self = Self::flag(0x0010_0000);
     /// The pointer is the `this` pointer of a `&&`-qualified member function.
-    pub const RVALUE_REF_THIS_POINTER: u32 = 0x0020_0000;
+    pub const RVALUE_REF_THIS_POINTER: Self = Self::flag(0x0020_0000);
+
+    /// Make a flag value. The kind and mode bits of `raw` must be zero.
+    const fn flag(raw: u32) -> Self {
+        Self {
+            raw,
+            kind: PointerKind::Near16,
+            mode: PointerMode::Pointer,
+        }
+    }
 
     /// Decode an attribute word.
     ///
@@ -446,7 +446,7 @@ impl PointerAttributes {
 
     /// Return the raw attribute word.
     #[must_use]
-    pub const fn bits(self) -> u32 {
+    pub const fn raw(self) -> u32 {
         self.raw
     }
 
@@ -469,10 +469,17 @@ impl PointerAttributes {
         ((self.raw >> 13) & 0x3f) as u8
     }
 
-    /// Return `true` if all bits of `flag` are set.
+    /// Return `true` if all bits of `other` are set.
     #[must_use]
-    pub const fn contains(self, flag: u32) -> bool {
-        self.raw & flag == flag
+    pub const fn contains(self, other: Self) -> bool {
+        self.raw & other.raw == other.raw
+    }
+}
+
+impl Default for PointerAttributes {
+    /// Return the attribute word 0: a 16-bit near normal pointer.
+    fn default() -> Self {
+        Self::flag(0)
     }
 }
 
@@ -509,6 +516,7 @@ impl MethodKind {
 
 /// The access protection of a member (`CV_access_e`).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum MemberAccess {
     /// No access protection.
     None,
@@ -524,7 +532,7 @@ pub enum MemberAccess {
 ///
 /// The layout is: access in bits 0 and 1, the method property in bits 2 to
 /// 4, and the flags in bits 5 to 9. Bits 10 to 15 are unused and stay
-/// available in [`MemberAttributes::bits`].
+/// available in [`MemberAttributes::raw`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MemberAttributes {
     /// The raw attribute word.
@@ -535,15 +543,23 @@ pub struct MemberAttributes {
 
 impl MemberAttributes {
     /// The method is compiler generated and does not exist.
-    pub const PSEUDO: u16 = 0x0020;
+    pub const PSEUDO: Self = Self::flag(0x0020);
     /// The class cannot be inherited.
-    pub const NO_INHERIT: u16 = 0x0040;
+    pub const NO_INHERIT: Self = Self::flag(0x0040);
     /// The class cannot be constructed.
-    pub const NO_CONSTRUCT: u16 = 0x0080;
+    pub const NO_CONSTRUCT: Self = Self::flag(0x0080);
     /// The method is compiler generated and exists.
-    pub const COMPILER_GENERATED: u16 = 0x0100;
+    pub const COMPILER_GENERATED: Self = Self::flag(0x0100);
     /// The method cannot be overridden.
-    pub const SEALED: u16 = 0x0200;
+    pub const SEALED: Self = Self::flag(0x0200);
+
+    /// Make a flag value. The access and method bits of `raw` must be zero.
+    const fn flag(raw: u16) -> Self {
+        Self {
+            raw,
+            method_kind: MethodKind::Vanilla,
+        }
+    }
 
     /// Decode an attribute word.
     ///
@@ -560,7 +576,7 @@ impl MemberAttributes {
 
     /// Return the raw attribute word.
     #[must_use]
-    pub const fn bits(self) -> u16 {
+    pub const fn raw(self) -> u16 {
         self.raw
     }
 
@@ -581,10 +597,17 @@ impl MemberAttributes {
         self.method_kind
     }
 
-    /// Return `true` if all bits of `flag` are set.
+    /// Return `true` if all bits of `other` are set.
     #[must_use]
-    pub const fn contains(self, flag: u16) -> bool {
-        self.raw & flag == flag
+    pub const fn contains(self, other: Self) -> bool {
+        self.raw & other.raw == other.raw
+    }
+}
+
+impl Default for MemberAttributes {
+    /// Return the attribute word 0: no access, a non-virtual member.
+    fn default() -> Self {
+        Self::flag(0)
     }
 }
 

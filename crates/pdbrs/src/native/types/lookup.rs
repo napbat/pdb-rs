@@ -11,9 +11,9 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{TypeRecord, TypeStream};
-use crate::native::codeview::field_list::{Member, Members};
+use crate::native::codeview::field_list::{FieldList, Member, Members};
 use crate::native::codeview::index::{IdIndex, TypeIndex};
-use crate::native::codeview::type_record::{FieldList, TypeLeaf};
+use crate::native::codeview::type_record::TypeLeaf;
 use crate::{Error, ErrorKind, Result};
 
 /// Return an invalid-reference error with `context`.

@@ -25,8 +25,8 @@ fn record(kind: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 /// An `LF_STRUCTURE` record with no members.
-fn structure(options: u16, name: &[u8], unique_name: Option<&[u8]>) -> Vec<u8> {
-    let options = options | unique_name.map_or(0, |_| ClassOptions::HAS_UNIQUE_NAME);
+fn structure(options: ClassOptions, name: &[u8], unique_name: Option<&[u8]>) -> Vec<u8> {
+    let options = options.0 | unique_name.map_or(0, |_| ClassOptions::HAS_UNIQUE_NAME.0);
     let mut payload = Vec::new();
     payload.extend_from_slice(&0_u16.to_le_bytes());
     payload.extend_from_slice(&options.to_le_bytes());
@@ -38,13 +38,13 @@ fn structure(options: u16, name: &[u8], unique_name: Option<&[u8]>) -> Vec<u8> {
         payload.extend_from_slice(unique_name);
         payload.push(0);
     }
-    record(LF_STRUCTURE, &payload)
+    record(LF_STRUCTURE.0, &payload)
 }
 
 fn pointer() -> Vec<u8> {
     let mut payload = 0x0074_u32.to_le_bytes().to_vec();
     payload.extend_from_slice(&(0x0c_u32 | (8 << 13)).to_le_bytes());
-    record(LF_POINTER, &payload)
+    record(LF_POINTER.0, &payload)
 }
 
 /// Serialize a type stream with a hash stream reference and three buffers.
@@ -97,7 +97,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let records = vec![
-            structure(0, b"S", None),
+            structure(ClassOptions(0), b"S", None),
             pointer(),
             structure(ClassOptions::FORWARD_REFERENCE, b"S", None),
         ];
@@ -150,10 +150,10 @@ fn parse_error(stream: &TypeStream, bytes: &[u8]) -> ErrorKind {
 
 #[test]
 fn hashes_udts_by_name_or_unique_name() {
-    let plain = structure(0, b"S", None);
+    let plain = structure(ClassOptions(0), b"S", None);
     assert_eq!(type_record_hash(&plain).unwrap(), hash_string_v1(b"S"));
     // A unique name does not change the hash of a type that is not scoped.
-    let unique = structure(0, b"S", Some(b".?AUS@@"));
+    let unique = structure(ClassOptions(0), b"S", Some(b".?AUS@@"));
     assert_eq!(type_record_hash(&unique).unwrap(), hash_string_v1(b"S"));
     let scoped = structure(ClassOptions::SCOPED, b"S", Some(b".?AUS@?1??f@@"));
     assert_eq!(
@@ -166,20 +166,20 @@ fn hashes_udts_by_name_or_unique_name() {
 fn hashes_forward_references_and_anonymous_udts_by_bytes() {
     for record in [
         structure(ClassOptions::FORWARD_REFERENCE, b"S", None),
-        structure(0, b"<unnamed-tag>", Some(b"u")),
-        structure(0, b"a::__unnamed", Some(b"u")),
+        structure(ClassOptions(0), b"<unnamed-tag>", Some(b"u")),
+        structure(ClassOptions(0), b"a::__unnamed", Some(b"u")),
         structure(ClassOptions::SCOPED, b"S", None),
     ] {
         assert_eq!(type_record_hash(&record).unwrap(), hash_buffer_v8(&record));
     }
     // An anonymous name without a unique name hashes the name.
-    let record = structure(0, b"<unnamed-tag>", None);
+    let record = structure(ClassOptions(0), b"<unnamed-tag>", None);
     assert_eq!(
         type_record_hash(&record).unwrap(),
         hash_string_v1(b"<unnamed-tag>")
     );
     // The suffix must follow a scope separator.
-    let record = structure(0, b"a__unnamed", Some(b"u"));
+    let record = structure(ClassOptions(0), b"a__unnamed", Some(b"u"));
     assert_eq!(
         type_record_hash(&record).unwrap(),
         hash_string_v1(b"a__unnamed")

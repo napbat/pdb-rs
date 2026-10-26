@@ -1,5 +1,7 @@
 //! Tests for the scope checks of module symbol streams.
 
+use pdbrs::native::codeview::SymbolKind;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{
     ModuleSymbols, S_BLOCK32, S_END, S_GMANPROC, S_GPROC32, S_GPROC32EX, S_GPROCMIPS, S_INLINESITE,
     S_INLINESITE_END, S_INLINESITE2, S_LABEL32, S_LMANPROC, S_LOCAL, S_LPROC32_DPC,
@@ -27,7 +29,7 @@ struct Builder {
 
 impl Builder {
     /// Add a record with zero padding and return its module stream offset.
-    fn push(&mut self, kind: u16, payload: &[u8]) -> u32 {
+    fn push(&mut self, kind: SymbolKind, payload: &[u8]) -> u32 {
         let offset = BASE + u32::try_from(self.bytes.len()).unwrap();
         let mut payload = payload.to_vec();
         while !(payload.len() + 4).is_multiple_of(4) {
@@ -35,7 +37,7 @@ impl Builder {
         }
         let length = u16::try_from(payload.len() + 2).unwrap();
         self.bytes.extend_from_slice(&length.to_le_bytes());
-        self.bytes.extend_from_slice(&kind.to_le_bytes());
+        self.bytes.extend_from_slice(&kind.0.to_le_bytes());
         self.bytes.extend_from_slice(&payload);
         offset
     }
@@ -47,7 +49,7 @@ impl Builder {
     }
 
     /// Add a scope start with `parent` and an end link to patch later.
-    fn open(&mut self, kind: u16, parent: u32) -> u32 {
+    fn open(&mut self, kind: SymbolKind, parent: u32) -> u32 {
         let mut payload = Vec::new();
         payload.extend_from_slice(&parent.to_le_bytes());
         payload.extend_from_slice(&0_u32.to_le_bytes());
@@ -65,7 +67,7 @@ impl Builder {
     }
 
     /// Add an end record and patch the end link of `scope`.
-    fn close(&mut self, kind: u16, scope: u32) -> u32 {
+    fn close(&mut self, kind: SymbolKind, scope: u32) -> u32 {
         let offset = self.push(kind, &[]);
         self.patch(scope, END, offset);
         offset
@@ -77,8 +79,17 @@ impl Builder {
     }
 
     fn walk(&self, max_depth: usize) -> Vec<Result<ScopedSymbol<'_>, Error>> {
-        ModuleSymbols::new(&self.bytes, STREAM, BASE, max_depth).collect()
+        ModuleSymbols::new(&self.bytes, STREAM, ModuleSymbolOffset(BASE), max_depth).collect()
     }
+}
+
+/// Return the module stream offset, the depth and the scope of `symbol`.
+fn place(symbol: &ScopedSymbol<'_>) -> (u32, usize, Option<u32>) {
+    (
+        symbol.offset.0,
+        symbol.depth,
+        symbol.scope.map(|scope| scope.0),
+    )
 }
 
 /// Return the error and the module stream offset of the failed walk.
@@ -127,10 +138,7 @@ fn walks_valid_nested_scopes() {
     let symbols: Vec<ScopedSymbol<'_>> = builder.walk(4).into_iter().map(Result::unwrap).collect();
     let [procedure, _, block, outer, inner, _, _, _, _, thunk, _] = offsets;
 
-    let places: Vec<(u32, usize, Option<u32>)> = symbols
-        .iter()
-        .map(|symbol| (symbol.offset, symbol.depth, symbol.scope))
-        .collect();
+    let places: Vec<(u32, usize, Option<u32>)> = symbols.iter().map(place).collect();
     let expected = [
         (offsets[0], 0, None),
         (offsets[1], 1, Some(procedure)),
@@ -266,7 +274,7 @@ fn enforces_the_depth_limit() {
 fn walks_scopes_of_all_scope_kinds() {
     // Each kind starts a scope. The length is the size of the fields after
     // the parent and end links, and the flag tells if a name follows.
-    let kinds: [(u16, usize, bool, u16); 8] = [
+    let kinds: [(SymbolKind, usize, bool, SymbolKind); 8] = [
         (S_SEPCODE, 20, false, S_END),
         (S_LPROC32_DPC, 27, true, S_END),
         (S_LPROC32_DPC_ID, 27, true, S_PROC_ID_END),
@@ -295,11 +303,19 @@ fn walks_scopes_of_all_scope_kinds() {
             .into_iter()
             .map(|symbol| symbol.unwrap_or_else(|error| panic!("kind {kind:#x}: {error:?}")))
             .collect();
-        assert_eq!(symbols[1].offset, opener, "kind {kind:#x}");
-        assert_eq!(symbols[2].offset, inner);
-        assert_eq!(symbols[2].scope, Some(opener), "kind {kind:#x}");
-        assert_eq!(symbols[3].offset, closer);
-        assert_eq!(symbols[3].scope, Some(opener), "kind {kind:#x}");
+        assert_eq!(symbols[1].offset.0, opener, "kind {kind:#x}");
+        assert_eq!(symbols[2].offset.0, inner);
+        assert_eq!(
+            symbols[2].scope,
+            Some(ModuleSymbolOffset(opener)),
+            "kind {kind:#x}"
+        );
+        assert_eq!(symbols[3].offset.0, closer);
+        assert_eq!(
+            symbols[3].scope,
+            Some(ModuleSymbolOffset(opener)),
+            "kind {kind:#x}"
+        );
     }
 }
 
@@ -331,10 +347,7 @@ fn walks_managed_procedure_scopes() {
         let procedure_end = builder.close(S_END, procedure);
         let symbols: Vec<ScopedSymbol<'_>> =
             builder.walk(2).into_iter().map(Result::unwrap).collect();
-        let places: Vec<(u32, usize, Option<u32>)> = symbols
-            .iter()
-            .map(|symbol| (symbol.offset, symbol.depth, symbol.scope))
-            .collect();
+        let places: Vec<(u32, usize, Option<u32>)> = symbols.iter().map(place).collect();
         let expected = [
             (procedure, 0, None),
             (block, 1, Some(procedure)),
@@ -385,7 +398,7 @@ fn stops_after_an_error() {
     let mut builder = Builder::default();
     builder.push(S_END, &[]);
     builder.label();
-    let mut symbols = ModuleSymbols::new(&builder.bytes, STREAM, BASE, 4);
+    let mut symbols = ModuleSymbols::new(&builder.bytes, STREAM, ModuleSymbolOffset(BASE), 4);
     assert!(symbols.next().unwrap().is_err());
     assert!(symbols.next().is_none());
     assert!(symbols.next().is_none());

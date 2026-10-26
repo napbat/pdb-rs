@@ -10,14 +10,15 @@ mod strip;
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::{IdRecord, StringId};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Data, Public, PublicFlags, S_GDATA32, S_PROCREF, S_PUB32, S_UDT, SymbolData, UserDefinedType,
+    Data, Public, PublicFlags, S_GDATA32, S_PROCREF, S_PUB32, S_UDT, Symbol, SymbolData,
+    UserDefinedType,
 };
 use pdbrs::native::codeview::type_record::{Class, ClassKind, ClassOptions, TypeLeaf};
+use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::info::IdentityPolicy;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{HashTable, RecordOffsets, indexed_name};
@@ -27,6 +28,23 @@ use pdbrs::native::{Identity, Pdb};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);
+
+/// Return an `S_PUB32` record with `flags` at `address`.
+fn public(flags: PublicFlags, address: SectionOffset, name: &[u8]) -> Public<'_> {
+    let mut public = Public::default();
+    public.flags = flags;
+    public.address = address;
+    public.name = name;
+    public
+}
+
+/// Return an `S_UDT` record for `type_index`.
+fn udt(type_index: TypeIndex, name: &[u8]) -> SymbolData<'_> {
+    let mut udt = UserDefinedType::default();
+    udt.type_index = type_index;
+    udt.name = name;
+    SymbolData::UserDefinedType(udt)
+}
 
 /// Build the synthetic program with the changes of `extra`.
 fn build(extra: impl FnOnce(&mut PdbBuilder<'static>) -> pdbrs::Result<()>) -> Vec<u8> {
@@ -104,7 +122,7 @@ fn symbols(bytes: &[u8]) -> Symbols {
     publics.check_records(&offsets).expect("public offsets");
     publics
         .check_address_order(|offset| {
-            let symbol = offset.record(&records)?.symbol()?;
+            let symbol = Symbol::decode(offset.record(&records)?)?;
             match symbol.data() {
                 SymbolData::Public(public) => Ok((public.address.section, public.address.offset)),
                 _ => Err(pdbrs::Error::new(ErrorKind::InvalidFormat, None)),
@@ -221,27 +239,24 @@ fn added_symbols_are_indexed_without_moving_records() {
     };
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&Public {
-            flags: PublicFlags(0),
-            address: SectionOffset {
+        .add_public(&public(
+            PublicFlags(0),
+            SectionOffset {
                 section: 2,
                 offset: 0,
             },
-            name: b"g_added",
-        })
+            b"g_added",
+        ))
         .expect("public");
+    let mut data = Data::default();
+    data.type_index = T_INT4;
+    data.address = SectionOffset {
+        section: 2,
+        offset: 0,
+    };
+    data.name = b"g_added";
     editor
-        .add_global(
-            S_GDATA32,
-            &SymbolData::Data(Data {
-                type_index: T_INT4,
-                address: SectionOffset {
-                    section: 2,
-                    offset: 0,
-                },
-                name: b"g_added",
-            }),
-        )
+        .add_global(S_GDATA32, &SymbolData::Data(data))
         .expect("global");
     let plan = editor.plan().expect("plan");
     assert_eq!(plan.pe_match().age, age + 1);
@@ -366,14 +381,14 @@ fn opaque_stream_rejects_moved_records_and_writes_no_file() {
     // An added record moves no record either.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&Public {
-            flags: PublicFlags(0),
-            address: SectionOffset {
+        .add_public(&public(
+            PublicFlags(0),
+            SectionOffset {
                 section: 2,
                 offset: 0,
             },
-            name: b"g_added",
-        })
+            b"g_added",
+        ))
         .expect("recorded");
     editor.plan().expect("appended record");
 }
@@ -400,14 +415,14 @@ fn unknown_symbol_kind_rejects_moved_records() {
     // An added record moves no record, so the edit needs no check.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&Public {
-            flags: PublicFlags(0),
-            address: SectionOffset {
+        .add_public(&public(
+            PublicFlags(0),
+            SectionOffset {
                 section: 2,
                 offset: 0,
             },
-            name: b"g_added",
-        })
+            b"g_added",
+        ))
         .expect("recorded");
     editor.plan().expect("appended record");
 }
@@ -419,18 +434,16 @@ fn number(value: u32) -> Numeric<'static> {
 
 /// Return a forward reference to a structure with the name `name`.
 fn forward(name: &[u8]) -> TypeLeaf<'_> {
-    TypeLeaf::Class(Class {
-        kind: ClassKind::Structure,
-        member_count: 0,
-        options: ClassOptions(ClassOptions::FORWARD_REFERENCE),
-        field_list: TypeIndex::NONE,
-        derivation_list: TypeIndex::NONE,
-        vtable_shape: TypeIndex::NONE,
-        size: number(0),
-        name,
-        unique_name: None,
-        producer_padding: &[],
-    })
+    let mut class = Class::new(ClassKind::Structure);
+    class.member_count = 0;
+    class.options = ClassOptions::FORWARD_REFERENCE;
+    class.field_list = TypeIndex::NONE;
+    class.derivation_list = TypeIndex::NONE;
+    class.vtable_shape = TypeIndex::NONE;
+    class.size = number(0);
+    class.name = name;
+    class.unique_name = None;
+    TypeLeaf::Class(class)
 }
 
 #[test]
@@ -443,20 +456,16 @@ fn added_types_get_the_next_indices_and_hash_values() {
     let added = editor.add_type(&forward(b"Added")).expect("type");
     assert_eq!(added, TypeIndex(tpi.header().index_end));
     let id = editor
-        .add_id(&IdRecord::String(StringId {
-            substrings: None,
-            string: b"added string",
+        .add_id(&IdRecord::String({
+            let mut string = StringId::default();
+            string.substrings = None;
+            string.string = b"added string";
+            string
         }))
         .expect("ID");
     assert_eq!(id, IdIndex(ipi.header().index_end));
     editor
-        .add_global(
-            S_UDT,
-            &SymbolData::UserDefinedType(UserDefinedType {
-                type_index: added,
-                name: b"Added",
-            }),
-        )
+        .add_global(S_UDT, &udt(added, b"Added"))
         .expect("UDT");
     let edited = editor.plan().expect("plan").to_vec().expect("output");
     let edited = Pdb::parse(edited.as_slice()).expect("edited");
@@ -488,31 +497,19 @@ fn invalid_type_references_come_before_output() {
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let end = pdb.types().expect("TPI").expect("TPI").header().index_end;
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .add_type(&TypeLeaf::Class(Class {
-            field_list: TypeIndex(end + 10),
-            ..match forward(b"Broken") {
-                TypeLeaf::Class(class) => Class {
-                    options: ClassOptions(0),
-                    ..class
-                },
-                _ => unreachable!(),
-            }
-        }))
-        .expect("recorded");
+    let TypeLeaf::Class(mut broken) = forward(b"Broken") else {
+        unreachable!()
+    };
+    broken.options = ClassOptions(0);
+    broken.field_list = TypeIndex(end + 10);
+    editor.add_type(&TypeLeaf::Class(broken)).expect("recorded");
     assert_eq!(
         editor.plan().expect_err("reference").kind(),
         ErrorKind::InvalidReference
     );
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_global(
-            S_UDT,
-            &SymbolData::UserDefinedType(UserDefinedType {
-                type_index: TypeIndex(end),
-                name: b"Missing",
-            }),
-        )
+        .add_global(S_UDT, &udt(TypeIndex(end), b"Missing"))
         .expect("recorded");
     assert_eq!(
         editor.plan().expect_err("global reference").kind(),
@@ -548,14 +545,14 @@ fn added_public_records_decode_as_public_symbols() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    let public = Public {
-        flags: PublicFlags(PublicFlags::FUNCTION.0),
-        address: SectionOffset {
+    let public = public(
+        PublicFlags(PublicFlags::FUNCTION.0),
+        SectionOffset {
             section: 1,
             offset: 0x10,
         },
-        name: b"inner",
-    };
+        b"inner",
+    );
     editor.add_public(&public).expect("public");
     let edited = editor.plan().expect("plan").to_vec().expect("output");
     let edited = Pdb::parse(edited.as_slice()).expect("edited");
@@ -567,9 +564,9 @@ fn added_public_records_decode_as_public_symbols() {
         .last()
         .expect("record")
         .expect("framed");
-    assert_eq!(last.kind, S_PUB32);
+    assert_eq!(SymbolKind(last.kind), S_PUB32);
     assert_eq!(
-        *last.symbol().expect("decoded").data(),
+        *Symbol::decode(last).expect("decoded").data(),
         SymbolData::Public(public)
     );
 }

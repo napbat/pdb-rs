@@ -8,7 +8,8 @@ use crate::native::codeview::numeric::Numeric;
 use crate::native::output::Output;
 
 /// An `LF_MODIFIER` record: a type with `const`, `volatile` or `__unaligned`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Modifier {
     /// The modified type.
     pub modified_type: TypeIndex,
@@ -37,6 +38,7 @@ impl Modifier {
 
 /// An `LF_PROCEDURE` record: the type of a function that is not a member.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Procedure {
     /// The return type.
     pub return_type: TypeIndex,
@@ -51,6 +53,19 @@ pub struct Procedure {
 }
 
 impl Procedure {
+    /// Make a record with `calling_convention`. The other fields are zero or
+    /// empty.
+    #[must_use]
+    pub const fn new(calling_convention: CallingConvention) -> Self {
+        Self {
+            return_type: TypeIndex::NONE,
+            calling_convention,
+            options: FunctionOptions(0),
+            parameter_count: 0,
+            argument_list: TypeIndex::NONE,
+        }
+    }
+
     /// Decode the payload of an `LF_PROCEDURE` record.
     pub(super) fn decode(data: &[u8]) -> Result<Self> {
         let mut fields = fields(data);
@@ -77,6 +92,7 @@ impl Procedure {
 
 /// An `LF_MFUNCTION` record: the type of a member function.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MemberFunction {
     /// The return type.
     pub return_type: TypeIndex,
@@ -97,6 +113,22 @@ pub struct MemberFunction {
 }
 
 impl MemberFunction {
+    /// Make a record with `calling_convention`. The other fields are zero or
+    /// empty.
+    #[must_use]
+    pub const fn new(calling_convention: CallingConvention) -> Self {
+        Self {
+            return_type: TypeIndex::NONE,
+            class_type: TypeIndex::NONE,
+            this_type: TypeIndex::NONE,
+            calling_convention,
+            options: FunctionOptions(0),
+            parameter_count: 0,
+            argument_list: TypeIndex::NONE,
+            this_adjustment: 0,
+        }
+    }
+
     /// Decode the payload of an `LF_MFUNCTION` record.
     pub(super) fn decode(data: &[u8]) -> Result<Self> {
         let mut fields = fields(data);
@@ -128,7 +160,8 @@ impl MemberFunction {
 }
 
 /// An `LF_BITFIELD` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Bitfield {
     /// The type that holds the bits.
     pub underlying_type: TypeIndex,
@@ -160,7 +193,8 @@ impl Bitfield {
 }
 
 /// An `LF_ARRAY` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Array<'a> {
     /// The element type.
     pub element_type: TypeIndex,

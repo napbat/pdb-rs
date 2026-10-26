@@ -10,36 +10,37 @@
 //! Visual Studio 18 (`lib/amd64/diaguids.lib`) give `STATICLOCAL` and
 //! `HYBRIDRANGESYM`, and they confirm `HOTPATCHFUNC` and `ASSOCIATION`.
 
-use super::super::Fields;
-use super::super::index::{IdIndex, TypeIndex};
+use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
+use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a virtual function table path (`S_VFTABLE32`).
-pub const S_VFTABLE32: u16 = 0x100c;
+pub const S_VFTABLE32: SymbolKind = SymbolKind(0x100c);
 /// The kind of a list of annotation strings (`S_ANNOTATION`).
-pub const S_ANNOTATION: u16 = 0x1019;
+pub const S_ANNOTATION: SymbolKind = SymbolKind(0x1019);
 /// The kind of a `with` block start (`S_WITH32`).
-pub const S_WITH32: u16 = 0x1104;
+pub const S_WITH32: SymbolKind = SymbolKind(0x1104);
 /// The kind of a separated code block start (`S_SEPCODE`).
-pub const S_SEPCODE: u16 = 0x1132;
+pub const S_SEPCODE: SymbolKind = SymbolKind(0x1132);
 /// The kind of a hot-patch function record (`S_HOTPATCHFUNC`).
-pub const S_HOTPATCHFUNC: u16 = 0x1169;
+pub const S_HOTPATCHFUNC: SymbolKind = SymbolKind(0x1169);
 /// The kind of a static local variable location (`S_STATICLOCAL`).
-pub const S_STATICLOCAL: u16 = 0x1176;
+pub const S_STATICLOCAL: SymbolKind = SymbolKind(0x1176);
 /// The kind of an association between two symbols (`S_ASSOCIATION`).
-pub const S_ASSOCIATION: u16 = 0x117c;
+pub const S_ASSOCIATION: SymbolKind = SymbolKind(0x117c);
 /// The kind of a code range of one architecture in a hybrid image (`S_HYBRIDRANGE`).
-pub const S_HYBRIDRANGE: u16 = 0x117d;
+pub const S_HYBRIDRANGE: SymbolKind = SymbolKind(0x117d);
 
 /// A `with` block start record ([`S_WITH32`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct With<'a> {
     /// The module stream offset of the enclosing scope record.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the `S_END` record of this block.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The length of the block code in bytes.
     pub code_length: u32,
     /// The start address.
@@ -51,8 +52,8 @@ pub struct With<'a> {
 impl<'a> With<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
         let expression = fields.name()?;
@@ -67,8 +68,8 @@ impl<'a> With<'a> {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
         out.c_string(self.expression)
@@ -89,12 +90,13 @@ flags! {
 ///
 /// The compiler moves a part of a procedure to a different place, for
 /// example cold code after profile-guided optimization.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct SeparatedCode {
     /// The module stream offset of the enclosing scope record.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the `S_END` record of this block.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The length of the separated code in bytes.
     pub code_length: u32,
     /// The flags.
@@ -108,8 +110,8 @@ pub struct SeparatedCode {
 impl SeparatedCode {
     /// Read the fields. Both offsets come before both section numbers.
     pub(super) fn read(fields: &mut Fields<'_>) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let flags = SeparatedCodeFlags(fields.u32()?);
         let (address, parent_address) = read_address_pair(fields)?;
@@ -125,8 +127,8 @@ impl SeparatedCode {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
         out.u32(self.code_length)?;
         out.u32(self.flags.0)?;
         write_address_pair(out, self.address, self.parent_address)
@@ -161,7 +163,8 @@ fn write_address_pair(
 }
 
 /// The location of a static local variable ([`S_STATICLOCAL`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StaticLocal {
     /// The address of the variable (`off` and `sect`).
     pub address: SectionOffset,
@@ -186,7 +189,8 @@ impl StaticLocal {
 }
 
 /// A virtual function table path record ([`S_VFTABLE32`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VirtualFunctionTable {
     /// The type index of the root of the path.
     pub root: TypeIndex,
@@ -220,7 +224,7 @@ impl VirtualFunctionTable {
 /// A list of annotation strings at a code address ([`S_ANNOTATION`]).
 ///
 /// MSVC writes the strings of the `__annotation` intrinsic in this record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AnnotationStrings<'a> {
     /// The code address.
@@ -312,7 +316,8 @@ impl<'a> AnnotationStrings<'a> {
 }
 
 /// A hot-patch function record ([`S_HOTPATCHFUNC`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HotPatchFunction<'a> {
     /// The ID index of the function in the IPI stream.
     pub function: IdIndex,
@@ -346,7 +351,8 @@ values! {
 }
 
 /// An association with another symbol ([`S_ASSOCIATION`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Association {
     /// The kind of the association.
     pub kind: AssociationKind,
@@ -370,7 +376,8 @@ impl Association {
 }
 
 /// A code range of one architecture in a hybrid image ([`S_HYBRIDRANGE`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HybridRange {
     /// The length of the range in bytes.
     pub length: u32,

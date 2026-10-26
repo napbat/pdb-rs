@@ -9,7 +9,7 @@ use crate::{annotation, lines_subsection, signed};
 
 /// Run `bytes` from file 0 and line 100 and return the ranges.
 fn ranges(bytes: &[u8]) -> pdbrs::Result<Vec<InlineRange>> {
-    let annotations = BinaryAnnotations::new(bytes).unwrap();
+    let annotations = BinaryAnnotations::parse(bytes).unwrap();
     InlineRanges::new(&annotations, 0, 100).collect()
 }
 
@@ -184,7 +184,7 @@ fn invalid_programs_give_errors() {
 #[test]
 fn errors_stop_the_iterator() {
     let bytes = [annotation(8, &[2]), annotation(3, &[0])].concat();
-    let annotations = BinaryAnnotations::new(&bytes).unwrap();
+    let annotations = BinaryAnnotations::parse(&bytes).unwrap();
     let mut iterator = InlineRanges::new(&annotations, 0, 1);
     assert!(iterator.next().unwrap().is_err());
     assert!(iterator.next().is_none());

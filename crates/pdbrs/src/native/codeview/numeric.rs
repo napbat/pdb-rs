@@ -11,57 +11,57 @@
 
 use alloc::vec::Vec;
 
-use super::Fields;
+use super::{Fields, LeafKind};
 use crate::{Error, ErrorKind, Result};
 
 /// The first leaf tag. Smaller values are immediate unsigned values.
-pub const LF_NUMERIC: u16 = 0x8000;
+pub const LF_NUMERIC: LeafKind = LeafKind(0x8000);
 /// A signed 8-bit integer.
-pub const LF_CHAR: u16 = 0x8000;
+pub const LF_CHAR: LeafKind = LeafKind(0x8000);
 /// A signed 16-bit integer.
-pub const LF_SHORT: u16 = 0x8001;
+pub const LF_SHORT: LeafKind = LeafKind(0x8001);
 /// An unsigned 16-bit integer.
-pub const LF_USHORT: u16 = 0x8002;
+pub const LF_USHORT: LeafKind = LeafKind(0x8002);
 /// A signed 32-bit integer.
-pub const LF_LONG: u16 = 0x8003;
+pub const LF_LONG: LeafKind = LeafKind(0x8003);
 /// An unsigned 32-bit integer.
-pub const LF_ULONG: u16 = 0x8004;
+pub const LF_ULONG: LeafKind = LeafKind(0x8004);
 /// A 32-bit floating-point value.
-pub const LF_REAL32: u16 = 0x8005;
+pub const LF_REAL32: LeafKind = LeafKind(0x8005);
 /// A 64-bit floating-point value.
-pub const LF_REAL64: u16 = 0x8006;
+pub const LF_REAL64: LeafKind = LeafKind(0x8006);
 /// An 80-bit floating-point value.
-pub const LF_REAL80: u16 = 0x8007;
+pub const LF_REAL80: LeafKind = LeafKind(0x8007);
 /// A 128-bit floating-point value.
-pub const LF_REAL128: u16 = 0x8008;
+pub const LF_REAL128: LeafKind = LeafKind(0x8008);
 /// A signed 64-bit integer.
-pub const LF_QUADWORD: u16 = 0x8009;
+pub const LF_QUADWORD: LeafKind = LeafKind(0x8009);
 /// An unsigned 64-bit integer.
-pub const LF_UQUADWORD: u16 = 0x800a;
+pub const LF_UQUADWORD: LeafKind = LeafKind(0x800a);
 /// A 48-bit floating-point value.
-pub const LF_REAL48: u16 = 0x800b;
+pub const LF_REAL48: LeafKind = LeafKind(0x800b);
 /// A complex value of two 32-bit floating-point values.
-pub const LF_COMPLEX32: u16 = 0x800c;
+pub const LF_COMPLEX32: LeafKind = LeafKind(0x800c);
 /// A complex value of two 64-bit floating-point values.
-pub const LF_COMPLEX64: u16 = 0x800d;
+pub const LF_COMPLEX64: LeafKind = LeafKind(0x800d);
 /// A complex value of two 80-bit floating-point values.
-pub const LF_COMPLEX80: u16 = 0x800e;
+pub const LF_COMPLEX80: LeafKind = LeafKind(0x800e);
 /// A complex value of two 128-bit floating-point values.
-pub const LF_COMPLEX128: u16 = 0x800f;
+pub const LF_COMPLEX128: LeafKind = LeafKind(0x800f);
 /// A string with a `u16` byte count.
-pub const LF_VARSTRING: u16 = 0x8010;
+pub const LF_VARSTRING: LeafKind = LeafKind(0x8010);
 /// A signed 128-bit integer.
-pub const LF_OCTWORD: u16 = 0x8017;
+pub const LF_OCTWORD: LeafKind = LeafKind(0x8017);
 /// An unsigned 128-bit integer.
-pub const LF_UOCTWORD: u16 = 0x8018;
+pub const LF_UOCTWORD: LeafKind = LeafKind(0x8018);
 /// An OLE `DECIMAL` value.
-pub const LF_DECIMAL: u16 = 0x8019;
+pub const LF_DECIMAL: LeafKind = LeafKind(0x8019);
 /// An OLE `DATE` value.
-pub const LF_DATE: u16 = 0x801a;
+pub const LF_DATE: LeafKind = LeafKind(0x801a);
 /// A NUL-terminated UTF-8 string.
-pub const LF_UTF8STRING: u16 = 0x801b;
+pub const LF_UTF8STRING: LeafKind = LeafKind(0x801b);
 /// A 16-bit floating-point value.
-pub const LF_REAL16: u16 = 0x801c;
+pub const LF_REAL16: LeafKind = LeafKind(0x801c);
 
 /// An integer decoded from a `CodeView` numeric leaf.
 ///
@@ -92,19 +92,22 @@ impl Integer {
     /// context.
     pub fn parse_prefix(bytes: &[u8]) -> Result<(Self, &[u8])> {
         let integer_tag = match bytes {
-            [low, high, ..] => matches!(
-                u16::from_le_bytes([*low, *high]),
-                0..LF_NUMERIC
-                    | LF_CHAR
-                    | LF_SHORT
-                    | LF_USHORT
-                    | LF_LONG
-                    | LF_ULONG
-                    | LF_QUADWORD
-                    | LF_UQUADWORD
-                    | LF_OCTWORD
-                    | LF_UOCTWORD
-            ),
+            [low, high, ..] => {
+                let tag = LeafKind(u16::from_le_bytes([*low, *high]));
+                tag < LF_NUMERIC
+                    || matches!(
+                        tag,
+                        LF_CHAR
+                            | LF_SHORT
+                            | LF_USHORT
+                            | LF_LONG
+                            | LF_ULONG
+                            | LF_QUADWORD
+                            | LF_UQUADWORD
+                            | LF_OCTWORD
+                            | LF_UOCTWORD
+                    )
+            }
             // `Numeric::parse_prefix` reports the truncated tag.
             _ => true,
         };
@@ -143,6 +146,7 @@ impl Integer {
 
 /// The encoding of an integer numeric leaf.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum IntegerKind {
     /// An unsigned value below `0x8000` in the tag field.
     Immediate,
@@ -192,7 +196,7 @@ impl IntegerKind {
     }
 
     /// Return the leaf tag, or `None` for an immediate value.
-    const fn tag(self) -> Option<u16> {
+    const fn tag(self) -> Option<LeafKind> {
         Some(match self {
             Self::Immediate => return None,
             Self::Char => LF_CHAR,
@@ -221,6 +225,8 @@ impl IntegerKind {
 }
 
 /// An integer numeric leaf: a value and its encoding.
+///
+/// The default value is the immediate integer 0.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct IntegerLeaf {
     /// The encoding.
@@ -228,6 +234,15 @@ pub struct IntegerLeaf {
     /// The value. Signed encodings give [`Integer::Signed`], the others
     /// give [`Integer::Unsigned`].
     value: Integer,
+}
+
+impl Default for IntegerLeaf {
+    fn default() -> Self {
+        Self {
+            kind: IntegerKind::Immediate,
+            value: Integer::Unsigned(0),
+        }
+    }
 }
 
 impl IntegerLeaf {
@@ -276,7 +291,8 @@ impl IntegerLeaf {
 }
 
 /// The fields of an OLE `DECIMAL` value (`LF_DECIMAL`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Decimal {
     /// The reserved `u16` field.
     pub reserved: u16,
@@ -293,7 +309,8 @@ pub struct Decimal {
 /// A decoded numeric leaf.
 ///
 /// The non-integer variants keep the exact value bytes after the tag. The
-/// accessors give typed values where Rust has a type for them.
+/// accessors give typed values where Rust has a type for them. The default
+/// value is the immediate integer 0.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Numeric<'a> {
@@ -352,7 +369,7 @@ impl<'a> Numeric<'a> {
             ErrorKind::UnexpectedEof,
             "CodeView numeric leaf is truncated",
         );
-        let tag = fields.u16()?;
+        let tag = LeafKind(fields.u16()?);
         let signed = |kind, value: i128| {
             Self::Integer(IntegerLeaf {
                 kind,
@@ -366,7 +383,7 @@ impl<'a> Numeric<'a> {
             })
         };
         let value = match tag {
-            0..LF_NUMERIC => unsigned(IntegerKind::Immediate, u128::from(tag)),
+            _ if tag < LF_NUMERIC => unsigned(IntegerKind::Immediate, u128::from(tag.0)),
             LF_CHAR => signed(
                 IntegerKind::Char,
                 i8::from_le_bytes(array(&mut fields)?).into(),
@@ -457,15 +474,19 @@ impl<'a> Numeric<'a> {
     }
 
     /// Return the leaf tag, or the value itself for an immediate value.
+    ///
+    /// An immediate value is below [`LF_NUMERIC`].
     #[must_use]
-    pub fn tag(&self) -> u16 {
+    pub fn tag(&self) -> LeafKind {
         match self {
             Self::Integer(leaf) => leaf.kind.tag().unwrap_or_else(|| {
                 // An immediate value is below 0x8000.
-                leaf.value
-                    .to_u128()
-                    .and_then(|value| u16::try_from(value).ok())
-                    .unwrap_or(0)
+                LeafKind(
+                    leaf.value
+                        .to_u128()
+                        .and_then(|value| u16::try_from(value).ok())
+                        .unwrap_or(0),
+                )
             }),
             Self::Real16(_) => LF_REAL16,
             Self::Real32(_) => LF_REAL32,
@@ -634,7 +655,7 @@ impl<'a> Numeric<'a> {
     ///   NUL byte.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let mut writer = crate::native::output::Output::new(out);
-        writer.u16(self.tag())?;
+        writer.u16(self.tag().0)?;
         match self {
             Self::Integer(leaf) => {
                 let width = leaf.kind.width();
@@ -666,6 +687,12 @@ impl<'a> Numeric<'a> {
             Self::Utf8String(bytes) => bytes.len() + 1,
             _ => self.value_bytes().map_or(0, <[u8]>::len),
         }
+    }
+}
+
+impl Default for Numeric<'_> {
+    fn default() -> Self {
+        Self::Integer(IntegerLeaf::default())
     }
 }
 

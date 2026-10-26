@@ -8,7 +8,7 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     Data, ModuleTypeReference, ModuleTypeReferenceFlags, ModuleTypeSource, Public, PublicFlags,
     S_LDATA32, S_MOD_TYPEREF, S_PUB32, SymbolData,
@@ -60,7 +60,7 @@ fn module_record(name: &[u8]) -> OwnedModule {
 fn type_records(count: usize) -> Vec<u8> {
     let mut out = Vec::new();
     for _ in 0..count {
-        TypeLeaf::ArgumentList(ArgumentList::from_bytes(&[]).expect("list"))
+        TypeLeaf::ArgumentList(ArgumentList::parse(&[]).expect("list"))
             .encode(&mut out)
             .expect("record");
     }
@@ -69,14 +69,21 @@ fn type_records(count: usize) -> Vec<u8> {
 
 /// Return a module-local data record of `type_index`.
 fn local(type_index: TypeIndex) -> SymbolData<'static> {
-    SymbolData::Data(Data {
-        type_index,
-        address: SectionOffset {
-            section: 1,
-            offset: 0,
-        },
-        name: b"local",
-    })
+    let mut data = Data::default();
+    data.type_index = type_index;
+    data.address = SectionOffset {
+        section: 1,
+        offset: 0,
+    };
+    data.name = b"local";
+    SymbolData::Data(data)
+}
+
+/// Return a module type reference with `flags` and zero words.
+fn type_reference(flags: u32) -> ModuleTypeReference {
+    let mut reference = ModuleTypeReference::default();
+    reference.flags = ModuleTypeReferenceFlags(flags);
+    reference
 }
 
 /// Build a PDB like `link /DEBUG:LAZY` writes: empty TPI and IPI, module 0
@@ -92,11 +99,7 @@ fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
         .add_module(module_record(b"own.obj"))
         .expect("module");
     own.push_symbol_with(move |resolver, out| {
-        let mut reference = ModuleTypeReference {
-            flags: ModuleTypeReferenceFlags(OWN_TYPE_RECORDS),
-            word0: 0,
-            word1: 0,
-        };
+        let mut reference = type_reference(OWN_TYPE_RECORDS);
         reference.map_streams(|_| resolver.stream(types))?;
         SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
     })
@@ -109,29 +112,22 @@ fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
     other
         .push_symbol_fields(
             S_MOD_TYPEREF,
-            SymbolData::ModuleTypeReference(ModuleTypeReference {
-                flags: ModuleTypeReferenceFlags(OTHER_MODULE),
-                word0: 0,
-                word1: 0,
-            }),
+            SymbolData::ModuleTypeReference(type_reference(OTHER_MODULE)),
         )
         .expect("type reference");
     other
         .push_symbol_fields(S_LDATA32, local(second))
         .expect("local");
     for name in [&b"pub"[..], b"later"] {
+        let mut record = Public::default();
+        record.flags = PublicFlags(0);
+        record.address = SectionOffset {
+            section: 1,
+            offset: 0,
+        };
+        record.name = name;
         let public = builder
-            .add_symbol_fields(
-                S_PUB32,
-                SymbolData::Public(Public {
-                    flags: PublicFlags(0),
-                    address: SectionOffset {
-                        section: 1,
-                        offset: 0,
-                    },
-                    name,
-                }),
-            )
+            .add_symbol_fields(S_PUB32, SymbolData::Public(record))
             .expect("public");
         builder.index_public(public).expect("index");
     }
@@ -183,7 +179,12 @@ fn module_symbols_resolve_against_their_type_records() {
     assert!(pdb.info().has_feature(Feature::NoTypeMerge));
     assert_eq!(
         module_type_streams(&pdb)[1],
-        (1, ModuleTypeSource::OtherModule { module: 0 })
+        (
+            1,
+            ModuleTypeSource::OtherModule {
+                module: ModuleIndex(0)
+            }
+        )
     );
     assert_eq!(stream(&pdb, own_stream(&pdb)), Some(type_records(2)));
 }
@@ -238,11 +239,7 @@ fn precompiled() -> Vec<u8> {
         let module = builder.add_module(module_record(name)).expect("module");
         module
             .push_symbol_with(move |resolver, out| {
-                let mut reference = ModuleTypeReference {
-                    flags: ModuleTypeReferenceFlags(flags),
-                    word0: 0,
-                    word1: 0,
-                };
+                let mut reference = type_reference(flags);
                 reference.map_streams(|_| resolver.stream(types))?;
                 SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
             })
@@ -277,7 +274,13 @@ fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
     );
     assert!(matches!(
         module_type_streams(&pdb)[1],
-        (1, ModuleTypeSource::PrecompiledTypeUser { owner: 0, .. })
+        (
+            1,
+            ModuleTypeSource::PrecompiledTypeUser {
+                owner: ModuleIndex(0),
+                ..
+            }
+        )
     ));
     let contents = pdb.contents().expect("contents");
     assert_eq!(contents.unclaimed_streams(), []);

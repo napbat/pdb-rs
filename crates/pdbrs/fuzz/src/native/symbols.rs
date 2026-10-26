@@ -1,6 +1,7 @@
 //! Symbol records, the global symbol index (GSI) and the public symbol index (PSI).
 
 use pdbrs::native::codeview::Records;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{
     AsyncMethodInfo, AttributeValue, CustomDebugInfo, CustomDebugInfoData, ModuleSymbols, Symbol,
     SymbolAttribute, SymbolData,
@@ -22,7 +23,7 @@ const STREAM: StreamId = StreamId(7);
 /// Decode a symbol record stream as shared records and as module records.
 pub fn symbols(data: &[u8]) {
     let _ = walk_records(data, STREAM);
-    for scoped in ModuleSymbols::new(data, STREAM, 4, 64).take(MAX_RECORDS) {
+    for scoped in ModuleSymbols::new(data, STREAM, ModuleSymbolOffset(4), 64).take(MAX_RECORDS) {
         let Some(scoped) = ok(scoped) else {
             break;
         };
@@ -58,7 +59,7 @@ pub(crate) fn walk_records(records: &[u8], stream: StreamId) -> Option<RecordOff
         let Some(record) = ok(record) else {
             break;
         };
-        if let Some(symbol) = ok(record.symbol()) {
+        if let Some(symbol) = ok(Symbol::decode(record)) {
             walk_symbol(&symbol);
         }
     }
@@ -76,17 +77,17 @@ pub(crate) fn walk_records(records: &[u8], stream: StreamId) -> Option<RecordOff
 
 /// Call the accessors of a decoded symbol and decode its nested data.
 pub(crate) fn walk_symbol(symbol: &Symbol<'_>) {
-    let _ = (symbol.name(), symbol.address(), symbol.scope());
+    let _ = (symbol.name(), symbol.address(), symbol.scope_links());
     let _ = (symbol.type_index(), symbol.id_index());
     if let Some(reference) = symbol.procedure_reference() {
-        let _ = reference.module_index();
+        let _ = (reference.module, reference.offset);
     }
     if let Some(index) = symbol.type_index() {
         let _ = index.primitive();
     }
     match symbol.data() {
         SymbolData::Oem(oem) => {
-            if let Some(Ok(attribute)) = oem.attribute() {
+            if let Ok(Some(attribute)) = oem.attribute() {
                 walk_attribute(&attribute);
             }
         }
@@ -192,7 +193,7 @@ fn walk_table(table: &HashTable<'_>, records: &[u8], offsets: Option<&RecordOffs
             assert!(!checked, "a checked index names a record");
             continue;
         };
-        if let Some(name) = ok(record.symbol()).and_then(|symbol| symbol.name()) {
+        if let Some(name) = ok(Symbol::decode(record)).and_then(|symbol| symbol.name()) {
             let _ = table.lookup(name).count();
         }
     }
@@ -225,7 +226,7 @@ pub(crate) fn walk_publics(
         let _ = publics.check_records(offsets);
     }
     let _ = publics.check_address_order(|offset| {
-        let symbol = offset.record(records)?.symbol()?;
+        let symbol = Symbol::decode(offset.record(records)?)?;
         let address = symbol.address().ok_or_else(|| {
             pdbrs::Error::new(pdbrs::ErrorKind::InvalidReference, None)
                 .with_context("public symbol has no address")

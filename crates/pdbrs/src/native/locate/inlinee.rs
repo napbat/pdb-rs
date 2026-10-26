@@ -77,7 +77,7 @@ fn module_records<S: ReadAt>(
     };
     let mut source = source_of(module);
     if let Some(ModuleTypeSource::OtherModule { module: owner }) = source {
-        source = source_of(u32::from(owner));
+        source = source_of(owner.0);
     }
     match source {
         Some(ModuleTypeSource::TypeRecords { stream }) => {
@@ -101,7 +101,7 @@ fn inlinee_name(
     id: IdIndex,
 ) -> Result<InlineeName> {
     let mut qualified = Vec::new();
-    let name = match table.decode(id)? {
+    let name = match table.leaf(id)? {
         IdRecord::Function(function) => {
             if let Some(scope) = function.scope {
                 table.resolve_string(scope, &mut qualified)?;

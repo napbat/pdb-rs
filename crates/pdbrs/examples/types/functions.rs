@@ -5,7 +5,7 @@ use pdbrs::native::Pdb;
 use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
-    ProcedureType, S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, SymbolData,
+    ProcedureType, S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, Symbol, SymbolData,
 };
 use pdbrs::native::types::TypeStream;
 
@@ -60,7 +60,7 @@ pub fn procedures(
             continue;
         };
         for record in stream.symbols() {
-            let symbol = record?.symbol()?;
+            let symbol = Symbol::decode(record?)?;
             let SymbolData::Procedure(procedure) = symbol.data() else {
                 continue;
             };
@@ -74,7 +74,7 @@ pub fn procedures(
                 ProcedureType::Id(IdIndex::NONE) => None,
                 ProcedureType::Id(id) => {
                     let ids = ids.ok_or("an _ID procedure needs the IPI stream")?;
-                    function_id(types, ids, &ids.decode(id)?)?.map(|(index, _)| index)
+                    function_id(types, ids, &ids.leaf(id)?)?.map(|(index, _)| index)
                 }
             };
             let signature = match function_type {

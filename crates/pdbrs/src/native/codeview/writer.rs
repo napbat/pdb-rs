@@ -5,6 +5,7 @@
 //! and [`Output::finish_record`]. These methods pad the record and set its `u16` length field.
 
 use super::index::{IdIndex, TypeIndex};
+use super::{LeafKind, SymbolKind};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
@@ -34,6 +35,24 @@ pub(crate) enum Padding {
 /// The start of a record or a field-list member in the output.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RecordStart(usize);
+
+/// A typed record kind: a symbol kind or a leaf kind.
+pub(crate) trait RecordKind {
+    /// Return the `u16` value of the kind field.
+    fn raw(self) -> u16;
+}
+
+impl RecordKind for SymbolKind {
+    fn raw(self) -> u16 {
+        self.0
+    }
+}
+
+impl RecordKind for LeafKind {
+    fn raw(self) -> u16 {
+        self.0
+    }
+}
 
 impl Output<'_> {
     /// Append a 32-bit type index.
@@ -82,10 +101,10 @@ impl Output<'_> {
     /// Append the length field and the kind field of a record.
     ///
     /// The length field is a placeholder until [`Output::finish_record`].
-    pub(crate) fn begin_record(&mut self, kind: u16) -> Result<RecordStart> {
+    pub(crate) fn begin_record(&mut self, kind: impl RecordKind) -> Result<RecordStart> {
         let start = self.position();
         self.u16(0)?;
-        self.u16(kind)?;
+        self.u16(kind.raw())?;
         Ok(start)
     }
 

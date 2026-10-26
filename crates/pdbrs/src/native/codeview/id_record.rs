@@ -4,7 +4,7 @@
 //! records, but their leaf kinds and their index space are different.
 //! [`IdRecord::decode`] decodes one framed [`Record`]. It keeps references
 //! to IPI records as [`IdIndex`] values and references to TPI records as
-//! [`TypeIndex`] values. It keeps `/names` byte offsets as plain `u32`
+//! [`TypeIndex`] values. It keeps `/names` byte offsets as [`NameOffset`]
 //! values. It does not resolve any reference. [`IdTable`] resolves string
 //! IDs and validates references.
 //!
@@ -23,8 +23,8 @@
 
 use core::iter::FusedIterator;
 
-use super::index::{IdIndex, TypeIndex};
-use super::{Fields, Record};
+use super::index::{IdIndex, ModuleIndex, NameOffset, TypeIndex};
+use super::{Fields, LeafKind, Record};
 use crate::{Error, ErrorKind, Result};
 
 mod encode;
@@ -33,19 +33,19 @@ mod table;
 pub use table::{IdTable, MAX_STRING_DEPTH};
 
 /// The leaf kind of a function ID (`LF_FUNC_ID`).
-pub const LF_FUNC_ID: u16 = 0x1601;
+pub const LF_FUNC_ID: LeafKind = LeafKind(0x1601);
 /// The leaf kind of a member function ID (`LF_MFUNC_ID`).
-pub const LF_MFUNC_ID: u16 = 0x1602;
+pub const LF_MFUNC_ID: LeafKind = LeafKind(0x1602);
 /// The leaf kind of a build information record (`LF_BUILDINFO`).
-pub const LF_BUILDINFO: u16 = 0x1603;
+pub const LF_BUILDINFO: LeafKind = LeafKind(0x1603);
 /// The leaf kind of a substring list (`LF_SUBSTR_LIST`).
-pub const LF_SUBSTR_LIST: u16 = 0x1604;
+pub const LF_SUBSTR_LIST: LeafKind = LeafKind(0x1604);
 /// The leaf kind of a string ID (`LF_STRING_ID`).
-pub const LF_STRING_ID: u16 = 0x1605;
+pub const LF_STRING_ID: LeafKind = LeafKind(0x1605);
 /// The leaf kind of a UDT source line (`LF_UDT_SRC_LINE`).
-pub const LF_UDT_SRC_LINE: u16 = 0x1606;
+pub const LF_UDT_SRC_LINE: LeafKind = LeafKind(0x1606);
 /// The leaf kind of a UDT source line with a module (`LF_UDT_MOD_SRC_LINE`).
-pub const LF_UDT_MOD_SRC_LINE: u16 = 0x1607;
+pub const LF_UDT_MOD_SRC_LINE: LeafKind = LeafKind(0x1607);
 
 /// The size of the optional decorated name hash.
 const NAME_HASH_SIZE: usize = 8;
@@ -95,7 +95,7 @@ impl<'a> IdRecord<'a> {
     /// The error does not have a file offset.
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let mut fields = Fields::new(record.data, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
-        let decoded = match record.kind {
+        let decoded = match LeafKind(record.kind) {
             LF_FUNC_ID => Self::Function(FunctionId {
                 scope: optional_id(fields.id_index()?),
                 function_type: fields.type_index()?,
@@ -129,9 +129,9 @@ impl<'a> IdRecord<'a> {
             }),
             LF_UDT_MOD_SRC_LINE => Self::UdtModuleSourceLine(UdtModuleSourceLine {
                 udt: fields.type_index()?,
-                name_offset: fields.u32()?,
+                name_offset: NameOffset(fields.u32()?),
                 line: fields.u32()?,
-                module: fields.u16()?,
+                module: module_from_disk(fields.u16()?),
                 padded: !fields.rest().is_empty(),
             }),
             _ => return Ok(Self::Unsupported(record)),
@@ -142,7 +142,8 @@ impl<'a> IdRecord<'a> {
 }
 
 /// An `LF_FUNC_ID` record: a function that is not a member function.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct FunctionId<'a> {
     /// The parent scope, or `None` for the global scope.
     ///
@@ -160,7 +161,8 @@ pub struct FunctionId<'a> {
 }
 
 /// An `LF_MFUNC_ID` record: a member function.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MemberFunctionId<'a> {
     /// The type of the parent class, structure, union or enum in the TPI
     /// stream.
@@ -210,7 +212,8 @@ impl BuildInfoArgument {
 ///
 /// A record can have fewer or more arguments than [`BuildInfoArgument`]
 /// names.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct BuildInfo<'a> {
     /// The arguments in their serialized order.
     ///
@@ -228,7 +231,8 @@ impl BuildInfo<'_> {
 }
 
 /// An `LF_STRING_ID` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct StringId<'a> {
     /// The `LF_SUBSTR_LIST` record with the leading parts of the string, if
     /// any.
@@ -241,7 +245,8 @@ pub struct StringId<'a> {
 }
 
 /// An `LF_UDT_SRC_LINE` record: the source location of a UDT.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct UdtSourceLine {
     /// The UDT in the TPI stream.
     pub udt: TypeIndex,
@@ -252,16 +257,19 @@ pub struct UdtSourceLine {
 }
 
 /// An `LF_UDT_MOD_SRC_LINE` record: the source location of a UDT in a module.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct UdtModuleSourceLine {
     /// The UDT in the TPI stream.
     pub udt: TypeIndex,
     /// The byte offset of the source file name in the `/names` stream.
-    pub name_offset: u32,
+    pub name_offset: NameOffset,
     /// The line number.
     pub line: u32,
-    /// The raw module value that contributes the UDT definition.
-    pub module: u16,
+    /// The module that contributes the UDT definition, or `None`.
+    ///
+    /// The record stores a 1-based module number. The value 0 gives `None`.
+    pub module: Option<ModuleIndex>,
     /// `true` if `LF_PAD` padding follows the module field.
     ///
     /// Microsoft `link.exe` writes this record without padding: its 18 bytes
@@ -270,7 +278,7 @@ pub struct UdtModuleSourceLine {
 }
 
 /// A borrowed list of serialized ID indices.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct IdList<'a> {
     /// The serialized indices.
     entries: &'a [[u8; ID_SIZE]],
@@ -354,6 +362,13 @@ impl FusedIterator for IdListIter<'_> {}
 /// Convert a serialized ID index.
 const fn index_from_bytes(bytes: [u8; ID_SIZE]) -> IdIndex {
     IdIndex(u32::from_le_bytes(bytes))
+}
+
+/// Convert a 1-based serialized module number to a module index.
+fn module_from_disk(module: u16) -> Option<ModuleIndex> {
+    module
+        .checked_sub(1)
+        .map(|index| ModuleIndex(u32::from(index)))
 }
 
 /// Convert the serialized "no ID" value to `None`.

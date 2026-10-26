@@ -10,9 +10,9 @@
 //! The `S_OEM` records of the .NET symbol writers hold symbol attributes:
 //! [`Oem::attribute`] and the child modules decode them.
 //!
-//! A metadata token is a raw `u32`: the high byte is the metadata table and
-//! the low 24 bits are the row number. For example, `0x0600_0001` is the first
-//! `MethodDef` row.
+//! A metadata token is a [`MetadataToken`]: the high byte is the metadata
+//! table and the low 24 bits are the row number. For example, `0x0600_0001`
+//! is the first `MethodDef` row.
 
 /// Define an iterator that decodes fixed-size chunks of a checked slice.
 macro_rules! chunk_iter {
@@ -73,35 +73,38 @@ mod attribute;
 mod custom_debug_info;
 
 pub use attribute::{
-    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncStepIter, AsyncSteps,
+    ASYNC_METHOD_INFO_ATTRIBUTE, AsyncMethodInfo, AsyncStep, AsyncSteps, AsyncStepsIter,
     AttributeValue, MD2_ATTRIBUTE, SymbolAttribute,
 };
 pub use custom_debug_info::{
     CUSTOM_DEBUG_INFO_VERSION, CustomDebugInfo, CustomDebugInfoData, CustomDebugInfoKind,
-    CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal, DynamicLocalIter, DynamicLocals,
-    HoistedLocalScope, HoistedLocalScopes, TupleElementNames, TupleElementNamesEntry,
-    TupleElementNamesIter, UsingGroups, Utf8NameIter, Utf8Names,
+    CustomDebugInfoRecord, CustomDebugInfoRecords, DynamicLocal, DynamicLocals, DynamicLocalsIter,
+    HoistedLocalScope, HoistedLocalScopes, HoistedLocalScopesIter, TupleElementNames,
+    TupleElementNamesEntry, TupleElementNamesIter, UsingGroups, UsingGroupsIter, Utf8Names,
+    Utf8NamesIter,
 };
 
 use super::super::Fields;
-use super::super::index::TypeIndex;
+use super::super::SymbolKind;
+use super::super::index::{ModuleSymbolOffset, TypeIndex};
 use super::super::numeric::Numeric;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
 use crate::native::output::Output;
+use crate::portable::metadata::MetadataToken;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an OEM-defined record (`S_OEM`).
-pub const S_OEM: u16 = 0x0404;
+pub const S_OEM: SymbolKind = SymbolKind(0x0404);
 /// The kind of a managed local variable in an IL slot (`S_MANSLOT`).
-pub const S_MANSLOT: u16 = 0x1120;
+pub const S_MANSLOT: SymbolKind = SymbolKind(0x1120);
 /// The kind of a reference to a managed procedure (`S_TOKENREF`).
-pub const S_TOKENREF: u16 = 0x1129;
+pub const S_TOKENREF: SymbolKind = SymbolKind(0x1129);
 /// The kind of a global managed procedure start (`S_GMANPROC`).
-pub const S_GMANPROC: u16 = 0x112a;
+pub const S_GMANPROC: SymbolKind = SymbolKind(0x112a);
 /// The kind of a module-local managed procedure start (`S_LMANPROC`).
-pub const S_LMANPROC: u16 = 0x112b;
+pub const S_LMANPROC: SymbolKind = SymbolKind(0x112b);
 /// The kind of a managed constant (`S_MANCONSTANT`).
-pub const S_MANCONSTANT: u16 = 0x112d;
+pub const S_MANCONSTANT: SymbolKind = SymbolKind(0x112d);
 
 /// The OEM ID of a symbol attribute from the Microsoft native symbol writer.
 ///
@@ -115,15 +118,16 @@ pub const MANAGED_ATTRIBUTE_OEM_ID: [u8; 16] = [
 ];
 
 /// A managed procedure start record (`S_GMANPROC` and `S_LMANPROC`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ManagedProcedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: u32,
+    pub parent: ModuleSymbolOffset,
     /// The module stream offset of the record that ends this scope.
-    pub end: u32,
+    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0. The
     /// scope check does not use this value.
-    pub next: u32,
+    pub next: ModuleSymbolOffset,
     /// The length of the procedure code in bytes.
     pub code_length: u32,
     /// The offset of the end of the prologue, relative to the procedure start.
@@ -131,7 +135,7 @@ pub struct ManagedProcedure<'a> {
     /// The offset of the start of the epilogue, relative to the procedure start.
     pub debug_end: u32,
     /// The metadata token of the method, usually a `MethodDef` token (table `0x06`).
-    pub token: u32,
+    pub token: MetadataToken,
     /// The start address. For IL code, the offset is an IL offset.
     pub address: SectionOffset,
     /// The flags.
@@ -145,13 +149,13 @@ pub struct ManagedProcedure<'a> {
 impl<'a> ManagedProcedure<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = fields.u32()?;
-        let end = fields.u32()?;
-        let next = fields.u32()?;
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
+        let next = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let debug_start = fields.u32()?;
         let debug_end = fields.u32()?;
-        let token = fields.u32()?;
+        let token = MetadataToken::from_raw(fields.u32()?);
         let address = SectionOffset::read(fields)?;
         let flags = ProcedureFlags(fields.u8()?);
         let return_register = fields.u16()?;
@@ -173,13 +177,13 @@ impl<'a> ManagedProcedure<'a> {
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent)?;
-        out.u32(self.end)?;
-        out.u32(self.next)?;
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)?;
+        out.u32(self.next.0)?;
         out.u32(self.code_length)?;
         out.u32(self.debug_start)?;
         out.u32(self.debug_end)?;
-        out.u32(self.token)?;
+        out.u32(self.token.get())?;
         self.address.write(out)?;
         out.u8(self.flags.0)?;
         out.u16(self.return_register)?;
@@ -188,7 +192,8 @@ impl<'a> ManagedProcedure<'a> {
 }
 
 /// A managed local variable in an IL slot (`S_MANSLOT`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ManagedSlot<'a> {
     /// The index of the local variable slot in the method body.
     pub slot: u32,
@@ -232,7 +237,8 @@ impl<'a> ManagedSlot<'a> {
 }
 
 /// A managed constant record (`S_MANCONSTANT`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ManagedConstant<'a> {
     /// A type index or a metadata token. Roslyn writes the token of the
     /// constant signature (`StandAloneSig`, table `0x11`).
@@ -268,7 +274,8 @@ impl<'a> ManagedConstant<'a> {
 }
 
 /// An OEM-defined record (`S_OEM`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Oem<'a> {
     /// The OEM ID: GUID bytes in serialized order, for example
     /// [`MANAGED_ATTRIBUTE_OEM_ID`].
@@ -297,14 +304,17 @@ impl<'a> Oem<'a> {
 
     /// Decode the data as a symbol attribute of the Microsoft native symbol writer.
     ///
-    /// Returns `None` if [`Oem::id`] is not [`MANAGED_ATTRIBUTE_OEM_ID`].
+    /// Returns `Ok(None)` if [`Oem::id`] is not [`MANAGED_ATTRIBUTE_OEM_ID`].
     ///
     /// # Errors
     ///
     /// The errors of [`SymbolAttribute::parse`].
-    #[must_use]
-    pub fn attribute(&self) -> Option<Result<SymbolAttribute<'a>>> {
-        (self.id == MANAGED_ATTRIBUTE_OEM_ID).then(|| SymbolAttribute::parse(self.data))
+    pub fn attribute(&self) -> Result<Option<SymbolAttribute<'a>>> {
+        if self.id == MANAGED_ATTRIBUTE_OEM_ID {
+            SymbolAttribute::parse(self.data).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     /// Write the fields and the raw data.

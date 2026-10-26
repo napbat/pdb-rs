@@ -20,19 +20,15 @@
 use alloc::vec::Vec;
 
 use super::{TypeHeader, TypeRecord, TypeStream};
+use crate::native::codeview::id_record::{LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE};
 use crate::native::codeview::type_record::{
     LF_CLASS, LF_CLASS2, LF_ENUM, LF_INTERFACE, LF_INTERFACE2, LF_STRUCTURE, LF_STRUCTURE2,
     LF_UNION, LF_UNION2, Tag, TypeLeaf,
 };
-use crate::native::codeview::{Fields, Records};
+use crate::native::codeview::{Fields, LeafKind, Records};
 use crate::native::hash::{hash_buffer_v8, hash_string_v1};
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
-
-/// The kind of a UDT source-line ID record (`LF_UDT_SRC_LINE`).
-const LF_UDT_SRC_LINE: u16 = 0x1606;
-/// The kind of a UDT module source-line ID record (`LF_UDT_MOD_SRC_LINE`).
-const LF_UDT_MOD_SRC_LINE: u16 = 0x1607;
 
 /// The size of one hash value.
 const VALUE_SIZE: usize = 4;
@@ -571,7 +567,7 @@ pub(super) fn tag_hash(tag: &Tag<'_>, full: &[u8]) -> u32 {
 
 /// Return `true` for the UDT kinds: the normal and the wide forms of
 /// classes, structures, interfaces and unions, and enumerations.
-pub(super) const fn is_udt_kind(kind: u16) -> bool {
+pub(super) const fn is_udt_kind(kind: LeafKind) -> bool {
     matches!(
         kind,
         LF_CLASS
@@ -592,7 +588,7 @@ pub(super) const fn is_udt_kind(kind: u16) -> bool {
 /// `LF_UDT_MOD_SRC_LINE` a `u16` module index (`TypeRecordMapping.cpp`).
 /// This function checks only the size of the payload and its padding. It
 /// hashes the 4 bytes of the UDT index with [`hash_string_v1`].
-fn source_line_hash(kind: u16, data: &[u8]) -> Result<u32> {
+fn source_line_hash(kind: LeafKind, data: &[u8]) -> Result<u32> {
     let mut fields = Fields::new(
         data,
         ErrorKind::InvalidFormat,
@@ -633,7 +629,7 @@ pub fn type_record_hash(bytes: &[u8]) -> Result<u32> {
                 .with_context("type hash input is not one complete record"));
         }
     };
-    match record.kind {
+    match LeafKind(record.kind) {
         kind if is_udt_kind(kind) => {
             match TypeLeaf::decode(record)?.tag() {
                 Some(tag) => Ok(udt_hash(&tag, bytes)),
@@ -641,7 +637,7 @@ pub fn type_record_hash(bytes: &[u8]) -> Result<u32> {
                     .with_context("UDT record has no name")),
             }
         }
-        LF_UDT_SRC_LINE | LF_UDT_MOD_SRC_LINE => source_line_hash(record.kind, record.data),
+        kind @ (LF_UDT_SRC_LINE | LF_UDT_MOD_SRC_LINE) => source_line_hash(kind, record.data),
         _ => Ok(hash_buffer_v8(bytes)),
     }
 }

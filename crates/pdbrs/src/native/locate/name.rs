@@ -137,7 +137,7 @@ impl SymbolLocator {
 
     /// Decode the record at an offset of the symbol record stream.
     fn shared_symbol(&self, offset: SymbolOffset) -> Result<Symbol<'_>> {
-        offset.record(&self.symbol_records)?.symbol()
+        Symbol::decode(offset.record(&self.symbol_records)?)
     }
 
     /// Decode the `S_PUB32` record at an offset of the symbol record stream.
@@ -154,13 +154,13 @@ impl SymbolLocator {
         &self,
         reference: &ProcedureReference<'_>,
     ) -> Result<ProcedureInfo<'_>> {
-        let module = u32::from(reference.module).checked_sub(1).ok_or_else(|| {
+        let module = reference.module.ok_or_else(|| {
             Error::new(ErrorKind::InvalidReference, None)
                 .with_context("procedure reference has module number 0")
         })?;
         self.procedure_info(ProcedureKey {
-            module,
-            offset: reference.offset,
+            module: module.0,
+            offset: reference.offset.0,
         })
     }
 }

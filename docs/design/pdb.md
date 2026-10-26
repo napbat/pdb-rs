@@ -69,7 +69,7 @@ Callers can change these limits through `ReadOptions`. Allocation failures retur
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot. Writing: exact copies, stream-preserving repacks and new layouts for page sizes 512 to 32768 (see [MSF writing](#implemented-msf-writing)) | Edits in place and incremental commits (not planned); writing 65536-byte pages (consumers reject them) |
 | PDB Info and named streams | Identity, `niMac`, typed feature codes, named-stream slot placement and the Microsoft or LLVM hash table growth rules, `/LinkInfo` versions 1 and 2, `/TMCache` and its type map streams, `/UDTSRCLINEUNDONE`, `/src/headerblock`, verified uncompressed injected sources, .NET document records (compression byte 101) with CRC, size and SHA-256 checks through the shared `portable::embedded` codec, Natvis files, `sourcelink` and `srcsrv` as checked bytes, an Info age larger than the DBI age (`pdbstr -w`), encoders for each stream and `InfoBuilder` with an explicit `IdentityPolicy` (#32) | Run-length, Huffman or LZ injected sources (no producer and no algorithm description); Info header versions other than VC70 |
-| TPI and IPI | Modern headers, indexed record iteration, typed decoders and encoders for every modern leaf of `cvinfo.h` and the wide UDT leaves of LLVM, every field-list member and every ID record (#29), typed based-pointer data, `LF_INDEX` continuation splitting, offset-table lookup, continuation chains, forward-reference resolution, reference validation with depth and work limits, hash values, index offsets and hash adjusters, stream writers that rebuild the TPI and IPI streams and their hash streams in the Microsoft or LLVM layout, the MASM end padding of UDT records (`producer_padding`), and the module type streams of `NOTM` PDBs (`TypeStream::from_records`, #30) | Auxiliary hash streams; `LF_RANGELIST`, `LF_TAGGED_UNION`, `LF_TAGGED_UNION_CASE`, `LF_TUCASE` and `LF_IFC_RECORD` have no layout in the pinned definitions and stay raw |
+| TPI and IPI | Modern headers, indexed record iteration, typed decoders and encoders for every modern leaf of `cvinfo.h` and the wide UDT leaves of LLVM, every field-list member and every ID record (#29), typed based-pointer data, `LF_INDEX` continuation splitting, offset-table lookup, continuation chains, forward-reference resolution, reference validation with depth and work limits, hash values, index offsets and hash adjusters, stream writers that rebuild the TPI and IPI streams and their hash streams in the Microsoft or LLVM layout, the MASM end padding of UDT records (`trailing`), and the module type streams of `NOTM` PDBs (`TypeStream::from_records`, #30) | Auxiliary hash streams; `LF_RANGELIST`, `LF_TAGGED_UNION`, `LF_TAGGED_UNION_CASE`, `LF_TUCASE` and `LF_IFC_RECORD` have no layout in the pinned definitions and stay raw |
 | DBI | Modern header with typed flags, module records with every field, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, type server maps (also non-empty), EC names, an encoder for each substream and `DbiBuilder` (#32) | DBI versions other than V70 |
 | Optional debug streams | A decoder and an encoder for all 11 slots: FPO, exception data, fixups, OMAP in both directions, section headers, token/RID maps, `.xdata`, `.pdata`, new FPO (frame data) and original section headers (#32) | — |
 | String tables | `/names` and EC layout, offset lookup, version 1 and version 2 hash lookup and bucket checks, `StringTable::encode` and `StringTableBuilder` with the Microsoft `NMT` bucket rules (#32) | — |
@@ -532,8 +532,10 @@ Use a stream cursor that translates logical offsets into physical blocks.
 Decode small fields through fixed-size scratch storage.
 Borrow contiguous bytes when the source permits it. Do not promise universal zero-copy access.
 
-A record cursor may reuse a bounded scratch buffer for fragmented records.
-Use a lending `next_record` method for views tied to that buffer, not an ordinary `Iterator`.
+Native record readers load the bytes of a stream and bound them before they iterate.
+Use ordinary `Iterator` types over these loaded, bounded stream bytes. Do not use a lending iterator.
+The `iter()` function of a view returns `<View>Iter`.
+Give a name to each iterator type that a function returns, so that a caller can name it.
 Offer an explicit owned conversion for callers that retain records.
 Offer lazy native type-offset indexing; do not build a complete type graph during open.
 Do not require native type references to form a strictly ordered DAG when reading.
@@ -544,6 +546,35 @@ Keep metadata proportional to directory or table metadata and requested indexes.
 Bound directory bytes, stream counts, record buffers, nesting, decompressed bytes and optional index allocations.
 Expose documented limits and return `LimitExceeded` before crossing them.
 Do not allocate a buffer from an unchecked length in the file.
+
+## Preserved producer encodings
+
+Some producers write CodeView bytes that the format does not require or that a canonical encoder does not write.
+`native::codeview` keeps these details, so that a decoded record encodes to the same bytes.
+The names of these items use one vocabulary (rule 13 of #40):
+
+- `trailing_zeros`: the count of zero bytes after the last field of a record.
+- `trailing`: the bytes after the last field that are not zero bytes, for example the MASM end bytes of a UDT record.
+- `padding*`, `reserved*` and `unused*`: a field with the name that the source structure (`cvinfo.h` or the producer) gives it.
+- `*Form` or `*Kind` enums, or `bool`s: the encoding form when more than one form is valid.
+
+| Item | Producer | What the decoder keeps | What the encoder writes |
+| --- | --- | --- | --- |
+| `Symbol::trailing_zeros()` | `fxc` (4 or more zero bytes after an `S_LOCAL` name) | The count of zero bytes after the fields. A nonzero byte is `InvalidFormat`. | `Symbol::encode`, `ModuleSymbolWriter::push_symbol` and `SymbolRecordWriter::push_symbol` write the same count. `SymbolData::encode` writes the shortest padding. |
+| `Compile3::trailing_zeros` | `ml64` (one more NUL after the version string) | The count of zero bytes after the version string. | The same count of zero bytes. |
+| `type_record::Pointer::trailing_zeros` | `ml64` and `ml` 14.51 (6 zero bytes in each `LF_POINTER` record) | The count of zero bytes after the last field, before the `LF_PAD` run. | The same count of zero bytes, then the `LF_PAD` run. |
+| `trailing` on `Class`, `WideClass`, `Union`, `WideUnion` and `Enum`; `TypeLeaf::trailing()` | MASM (`ml64`) in UDT records of the static CRT, for example `f1 6d 65` | 1 to 3 end bytes that start with `0xf1` to `0xf3`. Empty for the standard `LF_PAD` run. | These bytes instead of the `LF_PAD` run. |
+| `IntegerKind`, `IntegerLeaf` | All producers (the numeric leaf width form) | The leaf tag and the value, also a width that is not the smallest (for example `LF_ULONG` 5). | The same tag and width. `Numeric::from_integer` selects the smallest form. |
+| `RegisterList::parse(bytes, wide)`, `RegisterList::is_wide()` | All producers (the kind selects 8-bit or 16-bit register numbers, for example `S_MANYREG` or `S_MANYREG2`) | The width of the register numbers. | The same width. The encoder rejects a list with a width that does not agree with the kind. |
+| `StringList::is_terminated()` | All producers (the `S_COMPILE2` and `S_ENVBLOCK` string block is absent or ends with an empty string) | `true` if the record holds the empty string that ends the sequence. | The stored form. |
+| `UdtModuleSourceLine::padded` | `link.exe` (writes `LF_UDT_MOD_SRC_LINE` without `LF_PAD`, 18 bytes) | `true` if `LF_PAD` padding follows the module field. | The `LF_PAD` run only if `padded` is `true`. |
+| `numeric::Decimal::reserved` | Not known (`LF_DECIMAL`; no fixture has this leaf) | The reserved `u16` field of the OLE `DECIMAL` value. The `Numeric` value keeps all 16 value bytes. | The 16 value bytes of the `Numeric` value. |
+| `Hlsl::property_word`, `Hlsl::unused_bits()` | `fxc` (bits 4 to 15 are not zero, for example `0x07a0`) | The raw property word. `cvinfo.h` requires zero in bits 4 to 15. | The same word. |
+| `EnvironmentBlock::flags` | Not known | The raw flags byte. `cvinfo.h` requires zero in bits 1 to 7. | The same byte. |
+| `Discarded::raw_reason` | Not known | The reason in bits 0 to 7 and the unused bits 8 to 31, raw. | The same `u32`. |
+| `ModuleTypeReference::flags` | Not known | The flags, with the reserved bits 6 to 14. | The same flags. |
+| `CustomDebugInfoRecord::alignment`, `CustomDebugInfoRecord::reserved` | Roslyn (`MD2` in `S_OEM`; Roslyn writes 0 in `reserved`) | The reserved header byte and the count of zero padding bytes at the end of the record, raw. | No typed encoder. The `S_OEM` encoder writes the raw `Oem::data` bytes. |
+| `CustomDebugInfo::reserved` | Roslyn (writes zeros) | The two reserved bytes of the global header, raw. | No typed encoder. The `S_OEM` encoder writes the raw `Oem::data` bytes. |
 
 ## Modern MSF invariants
 

@@ -68,7 +68,7 @@ pub(crate) fn streams(
     if let Some(ModuleTypeSource::OtherModule { module }) = source {
         let owner = dbi
             .modules()
-            .nth(usize::from(module))
+            .nth(usize::try_from(module.0)?)
             .ok_or("S_MOD_TYPEREF names a missing module")??;
         let owner = pdb
             .module_stream(&owner)?

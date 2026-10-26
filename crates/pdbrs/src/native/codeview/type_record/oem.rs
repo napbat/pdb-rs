@@ -13,7 +13,8 @@ use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
 
 /// An `LF_OEM` record: a type that an OEM defines.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Oem<'a> {
     /// The OEM identifier that Microsoft assigned.
     pub oem: u16,
@@ -50,7 +51,8 @@ impl<'a> Oem<'a> {
 }
 
 /// An `LF_OEM2` record: a type that an OEM with a GUID defines.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Oem2<'a> {
     /// The OEM GUID, in its serialized byte order.
     pub oem: [u8; 16],
@@ -82,7 +84,8 @@ impl<'a> Oem2<'a> {
 }
 
 /// An `LF_COBOL0` record: a COBOL type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Cobol0<'a> {
     /// The parent type.
     pub parent_type: TypeIndex,
@@ -111,7 +114,8 @@ impl<'a> Cobol0<'a> {
 ///
 /// The next valid type index follows the record. This crate decodes the
 /// record. It does not change the indices of the next records.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Skip<'a> {
     /// The next valid type index.
     pub next_index: TypeIndex,

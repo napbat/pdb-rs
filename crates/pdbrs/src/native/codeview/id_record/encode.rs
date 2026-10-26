@@ -6,7 +6,8 @@ use super::{
     ID_SIZE, IdList, IdRecord, LF_BUILDINFO, LF_FUNC_ID, LF_MFUNC_ID, LF_STRING_ID, LF_SUBSTR_LIST,
     LF_UDT_MOD_SRC_LINE, LF_UDT_SRC_LINE,
 };
-use crate::native::codeview::index::IdIndex;
+use crate::native::codeview::LeafKind;
+use crate::native::codeview::index::{IdIndex, ModuleIndex};
 use crate::native::codeview::writer::Padding;
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
@@ -17,6 +18,20 @@ fn too_long() -> Error {
         .with_context("IPI record list is longer than its count field allows")
 }
 
+/// Convert a module index to the 1-based serialized module number.
+fn module_to_disk(module: Option<ModuleIndex>) -> Result<u16> {
+    module.map_or(Ok(0), |module| {
+        module
+            .0
+            .checked_add(1)
+            .and_then(|number| u16::try_from(number).ok())
+            .ok_or_else(|| {
+                Error::new(ErrorKind::LimitExceeded, None)
+                    .with_context("IPI record module index does not fit in its u16 field")
+            })
+    })
+}
+
 impl<'a> IdList<'a> {
     /// Make a list from serialized little-endian `u32` ID indices.
     ///
@@ -24,7 +39,7 @@ impl<'a> IdList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length is not a multiple
     /// of 4.
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let (entries, rest) = bytes.as_chunks::<ID_SIZE>();
         if rest.is_empty() {
             Ok(Self { entries })
@@ -44,7 +59,7 @@ impl<'a> IdList<'a> {
 impl IdRecord<'_> {
     /// Return the leaf kind of the record.
     #[must_use]
-    pub const fn kind(&self) -> u16 {
+    pub const fn kind(&self) -> LeafKind {
         match self {
             Self::Function(_) => LF_FUNC_ID,
             Self::MemberFunction(_) => LF_MFUNC_ID,
@@ -53,7 +68,7 @@ impl IdRecord<'_> {
             Self::String(_) => LF_STRING_ID,
             Self::UdtSourceLine(_) => LF_UDT_SRC_LINE,
             Self::UdtModuleSourceLine(_) => LF_UDT_MOD_SRC_LINE,
-            Self::Unsupported(record) => record.kind,
+            Self::Unsupported(record) => LeafKind(record.kind),
         }
     }
 
@@ -115,9 +130,9 @@ impl IdRecord<'_> {
             }
             Self::UdtModuleSourceLine(value) => {
                 writer.type_index(value.udt)?;
-                writer.u32(value.name_offset)?;
+                writer.u32(value.name_offset.0)?;
                 writer.u32(value.line)?;
-                writer.u16(value.module)?;
+                writer.u16(module_to_disk(value.module)?)?;
                 if value.padded {
                     Padding::Type
                 } else {

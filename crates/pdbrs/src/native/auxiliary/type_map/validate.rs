@@ -145,7 +145,7 @@ impl Violations {
 
 /// Return `true` if the IPI record `id` is a function ID with `function_type`.
 fn maps_to(ids: &IdTable<'_>, id: u32, function_type: u32) -> bool {
-    match ids.decode(IdIndex(id)) {
+    match ids.leaf(IdIndex(id)) {
         Ok(IdRecord::Function(value)) => value.function_type.0 == function_type,
         Ok(IdRecord::MemberFunction(value)) => value.function_type.0 == function_type,
         _ => false,

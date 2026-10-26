@@ -17,6 +17,7 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
+use super::super::index::ModuleSymbolOffset;
 use super::super::{Record, Records};
 use super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
 use crate::native::msf::StreamId;
@@ -31,7 +32,7 @@ pub use write::ModuleSymbolWriter;
 #[non_exhaustive]
 pub struct ScopedSymbol<'a> {
     /// The offset of the record in the module stream.
-    pub offset: u32,
+    pub offset: ModuleSymbolOffset,
     /// The number of open scopes that contain the record.
     ///
     /// A record that ends a scope belongs to the scope that it ends.
@@ -40,9 +41,22 @@ pub struct ScopedSymbol<'a> {
     /// record, or `None` at the top level.
     ///
     /// A record that ends a scope gives the scope that it ends.
-    pub scope: Option<u32>,
+    pub scope: Option<ModuleSymbolOffset>,
     /// The decoded symbol.
     pub symbol: Symbol<'a>,
+}
+
+impl<'a> ScopedSymbol<'a> {
+    /// Make a record with `symbol`. The other fields are zero or empty.
+    #[must_use]
+    pub const fn new(symbol: Symbol<'a>) -> Self {
+        Self {
+            offset: ModuleSymbolOffset(0),
+            depth: 0,
+            scope: None,
+            symbol,
+        }
+    }
 }
 
 /// An open scope on the stack of [`ModuleSymbols`].
@@ -94,11 +108,16 @@ impl<'a> ModuleSymbols<'a> {
     /// present. `stream` identifies the module stream in errors.
     /// `max_depth` limits the number of open scopes.
     #[must_use]
-    pub const fn new(symbols: &'a [u8], stream: StreamId, base: u32, max_depth: usize) -> Self {
+    pub const fn new(
+        symbols: &'a [u8],
+        stream: StreamId,
+        base: ModuleSymbolOffset,
+        max_depth: usize,
+    ) -> Self {
         Self {
             records: Records::new(symbols),
             stream: stream.0,
-            base,
+            base: base.0,
             max_depth,
             stack: Vec::new(),
             done: false,
@@ -124,20 +143,19 @@ impl<'a> ModuleSymbols<'a> {
     /// Decode `record` and update the scope stack.
     fn step(&mut self, record: Record<'a>) -> Result<ScopedSymbol<'a>> {
         let offset = self.offset(record)?;
-        let symbol = record
-            .symbol()
+        let symbol = Symbol::decode(record)
             .map_err(|error| error.with_stream(StreamId(self.stream), u64::from(offset)))?;
         let depth = self.stack.len();
         let scope = self.stack.last().map(|open| open.offset);
-        if let Some(links) = symbol.scope() {
-            if links.parent != scope.unwrap_or(0) {
+        if let Some(links) = symbol.scope_links() {
+            if links.parent.0 != scope.unwrap_or(0) {
                 return Err(self.error(
                     ErrorKind::InvalidReference,
                     offset,
                     "symbol scope parent is not the enclosing scope",
                 ));
             }
-            if links.end <= offset {
+            if links.end.0 <= offset {
                 return Err(self.error(
                     ErrorKind::InvalidReference,
                     offset,
@@ -160,7 +178,7 @@ impl<'a> ModuleSymbols<'a> {
             })?;
             self.stack.push(OpenScope {
                 offset,
-                end: links.end,
+                end: links.end.0,
                 inline: matches!(symbol.kind(), S_INLINESITE | S_INLINESITE2),
             });
         } else if matches!(
@@ -170,9 +188,9 @@ impl<'a> ModuleSymbols<'a> {
             self.close(offset, symbol.kind() == S_INLINESITE_END)?;
         }
         Ok(ScopedSymbol {
-            offset,
+            offset: ModuleSymbolOffset(offset),
             depth,
-            scope,
+            scope: scope.map(ModuleSymbolOffset),
             symbol,
         })
     }

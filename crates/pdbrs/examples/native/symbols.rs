@@ -8,6 +8,7 @@ use pdbrs::native::Pdb;
 use pdbrs::native::address::Rva;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::{
     Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
     Symbol, SymbolData, Trampoline, TrampolineKind,
@@ -37,7 +38,7 @@ fn check_symbol(symbol: &Symbol<'_>, context: &Context<'_>, report: &mut Report)
     if let Some(id) = symbol.id_index()
         && context.indices_checked
         && id.0 != 0
-        && context.ids.get(id).is_none()
+        && context.ids.record(id).is_none()
     {
         return Err(format!(
             "symbol {:#06x} refers to a missing ID {:#x}",
@@ -111,7 +112,7 @@ fn module_symbols(
         lines.validate()?;
     }
     let checksums = lines.as_ref().and_then(ModuleLines::checksums);
-    let base = u32::try_from(stream.symbol_offset())?;
+    let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
     crate::symbol_validation::module(stream, index, context, &mut procedures.records, report)?;
     let symbols = ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, MAX_SCOPE_DEPTH);
     let mut writer = Some(ModuleSymbolWriter::new(base));
@@ -131,7 +132,7 @@ fn module_symbols(
                 report.undecoded(format!("module symbol {:#06x}", symbol.kind()));
             }
             SymbolData::Procedure(_) | SymbolData::ManagedProcedure(_) => {
-                procedures.offsets.insert((index, scoped.offset));
+                procedures.offsets.insert((index, scoped.offset.0));
             }
             SymbolData::InlineSite(site) => {
                 for annotation in &site.annotations {
@@ -143,7 +144,7 @@ fn module_symbols(
                 }
             }
             SymbolData::FileStatic(value) => {
-                context.names.get(value.module_name_offset)?;
+                context.names.get(value.module_name_offset.0)?;
                 report.add("file statics joined to /names", 1);
             }
             SymbolData::Trampoline(value) => procedures.trampolines.push(*value),
@@ -164,11 +165,10 @@ fn module_symbols(
 
 /// Decode the symbol attribute of an `S_OEM` record and its Roslyn value.
 fn oem_attribute(oem: &Oem<'_>, report: &mut Report) -> Outcome {
-    let Some(attribute) = oem.attribute() else {
+    let Some(attribute) = oem.attribute()? else {
         report.undecoded("S_OEM record with an unknown OEM ID".to_owned());
         return Ok(());
     };
-    let attribute = attribute?;
     match report.supported(attribute.decode(), "symbol attribute")? {
         Some(AttributeValue::CustomDebugInfo(info)) => {
             for record in info.records() {
@@ -229,7 +229,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
             LineSubsection::InlineeLines(data) => {
                 for entry in data {
                     if context.indices_checked {
-                        match context.ids.decode(entry.inlinee)? {
+                        match context.ids.leaf(entry.inlinee)? {
                             IdRecord::Function(_) | IdRecord::MemberFunction(_) => {}
                             _ => {
                                 return Err(
@@ -271,8 +271,7 @@ pub(crate) fn shared_symbols(
     let mut writer = SymbolRecordWriter::new();
     for record in Records::new(&bytes) {
         let record = record?;
-        let symbol = record
-            .symbol()
+        let symbol = Symbol::decode(record)
             .map_err(|error| error.with_stream(id, u64::from(record.offset)))?;
         check_symbol(&symbol, context, report)?;
         reencode(&symbol, report)?;
@@ -281,12 +280,13 @@ pub(crate) fn shared_symbols(
         }
         if let Some(reference) = symbol.procedure_reference() {
             let module = reference
-                .module_index()
+                .module
+                .and_then(|module| u16::try_from(module.0).ok())
                 .filter(|&module| usize::from(module) < context.module_count)
                 .ok_or("procedure reference names a missing module")?;
             if procedures.incomplete.contains(&module) {
                 report.add("procedure references into partly decoded modules", 1);
-            } else if !procedures.offsets.contains(&(module, reference.offset)) {
+            } else if !procedures.offsets.contains(&(module, reference.offset.0)) {
                 return Err("procedure reference does not name a module procedure".into());
             }
         }
@@ -308,7 +308,7 @@ pub(crate) fn shared_symbols(
         report.claim(dbi.header().public_stream.ok_or("missing public stream")?);
         publics.check_records(&offsets)?;
         publics.check_address_order(|offset| {
-            let symbol = offset.record(&bytes)?.symbol()?;
+            let symbol = Symbol::decode(offset.record(&bytes)?)?;
             let address = symbol.address().ok_or_else(|| {
                 pdbrs::Error::new(ErrorKind::InvalidReference, None)
                     .with_context("public address map names a symbol without an address")
@@ -439,7 +439,7 @@ fn check_lookup(
 ) -> Outcome {
     for entry in table.records() {
         indexed.insert(entry.symbol.0);
-        let symbol = entry.symbol.record(bytes)?.symbol()?;
+        let symbol = Symbol::decode(entry.symbol.record(bytes)?)?;
         let Some(name) = symbol.name() else {
             if matches!(symbol.data(), SymbolData::Unsupported(_)) {
                 continue;

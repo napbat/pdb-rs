@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 
 use super::entry::{Entry, SymbolEntry};
 use super::handle::{ModuleHandle, ModuleSymbolHandle, Resolver, SymbolHandle};
+use crate::native::codeview::SymbolKind;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::native::dbi::OwnedModule;
 use crate::native::lines::LineSubsection;
@@ -127,7 +128,7 @@ impl<'a> ModuleBuilder<'a> {
     ///   32 bits or an allocation fails.
     pub fn push_symbol_fields(
         &mut self,
-        kind: u16,
+        kind: SymbolKind,
         data: SymbolData<'a>,
     ) -> Result<ModuleSymbolHandle> {
         self.push(SymbolEntry::Fields(kind, data))

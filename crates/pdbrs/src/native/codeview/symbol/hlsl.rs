@@ -7,36 +7,36 @@
 //! names `S_DEFRANGE_HLSL` and `S_DEFRANGE_DPC_PTR_TAG`, so both kinds use
 //! that layout.
 
-use super::super::Fields;
 use super::super::index::TypeIndex;
+use super::super::{Fields, SymbolKind};
 use super::{AddressGaps, AddressRange, LocalFlags};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of an HLSL def-range (`S_DEFRANGE_HLSL`).
-pub const S_DEFRANGE_HLSL: u16 = 0x1150;
+pub const S_DEFRANGE_HLSL: SymbolKind = SymbolKind(0x1150);
 /// The kind of a global HLSL data symbol (`S_GDATA_HLSL`).
-pub const S_GDATA_HLSL: u16 = 0x1151;
+pub const S_GDATA_HLSL: SymbolKind = SymbolKind(0x1151);
 /// The kind of a module-local HLSL data symbol (`S_LDATA_HLSL`).
-pub const S_LDATA_HLSL: u16 = 0x1152;
+pub const S_LDATA_HLSL: SymbolKind = SymbolKind(0x1152);
 /// The kind of a DPC group-shared local variable (`S_LOCAL_DPC_GROUPSHARED`).
-pub const S_LOCAL_DPC_GROUPSHARED: u16 = 0x1154;
+pub const S_LOCAL_DPC_GROUPSHARED: SymbolKind = SymbolKind(0x1154);
 /// The kind of a DPC pointer tag def-range (`S_DEFRANGE_DPC_PTR_TAG`).
-pub const S_DEFRANGE_DPC_PTR_TAG: u16 = 0x1157;
+pub const S_DEFRANGE_DPC_PTR_TAG: SymbolKind = SymbolKind(0x1157);
 /// The kind of a map from DPC pointer tags to symbols (`S_DPC_SYM_TAG_MAP`).
-pub const S_DPC_SYM_TAG_MAP: u16 = 0x1158;
+pub const S_DPC_SYM_TAG_MAP: SymbolKind = SymbolKind(0x1158);
 /// The kind of a global HLSL data symbol with 32-bit slots (`S_GDATA_HLSL32`).
-pub const S_GDATA_HLSL32: u16 = 0x1162;
+pub const S_GDATA_HLSL32: SymbolKind = SymbolKind(0x1162);
 /// The kind of a module-local HLSL data symbol with 32-bit slots (`S_LDATA_HLSL32`).
-pub const S_LDATA_HLSL32: u16 = 0x1163;
+pub const S_LDATA_HLSL32: SymbolKind = SymbolKind(0x1163);
 /// The kind of a global HLSL data symbol with a binding space (`S_GDATA_HLSL32_EX`).
-pub const S_GDATA_HLSL32_EX: u16 = 0x1164;
+pub const S_GDATA_HLSL32_EX: SymbolKind = SymbolKind(0x1164);
 /// The kind of a module-local HLSL data symbol with a binding space (`S_LDATA_HLSL32_EX`).
-pub const S_LDATA_HLSL32_EX: u16 = 0x1165;
+pub const S_LDATA_HLSL32_EX: SymbolKind = SymbolKind(0x1165);
 
 /// An HLSL or DPC pointer tag def-range ([`S_DEFRANGE_HLSL`] and
 /// [`S_DEFRANGE_DPC_PTR_TAG`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeHlsl<'a> {
     /// The register type (`CV_HLSLREG_e`).
@@ -78,7 +78,7 @@ impl<'a> DefRangeHlsl<'a> {
                 Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("HLSL def-range is too short for its register offsets")
             })?;
-        let gaps = AddressGaps::from_le_bytes(fields.bytes(gap_bytes)?)?;
+        let gaps = AddressGaps::parse(fields.bytes(gap_bytes)?)?;
         let (offsets, _) = fields.bytes(offset_bytes)?.as_chunks();
         Ok(Self {
             register_type,
@@ -141,7 +141,8 @@ impl<'a> DefRangeHlsl<'a> {
 /// [`S_GDATA_HLSL`] and [`S_LDATA_HLSL`] store 16-bit slots.
 /// [`S_GDATA_HLSL32`] and [`S_LDATA_HLSL32`] store 32-bit slots and put the
 /// register type after them. The value keeps the slots as `u32`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HlslData<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -225,7 +226,8 @@ impl<'a> HlslData<'a> {
 
 /// An HLSL data symbol with a binding space ([`S_GDATA_HLSL32_EX`] and
 /// [`S_LDATA_HLSL32_EX`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct HlslDataEx<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -277,7 +279,8 @@ impl<'a> HlslDataEx<'a> {
 }
 
 /// A DPC group-shared local variable ([`S_LOCAL_DPC_GROUPSHARED`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DpcGroupSharedLocal<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
@@ -319,14 +322,15 @@ impl<'a> DpcGroupSharedLocal<'a> {
 }
 
 /// A map from DPC pointer tag values to symbol records ([`S_DPC_SYM_TAG_MAP`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct DpcTagMap<'a> {
     /// The 8-byte entries.
     entries: &'a [[u8; 8]],
 }
 
 /// One entry of a [`DpcTagMap`] (`CV_DPC_SYM_TAG_MAP_ENTRY`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DpcTag {
     /// The pointer tag value of the symbol.
     pub tag: u32,
@@ -342,7 +346,7 @@ impl<'a> DpcTagMap<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 8.
-    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let (entries, rest) = bytes.as_chunks();
         if !rest.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -353,7 +357,7 @@ impl<'a> DpcTagMap<'a> {
 
     /// Read all remaining bytes as entries.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        Self::from_le_bytes(fields.bytes(fields.rest().len())?)
+        Self::parse(fields.bytes(fields.rest().len())?)
     }
 
     /// Write the entries.

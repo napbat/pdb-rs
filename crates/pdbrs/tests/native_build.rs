@@ -5,8 +5,9 @@
 mod program;
 
 use pdbrs::ErrorKind;
+use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::TypeIndex;
-use pdbrs::native::codeview::symbol::{S_GDATA32, SymbolData};
+use pdbrs::native::codeview::symbol::{Data, S_GDATA32, Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{OwnedModule, SectionContribution};
 use pdbrs::native::info::IdentityPolicy;
@@ -20,6 +21,18 @@ fn synthetic() -> Vec<u8> {
     program::build()
         .and_then(|builder| builder.plan(&BuildOptions::default())?.to_vec())
         .expect("the synthetic program builds")
+}
+
+/// Return a data record `g` of `type_index` at the start of section 1.
+fn data_g(type_index: TypeIndex) -> Data<'static> {
+    let mut data = Data::default();
+    data.type_index = type_index;
+    data.address = SectionOffset {
+        section: 1,
+        offset: 0,
+    };
+    data.name = b"g";
+    data
 }
 
 /// Return a module record with a name and no section contribution.
@@ -78,12 +91,15 @@ fn synthetic_program_reads_back() {
         .expect("module stream present");
     let names: Vec<Vec<u8>> = stream
         .symbols()
-        .filter_map(
-            |record| match *record.expect("record").symbol().expect("symbol").data() {
+        .filter_map(|record| {
+            match *Symbol::decode(record.expect("record"))
+                .expect("symbol")
+                .data()
+            {
                 SymbolData::Procedure(procedure) => Some(procedure.name.to_vec()),
                 _ => None,
-            },
-        )
+            }
+        })
         .collect();
     assert_eq!(names, [b"sum".to_vec(), b"main".to_vec()]);
     let lines = ModuleLines::parse(&stream).expect("C13 subsections");
@@ -205,19 +221,19 @@ fn handle_of_another_builder_is_rejected() {
     let mut other = PdbBuilder::new(1, [1; 16], 1).expect("builder");
     other
         .add_type(TypeLeaf::ArgumentList(
-            ArgumentList::from_bytes(&[]).expect("list"),
+            ArgumentList::parse(&[]).expect("list"),
         ))
         .expect("type");
     let foreign = other
         .add_type(TypeLeaf::ArgumentList(
-            ArgumentList::from_bytes(&[]).expect("list"),
+            ArgumentList::parse(&[]).expect("list"),
         ))
         .expect("type");
     let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
     builder
         .add_type_with(move |resolver, out| {
             let index = resolver.type_index(foreign)?.0.to_le_bytes();
-            TypeLeaf::ArgumentList(ArgumentList::from_bytes(&index)?).encode(out)
+            TypeLeaf::ArgumentList(ArgumentList::parse(&index)?).encode(out)
         })
         .expect("deferred type");
     let error = builder
@@ -230,17 +246,7 @@ fn handle_of_another_builder_is_rejected() {
 fn reference_past_the_type_stream_is_rejected() {
     let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
     builder
-        .add_symbol_fields(
-            S_GDATA32,
-            SymbolData::Data(pdbrs::native::codeview::symbol::Data {
-                type_index: TypeIndex(0x1000),
-                address: pdbrs::native::address::SectionOffset {
-                    section: 1,
-                    offset: 0,
-                },
-                name: b"g",
-            }),
-        )
+        .add_symbol_fields(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x1000))))
         .expect("symbol");
     let error = builder
         .plan(&BuildOptions::default())
@@ -269,17 +275,7 @@ fn module_without_stream_rejects_symbols() {
     let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
     let module = builder.add_module(module_record(b"m")).expect("module");
     module
-        .push_symbol_fields(
-            S_GDATA32,
-            SymbolData::Data(pdbrs::native::codeview::symbol::Data {
-                type_index: TypeIndex(0x74),
-                address: pdbrs::native::address::SectionOffset {
-                    section: 1,
-                    offset: 0,
-                },
-                name: b"g",
-            }),
-        )
+        .push_symbol_fields(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x74))))
         .expect("symbol");
     module.set_stream(false);
     let error = builder

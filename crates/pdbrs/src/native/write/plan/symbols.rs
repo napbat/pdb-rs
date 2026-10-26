@@ -9,14 +9,14 @@ use super::super::handle::Resolver;
 use super::super::module::ModuleBuilder;
 use super::types::{PlannedTypes, id_end};
 use super::{BuildOptions, StreamIds};
-use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdTable;
-use crate::native::codeview::index::{IdIndex, TypeIndex};
+use crate::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use crate::native::codeview::symbol::ModuleSymbolWriter;
 use crate::native::codeview::symbol::validate::{
     ModuleRecord, Rule, ValidationContext, ValidationReport, validate_module_symbols,
     validate_shared_symbols,
 };
+use crate::native::codeview::{LeafKind, Records, SymbolKind};
 use crate::native::dbi::{ModuleStream, ModuleStreamParts, OwnedModule};
 use crate::native::info::Feature;
 use crate::native::lines::ModuleLines;
@@ -27,7 +27,7 @@ use crate::native::symbols::{
 use crate::{Error, ErrorKind, Result};
 
 /// The module stream offset of the first symbol record: after the signature.
-const SYMBOL_BASE: u32 = 4;
+const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
 
 /// A planned module: its record and its stream.
 pub(in crate::native::write) struct PlannedModule {
@@ -111,7 +111,7 @@ fn module_regions(
                 .map_err(|_| no_memory())?;
             let mut writer = ModuleSymbolWriter::new(SYMBOL_BASE);
             for entry in entries {
-                offsets.push(entry.push_module(&mut writer, resolver)?);
+                offsets.push(entry.push_module(&mut writer, resolver)?.0);
             }
             Some(writer.finish()?)
         }
@@ -124,7 +124,7 @@ fn module_regions(
 }
 
 /// Return the kinds of the module records by module index and offset.
-fn record_kinds(regions: &[Option<ModuleRegions>]) -> Result<BTreeMap<(u16, u32), u16>> {
+fn record_kinds(regions: &[Option<ModuleRegions>]) -> Result<BTreeMap<(u16, u32), SymbolKind>> {
     let mut kinds = BTreeMap::new();
     for (index, region) in regions.iter().enumerate() {
         let Some(symbols) = region.as_ref().and_then(|region| region.symbols.as_ref()) else {
@@ -136,7 +136,10 @@ fn record_kinds(regions: &[Option<ModuleRegions>]) -> Result<BTreeMap<(u16, u32)
         })?;
         for record in Records::new(symbols) {
             let record = record?;
-            kinds.insert((module, record.offset + SYMBOL_BASE), record.kind);
+            kinds.insert(
+                (module, record.offset + SYMBOL_BASE.0),
+                SymbolKind(record.kind),
+            );
         }
     }
     Ok(kinds)
@@ -153,7 +156,7 @@ impl PdbBuilder<'_> {
         options: &BuildOptions,
     ) -> Result<EncodedSymbols> {
         let id_table = IdTable::new(&ipi.parsed)?;
-        let id_kind = |id: IdIndex| id_table.get(id).map(|record| record.kind);
+        let id_kind = |id: IdIndex| id_table.record(id).map(|record| LeafKind(record.kind));
         let base = ValidationContext::new(TypeIndex(tpi.index_end()), id_end(ipi))
             .with_id_kinds(&id_kind)
             .with_module_count(self.modules.len());
@@ -186,9 +189,10 @@ impl PdbBuilder<'_> {
         }
         self.check_modules(&regions, ids, &base)?;
         let kinds = record_kinds(&regions)?;
-        let module_record = |module: u16, offset: u32| {
-            kinds
-                .get(&(module, offset))
+        let module_record = |module: ModuleIndex, offset: ModuleSymbolOffset| {
+            u16::try_from(module.0)
+                .ok()
+                .and_then(|module| kinds.get(&(module, offset.0)))
                 .map_or(ModuleRecord::Missing, |&kind| ModuleRecord::Kind(kind))
         };
         let shared = Resolver {

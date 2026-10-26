@@ -2,7 +2,7 @@
 
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::id_record::{LF_BUILDINFO, LF_FUNC_ID, LF_STRING_ID};
-use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::validate::{
     ModuleRecord, Rule, ValidationContext, ValidationReport, validate_module_symbols,
     validate_shared_symbols,
@@ -15,6 +15,7 @@ use pdbrs::native::codeview::symbol::{
     S_GPROC32_ID, S_INLINESITE, S_INLINESITE_END, S_LABEL32, S_LDATA32, S_LOCAL, S_LPROC32,
     S_LPROCREF, S_PROC_ID_END, S_PROCREF, S_SEPCODE, S_SKIP, S_SOURCELINK, S_THUNK32, S_UDT,
 };
+use pdbrs::native::codeview::{LeafKind, SymbolKind};
 use pdbrs::native::msf::StreamId;
 
 /// The module stream ID in the tests.
@@ -45,7 +46,7 @@ struct Builder {
 
 impl Builder {
     /// Add a record with zero padding and return its stream offset.
-    fn push(&mut self, kind: u16, payload: &[u8]) -> u32 {
+    fn push(&mut self, kind: SymbolKind, payload: &[u8]) -> u32 {
         let offset = BASE + u32::try_from(self.bytes.len()).unwrap();
         let mut payload = payload.to_vec();
         while !payload.len().is_multiple_of(4) {
@@ -53,7 +54,7 @@ impl Builder {
         }
         let length = u16::try_from(payload.len() + 2).unwrap();
         self.bytes.extend_from_slice(&length.to_le_bytes());
-        self.bytes.extend_from_slice(&kind.to_le_bytes());
+        self.bytes.extend_from_slice(&kind.0.to_le_bytes());
         self.bytes.extend_from_slice(&payload);
         offset
     }
@@ -74,7 +75,7 @@ impl Builder {
     }
 
     /// Add a procedure with an end link to patch later.
-    fn procedure(&mut self, kind: u16, index: u32, start: u32, length: u32) -> u32 {
+    fn procedure(&mut self, kind: SymbolKind, index: u32, start: u32, length: u32) -> u32 {
         let mut payload = Vec::new();
         for value in [0, 0, 0, length, 0, 0, index, start] {
             payload.extend_from_slice(&value.to_le_bytes());
@@ -116,7 +117,7 @@ impl Builder {
     }
 
     /// Add an end record and patch the end link of `scope`.
-    fn close(&mut self, kind: u16, scope: u32) -> u32 {
+    fn close(&mut self, kind: SymbolKind, scope: u32) -> u32 {
         let offset = self.push(kind, &[]);
         self.patch(scope, END, offset);
         offset
@@ -167,7 +168,7 @@ impl Builder {
     }
 
     /// Add a procedure reference record.
-    fn reference(&mut self, kind: u16, module: u16, offset: u32) -> u32 {
+    fn reference(&mut self, kind: SymbolKind, module: u16, offset: u32) -> u32 {
         let mut payload = vec![0; 4];
         payload.extend_from_slice(&offset.to_le_bytes());
         payload.extend_from_slice(&module.to_le_bytes());
@@ -178,7 +179,7 @@ impl Builder {
 
 /// Return the IPI record kind of a test ID: 0x1000 is a function, 0x1001
 /// is a build information record and 0x1002 is a string.
-fn id_kind(id: IdIndex) -> Option<u16> {
+fn id_kind(id: IdIndex) -> Option<LeafKind> {
     match id.0 {
         0x1000 => Some(LF_FUNC_ID),
         0x1001 => Some(LF_BUILDINFO),
@@ -194,7 +195,7 @@ fn context() -> ValidationContext<'static> {
 
 /// Validate a module stream with `context`.
 fn module_with(builder: &Builder, context: &ValidationContext<'_>) -> ValidationReport {
-    validate_module_symbols(&builder.bytes, STREAM, BASE, context).unwrap()
+    validate_module_symbols(&builder.bytes, STREAM, ModuleSymbolOffset(BASE), context).unwrap()
 }
 
 /// Validate a module stream with the default test context.
@@ -589,7 +590,7 @@ fn checks_module_references() {
     let wrong_kind = builder.reference(S_LPROCREF, 1, 4);
     builder.reference(S_PROCREF, 2, 4);
     let unknown = builder.reference(S_PROCREF, 2, 100);
-    let records = |module: u16, offset: u32| match (module, offset) {
+    let records = |module: ModuleIndex, offset: ModuleSymbolOffset| match (module.0, offset.0) {
         (0, 4) => ModuleRecord::Kind(S_GPROC32),
         (0, 40) => ModuleRecord::Kind(S_GMANPROC),
         (1, 8) => ModuleRecord::Kind(S_LPROC32),
@@ -673,7 +674,7 @@ fn does_not_panic_on_corrupt_bytes() {
     builder.close(S_END, block);
     builder.close(S_PROC_ID_END, outer);
     builder.reference(S_PROCREF, 1, 4);
-    let records = |_: u16, _: u32| ModuleRecord::Missing;
+    let records = |_: ModuleIndex, _: ModuleSymbolOffset| ModuleRecord::Missing;
     let lengths = [0x10];
     let context = context()
         .with_module_count(1)
@@ -685,10 +686,15 @@ fn does_not_panic_on_corrupt_bytes() {
             let mut bytes = builder.bytes.clone();
             bytes[index] = value;
             // Only the absence of a panic matters for the module walk.
-            let _ = validate_module_symbols(&bytes, STREAM, BASE, &context);
+            let _ = validate_module_symbols(&bytes, STREAM, ModuleSymbolOffset(BASE), &context);
             let shared = validate_shared_symbols(&bytes, STREAM, &context);
             assert!(shared.is_ok());
-            let _ = validate_module_symbols(&bytes[..index], STREAM, BASE, &context);
+            let _ = validate_module_symbols(
+                &bytes[..index],
+                STREAM,
+                ModuleSymbolOffset(BASE),
+                &context,
+            );
         }
     }
 }
@@ -696,7 +702,7 @@ fn does_not_panic_on_corrupt_bytes() {
 /// Add a record of `kind` with `head`, a range in section 1 and `gaps`.
 fn ranged(
     builder: &mut Builder,
-    kind: u16,
+    kind: SymbolKind,
     head: &[u8],
     start: u32,
     length: u16,
@@ -820,7 +826,7 @@ fn checks_data_and_annotation_references() {
     builder.reference(S_ANNOTATIONREF, 1, 8);
     let annotation_kind = builder.reference(S_ANNOTATIONREF, 1, 4);
     let annotation_module = builder.reference(S_ANNOTATIONREF, 0, 8);
-    let records = |module: u16, offset: u32| match (module, offset) {
+    let records = |module: ModuleIndex, offset: ModuleSymbolOffset| match (module.0, offset.0) {
         (0, 4) => ModuleRecord::Kind(S_LDATA32),
         (0, 8) => ModuleRecord::Kind(S_ANNOTATION),
         (0, 12) => ModuleRecord::Kind(S_GPROC32),

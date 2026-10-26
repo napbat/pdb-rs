@@ -9,17 +9,18 @@
 //! Each decoder reads all fixed fields, numeric leaves and names. The bytes
 //! after the last field must be valid `LF_PAD` padding. UDT records also
 //! accept the padding form of Microsoft Macro Assembler and keep it (see
-//! [`TypeLeaf::producer_padding`]). Names stay as
+//! [`TypeLeaf::trailing`]). Names stay as
 //! bytes. Kinds without a decoder give [`TypeLeaf::Unsupported`], which keeps
 //! the kind and the payload. The encoders pad each record to a multiple of
 //! 4 bytes with `LF_PAD` bytes, as Microsoft and LLVM do. A UDT record with
-//! producer padding gets these bytes again.
+//! trailing bytes gets these bytes again.
 
 use alloc::vec::Vec;
 
+use super::field_list::FieldList;
 use super::index::TypeIndex;
 use super::writer::Padding;
-use super::{Fields, Record};
+use super::{Fields, LeafKind, Record};
 use crate::native::output::Output;
 use crate::{ErrorKind, Result};
 
@@ -35,7 +36,6 @@ mod references;
 mod server;
 mod udt;
 
-pub use super::field_list::FieldList;
 pub use alias::{Alias, DefaultArgument};
 pub use array::{
     ConstantDimensions, DimensionBound, DimensionBounds, DimensionedArray, StridedArray,
@@ -61,95 +61,95 @@ pub use udt::{Class, ClassKind, Enum, Tag, Union, WideClass, WideUnion};
 pub(crate) use list::encode_vtable_offset;
 
 /// The kind of a virtual function table shape (`LF_VTSHAPE`).
-pub const LF_VTSHAPE: u16 = 0x000a;
+pub const LF_VTSHAPE: LeafKind = LeafKind(0x000a);
 /// The kind of a code label type (`LF_LABEL`).
-pub const LF_LABEL: u16 = 0x000e;
+pub const LF_LABEL: LeafKind = LeafKind(0x000e);
 /// The kind of the end of precompiled types (`LF_ENDPRECOMP`).
-pub const LF_ENDPRECOMP: u16 = 0x0014;
+pub const LF_ENDPRECOMP: LeafKind = LeafKind(0x0014);
 /// The kind of a type with modifiers (`LF_MODIFIER`).
-pub const LF_MODIFIER: u16 = 0x1001;
+pub const LF_MODIFIER: LeafKind = LeafKind(0x1001);
 /// The kind of a pointer type (`LF_POINTER`).
-pub const LF_POINTER: u16 = 0x1002;
+pub const LF_POINTER: LeafKind = LeafKind(0x1002);
 /// The kind of a procedure type (`LF_PROCEDURE`).
-pub const LF_PROCEDURE: u16 = 0x1008;
+pub const LF_PROCEDURE: LeafKind = LeafKind(0x1008);
 /// The kind of a member function type (`LF_MFUNCTION`).
-pub const LF_MFUNCTION: u16 = 0x1009;
+pub const LF_MFUNCTION: LeafKind = LeafKind(0x1009);
 /// The kind of a COBOL type (`LF_COBOL0`).
-pub const LF_COBOL0: u16 = 0x100a;
+pub const LF_COBOL0: LeafKind = LeafKind(0x100a);
 /// The kind of a basic array (`LF_BARRAY`).
-pub const LF_BARRAY: u16 = 0x100b;
+pub const LF_BARRAY: LeafKind = LeafKind(0x100b);
 /// The kind of a virtual function table path (`LF_VFTPATH`).
-pub const LF_VFTPATH: u16 = 0x100d;
+pub const LF_VFTPATH: LeafKind = LeafKind(0x100d);
 /// The kind of an OEM type (`LF_OEM`).
-pub const LF_OEM: u16 = 0x100f;
+pub const LF_OEM: LeafKind = LeafKind(0x100f);
 /// The kind of an OEM type with a GUID (`LF_OEM2`).
-pub const LF_OEM2: u16 = 0x1011;
+pub const LF_OEM2: LeafKind = LeafKind(0x1011);
 /// The kind of a record that reserves type indices (`LF_SKIP`).
-pub const LF_SKIP: u16 = 0x1200;
+pub const LF_SKIP: LeafKind = LeafKind(0x1200);
 /// The kind of an argument list (`LF_ARGLIST`).
-pub const LF_ARGLIST: u16 = 0x1201;
+pub const LF_ARGLIST: LeafKind = LeafKind(0x1201);
 /// The kind of a field list (`LF_FIELDLIST`).
-pub const LF_FIELDLIST: u16 = 0x1203;
+pub const LF_FIELDLIST: LeafKind = LeafKind(0x1203);
 /// The kind of a derived class list (`LF_DERIVED`).
-pub const LF_DERIVED: u16 = 0x1204;
+pub const LF_DERIVED: LeafKind = LeafKind(0x1204);
 /// The kind of a bit field type (`LF_BITFIELD`).
-pub const LF_BITFIELD: u16 = 0x1205;
+pub const LF_BITFIELD: LeafKind = LeafKind(0x1205);
 /// The kind of a method overload list (`LF_METHODLIST`).
-pub const LF_METHODLIST: u16 = 0x1206;
+pub const LF_METHODLIST: LeafKind = LeafKind(0x1206);
 /// The kind of constant upper dimension bounds (`LF_DIMCONU`).
-pub const LF_DIMCONU: u16 = 0x1207;
+pub const LF_DIMCONU: LeafKind = LeafKind(0x1207);
 /// The kind of constant lower and upper dimension bounds (`LF_DIMCONLU`).
-pub const LF_DIMCONLU: u16 = 0x1208;
+pub const LF_DIMCONLU: LeafKind = LeafKind(0x1208);
 /// The kind of variable upper dimension bounds (`LF_DIMVARU`).
-pub const LF_DIMVARU: u16 = 0x1209;
+pub const LF_DIMVARU: LeafKind = LeafKind(0x1209);
 /// The kind of variable lower and upper dimension bounds (`LF_DIMVARLU`).
-pub const LF_DIMVARLU: u16 = 0x120a;
+pub const LF_DIMVARLU: LeafKind = LeafKind(0x120a);
 /// The kind of a type server reference (`LF_TYPESERVER`).
-pub const LF_TYPESERVER: u16 = 0x1501;
+pub const LF_TYPESERVER: LeafKind = LeafKind(0x1501);
 /// The kind of an array type (`LF_ARRAY`).
-pub const LF_ARRAY: u16 = 0x1503;
+pub const LF_ARRAY: LeafKind = LeafKind(0x1503);
 /// The kind of a class type (`LF_CLASS`).
-pub const LF_CLASS: u16 = 0x1504;
+pub const LF_CLASS: LeafKind = LeafKind(0x1504);
 /// The kind of a structure type (`LF_STRUCTURE`).
-pub const LF_STRUCTURE: u16 = 0x1505;
+pub const LF_STRUCTURE: LeafKind = LeafKind(0x1505);
 /// The kind of a union type (`LF_UNION`).
-pub const LF_UNION: u16 = 0x1506;
+pub const LF_UNION: LeafKind = LeafKind(0x1506);
 /// The kind of an enumeration type (`LF_ENUM`).
-pub const LF_ENUM: u16 = 0x1507;
+pub const LF_ENUM: LeafKind = LeafKind(0x1507);
 /// The kind of a dimensioned array (`LF_DIMARRAY`).
-pub const LF_DIMARRAY: u16 = 0x1508;
+pub const LF_DIMARRAY: LeafKind = LeafKind(0x1508);
 /// The kind of a precompiled type inclusion (`LF_PRECOMP`).
-pub const LF_PRECOMP: u16 = 0x1509;
+pub const LF_PRECOMP: LeafKind = LeafKind(0x1509);
 /// The kind of a `typedef` (`LF_ALIAS`).
-pub const LF_ALIAS: u16 = 0x150a;
+pub const LF_ALIAS: LeafKind = LeafKind(0x150a);
 /// The kind of a default argument (`LF_DEFARG`).
-pub const LF_DEFARG: u16 = 0x150b;
+pub const LF_DEFARG: LeafKind = LeafKind(0x150b);
 /// The kind of a managed type (`LF_MANAGED`).
-pub const LF_MANAGED: u16 = 0x1514;
+pub const LF_MANAGED: LeafKind = LeafKind(0x1514);
 /// The kind of a type server reference with a GUID (`LF_TYPESERVER2`).
-pub const LF_TYPESERVER2: u16 = 0x1515;
+pub const LF_TYPESERVER2: LeafKind = LeafKind(0x1515);
 /// The kind of a strided array (`LF_STRIDED_ARRAY`).
-pub const LF_STRIDED_ARRAY: u16 = 0x1516;
+pub const LF_STRIDED_ARRAY: LeafKind = LeafKind(0x1516);
 /// The kind of an HLSL built-in type (`LF_HLSL`).
-pub const LF_HLSL: u16 = 0x1517;
+pub const LF_HLSL: LeafKind = LeafKind(0x1517);
 /// The kind of a type with a modifier list (`LF_MODIFIER_EX`).
-pub const LF_MODIFIER_EX: u16 = 0x1518;
+pub const LF_MODIFIER_EX: LeafKind = LeafKind(0x1518);
 /// The kind of an interface type (`LF_INTERFACE`).
-pub const LF_INTERFACE: u16 = 0x1519;
+pub const LF_INTERFACE: LeafKind = LeafKind(0x1519);
 /// The kind of a vector type (`LF_VECTOR`).
-pub const LF_VECTOR: u16 = 0x151b;
+pub const LF_VECTOR: LeafKind = LeafKind(0x151b);
 /// The kind of a matrix type (`LF_MATRIX`).
-pub const LF_MATRIX: u16 = 0x151c;
+pub const LF_MATRIX: LeafKind = LeafKind(0x151c);
 /// The kind of a virtual function table with method names (`LF_VFTABLE`).
-pub const LF_VFTABLE: u16 = 0x151d;
+pub const LF_VFTABLE: LeafKind = LeafKind(0x151d);
 /// The kind of a class with a 32-bit property word (`LF_CLASS2`).
-pub const LF_CLASS2: u16 = 0x1608;
+pub const LF_CLASS2: LeafKind = LeafKind(0x1608);
 /// The kind of a structure with a 32-bit property word (`LF_STRUCTURE2`).
-pub const LF_STRUCTURE2: u16 = 0x1609;
+pub const LF_STRUCTURE2: LeafKind = LeafKind(0x1609);
 /// The kind of a union with a 32-bit property word (`LF_UNION2`).
-pub const LF_UNION2: u16 = 0x160a;
+pub const LF_UNION2: LeafKind = LeafKind(0x160a);
 /// The kind of an interface with a 32-bit property word (`LF_INTERFACE2`).
-pub const LF_INTERFACE2: u16 = 0x160b;
+pub const LF_INTERFACE2: LeafKind = LeafKind(0x160b);
 
 /// The error context for a payload that ends before its last field.
 pub(crate) const TRUNCATED: &str = "type record payload is truncated";
@@ -259,21 +259,21 @@ impl<'a> TypeLeaf<'a> {
     ///   has no terminator, if an enumeration field has an unknown value, if
     ///   a field-list member is malformed, or if bytes after the last field
     ///   are not valid padding. UDT records also accept the MASM form of
-    ///   [`TypeLeaf::producer_padding`].
+    ///   [`TypeLeaf::trailing`].
     /// - [`ErrorKind::UnsupportedVersion`] for a numeric leaf with an unknown
     ///   tag, for a field-list member kind without a decoder, or for constant
     ///   dimension bounds of a type without a known size.
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let data = record.data;
-        Ok(match record.kind {
+        Ok(match LeafKind(record.kind) {
             LF_MODIFIER => Self::Modifier(Modifier::decode(data)?),
             LF_POINTER => Self::Pointer(Pointer::decode(data)?),
             LF_PROCEDURE => Self::Procedure(Procedure::decode(data)?),
             LF_MFUNCTION => Self::MemberFunction(MemberFunction::decode(data)?),
             LF_ARGLIST => Self::ArgumentList(ArgumentList::decode(data)?),
-            LF_FIELDLIST => Self::FieldList(FieldList::decode(data)?),
+            LF_FIELDLIST => Self::FieldList(FieldList::parse(data)?),
             LF_BITFIELD => Self::Bitfield(Bitfield::decode(data)?),
-            LF_METHODLIST => Self::MethodList(MethodList::decode(data)?),
+            LF_METHODLIST => Self::MethodList(MethodList::parse(data)?),
             LF_ARRAY => Self::Array(Array::decode(data)?),
             LF_CLASS => Self::Class(Class::decode(ClassKind::Class, data)?),
             LF_STRUCTURE => Self::Class(Class::decode(ClassKind::Structure, data)?),
@@ -293,7 +293,7 @@ impl<'a> TypeLeaf<'a> {
 
     /// Return the leaf kind of the record.
     #[must_use]
-    pub const fn kind(&self) -> u16 {
+    pub const fn kind(&self) -> LeafKind {
         match self {
             Self::Modifier(_) => LF_MODIFIER,
             Self::Pointer(_) => LF_POINTER,
@@ -354,7 +354,7 @@ impl<'a> TypeLeaf<'a> {
             Self::ModifierEx(_) => LF_MODIFIER_EX,
             Self::Vector(_) => LF_VECTOR,
             Self::Matrix(_) => LF_MATRIX,
-            Self::Unsupported(record) => record.kind,
+            Self::Unsupported(record) => LeafKind(record.kind),
         }
     }
 
@@ -375,7 +375,7 @@ impl<'a> TypeLeaf<'a> {
     ///   record that is too long.
     /// - [`ErrorKind::InvalidFormat`] if a name contains a NUL byte, or if
     ///   fields do not match each other, for example a unique name without
-    ///   the unique-name flag, or producer padding outside the MASM form or
+    ///   the unique-name flag, or trailing bytes outside the MASM form or
     ///   that does not end the record on a 4-byte boundary.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let mut writer = Output::new(out);
@@ -453,13 +453,13 @@ impl<'a> TypeLeaf<'a> {
     /// Microsoft Macro Assembler writes these bytes after some `LF_STRUCTURE` names, for
     /// example `f1 6d 65`. Other kinds always give an empty slice.
     #[must_use]
-    pub const fn producer_padding(&self) -> &'a [u8] {
+    pub const fn trailing(&self) -> &'a [u8] {
         match self {
-            Self::Class(value) => value.producer_padding,
-            Self::WideClass(value) => value.producer_padding,
-            Self::Union(value) => value.producer_padding,
-            Self::WideUnion(value) => value.producer_padding,
-            Self::Enum(value) => value.producer_padding,
+            Self::Class(value) => value.trailing,
+            Self::WideClass(value) => value.trailing,
+            Self::Union(value) => value.trailing,
+            Self::WideUnion(value) => value.trailing,
+            Self::Enum(value) => value.trailing,
             _ => &[],
         }
     }
@@ -484,7 +484,7 @@ impl<'a> TypeLeaf<'a> {
 /// Decode a record of a kind that is not in the common dispatch.
 fn decode_other(record: Record<'_>) -> Result<TypeLeaf<'_>> {
     let data = record.data;
-    Ok(match record.kind {
+    Ok(match LeafKind(record.kind) {
         LF_COBOL0 => TypeLeaf::Cobol0(Cobol0::decode(data)?),
         LF_BARRAY => TypeLeaf::BasicArray(single_index(data)?),
         LF_VFTPATH => TypeLeaf::VirtualFunctionTablePath(counted_indices(data)?),

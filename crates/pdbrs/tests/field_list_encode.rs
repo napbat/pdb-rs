@@ -11,11 +11,11 @@ use pdbrs::native::codeview::field_list::{
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::type_record::{LF_FIELDLIST, MemberAttributes, TypeLeaf};
-use pdbrs::native::codeview::{Record, Records};
+use pdbrs::native::codeview::{LeafKind, Record, Records};
 
 /// Serialize one member and pad it to 4 bytes with `LF_PAD` bytes.
-fn member(kind: u16, fields: &[&[u8]]) -> Vec<u8> {
-    let mut bytes = kind.to_le_bytes().to_vec();
+fn member(kind: LeafKind, fields: &[&[u8]]) -> Vec<u8> {
+    let mut bytes = kind.0.to_le_bytes().to_vec();
     for field in fields {
         bytes.extend_from_slice(field);
     }
@@ -31,7 +31,7 @@ fn u32le(value: u32) -> [u8; 4] {
 }
 
 /// Every member kind once.
-fn all_members() -> Vec<(u16, Vec<u8>)> {
+fn all_members() -> Vec<(LeafKind, Vec<u8>)> {
     vec![
         (
             LF_BCLASS,
@@ -121,7 +121,7 @@ fn every_member_kind_decodes_and_re_encodes() {
         .iter()
         .flat_map(|(_, bytes)| bytes.clone())
         .collect();
-    let list = FieldList::decode(&data).unwrap();
+    let list = FieldList::parse(&data).unwrap();
     assert_eq!(list.continuation(), Some(TypeIndex(0x100a)));
     let decoded: Vec<Member<'_>> = list.members().collect::<Result<_, _>>().unwrap();
     assert_eq!(decoded.len(), members.len());
@@ -136,14 +136,9 @@ fn every_member_kind_decodes_and_re_encodes() {
         .unwrap()
         .to_le_bytes()
         .to_vec();
-    full.extend_from_slice(&LF_FIELDLIST.to_le_bytes());
+    full.extend_from_slice(&LF_FIELDLIST.0.to_le_bytes());
     full.extend_from_slice(&data);
-    let leaf = TypeLeaf::decode(Record {
-        offset: 0,
-        kind: LF_FIELDLIST,
-        data: &data,
-    })
-    .unwrap();
+    let leaf = TypeLeaf::decode(Record::new(0, LF_FIELDLIST.0, &data)).unwrap();
     let mut out = Vec::new();
     leaf.encode(&mut out).unwrap();
     assert_eq!(out, full);
@@ -154,7 +149,7 @@ fn each_truncated_member_is_an_error() {
     for (kind, bytes) in all_members() {
         let unpadded = bytes.iter().rposition(|&byte| byte < 0xf0).unwrap() + 1;
         for end in 2..unpadded {
-            let error = FieldList::decode(&bytes[..end]).unwrap_err();
+            let error = FieldList::parse(&bytes[..end]).unwrap_err();
             assert_eq!(
                 error.kind(),
                 ErrorKind::InvalidFormat,
@@ -168,7 +163,7 @@ fn each_truncated_member_is_an_error() {
 fn reserved_fields_must_be_zero() {
     for kind in [LF_FRIENDCLS, LF_VFUNCOFF, LF_FRIENDFCN] {
         let bytes = member(kind, &[&[1, 0], &u32le(0x1000), &u32le(0), b"\0"]);
-        let error = FieldList::decode(&bytes).unwrap_err();
+        let error = FieldList::parse(&bytes).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "kind {kind:#x}");
     }
 }
@@ -176,25 +171,25 @@ fn reserved_fields_must_be_zero() {
 #[test]
 fn one_method_offset_must_match_the_method_property() {
     let introducing = MemberAttributes::from_raw(0x13).unwrap();
-    let error = Member::OneMethod(OneMethod {
-        attributes: introducing,
-        method_type: TypeIndex(0x1000),
-        vtable_offset: None,
-        name: b"f",
-    })
-    .encode(&mut Vec::new())
-    .unwrap_err();
+    let mut method = OneMethod::default();
+    method.attributes = introducing;
+    method.method_type = TypeIndex(0x1000);
+    method.vtable_offset = None;
+    method.name = b"f";
+    let error = Member::OneMethod(method)
+        .encode(&mut Vec::new())
+        .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }
 
 /// An enumerator of 16 bytes: kind, attributes, an immediate value and a
 /// name of 9 bytes with its terminator.
 fn enumerator(value: u16) -> Member<'static> {
-    Member::Enumerator(Enumerator {
-        attributes: MemberAttributes::from_raw(3).unwrap(),
-        value: Numeric::from_integer(Integer::Unsigned(u128::from(value))),
-        name: b"Item_000",
-    })
+    let mut enumerator = Enumerator::default();
+    enumerator.attributes = MemberAttributes::from_raw(3).unwrap();
+    enumerator.value = Numeric::from_integer(Integer::Unsigned(u128::from(value)));
+    enumerator.name = b"Item_000";
+    Member::Enumerator(enumerator)
 }
 
 /// Split `members` and return the records.
@@ -227,7 +222,7 @@ fn long_lists_split_at_the_limit_with_continuations() {
     let values: Vec<Vec<Option<u128>>> = records
         .iter()
         .map(|record| {
-            FieldList::decode(record.data)
+            FieldList::parse(record.data)
                 .unwrap()
                 .members()
                 .filter_map(|member| match member.unwrap() {
@@ -249,7 +244,7 @@ fn long_lists_split_at_the_limit_with_continuations() {
     );
     let continuations: Vec<_> = records
         .iter()
-        .map(|record| FieldList::decode(record.data).unwrap().continuation())
+        .map(|record| FieldList::parse(record.data).unwrap().continuation())
         .collect();
     assert_eq!(
         continuations,
@@ -294,15 +289,14 @@ fn split_rejects_invalid_input() {
 
 #[test]
 fn base_interface_is_a_base_class_layout() {
-    let base = BaseClass {
-        attributes: MemberAttributes::from_raw(3).unwrap(),
-        base_type: TypeIndex(0x1000),
-        offset: Numeric::from_integer(Integer::Unsigned(0)),
-    };
+    let mut base = BaseClass::default();
+    base.attributes = MemberAttributes::from_raw(3).unwrap();
+    base.base_type = TypeIndex(0x1000);
+    base.offset = Numeric::from_integer(Integer::Unsigned(0));
     let mut class = Vec::new();
     Member::BaseClass(base).encode(&mut class).unwrap();
     let mut interface = Vec::new();
     Member::BaseInterface(base).encode(&mut interface).unwrap();
     assert_eq!(class[2..], interface[2..]);
-    assert_eq!(interface[..2], LF_BINTERFACE.to_le_bytes());
+    assert_eq!(interface[..2], LF_BINTERFACE.0.to_le_bytes());
 }

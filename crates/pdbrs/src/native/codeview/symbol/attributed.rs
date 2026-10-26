@@ -10,47 +10,48 @@
 //! kinds store a type index. [`Symbol::type_index`](super::Symbol::type_index)
 //! gives the value only for the native kinds.
 
-use super::super::Fields;
 use super::super::index::TypeIndex;
+use super::super::{Fields, SymbolKind};
 use super::{LocalFlags, SectionOffset};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a managed type reference (`S_MANTYPREF`).
-pub const S_MANTYPREF: u16 = 0x1028;
+pub const S_MANTYPREF: SymbolKind = SymbolKind(0x1028);
 /// The kind of a variable in several 8-bit register numbers (`S_MANYREG`).
-pub const S_MANYREG: u16 = 0x110a;
+pub const S_MANYREG: SymbolKind = SymbolKind(0x110a);
 /// The kind of a variable in several 16-bit register numbers (`S_MANYREG2`).
-pub const S_MANYREG2: u16 = 0x1117;
+pub const S_MANYREG2: SymbolKind = SymbolKind(0x1117);
 /// The kind of a local variable in an IL slot (`S_LOCALSLOT`).
-pub const S_LOCALSLOT: u16 = 0x111a;
+pub const S_LOCALSLOT: SymbolKind = SymbolKind(0x111a);
 /// The kind of a parameter in an IL slot (`S_PARAMSLOT`).
-pub const S_PARAMSLOT: u16 = 0x111b;
+pub const S_PARAMSLOT: SymbolKind = SymbolKind(0x111b);
 /// The kind of a module-local managed data symbol (`S_LMANDATA`).
-pub const S_LMANDATA: u16 = 0x111c;
+pub const S_LMANDATA: SymbolKind = SymbolKind(0x111c);
 /// The kind of a global managed data symbol (`S_GMANDATA`).
-pub const S_GMANDATA: u16 = 0x111d;
+pub const S_GMANDATA: SymbolKind = SymbolKind(0x111d);
 /// The kind of a managed frame-relative variable (`S_MANFRAMEREL`).
-pub const S_MANFRAMEREL: u16 = 0x111e;
+pub const S_MANFRAMEREL: SymbolKind = SymbolKind(0x111e);
 /// The kind of a managed register variable (`S_MANREGISTER`).
-pub const S_MANREGISTER: u16 = 0x111f;
+pub const S_MANREGISTER: SymbolKind = SymbolKind(0x111f);
 /// The kind of a managed variable in several 8-bit register numbers (`S_MANMANYREG`).
-pub const S_MANMANYREG: u16 = 0x1121;
+pub const S_MANMANYREG: SymbolKind = SymbolKind(0x1121);
 /// The kind of a managed register-relative variable (`S_MANREGREL`).
-pub const S_MANREGREL: u16 = 0x1122;
+pub const S_MANREGREL: SymbolKind = SymbolKind(0x1122);
 /// The kind of a managed variable in several 16-bit register numbers (`S_MANMANYREG2`).
-pub const S_MANMANYREG2: u16 = 0x1123;
+pub const S_MANMANYREG2: SymbolKind = SymbolKind(0x1123);
 /// The kind of a frame-relative variable with attributes (`S_ATTR_FRAMEREL`).
-pub const S_ATTR_FRAMEREL: u16 = 0x112e;
+pub const S_ATTR_FRAMEREL: SymbolKind = SymbolKind(0x112e);
 /// The kind of a register variable with attributes (`S_ATTR_REGISTER`).
-pub const S_ATTR_REGISTER: u16 = 0x112f;
+pub const S_ATTR_REGISTER: SymbolKind = SymbolKind(0x112f);
 /// The kind of a register-relative variable with attributes (`S_ATTR_REGREL`).
-pub const S_ATTR_REGREL: u16 = 0x1130;
+pub const S_ATTR_REGREL: SymbolKind = SymbolKind(0x1130);
 /// The kind of a variable in several registers with attributes (`S_ATTR_MANYREG`).
-pub const S_ATTR_MANYREG: u16 = 0x1131;
+pub const S_ATTR_MANYREG: SymbolKind = SymbolKind(0x1131);
 
 /// The attributes of a variable (`CV_lvar_attr`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VariableAttributes {
     /// The first code address where the variable is live.
     pub address: SectionOffset,
@@ -78,7 +79,7 @@ impl VariableAttributes {
 /// The 8-bit kinds store a `u8` count and `u8` registers. The 16-bit kinds
 /// store a `u16` count and `u16` registers. The most significant register
 /// is first.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct RegisterList<'a> {
     /// The register bytes.
     bytes: &'a [u8],
@@ -95,7 +96,7 @@ impl<'a> RegisterList<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] if `wide` is set and the length is
     /// odd. Returns [`ErrorKind::LimitExceeded`] if the count does not fit the
     /// count field.
-    pub fn new(bytes: &'a [u8], wide: bool) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8], wide: bool) -> Result<Self> {
         if wide && !bytes.len().is_multiple_of(2) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("16-bit register list has an odd length"));
@@ -180,7 +181,8 @@ impl<'a> RegisterList<'a> {
 ///
 /// The kinds are [`S_MANYREG`], [`S_MANYREG2`], [`S_MANMANYREG`],
 /// [`S_MANMANYREG2`] and [`S_ATTR_MANYREG`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ManyRegisters<'a> {
     /// The type index, or a metadata token for the managed kinds.
     pub type_index: TypeIndex,
@@ -224,7 +226,8 @@ impl<'a> ManyRegisters<'a> {
 }
 
 /// A variable in an IL slot ([`S_LOCALSLOT`] and [`S_PARAMSLOT`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Slot<'a> {
     /// The slot index.
     pub slot: u32,
@@ -257,7 +260,8 @@ impl<'a> Slot<'a> {
 
 /// A frame-relative variable with attributes ([`S_MANFRAMEREL`] and
 /// [`S_ATTR_FRAMEREL`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AttributedFrameRelative<'a> {
     /// The offset from the frame. `cvinfo.h` gives a signed `CV_off32_t`.
     pub offset: i32,
@@ -295,7 +299,8 @@ impl<'a> AttributedFrameRelative<'a> {
 
 /// A register variable with attributes ([`S_MANREGISTER`] and
 /// [`S_ATTR_REGISTER`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AttributedRegister<'a> {
     /// The type index, or a metadata token for [`S_MANREGISTER`].
     pub type_index: TypeIndex,
@@ -333,7 +338,8 @@ impl<'a> AttributedRegister<'a> {
 
 /// A register-relative variable with attributes ([`S_MANREGREL`] and
 /// [`S_ATTR_REGREL`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct AttributedRegisterRelative<'a> {
     /// The offset from the register.
     pub offset: u32,

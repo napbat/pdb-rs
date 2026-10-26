@@ -15,7 +15,7 @@
 //! and `lld-link` copy these records to the PDB. LLVM, DIA and `pdbtool` read
 //! them; LLVM does not check the bytes after the last field
 //! (`CodeViewRecordIO::endRecord`). The decoders keep these bytes in the
-//! `producer_padding` field, and the encoders write them again (#29).
+//! `trailing` field, and the encoders write them again (#29).
 
 use super::{ClassOptions, fields};
 use crate::native::codeview::Fields;
@@ -29,7 +29,8 @@ use crate::{Error, ErrorKind, Result};
 ///
 /// LLVM calls the records with these fields tag records. Type hashing and
 /// forward-reference resolution use only these fields.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Tag<'a> {
     /// The properties of the type.
     pub options: ClassOptions,
@@ -108,6 +109,7 @@ const fn low_options(options: u32) -> ClassOptions {
 
 /// The leaf kind of a [`Class`] or [`WideClass`] record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ClassKind {
     /// `LF_CLASS` or `LF_CLASS2`.
     Class,
@@ -119,6 +121,7 @@ pub enum ClassKind {
 
 /// An `LF_CLASS`, `LF_STRUCTURE` or `LF_INTERFACE` record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Class<'a> {
     /// The leaf kind.
     pub kind: ClassKind,
@@ -142,10 +145,27 @@ pub struct Class<'a> {
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub producer_padding: &'a [u8],
+    pub trailing: &'a [u8],
 }
 
 impl<'a> Class<'a> {
+    /// Make a record with `kind`. The other fields are zero or empty.
+    #[must_use]
+    pub fn new(kind: ClassKind) -> Self {
+        Self {
+            kind,
+            member_count: 0,
+            options: ClassOptions(0),
+            field_list: TypeIndex::NONE,
+            derivation_list: TypeIndex::NONE,
+            vtable_shape: TypeIndex::NONE,
+            size: Numeric::default(),
+            name: &[],
+            unique_name: None,
+            trailing: &[],
+        }
+    }
+
     /// Decode the payload of a class, structure or interface record.
     pub(super) fn decode(kind: ClassKind, data: &'a [u8]) -> Result<Self> {
         let mut fields = fields(data);
@@ -166,7 +186,7 @@ impl<'a> Class<'a> {
             size,
             name,
             unique_name,
-            producer_padding,
+            trailing: producer_padding,
         })
     }
 
@@ -183,7 +203,7 @@ impl<'a> Class<'a> {
 
     /// Return the names and the producer padding.
     const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.producer_padding)
+        (self.name, self.unique_name, self.trailing)
     }
 
     /// Return the options and the names.
@@ -199,6 +219,7 @@ impl<'a> Class<'a> {
 
 /// An `LF_CLASS2`, `LF_STRUCTURE2` or `LF_INTERFACE2` record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct WideClass<'a> {
     /// The leaf kind.
     pub kind: ClassKind,
@@ -222,10 +243,27 @@ pub struct WideClass<'a> {
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub producer_padding: &'a [u8],
+    pub trailing: &'a [u8],
 }
 
 impl<'a> WideClass<'a> {
+    /// Make a record with `kind`. The other fields are zero or empty.
+    #[must_use]
+    pub fn new(kind: ClassKind) -> Self {
+        Self {
+            kind,
+            options: 0,
+            field_list: TypeIndex::NONE,
+            derivation_list: TypeIndex::NONE,
+            vtable_shape: TypeIndex::NONE,
+            member_count: Numeric::default(),
+            size: Numeric::default(),
+            name: &[],
+            unique_name: None,
+            trailing: &[],
+        }
+    }
+
     /// Decode the payload of a wide class, structure or interface record.
     pub(super) fn decode(kind: ClassKind, data: &'a [u8]) -> Result<Self> {
         let mut fields = fields(data);
@@ -246,7 +284,7 @@ impl<'a> WideClass<'a> {
             size,
             name,
             unique_name,
-            producer_padding,
+            trailing: producer_padding,
         })
     }
 
@@ -263,7 +301,7 @@ impl<'a> WideClass<'a> {
 
     /// Return the names and the producer padding.
     const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.producer_padding)
+        (self.name, self.unique_name, self.trailing)
     }
 
     /// Return the low 16 bits of the options and the names.
@@ -278,7 +316,8 @@ impl<'a> WideClass<'a> {
 }
 
 /// An `LF_UNION` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Union<'a> {
     /// The number of members in the field list.
     pub member_count: u16,
@@ -296,7 +335,7 @@ pub struct Union<'a> {
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub producer_padding: &'a [u8],
+    pub trailing: &'a [u8],
 }
 
 impl<'a> Union<'a> {
@@ -315,7 +354,7 @@ impl<'a> Union<'a> {
             size,
             name,
             unique_name,
-            producer_padding,
+            trailing: producer_padding,
         })
     }
 
@@ -330,7 +369,7 @@ impl<'a> Union<'a> {
 
     /// Return the names and the producer padding.
     const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.producer_padding)
+        (self.name, self.unique_name, self.trailing)
     }
 
     /// Return the options and the names.
@@ -345,7 +384,8 @@ impl<'a> Union<'a> {
 }
 
 /// An `LF_UNION2` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct WideUnion<'a> {
     /// The 32-bit property word. The low 16 bits are [`ClassOptions`].
     pub options: u32,
@@ -363,7 +403,7 @@ pub struct WideUnion<'a> {
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub producer_padding: &'a [u8],
+    pub trailing: &'a [u8],
 }
 
 impl<'a> WideUnion<'a> {
@@ -382,7 +422,7 @@ impl<'a> WideUnion<'a> {
             size,
             name,
             unique_name,
-            producer_padding,
+            trailing: producer_padding,
         })
     }
 
@@ -397,7 +437,7 @@ impl<'a> WideUnion<'a> {
 
     /// Return the names and the producer padding.
     const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.producer_padding)
+        (self.name, self.unique_name, self.trailing)
     }
 
     /// Return the low 16 bits of the options and the names.
@@ -412,7 +452,8 @@ impl<'a> WideUnion<'a> {
 }
 
 /// An `LF_ENUM` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Enum<'a> {
     /// The number of enumerators in the field list.
     pub member_count: u16,
@@ -430,7 +471,7 @@ pub struct Enum<'a> {
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub producer_padding: &'a [u8],
+    pub trailing: &'a [u8],
 }
 
 impl<'a> Enum<'a> {
@@ -449,7 +490,7 @@ impl<'a> Enum<'a> {
             field_list,
             name,
             unique_name,
-            producer_padding,
+            trailing: producer_padding,
         })
     }
 
@@ -464,7 +505,7 @@ impl<'a> Enum<'a> {
 
     /// Return the names and the producer padding.
     const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.producer_padding)
+        (self.name, self.unique_name, self.trailing)
     }
 
     /// Return the options and the names.

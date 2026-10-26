@@ -12,6 +12,8 @@
 
 use alloc::vec::Vec;
 
+use super::super::super::SymbolKind;
+use super::super::super::index::ModuleSymbolOffset;
 use super::super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
@@ -51,10 +53,10 @@ impl ModuleSymbolWriter {
     /// A module stream starts with a 4-byte signature, so `base` is
     /// usually 4.
     #[must_use]
-    pub const fn new(base: u32) -> Self {
+    pub const fn new(base: ModuleSymbolOffset) -> Self {
         Self {
             out: Vec::new(),
-            base,
+            base: base.0,
             stack: Vec::new(),
         }
     }
@@ -65,10 +67,11 @@ impl ModuleSymbolWriter {
     ///
     /// Returns [`ErrorKind::OffsetOverflow`] if the offset does not fit in
     /// 32 bits.
-    pub fn next_offset(&self) -> Result<u32> {
+    pub fn next_offset(&self) -> Result<ModuleSymbolOffset> {
         u32::try_from(self.out.len())
             .ok()
             .and_then(|length| self.base.checked_add(length))
+            .map(ModuleSymbolOffset)
             .ok_or_else(|| {
                 Error::new(ErrorKind::OffsetOverflow, None)
                     .with_context("module symbol offset does not fit in 32 bits")
@@ -88,29 +91,29 @@ impl ModuleSymbolWriter {
     ///   scope, or an end kind that does not match its scope.
     ///
     /// After an error, the writer is unchanged.
-    pub fn push(&mut self, kind: u16, data: &SymbolData<'_>) -> Result<u32> {
+    pub fn push(&mut self, kind: SymbolKind, data: &SymbolData<'_>) -> Result<ModuleSymbolOffset> {
         self.push_with(kind, data, |out| data.encode(kind, out))
     }
 
     /// Encode a decoded symbol and return its module stream offset.
     ///
     /// Unlike [`ModuleSymbolWriter::push`], this function keeps a long run
-    /// of zero padding (see [`Symbol::padding`]).
+    /// of zero padding (see [`Symbol::trailing_zeros`]).
     ///
     /// # Errors
     ///
     /// The errors of [`ModuleSymbolWriter::push`].
-    pub fn push_symbol(&mut self, symbol: &Symbol<'_>) -> Result<u32> {
+    pub fn push_symbol(&mut self, symbol: &Symbol<'_>) -> Result<ModuleSymbolOffset> {
         self.push_with(symbol.kind(), symbol.data(), |out| symbol.encode(out))
     }
 
     /// Encode a record with `encode` and set its scope links.
     fn push_with(
         &mut self,
-        kind: u16,
+        kind: SymbolKind,
         data: &SymbolData<'_>,
         encode: impl FnOnce(&mut Vec<u8>) -> Result<()>,
-    ) -> Result<u32> {
+    ) -> Result<ModuleSymbolOffset> {
         let offset = self.next_offset()?;
         let position = self.out.len();
         let starts_scope = data.scope_links().is_some();
@@ -139,11 +142,11 @@ impl ModuleSymbolWriter {
             self.patch(position + END_FIELD, 0);
             self.stack.push(Open {
                 position,
-                offset,
+                offset: offset.0,
                 inline: matches!(kind, S_INLINESITE | S_INLINESITE2),
             });
         } else if ends_scope && let Some(open) = self.stack.pop() {
-            self.patch(open.position + END_FIELD, offset);
+            self.patch(open.position + END_FIELD, offset.0);
         }
         Ok(offset)
     }

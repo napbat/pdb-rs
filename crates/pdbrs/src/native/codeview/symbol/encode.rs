@@ -7,8 +7,9 @@
 
 use alloc::vec::Vec;
 
-use super::super::Fields;
 use super::super::writer::Padding;
+use super::super::{Fields, SymbolKind};
+use super::procedure::write_id_list;
 use super::{
     ProcedureType, S_ANNOTATION, S_ANNOTATIONREF, S_ARMSWITCHTABLE, S_ASSOCIATION, S_ATTR_FRAMEREL,
     S_ATTR_MANYREG, S_ATTR_REGISTER, S_ATTR_REGREL, S_BLOCK32, S_BPREL32, S_BPREL32_ENCTMP,
@@ -51,12 +52,12 @@ impl SymbolData<'_> {
     ///   output cannot grow.
     ///
     /// After an error, `out` can hold a part of the record.
-    pub fn encode(&self, kind: u16, out: &mut Vec<u8>) -> Result<()> {
+    pub fn encode(&self, kind: SymbolKind, out: &mut Vec<u8>) -> Result<()> {
         self.encode_with(kind, Padding::Zero, out)
     }
 
     /// Append the record of `kind` with these fields and `padding` to `out`.
-    fn encode_with(&self, kind: u16, padding: Padding, out: &mut Vec<u8>) -> Result<()> {
+    fn encode_with(&self, kind: SymbolKind, padding: Padding, out: &mut Vec<u8>) -> Result<()> {
         let mut writer = Output::new(out);
         let start = writer.begin_record(kind)?;
         let written =
@@ -70,7 +71,7 @@ impl SymbolData<'_> {
 
     /// Write the fields of a kind that is not a variable, data or def-range
     /// kind. Return `false` if the variant does not belong to `kind`.
-    fn write_fields(&self, kind: u16, out: &mut Output<'_>) -> Result<bool> {
+    fn write_fields(&self, kind: SymbolKind, out: &mut Output<'_>) -> Result<bool> {
         let id = matches!(
             kind,
             S_GPROC32_ID
@@ -127,7 +128,7 @@ impl SymbolData<'_> {
             {
                 value.write(out)?;
             }
-            (S_INLINEES, Self::Inlinees(value)) => value.write(out)?,
+            (S_INLINEES, Self::Inlinees(value)) => write_id_list(value, out)?,
             (S_CALLEES, Self::Callees(value)) | (S_CALLERS, Self::Callers(value)) => {
                 value.write(out)?;
             }
@@ -170,7 +171,7 @@ impl SymbolData<'_> {
     /// Write the fields of a variable, data or def-range kind. Return
     /// `false` for other kinds and for a variant that does not belong to
     /// `kind`.
-    fn write_variable(&self, kind: u16, out: &mut Output<'_>) -> Result<bool> {
+    fn write_variable(&self, kind: SymbolKind, out: &mut Output<'_>) -> Result<bool> {
         let attributed = !matches!(kind, S_MANYREG | S_MANYREG2);
         let wide = matches!(kind, S_MANYREG2 | S_MANMANYREG2 | S_ATTR_MANYREG);
         match (kind, self) {
@@ -263,7 +264,7 @@ impl Symbol<'_> {
     /// The errors of [`SymbolData::encode`].
     ///
     /// The output has the length of the original record: the encoder writes the fields
-    /// and then the zero bytes of the original record after them (see [`Symbol::padding`]).
+    /// and then the zero bytes of the original record after them (see [`Symbol::trailing_zeros`]).
     /// A record with four or more zero bytes, or with a length that is not a multiple of 4,
     /// thus keeps its bytes.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
@@ -293,7 +294,7 @@ impl Symbol<'_> {
 ///
 /// The decoder gives [`SymbolData::Unsupported`] only for kinds without a
 /// decoder, and it does that without reading a field.
-fn is_decoded_kind(kind: u16) -> bool {
+fn is_decoded_kind(kind: SymbolKind) -> bool {
     let mut fields = Fields::new(&[], ErrorKind::InvalidFormat, SHORT_PAYLOAD);
     !matches!(
         decode_data(kind, &mut fields),

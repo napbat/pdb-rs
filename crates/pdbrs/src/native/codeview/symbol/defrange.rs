@@ -7,24 +7,25 @@
 //! give `DEFRANGECONSTVAL_ON_ENTRY` (an array of `unsigned long` values) and
 //! `DEFRANGEGLOBALSYM_ON_ENTRY` (a `long` offset and a section number).
 
-use super::super::Fields;
+use super::super::{Fields, SymbolKind};
 use super::{AddressGaps, AddressRange, SectionOffset};
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
 
 /// The kind of a def-range with a DIA program (`S_DEFRANGE`).
-pub const S_DEFRANGE: u16 = 0x113f;
+pub const S_DEFRANGE: SymbolKind = SymbolKind(0x113f);
 /// The kind of a def-range with a DIA program for a part of a variable
 /// (`S_DEFRANGE_SUBFIELD`).
-pub const S_DEFRANGE_SUBFIELD: u16 = 0x1140;
+pub const S_DEFRANGE_SUBFIELD: SymbolKind = SymbolKind(0x1140);
 /// The kind of a constant value at procedure entry (`S_DEFRANGE_CONSTVAL_ON_ENTRY`).
-pub const S_DEFRANGE_CONSTVAL_ON_ENTRY: u16 = 0x117f;
+pub const S_DEFRANGE_CONSTVAL_ON_ENTRY: SymbolKind = SymbolKind(0x117f);
 /// The kind of a global symbol value at procedure entry
 /// (`S_DEFRANGE_GLOBALSYM_ON_ENTRY`).
-pub const S_DEFRANGE_GLOBALSYM_ON_ENTRY: u16 = 0x1180;
+pub const S_DEFRANGE_GLOBALSYM_ON_ENTRY: SymbolKind = SymbolKind(0x1180);
 
 /// A def-range with a DIA program ([`S_DEFRANGE`] and [`S_DEFRANGE_SUBFIELD`]).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DefRangeProgram<'a> {
     /// The DIA program that evaluates the value (`program`).
     pub program: u32,
@@ -67,7 +68,7 @@ impl<'a> DefRangeProgram<'a> {
 ///
 /// No reference describes the meaning of the values. The record stores
 /// little-endian 32-bit words.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct EntryValues<'a> {
     /// The little-endian 32-bit words.
     words: &'a [[u8; 4]],
@@ -80,7 +81,7 @@ impl<'a> EntryValues<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 4.
-    pub fn from_le_bytes(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let (words, rest) = bytes.as_chunks();
         if !rest.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -91,7 +92,7 @@ impl<'a> EntryValues<'a> {
 
     /// Read all remaining bytes as words.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        Self::from_le_bytes(fields.bytes(fields.rest().len())?)
+        Self::parse(fields.bytes(fields.rest().len())?)
     }
 
     /// Write the words.

@@ -10,6 +10,7 @@
 use alloc::vec::Vec;
 
 use super::SymbolOffset;
+use crate::native::codeview::SymbolKind;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
@@ -51,14 +52,14 @@ impl SymbolRecordWriter {
     /// - [`ErrorKind::LimitExceeded`] if the offset list cannot grow.
     ///
     /// After an error, the writer is unchanged.
-    pub fn push(&mut self, kind: u16, data: &SymbolData<'_>) -> Result<SymbolOffset> {
+    pub fn push(&mut self, kind: SymbolKind, data: &SymbolData<'_>) -> Result<SymbolOffset> {
         self.push_with(|out| data.encode(kind, out))
     }
 
     /// Encode a decoded symbol and return its offset in the stream.
     ///
     /// Unlike [`SymbolRecordWriter::push`], this function keeps a long run
-    /// of zero padding (see [`Symbol::padding`]).
+    /// of zero padding (see [`Symbol::trailing_zeros`]).
     ///
     /// # Errors
     ///

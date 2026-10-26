@@ -19,6 +19,7 @@
 use alloc::vec::Vec;
 
 use super::{HEADER_SIZE, TypeTable};
+use crate::native::codeview::LeafKind;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::type_record::{ReferenceRole, TypeLeaf};
 use crate::native::msf::StreamId;
@@ -189,7 +190,7 @@ fn build_graph(
             }
             let target = table.record(index)?;
             if let Some(kinds) = reference.role.kinds()
-                && !kinds.contains(&target.record.kind)
+                && !kinds.contains(&LeafKind(target.record.kind))
             {
                 return Err(invalid(
                     "type reference refers to a record of the wrong kind",

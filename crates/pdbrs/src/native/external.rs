@@ -25,7 +25,10 @@
 use alloc::vec::Vec;
 
 use super::Pdb;
-use super::codeview::symbol::{ModuleTypeSource, S_FASTLINK, S_MOD_TYPEREF, S_OBJNAME, SymbolData};
+use super::codeview::SymbolKind;
+use super::codeview::symbol::{
+    ModuleTypeSource, S_FASTLINK, S_MOD_TYPEREF, S_OBJNAME, Symbol, SymbolData,
+};
 use super::dbi::{Dbi, TypeServer};
 use super::info::Feature;
 use super::output::no_memory;
@@ -163,14 +166,16 @@ impl<S: ReadAt> Pdb<S> {
             let mut references = 0_usize;
             for record in stream.symbols() {
                 let record = record?;
-                if record.kind == S_OBJNAME
-                    && let SymbolData::ObjectName(name) = record.symbol()?.data()
+                let kind = SymbolKind(record.kind);
+                if kind == S_OBJNAME
+                    && let SymbolData::ObjectName(name) = Symbol::decode(record)?.data()
                 {
                     signature = name.signature;
-                } else if record.kind == S_FASTLINK {
+                } else if kind == S_FASTLINK {
                     references += 1;
-                } else if record.kind == S_MOD_TYPEREF
-                    && let SymbolData::ModuleTypeReference(reference) = record.symbol()?.data()
+                } else if kind == S_MOD_TYPEREF
+                    && let SymbolData::ModuleTypeReference(reference) =
+                        Symbol::decode(record)?.data()
                 {
                     let modules = &mut dependencies.module_types;
                     modules.try_reserve(1).map_err(|_| no_memory())?;
@@ -206,7 +211,7 @@ fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) 
     for dependency in &dependencies.module_types {
         let owner = match dependency.source {
             ModuleTypeSource::PrecompiledTypeOwner { .. } => dependency.module,
-            ModuleTypeSource::PrecompiledTypeUser { owner, .. } => u32::from(owner),
+            ModuleTypeSource::PrecompiledTypeUser { owner, .. } => owner.0,
             _ => continue,
         };
         let object = dbi

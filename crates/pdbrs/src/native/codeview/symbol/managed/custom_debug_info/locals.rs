@@ -10,6 +10,7 @@ use core::iter::FusedIterator;
 
 use super::super::super::super::Fields;
 use super::super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::portable::metadata::IlOffset;
 use crate::{ErrorKind, Result};
 
 /// The size of the flag field of a dynamic local.
@@ -22,7 +23,7 @@ const NAME_BYTES: usize = 128;
 const DYNAMIC_LOCAL_SIZE: usize = FLAG_BYTES + 4 + 4 + NAME_BYTES;
 
 /// The `dynamic` flags of local variables and constants.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct DynamicLocals<'a> {
     /// The 200-byte entries.
     bytes: &'a [u8],
@@ -55,17 +56,18 @@ impl<'a> DynamicLocals<'a> {
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub fn iter(&self) -> DynamicLocalIter<'a> {
-        DynamicLocalIter {
+    pub fn iter(&self) -> DynamicLocalsIter<'a> {
+        DynamicLocalsIter {
             chunks: self.bytes.as_chunks::<DYNAMIC_LOCAL_SIZE>().0.iter(),
         }
     }
 }
 
-iterable!(DynamicLocals, DynamicLocalIter);
+iterable!(DynamicLocals, DynamicLocalsIter);
 
 /// The `dynamic` flags of one local variable or constant.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct DynamicLocal<'a> {
     /// The flag bytes: one byte for each type in the signature, nonzero for
     /// `dynamic`. The slice has [`DynamicLocal::flag_count`] bytes, at most 64.
@@ -80,12 +82,12 @@ pub struct DynamicLocal<'a> {
 
 /// An iterator over [`DynamicLocals`].
 #[derive(Clone, Debug)]
-pub struct DynamicLocalIter<'a> {
+pub struct DynamicLocalsIter<'a> {
     /// The remaining entries.
     chunks: core::slice::Iter<'a, [u8; DYNAMIC_LOCAL_SIZE]>,
 }
 
-impl<'a> Iterator for DynamicLocalIter<'a> {
+impl<'a> Iterator for DynamicLocalsIter<'a> {
     type Item = DynamicLocal<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -109,12 +111,12 @@ impl<'a> Iterator for DynamicLocalIter<'a> {
     }
 }
 
-impl ExactSizeIterator for DynamicLocalIter<'_> {}
+impl ExactSizeIterator for DynamicLocalsIter<'_> {}
 
-impl FusedIterator for DynamicLocalIter<'_> {}
+impl FusedIterator for DynamicLocalsIter<'_> {}
 
 /// The tuple element names of local variables and constants.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TupleElementNames<'a> {
     /// The entries. [`TupleElementNames::parse`] checked them.
     bytes: &'a [u8],
@@ -161,16 +163,17 @@ impl<'a> TupleElementNames<'a> {
 iterable!(TupleElementNames, TupleElementNamesIter);
 
 /// The tuple element names of one local variable or constant.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TupleElementNamesEntry<'a> {
     /// The element names. An empty name means that the element has no name.
     pub element_names: Utf8Names<'a>,
     /// The local variable slot, or -1 for a constant.
     pub slot: i32,
     /// The first IL offset of the scope of a constant, or 0 for a variable.
-    pub scope_start: u32,
+    pub scope_start: IlOffset,
     /// The end IL offset of the scope of a constant, or 0 for a variable.
-    pub scope_end: u32,
+    pub scope_end: IlOffset,
     /// The UTF-8 name of the local variable or constant, not decoded as text.
     pub name: &'a [u8],
 }
@@ -185,8 +188,8 @@ impl<'a> TupleElementNamesEntry<'a> {
         }
         let bytes = &start[..start.len() - fields.rest().len()];
         let slot = fields.i32()?;
-        let scope_start = fields.u32()?;
-        let scope_end = fields.u32()?;
+        let scope_start = IlOffset::new(fields.u32()?);
+        let scope_end = IlOffset::new(fields.u32()?);
         let name = fields.name()?;
         Ok(Self {
             element_names: Utf8Names { bytes, len },
@@ -222,7 +225,7 @@ impl<'a> Iterator for TupleElementNamesIter<'a> {
 impl FusedIterator for TupleElementNamesIter<'_> {}
 
 /// A list of NUL-terminated UTF-8 names.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Utf8Names<'a> {
     /// The names with their NUL terminators.
     bytes: &'a [u8],
@@ -245,21 +248,21 @@ impl<'a> Utf8Names<'a> {
 
     /// Return an iterator over the names, without their NUL terminators.
     #[must_use]
-    pub fn iter(&self) -> Utf8NameIter<'a> {
-        Utf8NameIter { bytes: self.bytes }
+    pub fn iter(&self) -> Utf8NamesIter<'a> {
+        Utf8NamesIter { bytes: self.bytes }
     }
 }
 
-iterable!(Utf8Names, Utf8NameIter);
+iterable!(Utf8Names, Utf8NamesIter);
 
 /// An iterator over [`Utf8Names`].
 #[derive(Clone, Debug)]
-pub struct Utf8NameIter<'a> {
+pub struct Utf8NamesIter<'a> {
     /// The remaining names.
     bytes: &'a [u8],
 }
 
-impl<'a> Iterator for Utf8NameIter<'a> {
+impl<'a> Iterator for Utf8NamesIter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<&'a [u8]> {
@@ -270,4 +273,4 @@ impl<'a> Iterator for Utf8NameIter<'a> {
     }
 }
 
-impl FusedIterator for Utf8NameIter<'_> {}
+impl FusedIterator for Utf8NamesIter<'_> {}

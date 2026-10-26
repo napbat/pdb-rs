@@ -13,7 +13,8 @@ use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
 
 /// An `LF_TYPESERVER` record: the types are in another PDB.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeServer<'a> {
     /// The signature of the PDB.
     pub signature: u32,
@@ -45,7 +46,8 @@ impl<'a> TypeServer<'a> {
 }
 
 /// An `LF_TYPESERVER2` record: the types are in another PDB with a GUID.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct TypeServer2<'a> {
     /// The GUID of the PDB, in its serialized byte order.
     pub guid: [u8; 16],
@@ -77,7 +79,8 @@ impl<'a> TypeServer2<'a> {
 }
 
 /// An `LF_PRECOMP` record: the types include a precompiled type file.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Precompiled<'a> {
     /// The first type index that the inclusion gives.
     pub start_index: TypeIndex,

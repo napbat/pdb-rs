@@ -20,7 +20,8 @@ const MODIFIER_SIZE: usize = 2;
 const PROPERTY_COUNT_MASK: u16 = 0x000f;
 
 /// An `LF_HLSL` record: a built-in HLSL type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Hlsl<'a> {
     /// The sub-type, if any.
     pub subtype: TypeIndex,
@@ -141,7 +142,8 @@ impl<'a> Iterator for NumericList<'a> {
 impl FusedIterator for NumericList<'_> {}
 
 /// An `LF_MODIFIER_EX` record: a type with a list of modifiers.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct ModifierEx<'a> {
     /// The modified type.
     pub modified_type: TypeIndex,
@@ -206,7 +208,8 @@ impl<'a> ModifierEx<'a> {
 }
 
 /// An `LF_VECTOR` record: a vector of elements.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Vector<'a> {
     /// The element type.
     pub element_type: TypeIndex,
@@ -242,7 +245,8 @@ impl<'a> Vector<'a> {
 }
 
 /// An `LF_MATRIX` record: a matrix of elements.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct Matrix<'a> {
     /// The element type.
     pub element_type: TypeIndex,

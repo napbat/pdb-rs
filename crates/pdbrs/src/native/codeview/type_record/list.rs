@@ -25,7 +25,7 @@ fn too_long() -> Error {
 }
 
 /// A borrowed list of serialized `u32` type indices.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TypeIndexList<'a> {
     /// The serialized type indices.
     indices: &'a [u8],
@@ -38,7 +38,7 @@ impl<'a> TypeIndexList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length is not a multiple
     /// of 4.
-    pub fn from_bytes(indices: &'a [u8]) -> Result<Self> {
+    pub fn parse(indices: &'a [u8]) -> Result<Self> {
         if indices.len().is_multiple_of(INDEX_SIZE) {
             Ok(Self { indices })
         } else {
@@ -115,10 +115,10 @@ impl<'a> ArgumentList<'a> {
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`TypeIndexList::from_bytes`].
-    pub fn from_bytes(indices: &'a [u8]) -> Result<Self> {
+    /// Returns the errors of [`TypeIndexList::parse`].
+    pub fn parse(indices: &'a [u8]) -> Result<Self> {
         Ok(Self {
-            list: TypeIndexList::from_bytes(indices)?,
+            list: TypeIndexList::parse(indices)?,
         })
     }
 
@@ -162,7 +162,8 @@ impl<'a> ArgumentList<'a> {
 }
 
 /// One method in an `LF_METHODLIST` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct MethodListEntry {
     /// The access and the method properties.
     pub attributes: MemberAttributes,
@@ -183,7 +184,7 @@ impl MethodListEntry {
     /// present for a method that does not introduce a virtual slot, or
     /// absent for one that does.
     pub(crate) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
-        writer.u16(self.attributes.bits())?;
+        writer.u16(self.attributes.raw())?;
         writer.u16(0)?;
         writer.type_index(self.method_type)?;
         encode_vtable_offset(writer, self.attributes, self.vtable_offset)
@@ -225,7 +226,7 @@ impl<'a> MethodList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] for a malformed entry or
     /// invalid padding.
-    pub fn decode(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
         let list = Self { data };
         for entry in list.entries() {
             entry?;
@@ -243,7 +244,7 @@ impl<'a> MethodList<'a> {
 
     /// Return an iterator over the entries.
     ///
-    /// [`MethodList::decode`] validates all entries before it returns the
+    /// [`MethodList::parse`] validates all entries before it returns the
     /// list, so the iterator does not give errors for a decoded list.
     #[must_use]
     pub const fn entries(&self) -> MethodListIter<'a> {
@@ -403,6 +404,7 @@ impl<'a> VtableShape<'a> {
 /// NUL-terminated names (`lfVftable` in `cvinfo.h`, `VFTableRecord` in
 /// LLVM). The first name is the table name; the others are method names.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub struct VirtualFunctionTable<'a> {
     /// The class or structure that owns the table.
     pub complete_class: TypeIndex,

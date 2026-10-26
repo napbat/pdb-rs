@@ -104,6 +104,7 @@ const fn primitive_kind_name(kind: PrimitiveKind) -> &'static str {
         PrimitiveKind::Character32 => "char32_t",
         PrimitiveKind::Character8 => "char8_t",
         PrimitiveKind::CvPointer => "<CodeView pointer>",
+        _ => "<unknown primitive>",
     }
 }
 
@@ -131,6 +132,7 @@ pub const fn calling_convention(convention: CallingConvention) -> &'static str {
         CallingConvention::Inline => "__inline",
         CallingConvention::NearVector => "__vectorcall",
         CallingConvention::Swift => "__swiftcall",
+        _ => "<unknown calling convention>",
     }
 }
 
@@ -271,6 +273,7 @@ impl<'a> Types<'_, 'a> {
                             None => "::*".to_owned(),
                         }
                     }
+                    _ => "<unknown pointer mode>".to_owned(),
                 };
                 declarator.push_str(&qualified(&pointer_qualifiers(pointer.attributes), inner));
                 if self.is_array_or_function(pointer.referent_type)? {
