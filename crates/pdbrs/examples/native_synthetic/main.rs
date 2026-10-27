@@ -1,6 +1,6 @@
 //! Build the PDB of a small synthetic program from scratch.
 //!
-//! The example builds the records of `program.rs` with `PdbBuilder`, plans
+//! The example adds the records of `program.rs` to a new `PdbEditor`, plans
 //! the output twice and fails if the two plans give different bytes. It
 //! writes the PDB to the output path.
 //!
@@ -10,7 +10,7 @@ mod program;
 
 use std::error::Error;
 
-use pdbrs::native::BuildOptions;
+use pdbrs::native::EditOptions;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -19,9 +19,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     if arguments.next().is_some() {
         return Err(usage.into());
     }
-    let options = BuildOptions::default();
-    let bytes = program::build()?.plan(options)?.to_vec()?;
-    if bytes != program::build()?.plan(options)?.to_vec()? {
+    let options = EditOptions::default();
+    let editor = program::build()?;
+    let bytes = editor.plan(options)?.to_vec()?;
+    if bytes != editor.plan(options)?.to_vec()? {
         return Err("two plans of the same records give different bytes".into());
     }
     std::fs::write(&output, &bytes)?;

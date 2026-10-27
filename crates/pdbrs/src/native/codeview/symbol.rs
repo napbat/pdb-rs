@@ -629,6 +629,13 @@ impl<'a> Symbol<'a> {
     pub const fn data(&self) -> &SymbolData<'a> {
         &self.data
     }
+
+    /// Return the typed fields for a change. The payload keeps the source
+    /// bytes, so [`Symbol::encode`] writes the changed fields with the
+    /// length of the source record.
+    pub(crate) const fn data_mut(&mut self) -> &mut SymbolData<'a> {
+        &mut self.data
+    }
 }
 
 /// Decode the fields of `kind`. Do not check the padding.

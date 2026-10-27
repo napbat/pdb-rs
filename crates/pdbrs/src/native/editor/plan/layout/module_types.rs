@@ -15,20 +15,17 @@
 //!   [`ModuleTypeSource::PrecompiledTypeUser`]: the precompiled types are in
 //!   an object file outside the PDB and the first index of the own records
 //!   is not known, so the plan does not check the type and ID index ranges.
-//!   The builder still writes the stream of the own records.
+//!   The plan still writes the stream of the own records.
 //! - [`ModuleTypeSource::Other`]: the meaning of the words is not known, so
 //!   the plan does not check the type and ID index ranges.
 //!
-//! A named stream must be a stream without a name of the builder
-//! ([`PdbBuilder::add_stream`]).
+//! A named stream must be a stream without a name of the model
+//! ([`UnnamedStreams`](crate::native::editor::UnnamedStreams)).
 
 use alloc::collections::BTreeMap;
 use alloc::collections::btree_map;
 use alloc::vec::Vec;
 
-use super::super::PdbBuilder;
-use super::super::entry::Entry;
-use super::StreamIds;
 use crate::native::codeview::LeafKind;
 use crate::native::codeview::id_record::IdTable;
 use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, ModuleIndex, TypeIndex};
@@ -99,14 +96,9 @@ pub(super) struct ModuleTypeStreams {
 }
 
 impl ModuleTypeStreams {
-    /// Return the validation context for the symbols of a module.
+    /// Call `check` with the validation context for the symbols of a module.
     ///
-    /// `base` is the context with the TPI and IPI ends. The function calls
-    /// `check` with the context of the module.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of `check` and of [`IdTable::new`].
+    /// `base` is the context with the TPI and IPI ends.
     pub(super) fn with_context<R>(
         &self,
         types: ModuleTypes,
@@ -144,78 +136,60 @@ impl ModuleTypeStreams {
     }
 }
 
-impl PdbBuilder<'_> {
-    /// Return where the indices of each module resolve, and the parsed
-    /// module type streams.
-    ///
-    /// `symbols` holds the encoded symbol records of each module without
-    /// the signature, or `None`.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidReference`] if an `S_MOD_TYPEREF` record names
-    ///   a missing module, a module without its own type records, or a
-    ///   stream that is not a stream without a name of the builder with
-    ///   bytes.
-    /// - The errors of the record decoders and of [`TypeStream::from_records`].
-    pub(super) fn module_types(
-        &self,
-        ids: &StreamIds,
-        symbols: &[Option<&[u8]>],
-    ) -> Result<(Vec<ModuleTypes>, ModuleTypeStreams)> {
-        let mut sources = Vec::new();
-        sources
-            .try_reserve_exact(symbols.len())
-            .map_err(|_| no_memory())?;
-        for records in symbols {
-            let reference = match records {
-                Some(records) => ModuleTypeReference::find(records)?,
-                None => None,
-            };
-            sources.push(reference.map(|reference| reference.source()));
-        }
-        let mut types = Vec::new();
-        types
-            .try_reserve_exact(sources.len())
-            .map_err(|_| no_memory())?;
-        let mut streams = BTreeMap::new();
-        for source in &sources {
-            let resolved = resolve(*source, |module| {
-                sources
-                    .get(usize::try_from(module.0).unwrap_or(usize::MAX))
-                    .copied()
-                    .ok_or_else(|| unresolved("S_MOD_TYPEREF names a missing module"))
-            })?;
-            if let ModuleTypes::Streams {
-                types: type_stream,
-                ids: id_stream,
-            } = resolved
-            {
-                for stream in [type_stream, id_stream] {
-                    if let btree_map::Entry::Vacant(slot) = streams.entry(stream) {
-                        slot.insert(self.type_stream_of(ids, stream)?);
-                    }
+/// Return where the indices of each module resolve, and the parsed module
+/// type streams.
+///
+/// `symbols` holds the encoded symbol records of each module without the
+/// signature, or `None`. `unnamed` gives the bytes of each stream without a
+/// name by its output stream ID.
+pub(super) fn module_types(
+    symbols: &[Option<&[u8]>],
+    unnamed: &[(StreamId, &[u8])],
+) -> Result<(Vec<ModuleTypes>, ModuleTypeStreams)> {
+    let mut sources = Vec::new();
+    sources
+        .try_reserve_exact(symbols.len())
+        .map_err(|_| no_memory())?;
+    for records in symbols {
+        let reference = match records {
+            Some(records) => ModuleTypeReference::find(records)?,
+            None => None,
+        };
+        sources.push(reference.map(|reference| reference.source()));
+    }
+    let mut types = Vec::new();
+    types
+        .try_reserve_exact(sources.len())
+        .map_err(|_| no_memory())?;
+    let mut streams = BTreeMap::new();
+    for source in &sources {
+        let resolved = resolve(*source, |module| {
+            sources
+                .get(usize::try_from(module.0).unwrap_or(usize::MAX))
+                .copied()
+                .ok_or_else(|| unresolved("S_MOD_TYPEREF names a missing module"))
+        })?;
+        if let ModuleTypes::Streams {
+            types: type_stream,
+            ids: id_stream,
+        } = resolved
+        {
+            for stream in [type_stream, id_stream] {
+                if let btree_map::Entry::Vacant(slot) = streams.entry(stream) {
+                    let bytes = unnamed
+                        .iter()
+                        .find(|(id, _)| *id == stream)
+                        .map(|(_, bytes)| *bytes)
+                        .ok_or_else(|| {
+                            unresolved(
+                                "S_MOD_TYPEREF names a stream that is not a stream without a name",
+                            )
+                        })?;
+                    slot.insert(TypeStream::from_records(bytes)?);
                 }
             }
-            types.push(resolved);
         }
-        Ok((types, ModuleTypeStreams { streams }))
+        types.push(resolved);
     }
-
-    /// Parse the stream without a name with the ID `stream` as type records.
-    fn type_stream_of(&self, ids: &StreamIds, stream: StreamId) -> Result<TypeStream> {
-        let position = ids
-            .unnamed
-            .iter()
-            .position(|&id| id == stream)
-            .ok_or_else(|| {
-                unresolved("S_MOD_TYPEREF names a stream that is not a stream without a name")
-            })?;
-        match self.streams.get(position) {
-            Some(Entry::Value(bytes)) => TypeStream::from_records(bytes),
-            _ => Err(unresolved(
-                "S_MOD_TYPEREF names a deferred stream; the plan cannot check its records",
-            )),
-        }
-    }
+    Ok((types, ModuleTypeStreams { streams }))
 }

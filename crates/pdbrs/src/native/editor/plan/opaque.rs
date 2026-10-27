@@ -16,7 +16,7 @@
 
 use alloc::vec::Vec;
 
-use super::plan::Context;
+use super::cow::Context;
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache, TypeMapStream};

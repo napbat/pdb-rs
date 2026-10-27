@@ -11,58 +11,86 @@ use crate::{Bytes, ErrorKind};
 impl<'a> Symbol<'a> {
     /// Return the name bytes, if the kind has a name.
     ///
+    /// See [`SymbolData::name`].
+    #[must_use]
+    pub fn name(&self) -> Option<&Bytes<'a>> {
+        self.data.name()
+    }
+}
+
+/// Return a reference to the name field of a symbol data value, or `None`.
+/// `name` and `name_mut` share this list of kinds.
+macro_rules! name_field {
+    ($data:expr, $($mutability:tt)?) => {
+        Some(match $data {
+            SymbolData::ObjectName(value) => &$($mutability)? value.name,
+            SymbolData::UsingNamespace(name) => name,
+            SymbolData::Procedure(value) => &$($mutability)? value.name,
+            SymbolData::MipsProcedure(value) => &$($mutability)? value.name,
+            SymbolData::Ia64Procedure(value) => &$($mutability)? value.name,
+            SymbolData::Block(value) => &$($mutability)? value.name,
+            SymbolData::Label(value) => &$($mutability)? value.name,
+            SymbolData::Thunk(value) => &$($mutability)? value.name,
+            SymbolData::HotPatchFunction(value) => &$($mutability)? value.name,
+            SymbolData::Local(value) => &$($mutability)? value.name,
+            SymbolData::RegisterRelative(value) => &$($mutability)? value.name,
+            SymbolData::RegisterRelativeIndirect(value) => &$($mutability)? value.name,
+            SymbolData::BasePointerRelative(value) => &$($mutability)? value.name,
+            SymbolData::BasePointerRelativeIndirect(value) => &$($mutability)? value.name,
+            SymbolData::Register(value) => &$($mutability)? value.name,
+            SymbolData::ManyRegisters(value) => &$($mutability)? value.name,
+            SymbolData::AttributedFrameRelative(value) => &$($mutability)? value.name,
+            SymbolData::AttributedRegister(value) => &$($mutability)? value.name,
+            SymbolData::AttributedRegisterRelative(value) => &$($mutability)? value.name,
+            SymbolData::Slot(value) => &$($mutability)? value.name,
+            SymbolData::FileStatic(value) => &$($mutability)? value.name,
+            SymbolData::FastLink(value) => &$($mutability)? value.name,
+            SymbolData::Section(value) => &$($mutability)? value.name,
+            SymbolData::CoffGroup(value) => &$($mutability)? value.name,
+            SymbolData::Export(value) => &$($mutability)? value.name,
+            SymbolData::UserDefinedType(value) => &$($mutability)? value.name,
+            SymbolData::Data(value)
+            | SymbolData::ThreadData(value)
+            | SymbolData::ManagedData(value) => &$($mutability)? value.name,
+            SymbolData::HlslData(value) => &$($mutability)? value.name,
+            SymbolData::HlslDataEx(value) => &$($mutability)? value.name,
+            SymbolData::DpcGroupSharedLocal(value) => &$($mutability)? value.name,
+            SymbolData::Constant(value) => &$($mutability)? value.name,
+            SymbolData::Public(value) => &$($mutability)? value.name,
+            SymbolData::ProcedureReference(value) | SymbolData::SymbolReference(value) => {
+                &$($mutability)? value.name
+            }
+            SymbolData::ManagedProcedure(value) => &$($mutability)? value.name,
+            SymbolData::ManagedSlot(value) => &$($mutability)? value.name,
+            SymbolData::ManagedConstant(value) => &$($mutability)? value.name,
+            _ => return None,
+        })
+    };
+}
+
+impl<'a> SymbolData<'a> {
+    /// Return the name bytes, if the kind has a name.
+    ///
     /// The bytes do not include the NUL terminator. `S_OBJNAME` gives the
     /// object file path, `S_UNAMESPACE` gives the namespace and `S_EXPORT`
     /// gives the exported name. Compile records have a version string, not a
     /// name, so they give `None`. `S_WITH32` has an expression, not a name.
     #[must_use]
     pub fn name(&self) -> Option<&Bytes<'a>> {
-        let name = match &self.data {
-            SymbolData::ObjectName(value) => &value.name,
-            SymbolData::UsingNamespace(name) => name,
-            SymbolData::Procedure(value) => &value.name,
-            SymbolData::MipsProcedure(value) => &value.name,
-            SymbolData::Ia64Procedure(value) => &value.name,
-            SymbolData::Block(value) => &value.name,
-            SymbolData::Label(value) => &value.name,
-            SymbolData::Thunk(value) => &value.name,
-            SymbolData::HotPatchFunction(value) => &value.name,
-            SymbolData::Local(value) => &value.name,
-            SymbolData::RegisterRelative(value) => &value.name,
-            SymbolData::RegisterRelativeIndirect(value) => &value.name,
-            SymbolData::BasePointerRelative(value) => &value.name,
-            SymbolData::BasePointerRelativeIndirect(value) => &value.name,
-            SymbolData::Register(value) => &value.name,
-            SymbolData::ManyRegisters(value) => &value.name,
-            SymbolData::AttributedFrameRelative(value) => &value.name,
-            SymbolData::AttributedRegister(value) => &value.name,
-            SymbolData::AttributedRegisterRelative(value) => &value.name,
-            SymbolData::Slot(value) => &value.name,
-            SymbolData::FileStatic(value) => &value.name,
-            SymbolData::FastLink(value) => &value.name,
-            SymbolData::Section(value) => &value.name,
-            SymbolData::CoffGroup(value) => &value.name,
-            SymbolData::Export(value) => &value.name,
-            SymbolData::UserDefinedType(value) => &value.name,
-            SymbolData::Data(value)
-            | SymbolData::ThreadData(value)
-            | SymbolData::ManagedData(value) => &value.name,
-            SymbolData::HlslData(value) => &value.name,
-            SymbolData::HlslDataEx(value) => &value.name,
-            SymbolData::DpcGroupSharedLocal(value) => &value.name,
-            SymbolData::Constant(value) => &value.name,
-            SymbolData::Public(value) => &value.name,
-            SymbolData::ProcedureReference(value) | SymbolData::SymbolReference(value) => {
-                &value.name
-            }
-            SymbolData::ManagedProcedure(value) => &value.name,
-            SymbolData::ManagedSlot(value) => &value.name,
-            SymbolData::ManagedConstant(value) => &value.name,
-            _ => return None,
-        };
-        Some(name)
+        name_field!(self,)
     }
 
+    /// Return the name bytes for a change, if the kind has a name.
+    ///
+    /// The kinds are the kinds of [`SymbolData::name`]. The encoder writes
+    /// the name with a NUL terminator, so the name must not contain a NUL
+    /// byte.
+    pub fn name_mut(&mut self) -> Option<&mut Bytes<'a>> {
+        name_field!(self, mut)
+    }
+}
+
+impl<'a> Symbol<'a> {
     /// Return the start address, if the kind has one address.
     ///
     /// Procedures, blocks, `with` blocks, separated code, labels, thunks,

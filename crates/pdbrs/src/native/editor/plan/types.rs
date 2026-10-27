@@ -1,25 +1,26 @@
-//! The type and ID edits: records appended to the TPI and IPI streams.
+//! The TPI and IPI streams of a plan.
 //!
-//! The plan keeps the source header, records and hash buffers. It appends
-//! the new records, their hash values and their index offset pairs, and it
-//! moves each hash buffer after the buffers before it. The hash adjusters
-//! keep their bytes.
+//! The new layout encodes every record and writes the stream and its hash
+//! stream with [`encode_type_stream`].
+//!
+//! The copy-on-write layout keeps the source stream if the records did not
+//! change. If the caller only appended records, the plan keeps the source
+//! header, records and hash buffers. It appends the new records, their hash
+//! values and their index offset pairs, and it moves each hash buffer after
+//! the buffers before it. The hash adjusters keep their bytes. If a source
+//! record or a hash adjuster changed, the plan writes all records again with
+//! the header options of the source.
 
 use alloc::vec::Vec;
 
-use super::plan::{Changes, Context, missing};
-use super::{AddedRecords, INDEX_END_OFFSET, IPI_STREAM, TPI_STREAM, unsupported};
-use crate::io::ReadAt;
-use crate::native::Pdb;
 use crate::native::Producer;
 use crate::native::codeview::Records;
-use crate::native::codeview::id_record::IdTable;
-use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use crate::native::editor::types::{ListRecord, RecordList};
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::native::types::{
-    HashBuffer, IndexOffset, ReferenceLimits, TypeHashes, TypeHeader, TypeStream, TypeTable,
-    type_record_hash, validate_type_references,
+    HashBuffer, IndexOffset, TypeHashes, TypeHeader, TypeStream, TypeStreamOptions,
+    encode_type_stream, type_record_hash,
 };
 use crate::{Error, ErrorKind, Result};
 
@@ -32,21 +33,19 @@ const VALUE_SIZE: usize = 4;
 /// The size of one index offset pair.
 const PAIR_SIZE: usize = 8;
 
-/// The index ends of the TPI and IPI streams after the edit.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Ends {
-    /// The index after the last TPI record.
-    pub(super) types: TypeIndex,
-    /// The index after the last IPI record.
-    pub(super) ids: IdIndex,
+/// A planned TPI or IPI stream.
+pub(super) struct PlannedTypes {
+    /// The parsed stream.
+    pub(super) stream: TypeStream,
+    /// The hash stream bytes, if the stream has a hash stream.
+    pub(super) hash: Option<Vec<u8>>,
 }
 
-/// A TPI or IPI stream with appended records, and its hash stream.
-struct Appended {
-    /// The stream.
-    stream: TypeStream,
-    /// The hash stream, if the header names one.
-    hash: Option<Vec<u8>>,
+impl PlannedTypes {
+    /// Return the index after the last record.
+    pub(super) const fn index_end(&self) -> u32 {
+        self.stream.header().index_end
+    }
 }
 
 /// Return the error for a value that does not fit its field.
@@ -54,85 +53,131 @@ fn too_large(context: &'static str) -> Error {
     Error::new(ErrorKind::LimitExceeded, None).with_context(context)
 }
 
-/// Append the added TPI and IPI records, check the references and return
-/// the index ends.
-pub(super) fn plan<S: ReadAt>(
-    pdb: &Pdb<S>,
-    context: &Context<'_>,
-    types: &AddedRecords,
-    ids: &AddedRecords,
-    changes: &mut Changes,
-) -> Result<Ends> {
-    let mut type_end = TypeIndex(context.tpi.header().index_end);
-    if types.count != 0 {
-        let appended = append(pdb, &context.tpi, types)?;
-        validate_type_references(
-            &TypeTable::new(&appended.stream)?,
-            ReferenceLimits::default(),
-        )?;
-        type_end = TypeIndex(appended.stream.header().index_end);
-        store(appended, TPI_STREAM, changes)?;
+/// The options of a stream of the new layout.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NewTypeOptions {
+    /// The hash bucket count.
+    pub(super) hash_buckets: u32,
+    /// The producer of the hash stream layout.
+    pub(super) producer: Producer,
+}
+
+/// Encode every record of `list` in index order.
+fn encode_all<T: ListRecord>(list: &RecordList<T>) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    for entry in &list.entries {
+        entry.value.encode_record(&mut bytes)?;
     }
-    let id_end = if ids.count == 0 {
-        match pdb.container().stream(IPI_STREAM)? {
-            Some(stream) if stream.len()? != 0 => IdIndex(stream.read_u32_at(INDEX_END_OFFSET)?),
-            _ => IdIndex(FIRST_RECORD_INDEX),
-        }
-    } else {
-        let source = pdb.ids()?.ok_or_else(|| missing("PDB has no IPI stream"))?;
-        let appended = append(pdb, &source, ids)?;
-        IdTable::new(&appended.stream)?.check(type_end)?;
-        let end = IdIndex(appended.stream.header().index_end);
-        store(appended, IPI_STREAM, changes)?;
-        end
-    };
-    Ok(Ends {
-        types: type_end,
-        ids: id_end,
+    Ok(bytes)
+}
+
+/// Write a stream of the new layout and its hash stream.
+pub(super) fn write_new<T: ListRecord>(
+    list: &RecordList<T>,
+    options: NewTypeOptions,
+    hash_stream: Option<StreamId>,
+) -> Result<PlannedTypes> {
+    let records = encode_all(list)?;
+    let stream_options = TypeStreamOptions::default()
+        .with_index_begin(crate::native::codeview::index::FIRST_RECORD_INDEX)
+        .with_hash_bucket_count(options.hash_buckets)
+        .with_hash_stream(hash_stream)
+        .with_hash_aux_stream(None)
+        .with_producer(options.producer)
+        .with_adjusters(&list.adjusters);
+    let written = encode_type_stream(&records, &stream_options)?;
+    Ok(PlannedTypes {
+        stream: TypeStream::parse(written.stream)?,
+        hash: written.hash_stream,
     })
 }
 
-/// Give the stream and the hash stream of `appended` to `changes`.
-fn store(appended: Appended, stream: StreamId, changes: &mut Changes) -> Result<()> {
-    if let (Some(hash), Some(id)) = (appended.hash, appended.stream.header().hash_stream) {
-        changes.replace(id, hash)?;
+/// Plan a stream of the copy-on-write layout. Return `None` if the plan
+/// keeps the source stream.
+///
+/// `hash` gives the bytes of the source hash stream.
+pub(super) fn write_cow<T: ListRecord>(
+    list: &RecordList<T>,
+    hash: impl FnOnce(StreamId) -> Result<Vec<u8>>,
+) -> Result<Option<PlannedTypes>> {
+    let source = list.source.as_ref().ok_or_else(|| {
+        Error::new(ErrorKind::InvalidFormat, None)
+            .with_context("type list of the copy-on-write layout has no source stream")
+    })?;
+    let mut changed = list.adjusters_changed;
+    let mut added = Vec::new();
+    let mut count = 0_u32;
+    for entry in &list.entries {
+        if entry.source.is_none() {
+            entry.value.encode_record(&mut added)?;
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| too_large("type index end does not fit in 32 bits"))?;
+        } else if !list.unchanged(entry)? {
+            changed = true;
+        }
     }
-    changes.replace(stream, appended.stream.into_bytes())
+    if !changed && count == 0 {
+        return Ok(None);
+    }
+    if !changed {
+        return append(source, &added, count, hash).map(Some);
+    }
+    let mut records = Vec::new();
+    for entry in &list.entries {
+        if list.unchanged(entry)? {
+            let bytes = list.source_bytes(entry)?.ok_or_else(|| {
+                Error::new(ErrorKind::InvalidFormat, None)
+                    .with_context("source record has no bytes")
+            })?;
+            records.try_reserve(bytes.len()).map_err(|_| no_memory())?;
+            records.extend_from_slice(bytes);
+        } else {
+            entry.value.encode_record(&mut records)?;
+        }
+    }
+    let options = TypeStreamOptions::from_header(source.header(), &list.adjusters);
+    let written = encode_type_stream(&records, &options)?;
+    Ok(Some(PlannedTypes {
+        stream: TypeStream::parse(written.stream)?,
+        hash: written.hash_stream,
+    }))
 }
 
-/// Append the records of `added` to `source` and build the hash stream.
-fn append<S: ReadAt>(pdb: &Pdb<S>, source: &TypeStream, added: &AddedRecords) -> Result<Appended> {
+/// Append the records `added` to `source` and build the hash stream.
+fn append(
+    source: &TypeStream,
+    added: &[u8],
+    count: u32,
+    hash: impl FnOnce(StreamId) -> Result<Vec<u8>>,
+) -> Result<PlannedTypes> {
     let header = source.header();
-    if added.first != Some(header.index_end) {
-        return Err(Error::new(ErrorKind::InvalidFormat, None)
-            .with_context("type stream changed after the editor read its header"));
-    }
     let old_bytes = header.record_bytes;
-    let record_bytes = u32::try_from(added.records.len())
+    let record_bytes = u32::try_from(added.len())
         .ok()
         .and_then(|length| old_bytes.checked_add(length))
         .ok_or_else(|| too_large("type record bytes do not fit in 32 bits"))?;
     let index_end = header
         .index_end
-        .checked_add(added.count)
+        .checked_add(count)
         .ok_or_else(|| too_large("type index end does not fit in 32 bits"))?;
     // The size and the hash value of each added record.
     let mut sizes = Vec::new();
     let mut hashes = Vec::new();
     sizes
-        .try_reserve_exact(added.count as usize)
+        .try_reserve_exact(count as usize)
         .map_err(|_| no_memory())?;
     hashes
-        .try_reserve_exact(added.count as usize)
+        .try_reserve_exact(count as usize)
         .map_err(|_| no_memory())?;
-    let mut framing = Records::new(&added.records);
+    let mut framing = Records::new(added);
     let mut start = 0;
     while let Some(record) = framing.next() {
         record?;
         let end = framing.position();
         // A record has at most 65537 bytes.
         sizes.push(u32::try_from(end - start).unwrap_or(u32::MAX));
-        hashes.push(type_record_hash(&added.records[start..end])? % header.hash_bucket_count);
+        hashes.push(type_record_hash(&added[start..end])? % header.hash_bucket_count);
         start = end;
     }
     let mut new_header = *header;
@@ -140,7 +185,7 @@ fn append<S: ReadAt>(pdb: &Pdb<S>, source: &TypeStream, added: &AddedRecords) ->
     new_header.record_bytes = record_bytes;
     let hash = match header.hash_stream {
         Some(id) => {
-            let bytes = pdb.stream_bytes(id)?;
+            let bytes = hash(id)?;
             Some(append_hashes(
                 &mut new_header,
                 header,
@@ -157,17 +202,17 @@ fn append<S: ReadAt>(pdb: &Pdb<S>, source: &TypeStream, added: &AddedRecords) ->
         .map_err(|_| no_memory())?;
     encode_header(&new_header, &mut stream);
     stream.extend_from_slice(source.record_bytes());
-    stream.extend_from_slice(&added.records);
+    stream.extend_from_slice(added);
     let stream = TypeStream::parse(stream)?;
     if let Some(bytes) = &hash {
         TypeHashes::parse(stream.header(), bytes)?.check(&stream)?;
     }
-    Ok(Appended { stream, hash })
+    Ok(PlannedTypes { stream, hash })
 }
 
 /// Append the 56-byte header to `out`.
 fn encode_header(header: &TypeHeader, out: &mut Vec<u8>) {
-    let stream = |id: Option<crate::native::msf::StreamId>| {
+    let stream = |id: Option<StreamId>| {
         // The source header stored these stream IDs in 16 bits.
         id.map_or(0xffff_u16, |id| u16::try_from(id.0).unwrap_or(u16::MAX))
     };
@@ -265,9 +310,8 @@ fn append_hashes(
     let pairs = buffer_bytes(bytes, old[1])?;
     let adjusters = buffer_bytes(bytes, old[2])?;
     if values.len() != source.record_count() as usize * VALUE_SIZE {
-        return Err(unsupported(
-            "type hash stream does not have one hash value for each record",
-        ));
+        return Err(Error::new(ErrorKind::UnsupportedEdit, None)
+            .with_context("type hash stream does not have one hash value for each record"));
     }
     let last = pairs
         .as_chunks::<PAIR_SIZE>()

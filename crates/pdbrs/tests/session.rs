@@ -12,12 +12,12 @@ use pdbrs::ErrorKind;
 use pdbrs::io::ReadAt;
 use pdbrs::native::codeview::index::ModuleIndex;
 use pdbrs::native::types::{IndexOffset, TypeHashes};
-use pdbrs::native::{BuildOptions, Pdb, ReadOptions};
+use pdbrs::native::{EditOptions, Pdb, ReadOptions};
 
 /// Build the synthetic program and return the PDB bytes.
 fn synthetic() -> Vec<u8> {
     program::build()
-        .and_then(|builder| builder.plan(BuildOptions::default())?.to_vec())
+        .and_then(|editor| editor.plan(EditOptions::default())?.to_vec())
         .expect("the synthetic program builds")
 }
 

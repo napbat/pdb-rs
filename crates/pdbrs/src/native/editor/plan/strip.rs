@@ -2,15 +2,15 @@
 //!
 //! The rules come from the stripped PDB that `link.exe` 14.51 writes next to
 //! the full PDB of the `msvc-x64-stripped` fixture (#27, #34). The
-//! documentation of [`PdbEditor`](super::PdbEditor) lists them.
+//! documentation of [`PdbEditor`](crate::native::PdbEditor) lists them.
 
 use alloc::borrow::Cow;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use super::cow::{Changes, Context, IPI_STREAM, TPI_STREAM, push};
 use super::opaque::{self, Scope};
-use super::plan::{Changes, Context, missing};
-use super::{IPI_STREAM, TPI_STREAM, push, unsupported};
+use super::{missing, unsupported};
 use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache};
@@ -55,7 +55,7 @@ fn unresolved(context: &'static str) -> Error {
 }
 
 /// Strip the TPI or IPI stream `id`: no records and an empty hash stream.
-fn strip_types(id: StreamId, header: &TypeHeader, changes: &mut Changes) -> Result<()> {
+fn strip_types(id: StreamId, header: &TypeHeader, changes: &mut Changes<'_>) -> Result<()> {
     let options = TypeStreamOptions::from_header(header, &[]);
     let written = encode_type_stream(&[], &options)?;
     if let (Some(hash), Some(stream)) = (written.hash_stream, header.hash_stream) {
@@ -330,7 +330,7 @@ pub(super) fn plan<S: ReadAt>(
     pdb: &Pdb<S>,
     context: &Context<'_>,
     info: &mut InfoBuilder,
-    changes: &mut Changes,
+    changes: &mut Changes<'_>,
 ) -> Result<DbiBuilder> {
     // The strip removes all type records, so it removes the type maps
     // without an owner as it removes the type maps that `/TMCache` names.
@@ -471,7 +471,7 @@ fn strip_named<S: ReadAt>(
     pdb: &Pdb<S>,
     keep_names: bool,
     info: &mut InfoBuilder,
-    changes: &mut Changes,
+    changes: &mut Changes<'_>,
 ) -> Result<()> {
     for named in pdb.info().named_streams() {
         let stream = named.stream;

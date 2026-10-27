@@ -1,4 +1,5 @@
-//! Tests of `PdbEditor::strip_private` (#34).
+//! Tests of the strip of private data: `EditOptions::with_strip_private`
+//! (#34).
 
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
@@ -9,7 +10,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::Module;
-use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
 use pdbrs::{Bytes, ErrorKind};
 
 use super::{T_INT4, build, differing_streams, symbols, synthetic};
@@ -18,7 +19,7 @@ use super::{T_INT4, build, differing_streams, symbols, synthetic};
 const LOCAL: &[u8] = b"local_helper";
 
 /// Add a module with a local procedure and an `S_LPROCREF` record for it.
-fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
+fn add_local_procedure(editor: &mut PdbEditor<'static>) -> pdbrs::Result<()> {
     let mut contribution = pdbrs::native::dbi::SectionContribution::default();
     contribution.section = 1;
     contribution.padding1 = 0;
@@ -46,7 +47,8 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     record.name = Bytes::new(b"C:\\synthetic\\local.obj");
     record.object_file = Bytes::new(b"C:\\synthetic\\local.obj");
     record.name_padding = [0; 3];
-    let module = builder.add_module(record)?;
+    let index = editor.add_module(record)?;
+    let module = editor.module_mut(index)?;
     let mut local = Procedure::new(ProcedureType::Type(T_INT4));
     local.next = ModuleSymbolOffset(0);
     local.code_length = 0x10;
@@ -59,7 +61,7 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     local.flags = ProcedureFlags(0);
     local.extended_flags = None;
     local.name = Bytes::new(LOCAL);
-    let procedure = module.push_symbol_fields(S_LPROC32, SymbolData::Procedure(local))?;
+    let procedure = module.push(S_LPROC32, SymbolData::Procedure(local))?;
     let mut frame = FrameProcedure::default();
     frame.frame_size = 0;
     frame.padding_size = 0;
@@ -70,15 +72,21 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
         offset: 0,
     };
     frame.flags = FrameProcedureFlags(0);
-    module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
-    module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
+    module.push(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
+    module.push(S_END, SymbolData::ScopeEnd)?;
     let mut reference = ProcedureReference::default();
     reference.name_checksum = 0;
     reference.target = ModuleSymbolTarget::Handle(procedure);
     reference.name = Bytes::new(LOCAL);
-    let reference =
-        builder.add_symbol_fields(S_LPROCREF, SymbolData::ProcedureReference(reference))?;
-    builder.index_global(reference, 1)
+    editor
+        .globals_mut()?
+        .push(S_LPROCREF, SymbolData::ProcedureReference(reference), 1)
+        .map(|_| ())
+}
+
+/// Return the options of a strip.
+fn strip() -> EditOptions {
+    EditOptions::default().with_strip_private(true)
 }
 
 #[test]
@@ -86,11 +94,10 @@ fn strip_keeps_publics_and_local_procedures() {
     let source = build(add_local_procedure);
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let source_identity = pdb.info().identity();
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
-    let plan = editor.plan(EditOptions::default()).expect("plan");
+    let editor = pdb.edit(IdentityPolicy::Preserve);
+    let plan = editor.plan(strip()).expect("plan");
     let edited = plan.to_vec().expect("output");
-    let changed: Vec<u32> = plan.changed_streams().iter().map(|id| id.0).collect();
+    let changed: Vec<u32> = plan.report().changed().map(|id| id.0).collect();
     assert_eq!(differing_streams(&source, &edited), changed);
     let stripped = Pdb::parse(edited.as_slice()).expect("stripped");
     assert_eq!(stripped.info().identity(), source_identity);
@@ -159,18 +166,16 @@ fn strip_keeps_publics_and_local_procedures() {
 fn strip_of_a_stripped_pdb_changes_nothing() {
     let source = build(add_local_procedure);
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
+    let editor = pdb.edit(IdentityPolicy::Preserve);
     let once = editor
-        .plan(EditOptions::default())
+        .plan(strip())
         .expect("plan")
         .to_vec()
         .expect("output");
     let pdb = Pdb::parse(once.as_slice()).expect("stripped");
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
-    let plan = editor.plan(EditOptions::default()).expect("plan");
-    assert_eq!(plan.changed_streams(), []);
+    let editor = pdb.edit(IdentityPolicy::Preserve);
+    let plan = editor.plan(strip()).expect("plan");
+    assert_eq!(plan.report().changed().count(), 0);
 }
 
 #[test]
@@ -178,9 +183,10 @@ fn strip_with_another_edit_is_unsupported() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
     editor
-        .add_public(&{
+        .publics_mut()
+        .expect("publics")
+        .push({
             let mut public = Public::default();
             public.flags = PublicFlags(0);
             public.address = SectionOffset {
@@ -192,44 +198,33 @@ fn strip_with_another_edit_is_unsupported() {
         })
         .expect("recorded");
     assert_eq!(
-        editor
-            .plan(EditOptions::default())
-            .expect_err("combined edit")
-            .kind(),
+        editor.plan(strip()).expect_err("combined edit").kind(),
         ErrorKind::UnsupportedEdit
     );
 }
 
 #[test]
 fn strip_with_an_opaque_stream_is_rejected() {
-    let source = build(|builder| builder.add_stream(vec![0; 8]).map(|_| ()));
+    let source = build(|editor| super::add_stream(editor, vec![0; 8]));
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
+    let editor = pdb.edit(IdentityPolicy::Preserve);
     assert_eq!(
-        editor
-            .plan(EditOptions::default())
-            .expect_err("opaque stream")
-            .kind(),
+        editor.plan(strip()).expect_err("opaque stream").kind(),
         ErrorKind::UnsupportedEdit
     );
 }
 
 #[test]
 fn strip_removes_an_unowned_type_map() {
-    let source = build(|builder| {
-        builder
-            .add_stream(super::UNOWNED_TYPE_MAP.to_vec())
-            .map(|_| ())
-    });
+    let source = build(|editor| super::add_stream(editor, super::UNOWNED_TYPE_MAP.to_vec()));
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let last = pdb.container().stream_count() - 1;
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
-    let plan = editor.plan(EditOptions::default()).expect("type map");
+    let editor = pdb.edit(IdentityPolicy::Preserve);
+    let plan = editor.plan(strip()).expect("type map");
     assert!(
-        plan.changed_streams()
-            .contains(&pdbrs::native::msf::StreamId(last))
+        plan.report()
+            .changed()
+            .any(|id| id == pdbrs::native::msf::StreamId(last))
     );
     let edited = plan.to_vec().expect("output");
     let edited = Pdb::parse(edited.as_slice()).expect("stripped");

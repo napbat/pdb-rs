@@ -1,4 +1,4 @@
-//! The comparison of a PDB that `PdbEditor::strip_private` stripped with the PDB that
+//! The comparison of a PDB that `EditOptions::with_strip_private` stripped with the PDB that
 //! `link /PDBSTRIPPED` wrote for the same link (`msvc-x64-stripped`).
 //!
 //! The comparison uses `llvm-pdbutil` sections. The two PDBs have different stream IDs, because

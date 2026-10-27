@@ -3,8 +3,8 @@
 //! The command rebuilds each native PDB of the fixture manifest with the pdbrs builder and
 //! compares the original and the rebuilt PDB through the consumer tools:
 //!
-//! 1. `Pdb::contents`, `PdbContents::to_builder` with `IdentityPolicy::Preserve` and
-//!    `PdbBuilder::plan` with `PdbContents::build_options` give the rebuilt PDB. A second plan
+//! 1. `Pdb::edit` with `IdentityPolicy::Preserve`, `PdbEditor::decode_all` and
+//!    `PdbEditor::plan` with `EditOptions::default()` give the rebuilt PDB. A second rebuild
 //!    must give the same bytes. The rebuilt PDB keeps the file name of the original.
 //! 2. `pdbtool check` of the rebuilt PDB must give 0 errors. `pdbtool compare` gives the
 //!    stream counts.
@@ -24,8 +24,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pdbrs::native::IdentityPolicy;
-use pdbrs::native::Pdb;
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb};
 
 use super::consumers::{
     Consumers, Run, StreamDifferences, dia2dump, normalize_pdbutil, pdbtool_check, pdbtool_compare,
@@ -392,15 +391,15 @@ fn rebuild(original: &Path, directory: &Path, file_name: &str) -> Result<Rebuilt
         .map_err(|error| format!("cannot read {}: {error}", original.display()))?;
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
     let pdb = Pdb::parse(&bytes).map_err(pdbrs)?;
-    let contents = pdb.contents().map_err(pdbrs)?;
-    let options = contents.build_options();
-    let plan = || -> Result<(Vec<u8>, u32), pdbrs::Error> {
-        let builder = contents.to_builder(IdentityPolicy::Preserve)?;
-        let plan = builder.plan(options)?;
-        Ok((plan.to_vec()?, plan.stream_count()))
+    let plan = || -> Result<(Vec<u8>, u32, Vec<u32>), pdbrs::Error> {
+        let mut editor = pdb.edit(IdentityPolicy::Preserve);
+        editor.decode_all()?;
+        let plan = editor.plan(EditOptions::default())?;
+        let dropped = plan.report().dropped().map(|stream| stream.0).collect();
+        Ok((plan.to_vec()?, plan.stream_count(), dropped))
     };
-    let (first, streams_after) = plan().map_err(pdbrs)?;
-    let (second, _) = plan().map_err(pdbrs)?;
+    let (first, streams_after, unclaimed) = plan().map_err(pdbrs)?;
+    let (second, _, _) = plan().map_err(pdbrs)?;
     fs::create_dir_all(directory)
         .map_err(|error| format!("cannot make {}: {error}", directory.display()))?;
     let path = directory.join(file_name);
@@ -411,11 +410,7 @@ fn rebuild(original: &Path, directory: &Path, file_name: &str) -> Result<Rebuilt
         deterministic: first == second,
         streams_before: pdb.container().stream_count(),
         streams_after,
-        unclaimed: contents
-            .unclaimed_streams()
-            .iter()
-            .map(|stream| stream.0)
-            .collect(),
+        unclaimed,
     })
 }
 

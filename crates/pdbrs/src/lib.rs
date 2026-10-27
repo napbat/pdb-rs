@@ -18,11 +18,11 @@
 //! containers: stream-preserving repacks and new layouts of arbitrary
 //! streams. [`native::msfz`] writes MSFZ containers, and
 //! [`native::container::Container`] converts between MSF 7.0 and MSFZ. Each
-//! native record and stream has an encoder. [`native::PdbBuilder`] builds new
-//! native PDBs, and [`native::PdbEditor`] edits native PDBs and rebuilds the
+//! native record and stream has an encoder. [`native::PdbEditor`] builds,
+//! edits and rebuilds native PDBs with one model, and its plan writes the
 //! dependent indexes. [`portable::write`] writes Portable PDBs in new layouts
-//! from raw rows and heaps. [`portable::PdbBuilder`] and
-//! [`portable::PdbEditor`] build and edit Portable PDBs from typed records.
+//! from raw rows and heaps. [`portable::PdbEditor`] builds and edits Portable
+//! PDBs from records.
 //!
 //! [`probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification

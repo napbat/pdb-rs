@@ -9,13 +9,13 @@ use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     Data, ModuleTypeReference, ModuleTypeReferenceFlags, ModuleTypeSource, Public, PublicFlags,
-    S_LDATA32, S_MOD_TYPEREF, S_PUB32, SymbolData,
+    S_LDATA32, S_MOD_TYPEREF, SymbolData,
 };
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{Module, SectionContribution};
 use pdbrs::native::info::Feature;
 use pdbrs::native::msf::StreamId;
-use pdbrs::native::{BuildOptions, EditOptions, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbEditor, PdbWritePlan};
 use pdbrs::{Bytes, ErrorKind};
 
 /// The flags of a module that owns its type records (`fOwnTMR`).
@@ -88,35 +88,28 @@ fn type_reference(flags: u32) -> ModuleTypeReference {
 /// Build a PDB like `link /DEBUG:LAZY` writes: empty TPI and IPI, module 0
 /// with two type records in its own stream, and module 1 with the records
 /// of module 0. The local data of the modules has `first` and `second`.
-fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
-    let mut builder = PdbBuilder::new(7, [7; 16], 1).expect("builder");
-    builder
+fn builder(first: TypeIndex, second: TypeIndex) -> PdbEditor<'static> {
+    let mut editor = PdbEditor::new(7, [7; 16], 1).expect("editor");
+    editor
         .set_features(&[Feature::VC140, Feature::NO_TYPE_MERGE])
         .expect("features");
-    let types = builder.add_stream(type_records(2)).expect("type stream");
-    let own = builder
+    let own = editor
         .add_module(module_record(b"own.obj"))
         .expect("module");
-    own.push_symbol_with(move |resolver, out| {
-        let mut reference = type_reference(OWN_TYPE_RECORDS);
-        reference.map_streams(|_| resolver.stream(types))?;
-        SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
-    })
-    .expect("type reference");
-    own.push_symbol_fields(S_LDATA32, local(first))
-        .expect("local");
-    let other = builder
+    push_own_types(&mut editor, own, OWN_TYPE_RECORDS);
+    let own = editor.module_mut(own).expect("module");
+    own.push(S_LDATA32, local(first)).expect("local");
+    let other = editor
         .add_module(module_record(b"other.obj"))
         .expect("module");
+    let other = editor.module_mut(other).expect("module");
     other
-        .push_symbol_fields(
+        .push(
             S_MOD_TYPEREF,
             SymbolData::ModuleTypeReference(type_reference(OTHER_MODULE)),
         )
         .expect("type reference");
-    other
-        .push_symbol_fields(S_LDATA32, local(second))
-        .expect("local");
+    other.push(S_LDATA32, local(second)).expect("local");
     for name in [&b"pub"[..], b"later"] {
         let mut record = Public::default();
         record.flags = PublicFlags(0);
@@ -125,18 +118,52 @@ fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
             offset: 0,
         };
         record.name = Bytes::new(name);
-        let public = builder
-            .add_symbol_fields(S_PUB32, SymbolData::Public(record))
+        editor
+            .publics_mut()
+            .and_then(|mut publics| publics.push(record))
             .expect("public");
-        builder.index_public(public).expect("index");
     }
-    builder
+    editor
+}
+
+/// Add a stream with two type records and an `S_MOD_TYPEREF` record with
+/// `flags` that names it to `module`.
+fn push_own_types(editor: &mut PdbEditor<'static>, module: ModuleIndex, flags: u32) {
+    let types = editor
+        .unnamed_streams_mut()
+        .and_then(|streams| streams.push(type_records(2)))
+        .expect("type stream");
+    let mut reference = type_reference(flags);
+    reference
+        .map_streams(|_| Ok(types))
+        .expect("stream of the records");
+    editor
+        .module_mut(module)
+        .and_then(|module| module.push(S_MOD_TYPEREF, SymbolData::ModuleTypeReference(reference)))
+        .expect("type reference");
+}
+
+/// Rebuild `pdb` from all its decoded streams, and check that the plan
+/// drops no stream.
+fn rebuild(pdb: &Pdb<&[u8]>) -> Vec<u8> {
+    let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    editor.decode_all().expect("decode");
+    let plan = editor
+        .plan(EditOptions::default())
+        .expect("the rebuild plans");
+    assert_eq!(plan.report().dropped().count(), 0);
+    plan.to_vec().expect("output")
+}
+
+/// Return `true` if the plan changes stream `id`.
+fn changes(plan: &PdbWritePlan<'_, &[u8]>, id: StreamId) -> bool {
+    plan.report().changed().any(|changed| changed == id)
 }
 
 /// Build the PDB with valid module type indices.
 fn notm() -> Vec<u8> {
     builder(TypeIndex(0x1000), TypeIndex(0x1001))
-        .plan(BuildOptions::default())
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("the NOTM PDB builds")
 }
@@ -194,7 +221,7 @@ fn module_type_index_past_the_module_records_is_rejected() {
         (TypeIndex(0x1000), TypeIndex(0x1002)),
     ] {
         let error = builder(first, second)
-            .plan(BuildOptions::default())
+            .plan(EditOptions::default())
             .expect_err("module 0 has two type records");
         assert_eq!(error.kind(), ErrorKind::InvalidReference);
     }
@@ -204,15 +231,7 @@ fn module_type_index_past_the_module_records_is_rejected() {
 fn rebuild_carries_the_module_type_streams() {
     let bytes = notm();
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
-    let contents = pdb.contents().expect("contents");
-    assert_eq!(contents.unclaimed_streams(), []);
-    let builder = contents
-        .to_builder(IdentityPolicy::Preserve)
-        .expect("builder");
-    let rebuilt = builder
-        .plan(contents.build_options())
-        .and_then(|plan| plan.to_vec())
-        .expect("the rebuild plans");
+    let rebuilt = rebuild(&pdb);
     let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
     assert!(rebuilt.info().has_feature(Feature::NO_TYPE_MERGE));
     assert_eq!(module_type_streams(&rebuilt), module_type_streams(&pdb));
@@ -228,26 +247,20 @@ fn rebuild_carries_the_module_type_streams() {
 /// own records in a stream. The local data uses index `0x1506`, an index
 /// after 1286 precompiled types that the PDB does not hold.
 fn precompiled() -> Vec<u8> {
-    let mut builder = PdbBuilder::new(7, [7; 16], 1).expect("builder");
-    builder
+    let mut editor = PdbEditor::new(7, [7; 16], 1).expect("editor");
+    editor
         .set_features(&[Feature::VC140, Feature::NO_TYPE_MERGE])
         .expect("features");
     for (name, flags) in [(&b"pch.obj"[..], 0x0c), (b"use.obj", 0x0a)] {
-        let types = builder.add_stream(type_records(2)).expect("type stream");
-        let module = builder.add_module(module_record(name)).expect("module");
-        module
-            .push_symbol_with(move |resolver, out| {
-                let mut reference = type_reference(flags);
-                reference.map_streams(|_| resolver.stream(types))?;
-                SymbolData::ModuleTypeReference(reference).encode(S_MOD_TYPEREF, out)
-            })
-            .expect("type reference");
-        module
-            .push_symbol_fields(S_LDATA32, local(TypeIndex(0x1506)))
+        let module = editor.add_module(module_record(name)).expect("module");
+        push_own_types(&mut editor, module, flags);
+        editor
+            .module_mut(module)
+            .and_then(|module| module.push(S_LDATA32, local(TypeIndex(0x1506))))
             .expect("local");
     }
-    builder
-        .plan(BuildOptions::default())
+    editor
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("indices of precompiled-type modules are not checked")
 }
@@ -279,14 +292,7 @@ fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
             }
         )
     ));
-    let contents = pdb.contents().expect("contents");
-    assert_eq!(contents.unclaimed_streams(), []);
-    let rebuilt = contents
-        .to_builder(IdentityPolicy::Preserve)
-        .expect("builder")
-        .plan(contents.build_options())
-        .and_then(|plan| plan.to_vec())
-        .expect("the rebuild plans");
+    let rebuilt = rebuild(&pdb);
     let rebuilt = Pdb::parse(rebuilt.as_slice()).expect("rebuilt");
     let sources = module_type_streams(&rebuilt);
     assert_eq!(sources.len(), 2);
@@ -301,14 +307,21 @@ fn edit_that_moves_records_keeps_the_module_type_streams() {
     let bytes = notm();
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .rename_public(b"pub", b"pub_with_a_longer_name")
-        .expect("recorded");
+    {
+        let mut publics = editor.publics_mut().expect("publics");
+        let handle = publics.find(b"pub").expect("find").expect("public present");
+        *publics
+            .get_mut(handle)
+            .expect("record")
+            .data_mut()
+            .name_mut()
+            .expect("named record") = Bytes::from(b"pub_with_a_longer_name".to_vec());
+    }
     let plan = editor
         .plan(EditOptions::default())
         .expect("the module type stream has an owner");
     let own = own_stream(&pdb);
-    assert!(!plan.changed_streams().contains(&own));
+    assert!(!changes(&plan, own));
     let edited = plan.to_vec().expect("output");
     let edited = Pdb::parse(edited.as_slice()).expect("edited");
     assert_eq!(stream(&edited, own), Some(type_records(2)));
@@ -318,11 +331,12 @@ fn edit_that_moves_records_keeps_the_module_type_streams() {
 fn strip_removes_the_module_type_streams_and_the_feature() {
     let bytes = notm();
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.strip_private();
-    let plan = editor.plan(EditOptions::default()).expect("strip");
+    let editor = pdb.edit(IdentityPolicy::Preserve);
+    let plan = editor
+        .plan(EditOptions::default().with_strip_private(true))
+        .expect("strip");
     let own = own_stream(&pdb);
-    assert!(plan.changed_streams().contains(&own));
+    assert!(changes(&plan, own));
     let stripped = plan.to_vec().expect("output");
     let stripped = Pdb::parse(stripped.as_slice()).expect("stripped");
     assert_eq!(stream(&stripped, own), None);

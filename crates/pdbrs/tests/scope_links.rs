@@ -12,7 +12,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::Module;
-use pdbrs::native::{BuildOptions, PdbBuilder};
+use pdbrs::native::{EditOptions, PdbEditor};
 
 /// A scope record from a fixture with the links that `llvm-pdbutil` prints.
 struct RealRecord {
@@ -220,10 +220,12 @@ fn procedure_reference_with_a_position_target_round_trips() {
 
 #[test]
 fn reference_with_an_unresolved_handle_does_not_encode() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).unwrap();
-    let module = builder.add_module(Module::default()).unwrap();
-    let handle = module
-        .push_symbol_fields(S_PUB32, SymbolData::Public(Public::default()))
+    let mut editor = PdbEditor::new(1, [1; 16], 1).unwrap();
+    let index = editor.add_module(Module::default()).unwrap();
+    let handle = editor
+        .module_mut(index)
+        .unwrap()
+        .push(S_PUB32, SymbolData::Public(Public::default()))
         .unwrap();
     assert_eq!(handle.module(), ModuleIndex(0));
     let mut reference = position_reference();
@@ -248,18 +250,19 @@ fn reference_with_an_unresolved_handle_does_not_encode() {
 
 #[test]
 fn plan_rejects_a_handle_target_in_a_module_stream() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).unwrap();
-    let module = builder.add_module(Module::default()).unwrap();
+    let mut editor = PdbEditor::new(1, [1; 16], 1).unwrap();
+    let index = editor.add_module(Module::default()).unwrap();
+    let module = editor.module_mut(index).unwrap();
     let handle = module
-        .push_symbol_fields(S_PUB32, SymbolData::Public(Public::default()))
+        .push(S_PUB32, SymbolData::Public(Public::default()))
         .unwrap();
     let mut reference = position_reference();
     reference.target = ModuleSymbolTarget::Handle(handle);
     module
-        .push_symbol_fields(S_PROCREF, SymbolData::ProcedureReference(reference))
+        .push(S_PROCREF, SymbolData::ProcedureReference(reference))
         .unwrap();
-    let error = builder
-        .plan(BuildOptions::default())
+    let error = editor
+        .plan(EditOptions::default())
         .expect_err("module offsets are not known when the plan encodes a module stream");
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }

@@ -44,9 +44,9 @@ const RENAME_SUFFIX: &[u8] = b"_pdbrs_renamed";
 /// The name of the structure that the type edit adds.
 const ADDED_TYPE: &[u8] = b"PdbrsBenchType";
 
-/// Plan the edits of `editor` with the default options and write the output.
-fn write(editor: &PdbEditor<'_, &[u8]>) -> Outcome<u64> {
-    let bytes = editor.plan(EditOptions::default())?.to_vec()?;
+/// Plan the edits of `editor` with `options` and write the output.
+fn write(editor: &PdbEditor<'_, &[u8]>, options: EditOptions) -> Outcome<u64> {
+    let bytes = editor.plan(options)?.to_vec()?;
     Ok(u64::try_from(bytes.len())?)
 }
 
@@ -56,8 +56,10 @@ pub(crate) fn named_stream(path: &Path, bench: &mut Bench) -> Outcome {
     let pdb = Pdb::parse(&bytes)?;
     bench.measure(|| {
         let mut editor = pdb.edit(IdentityPolicy::Preserve);
-        editor.set_named_stream(b"srcsrv", SOURCE_SERVER.as_bytes().to_vec())?;
-        write(&editor)
+        editor
+            .named_streams_mut()?
+            .insert(b"srcsrv", SOURCE_SERVER.as_bytes().to_vec())?;
+        write(&editor, EditOptions::default())
     })
 }
 
@@ -91,8 +93,14 @@ pub(crate) fn rename_public(path: &Path, bench: &mut Bench) -> Outcome {
     let new = [old.as_slice(), RENAME_SUFFIX].concat();
     bench.measure(|| {
         let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-        editor.rename_public(&old, &new)?;
-        write(&editor)
+        let mut publics = editor.publics_mut()?;
+        let handle = publics.find(&old)?.ok_or("missing public symbol")?;
+        let name = publics
+            .get_mut(handle)
+            .and_then(|record| record.data_mut().name_mut())
+            .ok_or("public symbol without a name")?;
+        *name = new.clone().into();
+        write(&editor, EditOptions::default())
     })
 }
 
@@ -129,7 +137,7 @@ pub(crate) fn append_type(path: &Path, bench: &mut Bench) -> Outcome {
     let list = TypeLeaf::decode(record)?;
     bench.measure(|| {
         let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-        let field_list = editor.add_type(&list)?;
+        let field_list = editor.types_mut()?.push(list.clone())?;
         let mut class = Class::new(ClassKind::Structure);
         class.member_count = 1;
         class.options = ClassOptions(0);
@@ -140,19 +148,18 @@ pub(crate) fn append_type(path: &Path, bench: &mut Bench) -> Outcome {
         class.name = ADDED_TYPE.into();
         class.unique_name = None;
         class.trailing = Bytes::new(&[]);
-        editor.add_type(&TypeLeaf::Class(class))?;
-        write(&editor)
+        editor.types_mut()?.push(TypeLeaf::Class(class))?;
+        write(&editor, EditOptions::default())
     })
 }
 
-/// Strip the private symbols with [`PdbEditor::strip_private`].
+/// Strip the private symbols with [`EditOptions::with_strip_private`].
 pub(crate) fn strip_private(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let pdb = Pdb::parse(&bytes)?;
     bench.measure(|| {
-        let mut editor = pdb.edit(IdentityPolicy::Preserve);
-        editor.strip_private();
-        write(&editor)
+        let editor = pdb.edit(IdentityPolicy::Preserve);
+        write(&editor, EditOptions::default().with_strip_private(true))
     })
 }
 
@@ -161,11 +168,9 @@ pub(crate) fn rebuild(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let pdb = Pdb::parse(&bytes)?;
     bench.measure(|| {
-        let contents = pdb.contents()?;
-        let options = contents.build_options();
-        let builder = contents.to_builder(IdentityPolicy::Preserve)?;
-        let output = builder.plan(options)?.to_vec()?;
-        Ok(u64::try_from(output.len())?)
+        let mut editor = pdb.edit(IdentityPolicy::Preserve);
+        editor.decode_all()?;
+        write(&editor, EditOptions::default())
     })
 }
 

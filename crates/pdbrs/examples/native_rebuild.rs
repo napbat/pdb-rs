@@ -1,16 +1,17 @@
 //! Rebuild a native PDB from its decoded records.
 //!
-//! The example reads every stream of the input, decodes every record and
-//! builds a new PDB from the decoded values with `PdbBuilder`. It keeps the
-//! identity of the input, so the image of the input matches the output. It
-//! plans the output twice and fails if the two plans give different bytes.
-//! The input can be an MSF 7.00 or an MSFZ PDB. The output is MSF 7.00.
+//! The example reads every stream of the input, decodes every record with
+//! `PdbEditor::decode_all` and plans a new PDB from the decoded values. It
+//! keeps the identity of the input, so the image of the input matches the
+//! output. It plans the output twice and fails if the two plans give
+//! different bytes. The input can be an MSF 7.00 or an MSFZ PDB. The output
+//! is MSF 7.00.
 //!
 //! Usage: `cargo run --example native_rebuild -- <input.pdb> <output.pdb>`
 
 use std::error::Error;
 
-use pdbrs::native::{Identity, IdentityPolicy, Pdb};
+use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
@@ -21,20 +22,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(usage.into());
     }
     let pdb = Pdb::open(&input)?;
-    let contents = pdb.contents()?;
-    let options = contents.build_options();
-    let builder = contents.to_builder(IdentityPolicy::Preserve)?;
-    let plan = builder.plan(options)?;
+    let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    editor.decode_all()?;
+    let options = EditOptions::default();
+    let plan = editor.plan(options)?;
     let bytes = plan.to_vec()?;
-    let again = contents
-        .to_builder(IdentityPolicy::Preserve)?
-        .plan(options)?
-        .to_vec()?;
+    let again = editor.plan(options)?.to_vec()?;
     if bytes != again {
         return Err("two plans of the same input give different bytes".into());
     }
     std::fs::write(&output, &bytes)?;
-    println!("{builder:?}");
+    println!("{editor:?}");
     println!(
         "input container: {:?}, streams: {}",
         pdb.container().kind(),
@@ -43,10 +41,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("output streams: {}", plan.stream_count());
     println!("output bytes: {}", bytes.len());
     println!(
-        "unclaimed input streams: {:?}",
-        contents.unclaimed_streams()
+        "dropped input streams: {:?}",
+        plan.report().dropped().collect::<Vec<_>>()
     );
-    if let Identity::Modern { guid, age } = plan.identity() {
+    if let Identity::Modern { guid, age } = plan.identity()? {
         println!("PE match: guid {guid:02x?}, age {age}");
     }
     println!("deterministic: same bytes in two plans");

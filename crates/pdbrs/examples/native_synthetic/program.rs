@@ -1,4 +1,4 @@
-//! The records of a small synthetic x64 program, built through the public API.
+//! The records of a small synthetic x64 program, built with the public editor API.
 //!
 //! The program has this source, `C:\synthetic\synthetic.c`:
 //!
@@ -20,9 +20,9 @@
 //! `sum` is at `.text+0x0` (0x20 bytes), `main` at `.text+0x20` (0x30 bytes)
 //! and `g_value` at `.data+0x0`.
 
-use pdbrs::Result;
-use pdbrs::native::PdbBuilder;
+use pdbrs::native::PdbEditor;
 use pdbrs::native::address::SectionOffset;
+use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::field_list::{DataMember, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{FunctionId, IdRecord};
 use pdbrs::native::codeview::index::{
@@ -33,7 +33,7 @@ use pdbrs::native::codeview::symbol::{
     Compile3, CompileFlags, CpuType, Data, FrameProcedure, FrameProcedureFlags, ModuleSymbolTarget,
     ObjectName, Procedure, ProcedureFlags, ProcedureReference, ProcedureType, Public, PublicFlags,
     RegisterRelative, S_COMPILE3, S_END, S_FRAMEPROC, S_GDATA32, S_GPROC32, S_OBJNAME, S_PROCREF,
-    S_PUB32, S_REGREL32, S_UDT, ScopeLinks, SymbolData, UserDefinedType,
+    S_REGREL32, S_UDT, SymbolData, UserDefinedType,
 };
 use pdbrs::native::codeview::type_record::{
     ArgumentList, CallingConvention, Class, ClassKind, ClassOptions, FunctionOptions,
@@ -44,12 +44,13 @@ use pdbrs::native::dbi::{
     SectionMapEntry, SegmentFlags,
 };
 use pdbrs::native::debug_stream::RecordStream;
+use pdbrs::native::editor::ModuleContents;
 use pdbrs::native::lines::{
     ChecksumKind, DEBUG_S_FILECHKSMS, DEBUG_S_LINES, FileChecksum, LineBlock, LineEntry,
     LineSubsection, LinesHeader, SubsectionKind,
 };
 use pdbrs::native::section::{Machine, SectionHeader};
-use pdbrs::native::write::TypeHandle;
+use pdbrs::{Error, ErrorKind, Result};
 
 /// The identity of the synthetic PDB.
 pub const GUID: [u8; 16] = *b"pdbrs-synthetic!";
@@ -137,85 +138,73 @@ fn int_member(attributes: MemberAttributes, offset: u32, name: &'static [u8]) ->
 
 /// Build the synthetic PDB.
 ///
+/// The type and ID records go in reference order: a record refers only to
+/// earlier records. The indices are the indices of the old builder program.
+///
 /// # Errors
 ///
-/// Returns the errors of the builder.
-pub fn build() -> Result<PdbBuilder<'static>> {
-    let mut builder = PdbBuilder::new(SIGNATURE, GUID, 1)?;
-    // The handle of the function ID of `sum` exists before its record and
-    // before its type: the module records can refer to it at once.
-    let sum_id = builder.reserve_id()?;
-    let point_forward = builder.add_type(TypeLeaf::Class(point_class(
+/// Returns the errors of the editor.
+pub fn build() -> Result<PdbEditor<'static>> {
+    let mut editor = PdbEditor::new(SIGNATURE, GUID, 1)?;
+    let types = editor.types_mut()?;
+    // 0x1000.
+    let point_forward = types.push(TypeLeaf::Class(point_class(
         ClassOptions::FORWARD_REFERENCE,
         TypeIndex::NONE,
         0,
         0,
     )))?;
-    let pointer = builder.add_type_with(move |resolver, out| {
-        let mut pointer = Pointer::default();
-        pointer.referent_type = resolver.type_index(point_forward)?;
-        // A 64-bit pointer (kind 0x0c) of 8 bytes.
-        pointer.attributes = PointerAttributes::from_raw(0x0c | (8 << 13))?;
-        pointer.member = None;
-        pointer.based = None;
-        pointer.trailing_zeros = 0;
-        TypeLeaf::Pointer(pointer).encode(out)
-    })?;
-    let sum_arguments = builder.add_type_with(move |resolver, out| {
-        let index = resolver.type_index(pointer)?.0.to_le_bytes();
-        TypeLeaf::ArgumentList(ArgumentList::parse(&index)?).encode(out)
-    })?;
-    let sum_type = procedure_type(&mut builder, sum_arguments, 1)?;
-    let fields = builder.add_type_with(|_, out| {
-        let public = MemberAttributes::from_raw(3)?;
-        let members = [int_member(public, 0, b"x"), int_member(public, 4, b"y")];
-        encode_field_list(&members, TypeIndex(0x1000), 0xff00, out).map(|_| ())
-    })?;
+    let mut pointer = Pointer::default();
+    pointer.referent_type = point_forward;
+    // A 64-bit pointer (kind 0x0c) of 8 bytes.
+    pointer.attributes = PointerAttributes::from_raw(0x0c | (8 << 13))?;
+    pointer.member = None;
+    pointer.based = None;
+    pointer.trailing_zeros = 0;
+    // 0x1001.
+    let pointer = types.push(TypeLeaf::Pointer(pointer))?;
+    // 0x1002.
+    let sum_arguments = types.push(TypeLeaf::ArgumentList(ArgumentList::parse(
+        &pointer.0.to_le_bytes(),
+    )?))?;
+    // 0x1003.
+    let sum_type = types.push(procedure_type(sum_arguments, 1))?;
+    let public = MemberAttributes::from_raw(3)?;
+    let members = [int_member(public, 0, b"x"), int_member(public, 4, b"y")];
+    let mut field_list = Vec::new();
+    encode_field_list(&members, types.end()?, 0xff00, &mut field_list)?;
+    let field_list = Records::new(&field_list).next().ok_or_else(|| {
+        Error::new(ErrorKind::InvalidFormat, None).with_context("field list has no record")
+    })??;
+    // 0x1004.
+    let fields = types.push(TypeLeaf::decode(field_list)?)?;
     // The definition comes after its field list. The pointer refers to the
-    // forward reference, as compilers write it.
-    let point = builder.add_type_with(move |resolver, out| {
-        TypeLeaf::Class(point_class(
-            ClassOptions(0),
-            resolver.type_index(fields)?,
-            2,
-            8,
-        ))
-        .encode(out)
-    })?;
-    let main_arguments = builder.add_type(TypeLeaf::ArgumentList(ArgumentList::parse(&[])?))?;
-    let main_type = procedure_type(&mut builder, main_arguments, 0)?;
-    builder.define_id_with(sum_id, move |resolver, out| {
-        function_id(resolver.type_index(sum_type)?, SUM.name).encode(out)
-    })?;
-    builder.add_id_with(move |resolver, out| {
-        function_id(resolver.type_index(main_type)?, MAIN.name).encode(out)
-    })?;
-    let file = builder.add_name(SOURCE)?;
+    // forward reference, as compilers write it. 0x1005.
+    let point = types.push(TypeLeaf::Class(point_class(ClassOptions(0), fields, 2, 8)))?;
+    // 0x1006.
+    let main_arguments = types.push(TypeLeaf::ArgumentList(ArgumentList::parse(&[])?))?;
+    // 0x1007.
+    let main_type = types.push(procedure_type(main_arguments, 0))?;
+    let ids = editor.ids_mut()?;
+    // 0x1000 and 0x1001.
+    ids.push(function_id(sum_type, SUM.name))?;
+    ids.push(function_id(main_type, MAIN.name))?;
+    let file = editor.names_mut()?.insert(SOURCE)?;
     // As `link.exe` writes them, the procedure records name their type, not their ID.
-    let procedures = add_module(
-        &mut builder,
-        file,
-        [(sum_type, pointer), (main_type, point)],
-    )?;
-    add_globals(&mut builder, procedures, point)?;
-    add_image_tables(&mut builder)?;
-    Ok(builder)
+    let procedures = add_module(&mut editor, file, [(sum_type, pointer), (main_type, point)])?;
+    add_globals(&mut editor, procedures, point)?;
+    add_image_tables(&mut editor)?;
+    Ok(editor)
 }
 
-/// Add an `LF_PROCEDURE` record that returns `int`.
-fn procedure_type(
-    builder: &mut PdbBuilder<'_>,
-    arguments: TypeHandle,
-    parameter_count: u16,
-) -> Result<TypeHandle> {
-    builder.add_type_with(move |resolver, out| {
-        let mut procedure = ProcedureLeaf::new(CallingConvention::NearC);
-        procedure.return_type = T_INT4;
-        procedure.options = FunctionOptions(0);
-        procedure.parameter_count = parameter_count;
-        procedure.argument_list = resolver.type_index(arguments)?;
-        TypeLeaf::Procedure(procedure).encode(out)
-    })
+/// Return an `LF_PROCEDURE` record that returns `int`.
+fn procedure_type(arguments: TypeIndex, parameter_count: u16) -> TypeLeaf<'static> {
+    let mut procedure = ProcedureLeaf::new(CallingConvention::NearC);
+    procedure.return_type = T_INT4;
+    procedure.options = FunctionOptions(0);
+    procedure.parameter_count = parameter_count;
+    procedure.argument_list = arguments;
+    TypeLeaf::Procedure(procedure)
 }
 
 /// Return an `LF_FUNC_ID` record at the global scope.
@@ -230,20 +219,21 @@ fn function_id(function_type: TypeIndex, name: &[u8]) -> IdRecord<'_> {
 
 /// Add the module with its symbols and lines. Return the procedure handles.
 fn add_module(
-    builder: &mut PdbBuilder<'_>,
+    editor: &mut PdbEditor<'_>,
     file: NameOffset,
-    functions: [(TypeHandle, TypeHandle); 2],
+    functions: [(TypeIndex, TypeIndex); 2],
 ) -> Result<[ModuleSymbolHandle; 2]> {
     let mut record = Module::default();
     record.section_contribution = contribution(1, 0, 0x50, TEXT_CHARACTERISTICS);
     record.name = b"C:\\synthetic\\synthetic.obj".into();
     record.object_file = b"C:\\synthetic\\synthetic.obj".into();
-    let module = builder.add_module(record)?;
-    module.push_file(SOURCE)?;
+    let index = editor.add_module(record)?;
+    let module = editor.module_mut(index)?;
+    module.files_mut().push(SOURCE.into());
     let mut object = ObjectName::default();
     object.signature = 0;
     object.name = b"C:\\synthetic\\synthetic.obj".into();
-    module.push_symbol_fields(S_OBJNAME, SymbolData::ObjectName(object))?;
+    module.push(S_OBJNAME, SymbolData::ObjectName(object))?;
     let mut compile = Compile3::default();
     compile.flags = CompileFlags(0);
     compile.machine = CV_CFL_AMD64;
@@ -251,121 +241,117 @@ fn add_module(
     compile.backend = [19, 51, 0, 0];
     compile.version = b"pdbrs synthetic".into();
     compile.trailing_zeros = 0;
-    module.push_symbol_fields(S_COMPILE3, SymbolData::Compile3(compile))?;
-    let mut handles = [None, None];
-    for ((function, (procedure_type, local_type)), local) in [SUM, MAIN]
-        .iter()
-        .zip(functions)
-        .zip([b"p".as_slice(), b"p"])
-    {
-        let procedure = module.push_symbol_with(move |resolver, out| {
-            let mut procedure =
-                Procedure::new(ProcedureType::Type(resolver.type_index(procedure_type)?));
-            procedure.next = ModuleSymbolOffset(0);
-            procedure.code_length = function.size;
-            procedure.debug_start = 0;
-            procedure.debug_end = function.size - 1;
-            procedure.address = at(1, function.offset);
-            procedure.flags = ProcedureFlags(0);
-            procedure.extended_flags = None;
-            procedure.name = function.name.into();
-            // The plan replaces the scope links.
-            SymbolData::Procedure(procedure).encode_scope(S_GPROC32, ScopeLinks::default(), out)
-        })?;
-        let mut frame = FrameProcedure::default();
-        frame.frame_size = 0x28;
-        frame.padding_size = 0;
-        frame.padding_offset = 0;
-        frame.callee_saved_size = 0;
-        frame.exception_handler = at(0, 0);
-        // The local and parameter base registers are RSP.
-        frame.flags = FrameProcedureFlags((1 << 14) | (1 << 16));
-        module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
-        module.push_symbol_with(move |resolver, out| {
-            let mut relative = RegisterRelative::default();
-            relative.offset = 0x30;
-            relative.type_index = resolver.type_index(local_type)?;
-            relative.register = CV_AMD64_RSP;
-            relative.name = local.into();
-            SymbolData::RegisterRelative(relative).encode(S_REGREL32, out)
-        })?;
-        module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
-        let slot = usize::from(function.offset != 0);
-        handles[slot] = Some(procedure);
-    }
-    module.push_subsection_with(move |_, out| {
-        let mut data = Vec::new();
-        FileChecksum::encode_parts(file, ChecksumKind::None, &[], &mut data)?;
-        frame(DEBUG_S_FILECHKSMS, &data, out)
-    })?;
+    module.push(S_COMPILE3, SymbolData::Compile3(compile))?;
+    let [(sum_type, sum_local), (main_type, main_local)] = functions;
+    let sum = push_procedure(module, &SUM, sum_type, sum_local)?;
+    let main = push_procedure(module, &MAIN, main_type, main_local)?;
+    let mut data = Vec::new();
+    FileChecksum::encode_parts(file, ChecksumKind::None, &[], &mut data)?;
+    push_subsection(module, DEBUG_S_FILECHKSMS, &data)?;
     for function in [SUM, MAIN] {
-        module.push_subsection_with(move |_, out| {
-            let mut data = Vec::new();
-            let mut header = LinesHeader::default();
-            header.code_offset = function.offset;
-            header.segment = 1;
-            header.flags = 0;
-            header.code_size = function.size;
-            header.encode(&mut data)?;
-            let lines: Vec<LineEntry> = function
-                .lines
-                .iter()
-                .map(|&(offset, line)| {
-                    let mut entry = LineEntry::default();
-                    entry.offset = offset;
-                    entry.line_start = line;
-                    entry.end_delta = 0;
-                    entry.is_statement = true;
-                    entry
-                })
-                .collect();
-            // The file checksum entry of the source is at offset 0.
-            LineBlock::encode_parts(ChecksumOffset(0), &lines, None, &mut data)?;
-            frame(DEBUG_S_LINES, &data, out)
-        })?;
+        let mut data = Vec::new();
+        let mut header = LinesHeader::default();
+        header.code_offset = function.offset;
+        header.segment = 1;
+        header.flags = 0;
+        header.code_size = function.size;
+        header.encode(&mut data)?;
+        let lines: Vec<LineEntry> = function
+            .lines
+            .iter()
+            .map(|&(offset, line)| {
+                let mut entry = LineEntry::default();
+                entry.offset = offset;
+                entry.line_start = line;
+                entry.end_delta = 0;
+                entry.is_statement = true;
+                entry
+            })
+            .collect();
+        // The file checksum entry of the source is at offset 0.
+        LineBlock::encode_parts(ChecksumOffset(0), &lines, None, &mut data)?;
+        push_subsection(module, DEBUG_S_LINES, &data)?;
     }
-    let [Some(sum), Some(main)] = handles else {
-        unreachable!("both procedures have a handle")
-    };
     Ok([sum, main])
 }
 
-/// Append a C13 subsection of `kind` with `data`, its header and its padding.
+/// Add the scope of `function` to `module`: the procedure record of
+/// `procedure_type`, the frame record, the local `p` of `local_type` and the
+/// scope end. Return the handle of the procedure record.
+fn push_procedure(
+    module: &mut ModuleContents,
+    function: &Function,
+    procedure_type: TypeIndex,
+    local_type: TypeIndex,
+) -> Result<ModuleSymbolHandle> {
+    let mut procedure = Procedure::new(ProcedureType::Type(procedure_type));
+    procedure.next = ModuleSymbolOffset(0);
+    procedure.code_length = function.size;
+    procedure.debug_start = 0;
+    procedure.debug_end = function.size - 1;
+    procedure.address = at(1, function.offset);
+    procedure.flags = ProcedureFlags(0);
+    procedure.extended_flags = None;
+    procedure.name = function.name.into();
+    // The plan computes the scope links from the tree.
+    let handle = module.push(S_GPROC32, SymbolData::Procedure(procedure))?;
+    let mut frame = FrameProcedure::default();
+    frame.frame_size = 0x28;
+    frame.padding_size = 0;
+    frame.padding_offset = 0;
+    frame.callee_saved_size = 0;
+    frame.exception_handler = at(0, 0);
+    // The local and parameter base registers are RSP.
+    frame.flags = FrameProcedureFlags((1 << 14) | (1 << 16));
+    module.push(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
+    let mut relative = RegisterRelative::default();
+    relative.offset = 0x30;
+    relative.type_index = local_type;
+    relative.register = CV_AMD64_RSP;
+    relative.name = b"p".into();
+    module.push(S_REGREL32, SymbolData::RegisterRelative(relative))?;
+    module.push(S_END, SymbolData::ScopeEnd)?;
+    Ok(handle)
+}
+
+/// Add a C13 subsection of `kind` with `data` to `module`.
 ///
-/// The subsection codec decodes the data and frames it.
-fn frame(kind: SubsectionKind, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
-    LineSubsection::decode(kind, data)?.encode_framed(out)
+/// The subsection codec decodes the data. The plan frames it.
+fn push_subsection(module: &mut ModuleContents, kind: SubsectionKind, data: &[u8]) -> Result<()> {
+    let subsection = LineSubsection::decode(kind, data)?.into_owned();
+    let lines = module.lines_mut();
+    lines.try_reserve(1).map_err(|_| {
+        Error::new(ErrorKind::LimitExceeded, None).with_context("no memory for a subsection")
+    })?;
+    lines.push(subsection);
+    Ok(())
 }
 
 /// Add the symbol record stream with its global and public index entries.
 fn add_globals(
-    builder: &mut PdbBuilder<'_>,
+    editor: &mut PdbEditor<'_>,
     procedures: [ModuleSymbolHandle; 2],
-    point: TypeHandle,
+    point: TypeIndex,
 ) -> Result<()> {
+    let mut globals = editor.globals_mut()?;
     for (procedure, name) in procedures.into_iter().zip([SUM.name, MAIN.name]) {
         let mut reference = ProcedureReference::default();
         reference.name_checksum = 0;
         // The plan writes the module index and the offset of the procedure.
         reference.target = ModuleSymbolTarget::Handle(procedure);
         reference.name = name.into();
-        let reference =
-            builder.add_symbol_fields(S_PROCREF, SymbolData::ProcedureReference(reference))?;
-        builder.index_global(reference, 1)?;
+        globals.push(S_PROCREF, SymbolData::ProcedureReference(reference), 1)?;
     }
     let mut global = Data::default();
     global.type_index = T_INT4;
     global.address = at(2, 0);
     global.name = b"g_value".into();
-    let data = builder.add_symbol_fields(S_GDATA32, SymbolData::Data(global))?;
-    builder.index_global(data, 1)?;
-    let udt = builder.add_symbol_with(move |resolver, out| {
-        let mut udt = UserDefinedType::default();
-        udt.type_index = resolver.type_index(point)?;
-        udt.name = b"Point".into();
-        SymbolData::UserDefinedType(udt).encode(S_UDT, out)
-    })?;
-    builder.index_global(udt, 1)?;
+    globals.push(S_GDATA32, SymbolData::Data(global), 1)?;
+    let mut udt = UserDefinedType::default();
+    udt.type_index = point;
+    udt.name = b"Point".into();
+    globals.push(S_UDT, SymbolData::UserDefinedType(udt), 1)?;
+    let mut publics = editor.publics_mut()?;
     let function = PublicFlags(PublicFlags::FUNCTION.0 | PublicFlags::CODE.0);
     for (name, flags, address) in [
         (SUM.name, function, at(1, SUM.offset)),
@@ -376,8 +362,7 @@ fn add_globals(
         symbol.flags = flags;
         symbol.address = address;
         symbol.name = name.into();
-        let public = builder.add_symbol_fields(S_PUB32, SymbolData::Public(symbol))?;
-        builder.index_public(public)?;
+        publics.push(symbol)?;
     }
     Ok(())
 }
@@ -398,13 +383,14 @@ fn contribution(section: u16, offset: i32, size: i32, characteristics: u32) -> S
 
 /// Add the DBI header, the section contributions, the section map and the
 /// section headers.
-fn add_image_tables(builder: &mut PdbBuilder<'_>) -> Result<()> {
+fn add_image_tables(editor: &mut PdbEditor<'_>) -> Result<()> {
     let mut header = DbiHeader::default();
     // The new version format (bit 15), major version 14 and minor version 51 (0x33).
     header.build_number = 0x8000 | (14 << 8) | 0x33;
     header.machine = Machine::AMD64;
-    builder.set_dbi_header(header);
-    builder.set_section_contributions(
+    let info = editor.debug_info_mut()?;
+    *info.header_mut() = header;
+    info.set_section_contributions(
         SectionContributionVersion::V60,
         vec![
             contribution(1, 0, 0x50, TEXT_CHARACTERISTICS),
@@ -440,13 +426,13 @@ fn add_image_tables(builder: &mut PdbBuilder<'_>) -> Result<()> {
             u32::MAX,
         ),
     ];
-    builder.set_section_map(Some(map));
+    info.set_section_map(Some(map));
+    info.set_debug_slot_count(11);
     let mut text = SectionHeader::new(*b".text\0\0\0", 0x100, 0x1000);
     text.characteristics = TEXT_CHARACTERISTICS;
     let mut data = SectionHeader::new(*b".data\0\0\0", 0x100, 0x2000);
     data.characteristics = DATA_CHARACTERISTICS;
-    builder.set_debug_slot_count(11);
-    builder.set_debug_stream(
+    editor.debug_streams_mut()?.set(
         DebugStream::SectionHeader,
         RecordStream::from_records(&[text, data])?.to_bytes()?,
     )

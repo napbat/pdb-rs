@@ -18,6 +18,7 @@ use pdbrs::native::codeview::symbol::{
 use pdbrs::native::codeview::type_record::{
     Class, ClassKind, ClassOptions, MemberAttributes, TypeLeaf,
 };
+use pdbrs::native::editor::SymbolRecord;
 use pdbrs::native::symbols::{HashTable, indexed_name};
 use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
 
@@ -182,23 +183,36 @@ pub(crate) fn apply(edit: Edit, source: &[u8]) -> Result<Outcome, String> {
             expect.identity = Some((NEW_SIGNATURE, NEW_GUID, NEW_AGE));
             Ok(())
         }
-        Edit::Strip => {
-            editor.strip_private();
-            Ok(())
-        }
+        Edit::Strip => Ok(()),
     };
     prepared.map_err(|error| format!("cannot prepare the edit: {error}"))?;
-    let plan = match editor.plan(EditOptions::default()) {
+    let options = EditOptions::default().with_strip_private(edit == Edit::Strip);
+    plan(&editor, options, expect, notes)
+}
+
+/// Plan and write the edited PDB of `editor`.
+///
+/// A plan error gives [`Outcome::Rejected`].
+pub(crate) fn plan(
+    editor: &PdbEditor<'_, &[u8]>,
+    options: EditOptions,
+    expect: Expectation,
+    notes: Vec<String>,
+) -> Result<Outcome, String> {
+    let plan = match editor.plan(options) {
         Ok(plan) => plan,
         Err(error) => return Ok(Outcome::Rejected(error)),
     };
     let bytes = plan
         .to_vec()
         .map_err(|error| format!("cannot write the edited PDB: {error}"))?;
+    let identity = plan
+        .identity()
+        .map_err(|error| format!("cannot read the identity of the plan: {error}"))?;
     Ok(Outcome::Edited(Box::new(Edited {
         bytes,
-        changed: plan.changed_streams().iter().map(|id| id.0).collect(),
-        identity: plan.identity(),
+        changed: plan.report().changed().map(|id| id.0).collect(),
+        identity,
         expect,
         notes,
     })))
@@ -210,13 +224,14 @@ fn named(
     editor: &mut PdbEditor<'_, &[u8]>,
     expect: &mut Expectation,
 ) -> pdbrs::Result<()> {
-    editor.set_named_stream(b"srcsrv", SOURCE_SERVER.as_bytes().to_vec())?;
-    editor.set_named_stream(b"sourcelink", SOURCE_LINK.as_bytes().to_vec())?;
-    editor.set_named_stream(RAW_STREAM.as_bytes(), b"pdbrs raw stream".to_vec())?;
+    let named = editor.named_streams_mut()?;
+    named.insert(b"srcsrv", SOURCE_SERVER.as_bytes().to_vec())?;
+    named.insert(b"sourcelink", SOURCE_LINK.as_bytes().to_vec())?;
+    named.insert(RAW_STREAM.as_bytes(), b"pdbrs raw stream".to_vec())?;
     expect.named_present = vec!["srcsrv".into(), "sourcelink".into(), RAW_STREAM.into()];
     expect.source_server = Some(SOURCE_SERVER.to_owned());
     if pdb.info().named_stream(b"/LinkInfo").is_some() {
-        editor.remove_named_stream(b"/LinkInfo")?;
+        named.remove(b"/LinkInfo")?;
         expect.named_absent.push("/LinkInfo".into());
     }
     Ok(())
@@ -301,12 +316,14 @@ fn add_symbols(
     public.flags = flags;
     public.address = address;
     public.name = ADDED_PUBLIC.as_bytes().into();
-    editor.add_public(&public)?;
+    editor.publics_mut()?.push(public)?;
     let mut data = Data::default();
     data.type_index = T_INT4;
     data.address = address;
     data.name = ADDED_GLOBAL.as_bytes().into();
-    editor.add_global(S_GDATA32, &SymbolData::Data(data))?;
+    editor
+        .globals_mut()?
+        .push(S_GDATA32, SymbolData::Data(data), 1)?;
     expect.publics.push(ADDED_PUBLIC.into());
     expect.globals.push(ADDED_GLOBAL.into());
     Ok(())
@@ -327,7 +344,9 @@ fn rename_symbols(
     };
     if let Some((name, _)) = public {
         let new = [name, RENAME_SUFFIX.as_bytes()].concat();
-        editor.rename_public(name, &new)?;
+        let mut publics = editor.publics_mut()?;
+        let handle = publics.find(name)?.ok_or_else(absent)?;
+        rename(publics.get_mut(handle), &new)?;
         expect.publics_absent.push(lossy(name));
         expect.publics.push(lossy(&new));
     } else {
@@ -344,12 +363,32 @@ fn rename_symbols(
     };
     if let Some((name, _)) = global {
         let new = [name, RENAME_SUFFIX.as_bytes()].concat();
-        editor.rename_global(name, &new)?;
+        let mut globals = editor.globals_mut()?;
+        let handle = globals.find(name)?.ok_or_else(absent)?;
+        rename(globals.get_mut(handle), &new)?;
         expect.globals_absent.push(lossy(name));
         expect.globals.push(lossy(&new));
     } else {
         notes.push("no global data, constant or UDT symbol to rename".into());
     }
+    Ok(())
+}
+
+/// Return the error for a name that the editor does not find.
+fn absent() -> pdbrs::Error {
+    pdbrs::Error::new(pdbrs::ErrorKind::InvalidReference, None)
+        .with_context("the editor has no symbol record with the name")
+}
+
+/// Give the record `record` the name `new`.
+fn rename(record: Option<&mut SymbolRecord>, new: &[u8]) -> pdbrs::Result<()> {
+    let name = record
+        .and_then(|record| record.data_mut().name_mut())
+        .ok_or_else(|| {
+            pdbrs::Error::new(pdbrs::ErrorKind::InvalidReference, None)
+                .with_context("the symbol record has no name")
+        })?;
+    *name = new.to_vec().into();
     Ok(())
 }
 
@@ -387,7 +426,7 @@ fn types(
         pdbrs::Error::new(pdbrs::ErrorKind::InvalidFormat, None)
             .with_context("field list has no record")
     })??;
-    let field_list = editor.add_type(&TypeLeaf::decode(record)?)?;
+    let field_list = editor.types_mut()?.push(TypeLeaf::decode(record)?)?;
     let mut class = Class::new(ClassKind::Structure);
     class.member_count = 1;
     class.options = ClassOptions(0);
@@ -398,11 +437,13 @@ fn types(
     class.name = ADDED_TYPE.as_bytes().into();
     class.unique_name = None;
     class.trailing = pdbrs::Bytes::default();
-    let structure = editor.add_type(&TypeLeaf::Class(class))?;
+    let structure = editor.types_mut()?.push(TypeLeaf::Class(class))?;
     let mut udt = UserDefinedType::default();
     udt.type_index = structure;
     udt.name = ADDED_TYPE.as_bytes().into();
-    editor.add_global(S_UDT, &SymbolData::UserDefinedType(udt))?;
+    editor
+        .globals_mut()?
+        .push(S_UDT, SymbolData::UserDefinedType(udt), 1)?;
     expect.types.push(ADDED_TYPE.into());
     expect.globals.push(ADDED_TYPE.into());
     let has_ipi = pdb
@@ -413,7 +454,7 @@ fn types(
         let mut id = StringId::default();
         id.substrings = None;
         id.string = ADDED_ID.as_bytes().into();
-        editor.add_id(&IdRecord::String(id))?;
+        editor.ids_mut()?.push(IdRecord::String(id))?;
         expect.ids.push(ADDED_ID.into());
     } else {
         notes.push("the PDB has no IPI stream".into());

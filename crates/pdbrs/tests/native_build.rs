@@ -1,23 +1,24 @@
-//! Tests of `native::PdbBuilder`: the synthetic program, the rebuild
-//! of a built PDB, determinism, handle resolution and width checks (#33).
+//! Tests of a new `native::PdbEditor`: the synthetic program, the rebuild
+//! of a built PDB, determinism, reference checks and width checks (#33, #42).
 
 #[path = "../examples/native_synthetic/program.rs"]
 mod program;
 
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
+use pdbrs::native::codeview::id_record::{FunctionId, IdRecord, StringId};
+use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{Data, S_GDATA32, Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
 use pdbrs::native::dbi::{Module, SectionContribution};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::msf::MsfWriteOptions;
-use pdbrs::native::{BuildOptions, Identity, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::native::{EditOptions, Identity, IdentityPolicy, IndexSpace, Pdb, PdbEditor};
 use pdbrs::{Bytes, ErrorKind};
 
 /// Build the synthetic program and return the PDB bytes.
 fn synthetic() -> Vec<u8> {
     program::build()
-        .and_then(|builder| builder.plan(BuildOptions::default())?.to_vec())
+        .and_then(|editor| editor.plan(EditOptions::default())?.to_vec())
         .expect("the synthetic program builds")
 }
 
@@ -114,56 +115,67 @@ fn synthetic_program_reads_back() {
     assert_eq!(publics.index().hash_table().lookup(b"main").count(), 1);
 }
 
+/// Decode every stream of `bytes` and plan the PDB again with `options` and
+/// the identity policy `policy`. Return the output bytes.
+fn rebuild(bytes: &[u8], policy: IdentityPolicy, options: EditOptions) -> Vec<u8> {
+    let pdb = Pdb::parse(bytes).expect("parse");
+    let mut editor = pdb.edit(policy);
+    editor.decode_all().expect("decode");
+    editor
+        .plan(options)
+        .and_then(|plan| plan.to_vec())
+        .expect("rebuild")
+}
+
+/// Return the MSF page size of the PDB `bytes`.
+fn page_size(bytes: &[u8]) -> u32 {
+    Pdb::parse(bytes)
+        .expect("parse")
+        .container()
+        .msf()
+        .expect("MSF 7.00")
+        .block_size()
+}
+
 #[test]
 fn rebuild_keeps_the_source_page_size() {
-    let options = BuildOptions::default().with_msf(MsfWriteOptions::default().with_page_size(512));
+    let options = EditOptions::default().with_msf(MsfWriteOptions::default().with_page_size(512));
     let bytes = program::build()
-        .and_then(|builder| builder.plan(options)?.to_vec())
+        .and_then(|editor| editor.plan(options)?.to_vec())
         .expect("the synthetic program builds with 512-byte pages");
-    let pdb = Pdb::parse(&bytes).expect("parse");
-    assert_eq!(pdb.container().msf().expect("MSF 7.00").block_size(), 512);
-    let contents = pdb.contents().expect("contents");
-    let rebuild_options = contents.build_options();
-    assert_eq!(rebuild_options.msf().page_size(), 512);
-    let builder = contents
-        .to_builder(IdentityPolicy::Preserve)
-        .expect("builder");
-    let rebuilt = builder
-        .plan(rebuild_options)
-        .and_then(|plan| plan.to_vec())
-        .expect("rebuild");
+    assert_eq!(page_size(&bytes), 512);
+    // Without an MSF option, the rebuild uses the page size of the source.
+    let rebuilt = rebuild(&bytes, IdentityPolicy::Preserve, EditOptions::default());
+    assert_eq!(page_size(&rebuilt), 512);
     assert_eq!(rebuilt, bytes);
     // The caller can select another page size.
-    let rebuild_options = rebuild_options.with_msf(MsfWriteOptions::default().with_page_size(4096));
-    let larger = builder
-        .plan(rebuild_options)
-        .and_then(|plan| plan.to_vec())
-        .expect("rebuild with 4096-byte pages");
-    let larger = Pdb::parse(&larger).expect("parse");
-    assert_eq!(
-        larger.container().msf().expect("MSF 7.00").block_size(),
-        4096
-    );
+    let options = EditOptions::default().with_msf(MsfWriteOptions::default().with_page_size(4096));
+    let larger = rebuild(&bytes, IdentityPolicy::Preserve, options);
+    assert_eq!(page_size(&larger), 4096);
 }
 
 #[test]
 fn rebuild_keeps_missing_hash_streams() {
-    let options = BuildOptions::default()
+    let options = EditOptions::default()
         .with_type_hash_stream(false)
         .with_id_hash_stream(false);
     let bytes = program::build()
-        .and_then(|builder| builder.plan(options)?.to_vec())
+        .and_then(|editor| editor.plan(options)?.to_vec())
         .expect("the synthetic program builds without hash streams");
     let pdb = Pdb::parse(&bytes).expect("parse");
     let types = pdb.types().expect("TPI").expect("TPI present");
     assert_eq!(types.header().hash_stream, None);
-    let contents = pdb.contents().expect("contents");
-    let rebuild_options = contents.build_options();
-    assert!(!rebuild_options.type_hash_stream() && !rebuild_options.id_hash_stream());
-    let rebuilt = contents
-        .to_builder(IdentityPolicy::Preserve)
-        .and_then(|builder| builder.plan(rebuild_options)?.to_vec())
-        .expect("rebuild");
+    let ids = pdb.ids().expect("IPI").expect("IPI present");
+    assert_eq!(ids.header().hash_stream, None);
+    // Without hash stream options, the rebuild keeps the convention of the source.
+    let rebuilt = rebuild(&bytes, IdentityPolicy::Preserve, EditOptions::default());
+    let pdb = Pdb::parse(&rebuilt).expect("parse");
+    let types = pdb.types().expect("TPI").expect("TPI present");
+    let ids = pdb.ids().expect("IPI").expect("IPI present");
+    assert_eq!(
+        (types.header().hash_stream, ids.header().hash_stream),
+        (None, None)
+    );
     assert_eq!(rebuilt, bytes);
 }
 
@@ -176,12 +188,11 @@ fn identical_input_gives_identical_bytes() {
 fn rebuild_of_a_built_pdb_gives_the_same_bytes() {
     let bytes = synthetic();
     let pdb = Pdb::parse(&bytes).expect("parse");
-    let contents = pdb.contents().expect("contents");
-    assert_eq!(contents.unclaimed_streams(), []);
-    let rebuilt = contents
-        .to_builder(IdentityPolicy::Preserve)
-        .and_then(|builder| builder.plan(contents.build_options())?.to_vec())
-        .expect("rebuild");
+    let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    editor.decode_all().expect("decode");
+    let plan = editor.plan(EditOptions::default()).expect("plan");
+    assert_eq!(plan.report().dropped().count(), 0);
+    let rebuilt = plan.to_vec().expect("rebuild");
     assert_eq!(rebuilt, bytes);
 }
 
@@ -189,13 +200,11 @@ fn rebuild_of_a_built_pdb_gives_the_same_bytes() {
 fn identity_policy_sets_both_ages() {
     let bytes = synthetic();
     let pdb = Pdb::parse(&bytes).expect("parse");
-    let contents = pdb.contents().expect("contents");
-    let builder = contents
-        .to_builder(IdentityPolicy::IncrementAge)
-        .expect("builder");
-    let plan = builder.plan(contents.build_options()).expect("plan");
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    editor.decode_all().expect("decode");
+    let plan = editor.plan(EditOptions::default()).expect("plan");
     assert_eq!(
-        plan.identity(),
+        plan.identity().expect("identity"),
         Identity::Modern {
             guid: program::GUID,
             age: 2
@@ -208,80 +217,133 @@ fn identity_policy_sets_both_ages() {
     assert_eq!(dbi.header().age, 2);
 }
 
-#[test]
-fn reserved_handle_without_record_is_rejected() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
-    builder.reserve_type().expect("reserve");
-    let error = builder
-        .plan(BuildOptions::default())
-        .expect_err("the plan needs a record");
-    assert_eq!(error.kind(), ErrorKind::InvalidReference);
+/// Return an `LF_ARGLIST` record with the argument `argument`.
+fn arguments(argument: TypeIndex) -> TypeLeaf<'static> {
+    let index = argument.0.to_le_bytes();
+    TypeLeaf::ArgumentList(ArgumentList::parse(&index).expect("list")).into_owned()
+}
+
+/// Return an `LF_FUNC_ID` record `f` in the scope `scope`.
+fn function_in(scope: IdIndex) -> IdRecord<'static> {
+    let mut function = FunctionId::default();
+    function.scope = Some(scope);
+    function.function_type = TypeIndex(0x74);
+    function.name = Bytes::new(b"f");
+    IdRecord::Function(function)
+}
+
+/// Plan a new PDB with the type record `LF_ARGLIST [target]` at 0x1000 and
+/// a second record at 0x1001. Return the plan error.
+fn plan_type_reference(target: TypeIndex) -> pdbrs::Error {
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    let types = editor.types_mut().expect("types");
+    types.push(arguments(target)).expect("type");
+    types.push(arguments(TypeIndex(0x74))).expect("type");
+    editor
+        .plan(EditOptions::default())
+        .expect_err("the plan rejects the reference")
 }
 
 #[test]
-fn handle_of_another_builder_is_rejected() {
-    let mut other = PdbBuilder::new(1, [1; 16], 1).expect("builder");
-    other
-        .add_type(TypeLeaf::ArgumentList(
-            ArgumentList::parse(&[]).expect("list"),
-        ))
-        .expect("type");
-    let foreign = other
-        .add_type(TypeLeaf::ArgumentList(
-            ArgumentList::parse(&[]).expect("list"),
-        ))
-        .expect("type");
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
-    builder
-        .add_type_with(move |resolver, out| {
-            let index = resolver.type_index(foreign)?.0.to_le_bytes();
-            TypeLeaf::ArgumentList(ArgumentList::parse(&index)?).encode(out)
-        })
-        .expect("deferred type");
-    let error = builder
-        .plan(BuildOptions::default())
-        .expect_err("the handle is not in this builder");
-    assert_eq!(error.kind(), ErrorKind::InvalidReference);
+fn forward_type_reference_is_rejected() {
+    // A record can refer only to earlier records of its index space
+    // (decision 7 of #42): not to a later record and not to itself.
+    for target in [0x1001, 0x1000] {
+        let error = plan_type_reference(TypeIndex(target));
+        assert_eq!(
+            (error.kind(), error.index_space()),
+            (ErrorKind::UnsupportedEdit, Some(IndexSpace::TypeIndex)),
+            "{target:#x}: {error}"
+        );
+    }
+    // A reference to an earlier record is valid.
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    let types = editor.types_mut().expect("types");
+    let first = types.push(arguments(TypeIndex(0x74))).expect("type");
+    types.push(arguments(first)).expect("type");
+    editor
+        .plan(EditOptions::default())
+        .expect("a backward reference is valid");
+}
+
+#[test]
+fn type_reference_past_the_type_stream_is_rejected() {
+    // The TPI stream has only the records 0x1000 and 0x1001.
+    let error = plan_type_reference(TypeIndex(0x1002));
+    assert_eq!(error.kind(), ErrorKind::InvalidReference, "{error}");
+}
+
+#[test]
+fn forward_id_reference_is_rejected() {
+    // `f` names the scope `ns`, a later record.
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    let ids = editor.ids_mut().expect("IDs");
+    ids.push(function_in(IdIndex(0x1001))).expect("ID");
+    let mut scope = StringId::default();
+    scope.substrings = None;
+    scope.string = Bytes::new(b"ns");
+    let scope = ids.push(IdRecord::String(scope)).expect("ID");
+    assert_eq!(scope, IdIndex(0x1001));
+    let error = editor
+        .plan(EditOptions::default())
+        .expect_err("the plan rejects a forward reference");
+    assert_eq!(
+        (error.kind(), error.index_space()),
+        (ErrorKind::UnsupportedEdit, Some(IndexSpace::IdIndex)),
+        "{error}"
+    );
+    // The same records in reference order are valid.
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    let ids = editor.ids_mut().expect("IDs");
+    let mut scope = StringId::default();
+    scope.substrings = None;
+    scope.string = Bytes::new(b"ns");
+    let scope = ids.push(IdRecord::String(scope)).expect("ID");
+    ids.push(function_in(scope)).expect("ID");
+    editor
+        .plan(EditOptions::default())
+        .expect("a backward reference is valid");
 }
 
 #[test]
 fn reference_past_the_type_stream_is_rejected() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
-    builder
-        .add_symbol_fields(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x1000))))
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    editor
+        .globals_mut()
+        .expect("globals")
+        .push(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x1000))), 1)
         .expect("symbol");
-    let error = builder
-        .plan(BuildOptions::default())
+    let error = editor
+        .plan(EditOptions::default())
         .expect_err("the TPI stream has no record 0x1000");
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 }
 
 #[test]
 fn module_count_past_16_bits_is_rejected() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
     let record = module_record(b"m");
     for _ in 0..=u32::from(u16::MAX) {
-        builder
-            .add_module(record.clone())
-            .expect("module")
-            .set_stream(false);
+        let index = editor.add_module(record.clone()).expect("module");
+        editor.module_mut(index).expect("module").set_stream(false);
     }
-    let error = builder
-        .plan(BuildOptions::default())
+    let error = editor
+        .plan(EditOptions::default())
         .expect_err("the DBI stream has a 16-bit module count");
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
 }
 
 #[test]
 fn module_without_stream_rejects_symbols() {
-    let mut builder = PdbBuilder::new(1, [1; 16], 1).expect("builder");
-    let module = builder.add_module(module_record(b"m")).expect("module");
+    let mut editor = PdbEditor::new(1, [1; 16], 1).expect("editor");
+    let index = editor.add_module(module_record(b"m")).expect("module");
+    let module = editor.module_mut(index).expect("module");
     module
-        .push_symbol_fields(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x74))))
+        .push(S_GDATA32, SymbolData::Data(data_g(TypeIndex(0x74))))
         .expect("symbol");
     module.set_stream(false);
-    let error = builder
-        .plan(BuildOptions::default())
+    let error = editor
+        .plan(EditOptions::default())
         .expect_err("a module without a stream has no symbols");
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

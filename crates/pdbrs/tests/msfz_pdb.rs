@@ -13,7 +13,7 @@ use pdbrs::ContainerKind;
 use pdbrs::io::ReadAt;
 use pdbrs::native::container::Container;
 use pdbrs::native::msf::{Msf, StreamId};
-use pdbrs::native::{BuildOptions, EditOptions, IdentityPolicy, Pdb};
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb};
 use pdbrs::{Format, Pdb as AnyPdb};
 
 /// The decompressed size of each chunk.
@@ -25,7 +25,7 @@ const FRAGMENT_SIZE: usize = 300;
 /// Build the synthetic program as an MSF 7.00 PDB.
 fn synthetic() -> Vec<u8> {
     program::build()
-        .and_then(|builder| builder.plan(BuildOptions::default())?.to_vec())
+        .and_then(|editor| editor.plan(EditOptions::default())?.to_vec())
         .expect("the synthetic program builds")
 }
 
@@ -169,10 +169,10 @@ fn msfz_input_rebuilds_and_edits_to_the_same_msf_output() {
     let original = Pdb::parse(&msf).expect("MSF 7.00 PDB");
     let pdb = Pdb::parse(&msfz).expect("MSFZ PDB");
     let rebuild = |pdb: &Pdb<&[u8]>| {
-        let contents = pdb.contents().expect("contents");
-        contents
-            .to_builder(IdentityPolicy::Preserve)
-            .and_then(|builder| builder.plan(contents.build_options())?.to_vec())
+        let mut editor = pdb.edit(IdentityPolicy::Preserve);
+        editor
+            .decode_all()
+            .and_then(|()| editor.plan(EditOptions::default())?.to_vec())
             .expect("rebuild")
     };
     assert_eq!(rebuild(&pdb), rebuild(&original));
@@ -180,7 +180,8 @@ fn msfz_input_rebuilds_and_edits_to_the_same_msf_output() {
     let edit = |pdb: &Pdb<&[u8]>| {
         let mut editor = pdb.edit(IdentityPolicy::Preserve);
         editor
-            .set_named_stream(b"srcsrv", srcsrv.to_vec())
+            .named_streams_mut()
+            .and_then(|named| named.insert(b"srcsrv", srcsrv.to_vec()))
             .expect("named stream");
         editor
             .plan(EditOptions::default())

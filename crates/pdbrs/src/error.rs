@@ -2,8 +2,8 @@
 
 use core::fmt;
 
-use crate::native::RemapRange;
 use crate::native::msf::StreamId;
+use crate::native::{IndexSpace, RemapRange};
 use crate::portable::metadata::{MetadataStream, TableId};
 
 /// A result returned by this crate.
@@ -187,6 +187,8 @@ enum Location {
     Portable(PortableLocation),
     /// A rejected range of an [`ImageRemap`](crate::native::ImageRemap).
     Remap(RemapRange),
+    /// The index space of a rejected native edit.
+    Space(IndexSpace),
 }
 
 /// An error with an optional physical byte offset.
@@ -307,6 +309,25 @@ impl Error {
         }
     }
 
+    /// Attach the index space of a native edit that the plan rejects.
+    ///
+    /// For example, a type record that refers to a later type record gives
+    /// [`IndexSpace::TypeIndex`].
+    #[must_use]
+    pub const fn with_index_space(mut self, space: IndexSpace) -> Self {
+        self.location = Some(Location::Space(space));
+        self
+    }
+
+    /// Return the index space of a rejected native edit, if known.
+    #[must_use]
+    pub const fn index_space(&self) -> Option<IndexSpace> {
+        match self.location {
+            Some(Location::Space(space)) => Some(space),
+            _ => None,
+        }
+    }
+
     /// Return the static structure or operation description, if known.
     #[must_use]
     pub const fn context(&self) -> Option<&'static str> {
@@ -349,6 +370,7 @@ impl fmt::Display for Error {
                 " for the remap range: old RVA {:#x}, length {:#x}, new RVA {:#x}",
                 range.old.0, range.length, range.new.0
             )?,
+            Some(Location::Space(space)) => write!(formatter, " in the index space {space:?}")?,
             None => {}
         }
         if let Some(source) = &self.source {

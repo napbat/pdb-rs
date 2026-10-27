@@ -13,15 +13,16 @@ use pdbrs::native::codeview::id_record::{IdRecord, StringId};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Data, Public, PublicFlags, S_GDATA32, S_PROCREF, S_PUB32, S_UDT, Symbol, SymbolData,
-    UserDefinedType,
+    Data, Procedure, ProcedureType, Public, PublicFlags, S_GDATA32, S_GPROC32, S_PROCREF, S_PUB32,
+    S_UDT, Symbol, SymbolData, UserDefinedType,
 };
 use pdbrs::native::codeview::type_record::{Class, ClassKind, ClassOptions, TypeLeaf};
 use pdbrs::native::codeview::{Records, SymbolKind};
+use pdbrs::native::editor::SymbolRecord;
 use pdbrs::native::msf::{MsfWriteOptions, StreamId};
 use pdbrs::native::symbols::{HashTable, RecordOffsets, indexed_name};
 use pdbrs::native::types::TypeHashes;
-use pdbrs::native::{BuildOptions, EditOptions, Identity, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
 use pdbrs::{Bytes, ErrorKind};
 
 /// The `T_INT4` primitive type.
@@ -45,11 +46,11 @@ fn udt(type_index: TypeIndex, name: &[u8]) -> SymbolData<'_> {
 }
 
 /// Build the synthetic program with the changes of `extra`.
-fn build(extra: impl FnOnce(&mut PdbBuilder<'static>) -> pdbrs::Result<()>) -> Vec<u8> {
-    let mut builder = program::build().expect("the synthetic program builds");
-    extra(&mut builder).expect("the extra records build");
-    builder
-        .plan(BuildOptions::default())
+fn build(extra: impl FnOnce(&mut PdbEditor<'static>) -> pdbrs::Result<()>) -> Vec<u8> {
+    let mut editor = program::build().expect("the synthetic program builds");
+    extra(&mut editor).expect("the extra records build");
+    editor
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("the synthetic program plans")
 }
@@ -136,6 +137,46 @@ fn symbols(bytes: &[u8]) -> Symbols {
     }
 }
 
+/// Add a stream that no other stream names, with `bytes`.
+fn add_stream(editor: &mut PdbEditor<'static>, bytes: Vec<u8>) -> pdbrs::Result<()> {
+    editor.unnamed_streams_mut()?.push(bytes).map(|_| ())
+}
+
+/// Give the record of `handle` the name `new`.
+fn set_name(record: Option<&mut SymbolRecord>, new: &[u8]) {
+    *record
+        .expect("record of the handle")
+        .data_mut()
+        .name_mut()
+        .expect("named record") = Bytes::from(new.to_vec());
+}
+
+/// Rename the public symbol `old` to `new`.
+fn rename_public(editor: &mut PdbEditor<'_, &[u8]>, old: &[u8], new: &[u8]) {
+    let mut publics = editor.publics_mut().expect("publics");
+    let handle = publics.find(old).expect("find").expect("public present");
+    set_name(publics.get_mut(handle), new);
+}
+
+/// Rename the global symbol `old` to `new`.
+fn rename_global(editor: &mut PdbEditor<'_, &[u8]>, old: &[u8], new: &[u8]) {
+    let mut globals = editor.globals_mut().expect("globals");
+    let handle = globals.find(old).expect("find").expect("global present");
+    set_name(globals.get_mut(handle), new);
+}
+
+/// Return an `S_PUB32` record for `g_added` in section 2.
+fn added_public() -> Public<'static> {
+    public(
+        PublicFlags(0),
+        SectionOffset {
+            section: 2,
+            offset: 0,
+        },
+        b"g_added",
+    )
+}
+
 /// Return `true` if `list` has the name `name`.
 fn has(list: &[Vec<u8>], name: &[u8]) -> bool {
     list.iter().any(|entry| entry == name)
@@ -145,11 +186,9 @@ fn has(list: &[Vec<u8>], name: &[u8]) -> bool {
 fn edit_without_changes_keeps_every_stream() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let plan = pdb
-        .edit(IdentityPolicy::Preserve)
-        .plan(EditOptions::default())
-        .expect("plan");
-    assert_eq!(plan.changed_streams(), []);
+    let editor = pdb.edit(IdentityPolicy::Preserve);
+    let plan = editor.plan(EditOptions::default()).expect("plan");
+    assert_eq!(plan.report().changed().count(), 0);
     let edited = plan.to_vec().expect("output");
     assert_eq!(differing_streams(&source, &edited), Vec::<u32>::new());
     let source_identity = pdb.info().identity();
@@ -162,10 +201,8 @@ fn edit_options_select_the_page_size() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let page_size = |options: EditOptions| {
-        let plan = pdb
-            .edit(IdentityPolicy::Preserve)
-            .plan(options)
-            .expect("plan");
+        let editor = pdb.edit(IdentityPolicy::Preserve);
+        let plan = editor.plan(options).expect("plan");
         let edited = plan.to_vec().expect("output");
         assert_eq!(plan.file_size(), u64::try_from(edited.len()).unwrap());
         let edited = Pdb::parse(edited.as_slice()).expect("edited");
@@ -188,19 +225,16 @@ fn named_streams_are_added_replaced_and_removed() {
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
     let first = b"SRCSRV: ini ----\r\nVERSION=2\r\nSRCSRV: end ----\r\n";
     let second = b"SRCSRV: ini ----\r\nVERSION=3\r\nSRCSRV: end ----\r\n";
-    editor
-        .set_named_stream(b"srcsrv", first.to_vec())
-        .expect("srcsrv");
-    editor
-        .set_named_stream(b"raw", b"raw bytes".to_vec())
-        .expect("raw");
-    editor
-        .set_named_stream(b"srcsrv", second.to_vec())
+    let named = editor.named_streams_mut().expect("named streams");
+    named.insert(b"srcsrv", first.to_vec()).expect("srcsrv");
+    named.insert(b"raw", b"raw bytes".to_vec()).expect("raw");
+    named
+        .insert(b"srcsrv", second.to_vec())
         .expect("srcsrv again");
     let plan = editor.plan(EditOptions::default()).expect("plan");
     // The Info stream and the two new streams change.
     assert_eq!(
-        plan.changed_streams(),
+        plan.report().changed().collect::<Vec<_>>(),
         [StreamId(1), StreamId(count), StreamId(count + 1)]
     );
     let added = plan.to_vec().expect("output");
@@ -216,7 +250,11 @@ fn named_streams_are_added_replaced_and_removed() {
     );
     // Remove the raw stream again: its stream becomes nil.
     let mut editor = edited.edit(IdentityPolicy::Preserve);
-    editor.remove_named_stream(b"raw").expect("remove");
+    editor
+        .named_streams_mut()
+        .expect("named streams")
+        .remove(b"raw")
+        .expect("remove");
     let removed = editor
         .plan(EditOptions::default())
         .expect("plan")
@@ -233,34 +271,33 @@ fn named_stream_errors_come_before_output() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    let named = editor.named_streams_mut().expect("named streams");
+    for name in [b"".as_slice(), b"/names"] {
+        let error = named.insert(name, Vec::new()).expect_err("invalid name");
+        assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    }
     for name in [
-        b"/names".as_slice(),
-        b"/TMCache",
+        b"/TMCache".as_slice(),
         b"/UDTSRCLINEUNDONE",
         b"/src/headerblock",
         b"/src/files/a.natvis",
     ] {
-        let error = editor
-            .set_named_stream(name, Vec::new())
-            .expect_err("rejected name");
+        let error = named.insert(name, Vec::new()).expect_err("rejected name");
         assert_eq!(error.kind(), ErrorKind::UnsupportedEdit);
     }
-    let error = editor
-        .set_named_stream(b"", Vec::new())
-        .expect_err("empty name");
-    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     // The decoder of the kind checks the bytes when the plan runs.
-    editor
-        .set_named_stream(b"srcsrv", b"not a source server stream".to_vec())
+    named
+        .insert(b"srcsrv", b"not a source server stream".to_vec())
         .expect("recorded");
     let error = editor
         .plan(EditOptions::default())
         .expect_err("invalid srcsrv");
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    editor.remove_named_stream(b"absent").expect("recorded");
     let error = editor
-        .plan(EditOptions::default())
+        .named_streams_mut()
+        .expect("named streams")
+        .remove(b"absent")
         .expect_err("absent name");
     assert_eq!(error.kind(), ErrorKind::MissingStream);
 }
@@ -274,14 +311,9 @@ fn added_symbols_are_indexed_without_moving_records() {
     };
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&public(
-            PublicFlags(0),
-            SectionOffset {
-                section: 2,
-                offset: 0,
-            },
-            b"g_added",
-        ))
+        .publics_mut()
+        .expect("publics")
+        .push(added_public())
         .expect("public");
     let mut data = Data::default();
     data.type_index = T_INT4;
@@ -291,10 +323,12 @@ fn added_symbols_are_indexed_without_moving_records() {
     };
     data.name = Bytes::new(b"g_added");
     editor
-        .add_global(S_GDATA32, &SymbolData::Data(data))
+        .globals_mut()
+        .expect("globals")
+        .push(S_GDATA32, SymbolData::Data(data), 1)
         .expect("global");
     let plan = editor.plan(EditOptions::default()).expect("plan");
-    assert_eq!(plan.identity().age(), age + 1);
+    assert_eq!(plan.identity().expect("identity").age(), age + 1);
     let edited = plan.to_vec().expect("output");
     let symbols = symbols(&edited);
     assert!(has(&symbols.publics, b"g_added"));
@@ -324,12 +358,8 @@ fn renames_move_records_and_rewrite_the_indexes() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .rename_public(b"sum", b"sum_with_a_longer_name")
-        .expect("public");
-    editor
-        .rename_global(b"g_value", b"g_value_with_a_longer_name")
-        .expect("global");
+    rename_public(&mut editor, b"sum", b"sum_with_a_longer_name");
+    rename_global(&mut editor, b"g_value", b"g_value_with_a_longer_name");
     let edited = editor
         .plan(EditOptions::default())
         .expect("plan")
@@ -349,49 +379,58 @@ fn renames_move_records_and_rewrite_the_indexes() {
 fn rename_errors_come_before_output() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
-    let cases: [(&[u8], bool, ErrorKind); 3] = [
-        (b"absent", false, ErrorKind::InvalidReference),
-        // An S_PROCREF record: the module record has the same name.
-        (b"sum", true, ErrorKind::UnsupportedEdit),
-        (b"absent", true, ErrorKind::InvalidReference),
-    ];
-    for (name, global, kind) in cases {
-        let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-        if global {
-            editor.rename_global(name, b"new").expect("recorded");
-        } else {
-            editor.rename_public(name, b"new").expect("recorded");
-        }
-        assert_eq!(
-            editor
-                .plan(EditOptions::default())
-                .expect_err("rejected")
-                .kind(),
-            kind
-        );
-    }
+    // A name without a record: the search finds nothing.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor.rename_public(b"sum", b"first").expect("recorded");
-    editor.rename_public(b"sum", b"second").expect("recorded");
+    assert_eq!(
+        editor
+            .publics_mut()
+            .expect("publics")
+            .find(b"absent")
+            .expect("find"),
+        None
+    );
+    assert_eq!(
+        editor
+            .globals_mut()
+            .expect("globals")
+            .find(b"absent")
+            .expect("find"),
+        None
+    );
+    // An S_PROCREF record: the module record has the same name.
+    rename_global(&mut editor, b"sum", b"new");
     assert_eq!(
         editor
             .plan(EditOptions::default())
-            .expect_err("two renames")
+            .expect_err("rejected")
             .kind(),
         ErrorKind::UnsupportedEdit
     );
+    // After a rename, the old name finds no record for a second rename.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    let error = editor
-        .add_global(S_PROCREF, &SymbolData::ScopeEnd)
-        .expect_err("unsupported kind");
+    rename_public(&mut editor, b"sum", b"first");
+    let publics = editor.publics_mut().expect("publics");
+    assert_eq!(publics.find(b"sum").expect("find"), None);
+    assert!(publics.find(b"first").expect("find").is_some());
+    // The global index takes no record without a decoder and no scope opener.
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    let mut globals = editor.globals_mut().expect("globals");
+    let error = globals
+        .push(S_PROCREF, SymbolData::Unsupported(Bytes::new(&[0; 4])), 1)
+        .expect_err("unsupported data");
     assert_eq!(error.kind(), ErrorKind::UnsupportedEdit);
-    assert_eq!(
-        editor
-            .rename_public(b"a\0b", b"c")
-            .expect_err("NUL byte")
-            .kind(),
-        ErrorKind::InvalidFormat
-    );
+    let error = globals
+        .push(
+            S_GPROC32,
+            SymbolData::Procedure(Procedure::new(ProcedureType::Type(T_INT4))),
+            1,
+        )
+        .expect_err("scope opener");
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
+    let error = globals
+        .push(S_UDT, udt(T_INT4, b"a\0b"), 1)
+        .expect_err("NUL byte");
+    assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }
 
 /// Return a path in the temporary directory for this process and `name`.
@@ -403,12 +442,10 @@ fn temporary(name: &str) -> std::path::PathBuf {
 #[test]
 fn opaque_stream_rejects_moved_records_and_writes_no_file() {
     // A stream that no other stream names: its role is not known.
-    let source = build(|builder| builder.add_stream(vec![1, 2, 3, 4]).map(|_| ()));
+    let source = build(|editor| add_stream(editor, vec![1, 2, 3, 4]));
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .rename_public(b"sum", b"sum_with_a_longer_name")
-        .expect("recorded");
+    rename_public(&mut editor, b"sum", b"sum_with_a_longer_name");
     let error = editor
         .plan(EditOptions::default())
         .expect_err("opaque stream");
@@ -428,19 +465,14 @@ fn opaque_stream_rejects_moved_records_and_writes_no_file() {
     }
     // A rename that keeps the record size moves no record.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor.rename_public(b"sum", b"add").expect("recorded");
+    rename_public(&mut editor, b"sum", b"add");
     editor.plan(EditOptions::default()).expect("same size");
     // An added record moves no record either.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&public(
-            PublicFlags(0),
-            SectionOffset {
-                section: 2,
-                offset: 0,
-            },
-            b"g_added",
-        ))
+        .publics_mut()
+        .expect("publics")
+        .push(added_public())
         .expect("recorded");
     editor
         .plan(EditOptions::default())
@@ -449,20 +481,30 @@ fn opaque_stream_rejects_moved_records_and_writes_no_file() {
 
 #[test]
 fn unknown_symbol_kind_rejects_moved_records() {
-    // A record of a kind that the decoder does not know (0x11fe).
-    let source = build(|builder| {
-        builder
-            .add_symbol_with(|_, out| {
-                out.extend_from_slice(&[6, 0, 0xfe, 0x11, 0, 0, 0, 0]);
-                Ok(())
-            })
+    // A record of a kind that the decoder does not know (0x11fe), after the
+    // indexed records. The editor adds no record without a decoder, so the
+    // test adds an `S_UDT` record of 20 bytes and changes its bytes in the
+    // output: an `S_UDT` record of 12 bytes and the unknown record of 8 bytes.
+    let mut source = build(|editor| {
+        editor
+            .globals_mut()?
+            .push(S_UDT, udt(T_INT4, b"uZZZZZZZZZZ"), 1)
             .map(|_| ())
     });
+    let original: &[u8] = b"\x12\x00\x08\x11\x74\x00\x00\x00uZZZZZZZZZZ\x00";
+    let changed: &[u8] =
+        b"\x0a\x00\x08\x11\x74\x00\x00\x00u\x00\x00\x00\x06\x00\xfe\x11\x00\x00\x00\x00";
+    let starts: Vec<_> = source
+        .windows(original.len())
+        .enumerate()
+        .filter(|(_, window)| *window == original)
+        .map(|(start, _)| start)
+        .collect();
+    assert_eq!(starts.len(), 1);
+    source[starts[0]..starts[0] + changed.len()].copy_from_slice(changed);
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .rename_public(b"sum", b"sum_with_a_longer_name")
-        .expect("recorded");
+    rename_public(&mut editor, b"sum", b"sum_with_a_longer_name");
     let error = editor
         .plan(EditOptions::default())
         .expect_err("unknown kind");
@@ -471,14 +513,9 @@ fn unknown_symbol_kind_rejects_moved_records() {
     // An added record moves no record, so the edit needs no check.
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_public(&public(
-            PublicFlags(0),
-            SectionOffset {
-                section: 2,
-                offset: 0,
-            },
-            b"g_added",
-        ))
+        .publics_mut()
+        .expect("publics")
+        .push(added_public())
         .expect("recorded");
     editor
         .plan(EditOptions::default())
@@ -511,10 +548,16 @@ fn added_types_get_the_next_indices_and_hash_values() {
     let tpi = pdb.types().expect("TPI").expect("TPI present");
     let ipi = pdb.ids().expect("IPI").expect("IPI present");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    let added = editor.add_type(&forward(b"Added")).expect("type");
+    let added = editor
+        .types_mut()
+        .expect("types")
+        .push(forward(b"Added"))
+        .expect("type");
     assert_eq!(added, TypeIndex(tpi.header().index_end));
     let id = editor
-        .add_id(&IdRecord::String({
+        .ids_mut()
+        .expect("IDs")
+        .push(IdRecord::String({
             let mut string = StringId::default();
             string.substrings = None;
             string.string = Bytes::new(b"added string");
@@ -523,7 +566,9 @@ fn added_types_get_the_next_indices_and_hash_values() {
         .expect("ID");
     assert_eq!(id, IdIndex(ipi.header().index_end));
     editor
-        .add_global(S_UDT, &udt(added, b"Added"))
+        .globals_mut()
+        .expect("globals")
+        .push(S_UDT, udt(added, b"Added"), 1)
         .expect("UDT");
     let edited = editor
         .plan(EditOptions::default())
@@ -564,7 +609,11 @@ fn invalid_type_references_come_before_output() {
     };
     broken.options = ClassOptions(0);
     broken.field_list = TypeIndex(end + 10);
-    editor.add_type(&TypeLeaf::Class(broken)).expect("recorded");
+    editor
+        .types_mut()
+        .expect("types")
+        .push(TypeLeaf::Class(broken))
+        .expect("recorded");
     assert_eq!(
         editor
             .plan(EditOptions::default())
@@ -574,7 +623,9 @@ fn invalid_type_references_come_before_output() {
     );
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
     editor
-        .add_global(S_UDT, &udt(TypeIndex(end), b"Missing"))
+        .globals_mut()
+        .expect("globals")
+        .push(S_UDT, udt(TypeIndex(end), b"Missing"), 1)
         .expect("recorded");
     assert_eq!(
         editor
@@ -590,16 +641,20 @@ fn identity_replace_writes_both_ages() {
     let source = synthetic();
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let guid = *b"edited-identity!";
-    let plan = pdb
-        .edit(IdentityPolicy::Replace {
-            signature: 0x1234,
-            guid,
-            age: 9,
-        })
-        .plan(EditOptions::default())
-        .expect("plan");
-    assert_eq!(plan.identity(), Identity::Modern { guid, age: 9 });
-    assert_eq!(plan.changed_streams(), [StreamId(1), StreamId(3)]);
+    let editor = pdb.edit(IdentityPolicy::Replace {
+        signature: 0x1234,
+        guid,
+        age: 9,
+    });
+    let plan = editor.plan(EditOptions::default()).expect("plan");
+    assert_eq!(
+        plan.identity().expect("identity"),
+        Identity::Modern { guid, age: 9 }
+    );
+    assert_eq!(
+        plan.report().changed().collect::<Vec<_>>(),
+        [StreamId(1), StreamId(3)]
+    );
     let edited = plan.to_vec().expect("output");
     let edited = Pdb::parse(edited.as_slice()).expect("edited");
     assert_eq!(edited.info().identity(), Identity::Modern { guid, age: 9 });
@@ -621,7 +676,11 @@ fn added_public_records_decode_as_public_symbols() {
         },
         b"inner",
     );
-    editor.add_public(&public).expect("public");
+    editor
+        .publics_mut()
+        .expect("publics")
+        .push(public.clone())
+        .expect("public");
     let edited = editor
         .plan(EditOptions::default())
         .expect("plan")
@@ -652,12 +711,10 @@ const UNOWNED_TYPE_MAP: [u8; 40] = [
 
 #[test]
 fn unowned_type_map_does_not_block_moved_records() {
-    let source = build(|builder| builder.add_stream(UNOWNED_TYPE_MAP.to_vec()).map(|_| ()));
+    let source = build(|editor| add_stream(editor, UNOWNED_TYPE_MAP.to_vec()));
     let pdb = Pdb::parse(source.as_slice()).expect("source");
     let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
-    editor
-        .rename_public(b"sum", b"sum_with_a_longer_name")
-        .expect("recorded");
+    rename_public(&mut editor, b"sum", b"sum_with_a_longer_name");
     let edited = editor
         .plan(EditOptions::default())
         .expect("type map")
