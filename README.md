@@ -10,11 +10,11 @@ The library supports `std` and `no_std + alloc`.
 
 | Area | Status |
 | --- | --- |
-| Native PDB reading (MSF 7.0) | Typed decoders for every modern record kind, numeric leaf, C13 subsection and stream version that has a layout definition, with reference validation. Reads all 61 readable native fixture PDBs of MSVC, MASM, Clang/LLD, flang, rustc, .NET and fxc (page sizes 512 to 32768, a PDB with two free page map intervals, `NOTM` PDBs of `link /DEBUG:LAZY`, C++ AMP and ARM64EC) and the 92 PDZ files of the fixtures. The [native coverage](docs/design/native-coverage.md) document gives the state of each kind and version. Kinds without a local producer or a layout definition stay open there as `external-input` ([#29](https://github.com/napbat/pdbrs/issues/29) to [#32](https://github.com/napbat/pdbrs/issues/32)). |
+| Native PDB reading (MSF 7.0) | Typed decoders for every modern record kind, numeric leaf, C13 subsection and stream version that has a layout definition, with reference validation. Reads all 61 readable native fixture PDBs of MSVC, MASM, Clang/LLD, flang, rustc, .NET and fxc (page sizes 512 to 32768, a PDB with two free page map intervals, `NOTM` PDBs of `link /DEBUG:LAZY`, C++ AMP and ARM64EC) and the 92 PDZ files of the fixtures. The reader is a session: `native::Pdb` loads the DBI stream, `/names`, the symbol record stream and the symbol indexes once, and no accessor takes a `&Dbi` argument ([#42](https://github.com/napbat/pdbrs/issues/42)). `Pdb::stream_view` borrows a stream from a source that lends its bytes, for example a byte slice, if the pages of the stream are adjacent (zero-copy view, [#48](https://github.com/napbat/pdbrs/issues/48)). The [native coverage](docs/design/native-coverage.md) document gives the state of each kind and version. Kinds without a local producer or a layout definition stay open there as `external-input` ([#29](https://github.com/napbat/pdbrs/issues/29) to [#32](https://github.com/napbat/pdbrs/issues/32)). |
 | Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. |
-| Native PDB writing, building and editing | An encoder for each decoded record and stream, and one editor, `native::PdbEditor`, for new PDBs ([#33](https://github.com/napbat/pdbrs/issues/33)), copy-on-write edits of named streams, symbols, modules, types, IDs and the identity, strips ([#34](https://github.com/napbat/pdbrs/issues/34)) and rebuilds (`PdbEditor::decode_all`), with one plan and a report of each stream ([#42](https://github.com/napbat/pdbrs/issues/42)). Editing tasks: Source Link, `srcsrv`, named stream removal and symbol renames ([#41](https://github.com/napbat/pdbrs/issues/41)). `llvm-pdbutil`, DIA2Dump, `pdbtool` and `llvm-symbolizer` agree with the rebuilt and edited fixtures. |
-| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writes exact copies, new layouts ([#26](https://github.com/napbat/pdbrs/issues/26)), and builds and edits through one editor, `portable::PdbEditor`, with public-field records and a plan report ([#42](https://github.com/napbat/pdbrs/issues/42)). An edit copies the rows of each table that it does not change ([#49](https://github.com/napbat/pdbrs/issues/49)). Editing tasks: Source Link and embedded sources ([#41](https://github.com/napbat/pdbrs/issues/41)). |
-| Native PDB in MSFZ (PDZ files) | Reading: `pdbrs::probe` gives `ContainerKind::NativeMsfz`, and `native::Pdb` reads the streams through `native::container::Container`, so every typed accessor, and the editor (`Pdb::edit`, also with `decode_all`; MSF 7.0 output) work on PDZ files. Stored, zstd and raw DEFLATE chunks, compressed stream directories and fragments across chunks ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing: `msfz::MsfzBuilder` and `Container::to_msfz` write zstd or raw DEFLATE chunks with the options of `pdbtool pdz-encode`, and `Container::to_msf` converts MSFZ to MSF 7.0. The output is deterministic and keeps stream IDs, nil and empty streams and stream bytes ([#38](https://github.com/napbat/pdbrs/issues/38)). |
+| Native PDB writing, building and editing | An encoder for each decoded record and stream. Each backend has one editor ([#42](https://github.com/napbat/pdbrs/issues/42)): `native::PdbEditor` builds new PDBs ([#33](https://github.com/napbat/pdbrs/issues/33)), makes copy-on-write edits of named streams, symbols, modules, types, IDs and the identity, strips ([#34](https://github.com/napbat/pdbrs/issues/34)) and rebuilds (`PdbEditor::decode_all`), with one plan and a report of each stream. Editing tasks: Source Link, `srcsrv`, named stream removal and symbol renames ([#41](https://github.com/napbat/pdbrs/issues/41)), and source path remapping (`remap_source_paths`, [#46](https://github.com/napbat/pdbrs/issues/46)). Address remapping for a rewritten image, with OMAP output or clean output (`remap_addresses`, [#43](https://github.com/napbat/pdbrs/issues/43)). Type and ID record removal with index compaction (`TypeList::remove`, `IdList::remove`, [#47](https://github.com/napbat/pdbrs/issues/47)). The plan writes a stream that gets only new indices or offsets as a patched stream over the source bytes, and `find` of the public and global symbols uses a name index, not a scan of the records ([#48](https://github.com/napbat/pdbrs/issues/48)). `llvm-pdbutil`, DIA2Dump, `pdbtool` and `llvm-symbolizer` agree with the rebuilt and edited fixtures. |
+| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writes exact copies, new layouts ([#26](https://github.com/napbat/pdbrs/issues/26)), and builds and edits through one editor, `portable::PdbEditor`, with public-field records and a plan report ([#42](https://github.com/napbat/pdbrs/issues/42)). An edit copies the rows of each table that it does not change (copy-on-write, [#49](https://github.com/napbat/pdbrs/issues/49)). Editing tasks: Source Link and embedded sources ([#41](https://github.com/napbat/pdbrs/issues/41)), and document name remapping (`remap_source_paths`, [#46](https://github.com/napbat/pdbrs/issues/46)). |
+| Native PDB in MSFZ (PDZ files) | Reading: `pdbrs::probe` gives `ContainerKind::NativeMsfz`, and `native::Pdb` reads the streams through `native::container::Container`, so every typed accessor, and the editor (`Pdb::edit`, also with `decode_all`; MSF 7.0 output) work on PDZ files. Stored, zstd and raw DEFLATE chunks, compressed stream directories and fragments across chunks ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing: `msfz::MsfzBuilder` and `Container::to_msfz` write zstd or raw DEFLATE chunks with the options of `pdbtool pdz-encode`, and `Container::to_msf` converts MSFZ to MSF 7.0. The output is deterministic and keeps stream IDs, nil and empty streams and stream bytes ([#38](https://github.com/napbat/pdbrs/issues/38)). The plan keeps the compressed chunks up to a limit (`MsfzWriteOptions::with_max_kept_chunk_bytes`, 256 MiB by default), so the writer does not compress them again ([#50](https://github.com/napbat/pdbrs/issues/50)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
 The root epic [#18](https://github.com/napbat/pdbrs/issues/18) has one epic for each format family:
@@ -37,6 +37,7 @@ Read the identity, the type records and the module symbols of a PDB:
 
 ```rust
 use pdbrs::native::Pdb;
+use pdbrs::native::codeview::index::ModuleSymbolOffset;
 use pdbrs::native::codeview::symbol::ModuleSymbols;
 use pdbrs::native::codeview::type_record::TypeLeaf;
 
@@ -57,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for module in dbi.modules() {
             let (index, _) = module?;
             let Some(stream) = pdb.module(index)? else { continue };
-            let base = u32::try_from(stream.symbol_offset())?;
+            let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
             for symbol in ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, 256) {
                 if let Some(name) = symbol?.symbol.name() {
                     println!("{}", String::from_utf8_lossy(name));
@@ -75,9 +76,10 @@ bytes; `into_owned` gives a copy that owns its bytes.
 
 ## Cookbook: common edits
 
-The editors have one function for each common edit (#41). Each function checks all its inputs
-before it changes the model, so an error leaves the editor unchanged. Plan and write as for
-any other edit. The [`edit` example](crates/pdbrs/examples/edit.rs) runs each recipe.
+The editors have one function for each common edit (#41, #46). Each function checks all its
+inputs before it changes the model, so an error leaves the editor unchanged. Plan and write as
+for any other edit. The [`edit` example](crates/pdbrs/examples/edit.rs) runs the recipes of the
+first two blocks.
 
 ```rust
 use pdbrs::native::{EditOptions, IdentityPolicy, Pdb};
@@ -117,6 +119,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Use `IdentityPolicy::Preserve` for a change that does not change the symbols, for example
 only a Source Link or a `srcsrv` change: the image then keeps its match.
+
+`remap_source_paths` gives the source paths new values, for example to remove the build
+directory from a PDB (#46). The function gets each distinct path once and returns the new path,
+or `None` to keep the path. The native task changes each path field and builds `/names` again.
+The portable task changes the document names.
+
+```rust
+use pdbrs::{native, portable};
+
+/// Replace the build directory `C:\build\` with `/_/`.
+fn remap(path: &[u8]) -> Option<Vec<u8>> {
+    path.strip_prefix(br"C:\build\".as_slice())
+        .map(|rest| [b"/_/".as_slice(), rest].concat())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pdb = native::Pdb::open("app.pdb")?;
+    // The task does not change symbols or addresses, so the image keeps its match.
+    let mut editor = pdb.edit(native::IdentityPolicy::Preserve);
+    let changed = editor.remap_source_paths(remap)?;
+    println!("{changed} paths get a new value");
+    editor.plan(native::EditOptions::default())?.write_file("app.remapped.pdb")?;
+
+    let pdb = portable::Pdb::open("App.pdb")?;
+    let mut editor = pdb.edit(portable::IdentityPolicy::ContentDerived);
+    editor.remap_source_paths(remap)?;
+    editor.plan(portable::EditOptions::default())?.write_file("App.remapped.pdb")?;
+    Ok(())
+}
+```
+
+`TypeList::remove` and `IdList::remove` remove a type or ID record (#47). The removed record
+becomes a tombstone: in the model, the other records keep their indices. The plan gives each
+record that is not removed the next output index and writes the output index into each
+reference. `PdbWritePlan::type_index` and `PdbWritePlan::id_index` give the output index of a
+model index.
+
+Caution: the plan cannot see references in other files. An object file that uses a type-server
+PDB, a precompiled-header object (`/Yc`) and the object files of a `/DEBUG:FASTLINK` PDB keep
+the old indices. Remove records only from a PDB that no other file refers to by index.
+
+```rust
+use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pdb = Pdb::open("app.pdb")?;
+    // A removal changes the type indices: give the image the new identity.
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    // A reference to the removed record makes the plan fail with `InvalidReference`.
+    editor.types_mut()?.remove(TypeIndex(0x1008))?;
+    let plan = editor.plan(EditOptions::default())?;
+    let moved = plan.type_index(TypeIndex(0x1009))?;
+    println!("type 0x1009 is now {:#x}", moved.0);
+    plan.write_file("app.compacted.pdb")?;
+    println!("write into the image: {:?}", plan.identity()?);
+    Ok(())
+}
+```
+
+The plan refuses the compaction with `UnsupportedEdit` for a PDB without a DBI stream, a
+`/DEBUG:FASTLINK` PDB, a PDB without type merging (`NOTM`), a PDB whose modules use type
+servers, and data without a decoder that can hold an index. The
+[design](docs/design/pdb.md#implemented-native-editing) describes the removal.
 
 A binary rewriter moves, splits or removes code after the link. `PdbEditor::remap_addresses`
 makes the PDB describe the new image (#43). The caller gives the section headers of the new
@@ -233,12 +299,19 @@ and a provenance manifest to `target/fixtures/`:
 
 ```sh
 cargo run -p pdbrs-fixtures
+cargo run -p pdbrs-fixtures -- --list
+cargo run -p pdbrs-fixtures -- --only msvc-x64-debug --only rust-lld-x64-debug
 ```
+
+- `--list` prints the fixture names.
+- `--only <name>` builds only the named fixture. Give the option again for more fixtures. The
+  manifest keeps the entries of the other fixtures.
+- `--out <dir>` writes the fixtures and `manifest.json` to `<dir>`.
 
 The tool finds MSVC and Clang through the Visual Studio installation. Generated files are not
 committed. Automated tests do not read them; they use synthetic data.
 
-## Consumer tools
+## Consumer tools and verification
 
 Compare the output of pdbrs with three independent consumers: Microsoft's `pdbtool`,
 `DIA2Dump` from the Visual Studio DIA SDK and a .NET verifier that uses
@@ -255,23 +328,54 @@ sample. It writes the version, source and path of each tool to `target/tools/man
 The fixture manifest copies these records. [fixtures/README.md](fixtures/README.md#consumer-tools)
 gives the steps and the use of the tools.
 
-Compare the Portable PDB fixtures with the verifier, and check the format detection of all
-fixture outputs:
+The verification commands read `manifest.json` and the fixture outputs, and compare the output
+of pdbrs with the consumer tools:
+
+| Command | Check |
+| --- | --- |
+| `detect` | Open each fixture output with `pdbrs::Pdb` and compare the detected format with the manifest. |
+| `verify-portable` | Compare the canonical dump of each Portable PDB fixture from pdbrs with the dump from the verifier. |
+| `verify-rebuild` | Rebuild each Portable PDB fixture, and compare its bytes, its ID and its verifier dump with the original. |
+| `verify-edit` | Edit and build each Portable PDB fixture, compare the verifier dumps with the expected change, and run each standalone fixture program with the built and the edited PDB. |
+| `verify-native-build` | Rebuild each native PDB fixture, and compare the original and the rebuilt PDB with `pdbtool`, `llvm-pdbutil`, DIA2Dump and `llvm-symbolizer`. |
+| `verify-native-edit` | Apply each supported edit of the native editor to each native PDB fixture, and check the results with `pdbtool`, `llvm-pdbutil`, DIA2Dump and `pdbstr`. |
+| `verify-msfz` | Write each native PDB fixture as MSFZ with six option sets, convert each `pdz-*` and `msfz-*` fixture to MSF 7.0, and check the results with `pdbtool`, `llvm-pdbutil`, DIA2Dump and the pdbrs reader. |
+| `verify-remap` | Remap the addresses of each native PDB fixture for five range sets, as OMAP output and as clean output, and check the results with DIA2Dump, `pdbtool check`, `llvm-pdbutil`, `SymbolLocator` and the plan report. |
+
+Each command takes these options:
+
+- `--fixtures <dir>`: read `manifest.json` and the outputs in `<dir>`. The default is
+  `target/fixtures/`.
+- `--jobs <n>`: use `<n>` worker threads (`n` > 0). The default is the available parallelism.
+  `--jobs 1` runs all work on one thread. The output is the same for each value of `<n>` (see
+  [Worker threads](fixtures/README.md#worker-threads)).
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-portable
 cargo run -p pdbrs-fixtures -- detect
+cargo run -p pdbrs-fixtures -- verify-portable
+cargo run -p pdbrs-fixtures -- verify-rebuild
+cargo run -p pdbrs-fixtures -- verify-edit
+cargo run -p pdbrs-fixtures --release -- verify-native-build --jobs 8
+cargo run -p pdbrs-fixtures --release -- verify-native-edit
+cargo run -p pdbrs-fixtures --release -- verify-msfz
+cargo run -p pdbrs-fixtures --release -- verify-remap --fixtures D:/pdb-fixtures
 ```
+
+The `verify-*` commands write their outputs to `target/<command>/`, for example
+`target/verify-remap/`. [fixtures/README.md](fixtures/README.md) gives each check and its
+output lines.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `crates/pdbrs/` | The library, its examples, its integration tests and the `baseline` benchmark. |
-| `crates/pdbrs-fixtures/` | The fixture generator, the `tools` command for the consumer tools and the `verify-portable` and `detect` commands. |
+| `crates/pdbrs/fuzz/` | The `cargo-fuzz` targets and the seed generator. The package is not a workspace member, because it needs the nightly toolchain. |
+| `crates/pdbrs-fixtures/` | The fixture generator and its commands: `tools` for the consumer tools, `detect`, `verify-portable`, `verify-rebuild`, `verify-edit`, `verify-native-build`, `verify-native-edit`, `verify-msfz` and `verify-remap`. |
 | `fixtures/` | Demo program sources for the fixtures and the .NET Portable PDB verifier. |
-| `docs/benchmarks/` | The benchmark method, its limits and the baseline numbers (#44). |
+| `docs/benchmarks/` | The benchmark method and its limits. The baseline numbers are recorded (#44). The numbers after the redesign wait for a quiet machine (#51). |
 | `docs/design/` | The reader and writer design and the implementation evidence. |
+| `docs/fuzzing.md` | The fuzz targets, their commands and limits, and the recorded runs and findings. |
 | `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
 
 ## Development
@@ -287,5 +391,17 @@ cargo doc --workspace --no-deps --no-default-features
 cargo test --workspace
 cargo test --workspace --no-default-features
 ```
+
+The fuzz package `crates/pdbrs/fuzz/` needs the nightly toolchain and `cargo-fuzz`, so the
+checks above do not build it. Its targets use the public API of the library. After a change of
+that API, build the targets in `crates/pdbrs/fuzz/`:
+
+```sh
+cargo +nightly fuzz build
+```
+
+[crates/pdbrs/fuzz/README.md](crates/pdbrs/fuzz/README.md) gives the requirements.
+[docs/fuzzing.md](docs/fuzzing.md) gives the targets, the seed corpora, the run commands and
+the limits.
 
 The repository stores text files with LF line endings (`.gitattributes`).
