@@ -27,7 +27,7 @@ pub struct EditOptions {}
 ///
 /// [`PdbEditor::new`] starts without a source. [`Pdb::edit`] starts from a source: the
 /// editor borrows the source and decodes a table on the first `*_mut` call of that table.
-/// Both take the identity policy of the output (#42 rule 6). The plan computes a
+/// Both take the identity policy of the output. The plan computes a
 /// content-derived ID from the output bytes.
 ///
 /// The records are the records of the reader with `'static` (see
@@ -53,7 +53,7 @@ pub struct EditOptions {}
 ///
 /// # Copy-on-write
 ///
-/// The plan does not decode a table that no `*_mut` call decoded (#49). It copies the raw
+/// The plan does not decode a table that no `*_mut` call decoded. It copies the raw
 /// rows of the source table, so steps 1 to 4 do not apply to that table. The heap offsets of
 /// the raw rows stay valid, because the heaps start with the source heaps. The plan encodes
 /// the raw rows with the index widths of the output, so a table that refers to a heap or a

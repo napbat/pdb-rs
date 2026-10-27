@@ -1,4 +1,4 @@
-//! Def-ranges (#43, decision 4): one record for each part of the range.
+//! Def-ranges: one record for each part of the range.
 //!
 //! Each record gets the gaps inside its part, with offsets from the new part start. With
 //! [`RemovedCode::Drop`](crate::native::RemovedCode::Drop), the parts without a remap range

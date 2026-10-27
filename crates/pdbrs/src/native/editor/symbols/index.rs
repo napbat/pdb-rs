@@ -1,4 +1,4 @@
-//! The name index of the model of the symbol record stream (#48).
+//! The name index of the model of the symbol record stream.
 //!
 //! A name lookup does not scan the records. It compares the names of two
 //! candidate sets:

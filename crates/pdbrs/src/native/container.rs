@@ -8,7 +8,7 @@
 //! for example [`Msf::validate_free_page_map`].
 //!
 //! [`Container::to_msfz`] and [`Container::to_msf`] convert either container to MSFZ or to
-//! MSF 7.00 (#38).
+//! MSF 7.00.
 
 use alloc::vec::Vec;
 
@@ -161,7 +161,7 @@ impl<S> Container<S> {
 impl<S: ReadAt> Container<S> {
     /// Return the `length` bytes at the source offset `physical` as a slice
     /// of the source, if the source lends them. An MSFZ container does not
-    /// lend (#48).
+    /// lend.
     pub(crate) fn lend_at(&self, physical: u64, length: usize) -> Option<&[u8]> {
         match self {
             Self::Msf(msf) => msf.lend_at(physical, length),

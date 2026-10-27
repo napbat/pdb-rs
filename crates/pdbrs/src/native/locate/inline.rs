@@ -29,7 +29,7 @@
 //! without a length that no later range ends, ends with its chunk.
 //! [`SymbolLocator::code_chunks`](super::SymbolLocator::code_chunks) gives
 //! the chunks of a procedure. MSVC writes separated code for profile-guided
-//! optimization: the fixture `msvc-x64-pgo` of #27 has 62 inline sites with
+//! optimization: the fixture `msvc-x64-pgo` has 62 inline sites with
 //! `ChangeCodeOffsetBase`, and DIA gives the same inline frames in its
 //! separated code.
 //!

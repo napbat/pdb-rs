@@ -6,8 +6,7 @@
 //! or read the stream.
 //!
 //! The layout comes from `DBI1::DumpTMCache` and `DBI1::fUpdateTMCache` in `mspdbcore.dll` of
-//! MSVC 14.51, and agrees with `PascalBeyer/PDB-Documentation`. The decision and its evidence
-//! are recorded in issue #13. All values are little-endian:
+//! MSVC 14.51, and agrees with `PascalBeyer/PDB-Documentation`. All values are little-endian:
 //!
 //! | Offset | Field |
 //! | --- | --- |

@@ -59,7 +59,7 @@ pub(super) struct Entry<T> {
     /// `true` if the caller had mutable access to the record.
     pub(super) touched: bool,
     /// `true` if the caller removed the record. The model keeps the value,
-    /// so that the plan can name it (#47).
+    /// so that the plan can name it.
     pub(super) removed: bool,
 }
 
@@ -271,17 +271,16 @@ macro_rules! record_list {
             #[doc = concat!("Append ", $what, " and return its index in the model.")]
             ///
             /// The index is the next index after the last record, removed
-            /// records included: in the model, the index space only grows
-            /// (rule 5 of #42). While the list has no removed record, the
+            /// records included: in the model, the index space only grows.
+            /// While the list has no removed record, the
             /// index is also the index in the output. After a removal, the
             /// index is a handle: other records refer to the new record with
-            /// it, and the plan gives the output index (#47, see
+            /// it, and the plan gives the output index (see
             /// [`PdbWritePlan::type_index`](crate::native::PdbWritePlan::type_index)
             /// and [`PdbWritePlan::id_index`](crate::native::PdbWritePlan::id_index)).
             ///
             /// The record can refer only to earlier records: the plan rejects
-            /// a forward reference with [`ErrorKind::UnsupportedEdit`]
-            /// (decision 7 of #42).
+            /// a forward reference with [`ErrorKind::UnsupportedEdit`].
             ///
             /// # Errors
             ///
@@ -293,7 +292,7 @@ macro_rules! record_list {
                 self.list.push(record.into_owned()).map($index)
             }
 
-            #[doc = concat!("Remove ", $what, " with `index` (#47).")]
+            #[doc = concat!("Remove ", $what, " with `index`.")]
             ///
             /// Caution: the plan cannot see references in other files. An
             /// object file that uses a type-server PDB, a precompiled-header

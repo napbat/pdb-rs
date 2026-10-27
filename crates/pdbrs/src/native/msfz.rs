@@ -10,12 +10,14 @@
 //! decompressed chunks (see [`MsfzLimits::max_cache_bytes`]).
 //!
 //! The specification is `docs/reference/microsoft-pdb-rs/docs/pdb/msfz.md`. Where it differs
-//! from Microsoft's reader and writer (`ms-pdb-msfz` 0.1.10), the reader follows the decisions
-//! recorded in #37.
+//! from Microsoft's reader and writer (`ms-pdb-msfz` 0.1.10), the reader follows `ms-pdb-msfz`
+//! for the directory layout and the compression codes. It follows the specification for the
+//! reserved location bits, the chunk sizes, overlaps and fragments across chunks.
 //!
 //! [`MsfzBuilder::plan`] and `Container::to_msfz` (see
 //! [`Container`](crate::native::container::Container)) write new containers through a
-//! [`MsfzWritePlan`]. The decisions of the writer are recorded in #38.
+//! [`MsfzWritePlan`]. A fragment of the writer never crosses a chunk boundary, because the
+//! `ms-pdb-msfz` reader reads a fragment from one chunk only.
 //!
 //! # Validation
 //!

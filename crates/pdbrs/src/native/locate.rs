@@ -437,7 +437,7 @@ impl SymbolLocator {
     /// RVA. Prefer the procedures of the module of the section contribution,
     /// and of these the last one in module and record order. DIA
     /// (`findSymbolByRVA`) and `llvm-symbolizer` give the same procedure for
-    /// the folded procedures of the fixtures of #27.
+    /// the folded procedures of the fixtures.
     ///
     /// An address in a separated code chunk and in no procedure gives the
     /// procedure of the chunk, with the same preference.
@@ -474,7 +474,7 @@ impl SymbolLocator {
     /// the RVA. Prefer the subsections of the module `preferred`, and of
     /// these the first one in module and stream order. DIA
     /// (`findLinesByRVA`) gives the same line for the folded code of the
-    /// fixtures of #27. The start of the line is an image RVA.
+    /// fixtures. The start of the line is an image RVA.
     fn line_at(&self, pdb: Rva, preferred: Option<ModuleIndex>) -> Result<Option<SourceLine<'_>>> {
         let rva = pdb;
         let Some(span) = self

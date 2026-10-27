@@ -1,5 +1,5 @@
 //! The path fields of the modules, the IPI records, the module type streams
-//! and the DBI values (rules 1 and 3 of #46).
+//! and the DBI values.
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;

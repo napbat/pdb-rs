@@ -470,7 +470,7 @@ fn debug_bytes<S: ReadAt>(pdb: &Pdb<S>, kind: DebugStream) -> Result<Vec<u8>> {
 
 /// Read the streams that the `S_MOD_TYPEREF` record of a module names,
 /// decode their records and encode them again. A stream of `replaced` (the
-/// new bytes of a path remap, #46) replaces its source stream.
+/// new bytes of a path remap) replaces its source stream.
 fn module_types<S: ReadAt>(
     pdb: &Pdb<S>,
     symbols: &[u8],

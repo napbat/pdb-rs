@@ -31,7 +31,7 @@ enum State {
 /// not change the kind or the fields, or changes them back, the plan writes
 /// the source bytes with their padding. Otherwise the plan encodes the
 /// fields with the encoder of the kind. A record that starts a scope gets
-/// its links from the scope tree of its module (decision 3 of #42).
+/// its links from the scope tree of its module.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SymbolRecord {
     /// The kind and the fields.

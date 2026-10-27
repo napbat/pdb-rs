@@ -1,4 +1,4 @@
-//! Stream views (#48): the bytes of one stream, borrowed from the source or
+//! Stream views: the bytes of one stream, borrowed from the source or
 //! copied.
 
 use alloc::borrow::Cow;
@@ -17,7 +17,7 @@ use crate::{Error, ErrorKind, Result};
 /// bytes if the source lends the whole stream. That is an MSF 7.00 stream
 /// whose pages are adjacent in a source that lends bytes, for example a byte
 /// slice. Otherwise they copy the bytes, for example for a file source or an
-/// MSFZ stream (#38: MSFZ stream bytes are compressed).
+/// MSFZ stream (MSFZ stream bytes are compressed).
 ///
 /// # Example
 ///

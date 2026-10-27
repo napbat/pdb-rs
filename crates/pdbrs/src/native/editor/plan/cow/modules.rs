@@ -253,7 +253,7 @@ fn plan_shared<S: ReadAt>(
 /// that the model did not decode. A reference to a removed record goes away.
 ///
 /// The plan reads only the global reference region of each module stream.
-/// A new offset becomes a patch over the source stream (#48). A removed
+/// A new offset becomes a patch over the source stream. A removed
 /// reference makes the stream shorter, so that stream gets new bytes.
 fn move_global_refs<S: ReadAt>(work: &mut Work<'_, S>, shared: &EncodedShared) -> Result<()> {
     let pdb = work.pdb;

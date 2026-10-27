@@ -26,7 +26,7 @@
 //! A kind with the [`DEBUG_S_IGNORE`] bit gives [`LineSubsection::Ignored`]:
 //! `cvinfo.h` tells readers to ignore the contents. The data of
 //! [`DEBUG_S_INLINEE_MDTOKEN_MAP`] and unknown kinds stays raw, because no
-//! available source or producer defines their layout (#31). [`ModuleLines`]
+//! available source or producer defines their layout. [`ModuleLines`]
 //! decodes all subsections of one module stream and validates the file
 //! checksum references.
 //!

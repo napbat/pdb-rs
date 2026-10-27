@@ -6,8 +6,8 @@
 //! `S_REF_MINIPDB` follows `REFMINIPDB` in `cvinfo.h`. No pinned reference
 //! gives a layout for `S_FASTLINK`. LLVM calls the kind `S_REF_MINIPDB2`.
 //! The layout is `REFMINIPDB` of `cvinfo.h` without the module index. The
-//! MSVC 14.44 FASTLINK fixture of #12 and its object files confirm it. The
-//! decision is in #13. The debug type records of `cvinfo.h` in the DIA SDK
+//! MSVC 14.44 FASTLINK fixture and its object files confirm it. The
+//! debug type records of `cvinfo.h` in the DIA SDK
 //! of Visual Studio 18 (`lib/amd64/diaguids.lib`) give `REFMINIPDB2` with
 //! the same layout, and the flag bits `fThunk` (bit 5) and `fNamespace`
 //! (bit 6).
@@ -86,7 +86,7 @@ flags! {
     /// The flags of a mini PDB reference.
     ///
     /// Bits 0 to 4 come from `REFMINIPDB` in `cvinfo.h`. Bits 5 and 6 come
-    /// from `REFMINIPDB2` in the DIA SDK. The FASTLINK fixture of #12 sets
+    /// from `REFMINIPDB2` in the DIA SDK. The FASTLINK fixture sets
     /// bit 6 only on namespace names.
     FastLinkFlags(u16) {
         /// The name is local to the object file.

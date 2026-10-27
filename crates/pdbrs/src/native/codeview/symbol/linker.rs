@@ -216,7 +216,7 @@ pub struct ModuleTypeReference {
 /// MSVC `link /DEBUG:LAZY` writes these records in a PDB without type
 /// merging (feature `NOTM`). The type and ID indices of the module symbols
 /// are then indices of the input object file, not TPI or IPI indices. The
-/// meaning of the words comes from `msvc-x64-lazy` (#30): see
+/// meaning of the words comes from `msvc-x64-lazy`: see
 /// [`ModuleTypeReference::source`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -251,7 +251,7 @@ pub enum ModuleTypeSource {
     /// Microsoft's writer (`Mod1::fCopyTM`) does not copy them, and `word1`
     /// is 0. They stay in the object file of the module. The own records
     /// start at index `0x1000` plus the number of precompiled types, and
-    /// the PDB does not hold that number (`msvc-x64-pch-lazy`, #30, #39).
+    /// the PDB does not hold that number (`msvc-x64-pch-lazy`).
     PrecompiledTypeOwner {
         /// The stream with the own records (`word0`).
         stream: StreamId,

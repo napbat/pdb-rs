@@ -13,7 +13,7 @@
 //! The module checks use [`ModuleSymbols`] for the parent and end links, the
 //! end kinds and the depth limit. [`Rule`] lists the other checks. The rules
 //! come from `cvinfo.h`, from LLVM `SymbolRecord.h` and `CodeViewDebug.cpp`
-//! (revision `b9f2235f`), and from the producer fixtures of #12. The
+//! (revision `b9f2235f`), and from the producer fixtures. The
 //! [`Rule`] documentation names each rule that producers break and how the
 //! check accepts their output.
 //!
@@ -93,7 +93,7 @@ const MANAGED_PROCEDURES: &[SymbolKind] = &[S_GMANPROC, S_LMANPROC];
 ///
 /// The global procedure kinds come from LLVM. The .NET native PDB writer
 /// and the MSVC `/clr` linker also write `S_PROCREF` for `S_GMANPROC`
-/// records (.NET and MSVC `/clr` fixtures of #12).
+/// records (.NET and MSVC `/clr` fixtures).
 const GLOBAL_REFERENCE_TARGETS: &[SymbolKind] = &[
     S_GPROC32,
     S_GPROC32_ID,
@@ -396,7 +396,7 @@ fn check_references(
         }
     }
     // MSVC `/DEBUG:LAZY` writes ID 0 ("no ID") in the `S_LPROC32_ID` records
-    // of exception funclets (`msvc-x64-lazy`, #30). A linker that merges
+    // of exception funclets (`msvc-x64-lazy`). A linker that merges
     // types writes them as `S_LPROC32` with type 0.
     if let Some(id) = symbol
         .id_index()

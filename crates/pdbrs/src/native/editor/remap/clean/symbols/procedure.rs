@@ -1,9 +1,9 @@
-//! Procedures and separated code (#43, decision 4).
+//! Procedures and separated code.
 //!
 //! The part of a procedure with its start keeps the procedure record, with the length of
 //! that part. Each other part becomes an `S_SEPCODE` scope without children, with the new
 //! procedure start as its parent address. MSVC writes `S_SEPCODE` at the top level, after
-//! the end of its procedure, with flags 0 (fixture `msvc-x64-pgo` of #27). The new scopes go
+//! the end of its procedure, with flags 0 (fixture `msvc-x64-pgo`). The new scopes go
 //! after the `S_SEPCODE` scopes that follow the procedure with the same parent address.
 
 use alloc::boxed::Box;

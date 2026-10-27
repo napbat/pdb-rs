@@ -33,7 +33,7 @@ pub(super) enum Planned<'e, S> {
     Owned(Vec<u8>),
     /// Bytes that the editor model holds.
     Borrowed(&'e [u8]),
-    /// Base bytes with new fixed-width values (#48).
+    /// Base bytes with new fixed-width values.
     Patched(patch::Patched<'e, S>),
 }
 
@@ -192,9 +192,9 @@ pub struct PdbWritePlan<'e, S = &'static [u8]> {
     file_size: u64,
     /// The report.
     report: PlanReport,
-    /// The output indices of the TPI space, if it compacts (#47).
+    /// The output indices of the TPI space, if it compacts.
     types: Option<SpaceMap>,
-    /// The output indices of the IPI space, if it compacts (#47).
+    /// The output indices of the IPI space, if it compacts.
     ids: Option<SpaceMap>,
 }
 
@@ -248,7 +248,7 @@ impl<S: ReadAt> PdbWritePlan<'_, S> {
     }
 
     /// Return the output index of the type index `index` of the editor
-    /// model (#47).
+    /// model.
     ///
     /// A type index below `0x1000` stays. If the model removes no type
     /// record, each type index stays. Else each type record that is not
@@ -264,8 +264,7 @@ impl<S: ReadAt> PdbWritePlan<'_, S> {
         resolve_type(self.types.as_ref(), index)
     }
 
-    /// Return the output index of the ID index `index` of the editor model
-    /// (#47).
+    /// Return the output index of the ID index `index` of the editor model.
     ///
     /// The rules of [`PdbWritePlan::type_index`] apply to the IPI space and
     /// [`IdList::push`](super::IdList::push).

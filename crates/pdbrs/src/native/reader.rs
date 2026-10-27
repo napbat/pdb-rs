@@ -196,7 +196,7 @@ impl<S: ReadAt> Pdb<S> {
 
     /// Return the bytes of a present stream within the configured stream
     /// limit: borrowed from the source if the source lends the whole stream,
-    /// else a copy (#48). See [`StreamBytes`].
+    /// else a copy. See [`StreamBytes`].
     ///
     /// # Errors
     ///

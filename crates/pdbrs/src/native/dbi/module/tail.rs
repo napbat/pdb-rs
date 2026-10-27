@@ -1,5 +1,5 @@
 //! The global reference region of a module stream, read without the other
-//! regions (#48).
+//! regions.
 
 use alloc::vec::Vec;
 

@@ -87,7 +87,7 @@ pub(super) struct SharedSymbols {
     pub(super) section_starts: Vec<SectionStart>,
     /// The source, or `None` for a model without a source.
     pub(super) source: Option<SharedSource>,
-    /// The index of the names (#48).
+    /// The index of the names.
     name_index: NameIndex,
 }
 
@@ -217,7 +217,7 @@ impl SharedSymbols {
     /// Return the only record of the index `view` with the name `name`.
     ///
     /// The function compares the names of the candidates of the name index
-    /// only: it does not scan the records (#48).
+    /// only: it does not scan the records.
     fn find(&self, view: View, name: &[u8]) -> Result<Option<SymbolHandle>> {
         let mut found = None;
         for symbol in self.name_index.candidates(view, name) {

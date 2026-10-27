@@ -58,8 +58,8 @@ pub(super) struct ModuleSource {
 /// The plan sets these fields of the record: the module stream, the three
 /// region sizes and the source file count. It keeps the other fields.
 ///
-/// A module whose source records do not form a scope tree stays opaque (rule
-/// 2 of #42). The plan copies its symbol records. [`ModuleContents::symbols`],
+/// A module whose source records do not form a scope tree stays opaque.
+/// The plan copies its symbol records. [`ModuleContents::symbols`],
 /// [`ModuleContents::symbols_mut`], [`ModuleContents::procedure_mut`] and
 /// [`ModuleContents::push`] then fail with [`ErrorKind::UnsupportedEdit`].
 /// Its lines stay editable.
@@ -353,7 +353,7 @@ impl ModuleContents {
     /// The plan encodes each subsection with
     /// [`LineSubsection::encode_framed`]. A new file checksum goes to the end
     /// of the checksum table, so that the checksum offsets of the other
-    /// files stay (rule 5 of #42).
+    /// files stay.
     pub fn lines_mut(&mut self) -> &mut Vec<LineSubsection<'static>> {
         self.lines_changed = true;
         &mut self.lines

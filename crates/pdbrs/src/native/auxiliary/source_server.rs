@@ -243,7 +243,7 @@ impl<'a> SourceServer<'a> {
     }
 
     /// Return the byte range of the first field of each line of the `source files` section:
-    /// the build path (#46). Blank lines have no range.
+    /// the build path. Blank lines have no range.
     ///
     /// # Errors
     ///

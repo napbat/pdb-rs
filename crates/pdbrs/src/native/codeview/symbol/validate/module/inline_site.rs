@@ -8,7 +8,7 @@
 //! `BA_OP_ChangeCodeOffsetBase` selects a code chunk of the procedure. Chunk
 //! 0 is the code of the procedure. Chunk `n` is the code of the `n`-th
 //! `S_SEPCODE` record of the procedure, in stream order. MSVC PGO output
-//! follows these rules (`msvc-x64-pgo` of #27): the sites put 40
+//! follows these rules (`msvc-x64-pgo`): the sites put 40
 //! `ChangeCodeOffsetBase` opcodes after other code opcodes, and the next
 //! range then starts at offset 0 of the chunk.
 //!
@@ -134,7 +134,7 @@ pub(super) fn parts(
 ///
 /// A part touches a range if it starts at the end of the range or ends at
 /// its start. MSVC writes such def-ranges, for example for the result of an
-/// inlined function after the inlined code (`msvc-x64-release`, #30).
+/// inlined function after the inlined code (`msvc-x64-release`).
 pub(super) fn touches(ranges: &[CodeRange], parts: &[CodeRange]) -> bool {
     parts.iter().any(|part| {
         ranges.iter().any(|code| {

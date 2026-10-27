@@ -1,4 +1,4 @@
-//! The clean rewrite of the symbol record stream and its indexes (#43, decisions 4 and 5).
+//! The clean rewrite of the symbol record stream and its indexes.
 //!
 //! The rewrite changes:
 //!

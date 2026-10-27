@@ -63,7 +63,7 @@ pub enum Rule {
     ///
     /// The check does not use the code range of a block. LLVM writes
     /// def-ranges that start before the block of the variable (Clang and
-    /// Rust release fixtures of #12), because it takes the block range from
+    /// Rust release fixtures), because it takes the block range from
     /// the instructions and the def-range from the variable locations.
     DefRangeOutsideProcedure,
     /// A def-range gap has a length of 0.
@@ -94,7 +94,7 @@ pub enum Rule {
     /// The check does not require that the def-range is inside the code of
     /// its inline site. MSVC, Clang, rustc and fxc write def-ranges that
     /// continue after the inlined code, for example for a value that the
-    /// inlined function returns (fixtures of #12 and #27). MSVC PGO writes
+    /// inlined function returns (producer fixtures). MSVC PGO writes
     /// def-ranges of a local of an inner inline site in the separated code
     /// of an outer inline site. The check skips a def-range of length 0 and
     /// a def-range with the "may have no user name" bit (`CV_RANGEATTR`):

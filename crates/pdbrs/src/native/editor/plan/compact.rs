@@ -1,4 +1,4 @@
-//! The compaction of the TPI and IPI index spaces after a removal (#47).
+//! The compaction of the TPI and IPI index spaces after a removal.
 //!
 //! A removal leaves a tombstone in the model. The plan gives each record that
 //! is not removed the next output index, in model order ([`map`]). It writes

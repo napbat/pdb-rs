@@ -1,7 +1,7 @@
 //! The strip of private symbols, as Microsoft `link /PDBSTRIPPED` does.
 //!
 //! The rules come from the stripped PDB that `link.exe` 14.51 writes next to
-//! the full PDB of the `msvc-x64-stripped` fixture (#27, #34). The
+//! the full PDB of the `msvc-x64-stripped` fixture. The
 //! documentation of [`PdbEditor`](crate::native::PdbEditor) lists them.
 
 use alloc::borrow::Cow;

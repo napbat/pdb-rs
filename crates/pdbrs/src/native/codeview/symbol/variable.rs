@@ -506,8 +506,8 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
 ///
 /// MSVC writes `S_REGREL32_ENCTMP` for compiler temporaries, for example
 /// `__$ReturnUdt`, in code compiled with `/ZI` (Edit and Continue). No
-/// reference gives its layout. The MSVC incremental fixture of #12 confirms
-/// the `S_REGREL32` layout (#13).
+/// reference gives its layout. The MSVC incremental fixture confirms
+/// the `S_REGREL32` layout.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct RegisterRelative<'a> {

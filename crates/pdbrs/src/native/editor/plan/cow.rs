@@ -60,9 +60,9 @@ pub(super) enum Bytes<'e> {
     Owned(Vec<u8>),
     /// Bytes that the model holds.
     Borrowed(&'e [u8]),
-    /// The source stream with the same stream ID, with patches (#48).
+    /// The source stream with the same stream ID, with patches.
     SourcePatched(Vec<Patch>),
-    /// Bytes that the source session holds, with patches (#48).
+    /// Bytes that the source session holds, with patches.
     SessionPatched(&'e [u8], Vec<Patch>),
 }
 
@@ -499,7 +499,7 @@ fn plan_named<S: ReadAt>(work: &mut Work<'_, S>, info: &mut Option<InfoBuilder>)
         if entry.content == NamedContent::Removed {
             continue;
         }
-        // A path remap (#46) gives a `/src/files/` stream a new name. The
+        // A path remap gives a `/src/files/` stream a new name. The
         // old name leaves the string buffer of the map.
         let source_name = work
             .pdb
@@ -554,7 +554,7 @@ fn plan_types<S: ReadAt>(work: &mut Work<'_, S>, maps: &IndexMaps) -> Result<()>
     Ok(())
 }
 
-/// Plan the TPI and IPI streams of a compaction (#47).
+/// Plan the TPI and IPI streams of a compaction.
 ///
 /// [`Work::type_end`] and [`Work::id_end`] give the model ends: the checks of
 /// the module symbols run on model indices, before the compaction pass.

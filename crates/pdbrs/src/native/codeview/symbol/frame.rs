@@ -6,7 +6,7 @@
 //! `cvinfo.h`.
 //!
 //! No reference gives a layout for `S_FRAMEREG`. The layout comes from the
-//! MSVC ARM64 fixture of #12. The decision is in #13.
+//! MSVC ARM64 fixture.
 
 use super::super::Fields;
 use super::super::index::TypeIndex;

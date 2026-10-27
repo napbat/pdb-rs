@@ -1,4 +1,4 @@
-//! The editing tasks of #41: functions over the model of the editor.
+//! The editing tasks: functions over the model of the editor.
 //!
 //! Each task checks all its inputs before it changes the model, so an error
 //! leaves the model unchanged. The plan has no separate path for a task.

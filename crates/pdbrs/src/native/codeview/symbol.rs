@@ -477,9 +477,9 @@ pub enum SymbolData<'a> {
     /// [`S_FRAMEREG`]: a register as a `CV_HREG_e` number for the CPU of the
     /// module.
     ///
-    /// No reference gives the layout. The MSVC ARM64 fixture of #12 writes
+    /// No reference gives the layout. The MSVC ARM64 fixture writes
     /// a 16-bit register and two zero bytes after `S_FRAMEPROC`, in
-    /// procedures with exception handling and in their funclets (#13).
+    /// procedures with exception handling and in their funclets.
     FrameRegister(u16),
     /// [`S_HEAPALLOCSITE`].
     HeapAllocationSite(HeapAllocationSite),
@@ -574,7 +574,7 @@ impl<'a> Symbol<'a> {
     /// The bytes after the fields must be zero. Most producers write fewer
     /// than four of them to align the next record. The Windows SDK HLSL
     /// compiler `fxc` writes `S_LOCAL` records of a fixed length, so more
-    /// zero bytes follow the name (#30). [`Symbol::encode`] keeps them.
+    /// zero bytes follow the name. [`Symbol::encode`] keeps them.
     ///
     /// # Errors
     ///

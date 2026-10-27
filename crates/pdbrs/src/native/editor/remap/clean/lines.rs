@@ -1,4 +1,4 @@
-//! The clean rewrite of the C13 subsections of a module (#43, decisions 4, 5 and 11).
+//! The clean rewrite of the C13 subsections of a module.
 //!
 //! The rewrite changes the subsections that hold addresses:
 //!

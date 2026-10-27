@@ -1,7 +1,7 @@
 //! The type map streams that a `/TMCache` stream names.
 //!
 //! Each stream caches one type map of an incremental link. The layout comes from
-//! `DBI1::DumpTMCache` in `mspdbcore.dll` of MSVC 14.51; issue #13 records the evidence. All
+//! `DBI1::DumpTMCache` in `mspdbcore.dll` of MSVC 14.51. All
 //! values are little-endian `u32` values unless noted.
 //!
 //! Version 1 maps a type server (a `/Zi` or `/ZI` compiler PDB):

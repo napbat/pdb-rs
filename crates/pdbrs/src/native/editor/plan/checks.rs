@@ -35,7 +35,7 @@ pub(super) fn check(report: &ValidationReport) -> Result<()> {
     }
 }
 
-/// Return the error for a forward reference in `space` (decision 7 of #42).
+/// Return the error for a forward reference in `space`.
 fn forward(space: IndexSpace) -> Error {
     Error::new(ErrorKind::UnsupportedEdit, None)
         .with_context(
@@ -50,7 +50,7 @@ fn forward(space: IndexSpace) -> Error {
 /// A record that refers to itself makes a cycle, and the reference check
 /// rejects a cycle with [`ErrorKind::InvalidFormat`]. Each cycle has a
 /// forward reference, so the plan then looks for one and gives the error of
-/// decision 7.
+/// [`forward`].
 pub(super) fn check_types(table: &TypeTable<'_>) -> Result<()> {
     let summary = match validate_type_references(table, ReferenceLimits::default()) {
         Ok(summary) => summary,

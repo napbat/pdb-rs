@@ -1,4 +1,4 @@
-//! [`PdbEditor::remap_source_paths`] (#46).
+//! [`PdbEditor::remap_source_paths`].
 //!
 //! The task has two steps. [`stage`] reads the parts that hold paths into
 //! local values (a copy of each part that the model already has), calls the

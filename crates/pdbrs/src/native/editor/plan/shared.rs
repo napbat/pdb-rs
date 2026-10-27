@@ -153,7 +153,7 @@ fn encode_record(
         return record.encode(out);
     };
     // A reference record can get a new name only together with its target:
-    // the module record holds the same name (#41 rule 4).
+    // the module record holds the same name.
     if let (Some(origin), None) = (record.origin(), record.unchanged())
         && origin.name() != record.data().name()
         && modules.name(target) != record.name()
@@ -337,7 +337,7 @@ const fn public_address(data: &SymbolData<'_>) -> Option<SectionOffset> {
 }
 
 /// Return the new targets of the reference records of an undecoded symbol
-/// record stream as patches (#48). Return an empty list if no target moved.
+/// record stream as patches. Return an empty list if no target moved.
 pub(super) fn patch_targets(
     records: &[u8],
     modules: &dyn ModuleTargets,

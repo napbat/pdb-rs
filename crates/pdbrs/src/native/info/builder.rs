@@ -10,7 +10,7 @@
 //! 3. A removal (`NMTNI::deleteNiSzo`) marks the bucket as deleted. The name stays in the
 //!    string buffer.
 //!
-//! The streams of the 29 native fixtures of #32 have the same bytes as a map that gets its
+//! The streams of the 29 native fixtures have the same bytes as a map that gets its
 //! names in string buffer order with these rules.
 
 use alloc::vec::Vec;
@@ -238,7 +238,7 @@ impl InfoBuilder {
     /// Give the named stream `old` the name `new`, and remove `old` from the string buffer.
     /// Return `false` if the map has no name `old`.
     ///
-    /// A path remap (#46) uses this function, so that the stream keeps no old path. The other
+    /// A path remap uses this function, so that the stream keeps no old path. The other
     /// names move in the string buffer and keep their buckets. The new name goes to the end of
     /// the string buffer, as with [`InfoBuilder::set_named_stream`].
     ///

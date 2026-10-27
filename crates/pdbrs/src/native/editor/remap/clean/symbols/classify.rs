@@ -1,4 +1,4 @@
-//! The address fields of each kind of symbol record (#43, decision 4).
+//! The address fields of each kind of symbol record.
 //!
 //! [`shape`] sorts each [`SymbolData`] variant into one address form. The match names each
 //! variant, so that a new variant needs a decision here.

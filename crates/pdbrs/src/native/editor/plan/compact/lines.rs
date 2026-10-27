@@ -152,7 +152,7 @@ fn edit<M: IndexRemap>(kind: SubsectionKind, data: &[u8], map: &M) -> Result<Edi
         // The XFG type indices are in the type scope of the object file, and
         // `link.exe` does not copy these subsections to a PDB (see
         // `native::lines::xfg_hash`). In a PDB, the space of their indices is
-        // not known, so they block the compaction (rule 4 of #47).
+        // not known, so they block the compaction.
         LineSubsection::XfgTypeHashes(_) | LineSubsection::XfgVirtualHashes(_) => {
             return Err(unsupported(
                 "an XFG hash subsection holds type indices of an unknown type scope",

@@ -12,7 +12,7 @@
 //! it writes 0 for both links of a scope record and patches them later.
 //!
 //! The `next` link of procedures and thunks keeps its given value. The MSVC,
-//! LLVM and .NET producers of the fixtures write 0 (#30).
+//! LLVM and .NET producers of the fixtures write 0.
 
 use alloc::vec::Vec;
 

@@ -15,7 +15,7 @@
 //! and `lld-link` copy these records to the PDB. LLVM, DIA and `pdbtool` read
 //! them; LLVM does not check the bytes after the last field
 //! (`CodeViewRecordIO::endRecord`). The decoders keep these bytes in the
-//! `trailing` field, and the encoders write them again (#29).
+//! `trailing` field, and the encoders write them again.
 
 use super::{ClassOptions, fields};
 use crate::bytes::into_owned;

@@ -1,4 +1,4 @@
-//! The report of a write plan: how the plan writes each stream (rule 10 of #42).
+//! The report of a write plan: how the plan writes each stream.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -153,7 +153,7 @@ impl PlanReport {
     }
 }
 
-/// The counts of clean remap output (decision 13 of #43).
+/// The counts of clean remap output.
 ///
 /// [`PlanReport::remap`] gives the counts. A record that holds removed code
 /// counts as removed with [`RemovedCode::Drop`](crate::native::RemovedCode::Drop).
@@ -195,7 +195,7 @@ impl RemapReport {
 
     /// Return the number of section contributions (also in the DBI module
     /// records) that got the data CRC 0 and the relocation CRC 0, because
-    /// their address or size changed (decision 6 of #43).
+    /// their address or size changed.
     #[must_use]
     pub const fn cleared_crcs(&self) -> usize {
         self.cleared_crcs

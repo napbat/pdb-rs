@@ -78,7 +78,7 @@ pub trait ReadAt {
     }
 
     /// Return the `length` bytes at `offset` as a slice of the input, if the
-    /// input can lend them (#48).
+    /// input can lend them.
     ///
     /// The default returns `None`: the input cannot lend bytes, and the
     /// caller reads them with [`ReadAt::read_exact_at`]. A byte slice lends

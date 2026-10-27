@@ -1,4 +1,4 @@
-//! The clean rewrite of the DBI values (#43, decisions 4 to 6).
+//! The clean rewrite of the DBI values.
 //!
 //! - Each section contribution gets one entry for each part of its extent. The list is
 //!   sorted again by section and offset if an entry changes.
@@ -7,7 +7,7 @@
 //!   `link.exe` writes them, if the section headers change.
 //!
 //! A contribution whose section, offset or size changes gets the data CRC 0 and the
-//! relocation CRC 0 (decision 6).
+//! relocation CRC 0.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;

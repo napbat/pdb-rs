@@ -27,7 +27,7 @@ pub struct SourceLink<'a> {
 /// [`SourceLink::parse`] accepts. Else return the reason.
 ///
 /// The Portable PDB editor uses the same rules for the Source Link custom
-/// debug information (#41 rule 5).
+/// debug information.
 pub(crate) fn json_object(bytes: &[u8]) -> core::result::Result<&str, &'static str> {
     let json = core::str::from_utf8(bytes).map_err(|_| "Source Link stream is not UTF-8")?;
     let object = json.trim_start_matches('\u{feff}').trim();

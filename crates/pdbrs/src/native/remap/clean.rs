@@ -1,4 +1,4 @@
-//! The address map of clean output (#43, decision 4).
+//! The address map of clean output.
 //!
 //! A [`CleanMap`] maps an address of the source PDB to the new image. A source address is a
 //! section and an offset in the section headers that the records use: the original section

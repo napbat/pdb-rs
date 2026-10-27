@@ -1,7 +1,7 @@
-//! Clean output of the address remap (#43, decisions 4 to 7 and 11).
+//! Clean output of the address remap.
 //!
 //! [`PdbEditor::remap_addresses`] with [`RemapMode::Clean`](crate::native::RemapMode::Clean)
-//! keeps a copy of the map and the policy. The plan applies them (rule 6): it copies the
+//! keeps a copy of the map and the policy. The plan applies them: it copies the
 //! address-bearing parts of the model, rewrites the copy and plans from it. The parts are
 //! the modules, the symbol record stream with its indexes, the DBI values and the optional
 //! debug streams. The copy stays in the editor until the next change of the model, because

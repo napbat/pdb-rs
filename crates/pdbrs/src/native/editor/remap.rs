@@ -1,4 +1,4 @@
-//! The address remap of the editor model (#43).
+//! The address remap of the editor model.
 
 use alloc::vec::Vec;
 
@@ -58,7 +58,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///
     /// With [`RemapMode::Clean`], the function keeps a copy of `remap` and the
     /// policy. The plan writes the new address into each record that holds an
-    /// address (decision 4 of #43): the module symbols, the C13 line blocks,
+    /// address: the module symbols, the C13 line blocks,
     /// frame data and COFF symbol RVAs, the symbol record stream with the
     /// address map of the public index, the DBI section contributions and
     /// section map, and the FPO, new FPO, exception data and fixup streams.

@@ -1,4 +1,4 @@
-//! The clean rewrite of the module symbols (#43, decisions 4 and 5).
+//! The clean rewrite of the module symbols.
 //!
 //! The rewrite walks the scope tree of a module in stream order. [`classify::shape`] gives
 //! the address form of each record:

@@ -1,4 +1,4 @@
-//! Patched streams (#48): base bytes and fixed-width values that the plan
+//! Patched streams: base bytes and fixed-width values that the plan
 //! writes over them while it writes the output.
 //!
 //! A change that gives a stream only new indices or offsets keeps the size of
@@ -40,7 +40,7 @@ impl Patch {
 }
 
 /// Return the patches that change `old` into `new`, or `None` if two
-/// patches would overlap (#47).
+/// patches would overlap.
 ///
 /// Each patch starts at the first changed byte after the previous patch,
 /// or at the last 4 bytes of the stream, and takes its value from `new`.

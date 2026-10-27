@@ -146,7 +146,7 @@ pub(super) fn write_cow<T: ListRecord>(
     }))
 }
 
-/// Plan a stream of the copy-on-write layout with output indices (#47).
+/// Plan a stream of the copy-on-write layout with output indices.
 ///
 /// `own` is the map of the space of `list`. The plan writes all records
 /// again with the header options of the source and computes all hash values
@@ -170,7 +170,7 @@ pub(super) fn write_compacted<T: CompactRecord>(
 }
 
 /// Write a stream of the new layout with output indices, and its hash
-/// stream (#47).
+/// stream.
 pub(super) fn write_new_compacted<T: CompactRecord>(
     list: &RecordList<T>,
     own: Option<&SpaceMap>,

@@ -1,4 +1,4 @@
-//! [`PdbEditor::rename_symbols`] (#41).
+//! [`PdbEditor::rename_symbols`].
 //!
 //! The task has two steps. [`stage`] reads the source, decodes the parts
 //! into local values, calls the function and checks every new name. Then
@@ -41,7 +41,7 @@ struct Staged {
 
 /// Return the name of a record of the symbol record stream that the task
 /// renames. `S_DATAREF` and `S_ANNOTATIONREF` keep their names: the task
-/// does not rename their targets (decision 1 of #41).
+/// does not rename their targets.
 fn shared_name(record: &SymbolRecord) -> Option<&[u8]> {
     if matches!(record.data(), SymbolData::SymbolReference(_)) {
         return None;
@@ -169,7 +169,7 @@ fn find_module<'m>(
 }
 
 /// Check that each renamed procedure reference names a procedure that gets
-/// the same new name (rule 4 of #41).
+/// the same new name.
 fn check_references(
     shared: &SharedSymbols,
     slots: &[ModuleSlot],

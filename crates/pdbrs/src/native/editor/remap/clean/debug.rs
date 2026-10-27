@@ -1,4 +1,4 @@
-//! The clean rewrite of the optional debug streams (#43, decisions 4, 5 and 7).
+//! The clean rewrite of the optional debug streams.
 //!
 //! - The FPO, new FPO and exception data records move with their range. A split fails,
 //!   because the records describe the prolog and the frame from the function start. The

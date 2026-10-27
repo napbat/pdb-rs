@@ -1,6 +1,5 @@
-//! The path fields of the named streams: the `srcsrv` source file lines
-//! (decision 3 of #46), the `/LinkInfo` current directory and the names of
-//! the `/src/files/` streams.
+//! The path fields of the named streams: the `srcsrv` source file lines, the
+//! `/LinkInfo` current directory and the names of the `/src/files/` streams.
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;

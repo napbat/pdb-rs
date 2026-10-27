@@ -1,4 +1,4 @@
-//! The clean rewrite of a `DEBUG_S_LINES` subsection (#43, decisions 4 and 5).
+//! The clean rewrite of a `DEBUG_S_LINES` subsection.
 //!
 //! The code extent of the header maps to parts. Each part gets its own subsection, in the
 //! order of the old addresses, with the start of the part and the length of the part. Each

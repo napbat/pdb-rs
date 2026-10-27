@@ -13,8 +13,8 @@
 //! can have the same syntax offset.
 //!
 //! The Roslyn reader ignores bytes after the states. `Pdb2Pdb` copies the
-//! alignment bytes of a native `MD2` record of kind 9 into the Portable PDB
-//! (#14). This decoder accepts at most three zero bytes after the states for
+//! alignment bytes of a native `MD2` record of kind 9 into the Portable PDB.
+//! This decoder accepts at most three zero bytes after the states for
 //! this reason.
 
 use alloc::vec::Vec;

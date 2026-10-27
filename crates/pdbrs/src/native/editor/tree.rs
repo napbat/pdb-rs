@@ -1,4 +1,4 @@
-//! The scope tree of the symbols of a module (decision 3 of #42).
+//! The scope tree of the symbols of a module.
 //!
 //! These kinds open a scope: the procedures of all architectures and their
 //! `_ID` kinds, the managed procedures, `S_BLOCK32`, `S_WITH32`, `S_SEPCODE`,

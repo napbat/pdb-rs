@@ -3,7 +3,7 @@
 //! The walk reads the output Info and DBI streams of the assembly. They give
 //! the role of each stream in both layouts. The walk rewrites each stream
 //! that can hold a type or ID index, and rejects each stream that can hold
-//! one without a decoder (rule 4 of #47).
+//! one without a decoder.
 
 use alloc::vec::Vec;
 
@@ -193,8 +193,9 @@ fn rewrite_type_map<S: ReadAt>(
 }
 
 /// Write the output indices into each output stream that can hold a type or
-/// ID index, and reject the output if a stream can hold one without a
-/// decoder or if the PDB is a kind that decision 2 of #47 refuses.
+/// ID index. Reject the output if a stream can hold one without a decoder. Also
+/// reject a `/DEBUG:FASTLINK` PDB, a PDB without type merging, a PDB without a DBI
+/// stream and a PDB whose modules use type servers.
 pub(in crate::native::editor::plan) fn rewrite<S: ReadAt>(
     assembly: &mut Assembly<'_, S>,
     maps: &IndexMaps,

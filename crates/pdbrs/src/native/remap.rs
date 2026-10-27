@@ -1,4 +1,4 @@
-//! Address remapping for a rewritten image (#43).
+//! Address remapping for a rewritten image.
 //!
 //! A binary rewriter moves, splits or removes code after the link. The PDB must then
 //! describe the new image. [`ImageRemap`] holds the section headers of the new image and a
@@ -217,7 +217,7 @@ impl ImageRemap {
         self.by_old.values().copied()
     }
 
-    /// Give the `.pdata` and `.xdata` streams of the new image (decision 7 of #43).
+    /// Give the `.pdata` and `.xdata` streams of the new image.
     ///
     /// pdbrs does not decode the unwind information in `.xdata`, so it cannot rewrite the
     /// two streams. Clean output ([`RemapMode::Clean`]) writes these streams into the

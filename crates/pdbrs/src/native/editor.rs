@@ -1,4 +1,4 @@
-//! The record collections of a [`PdbEditor`] (#42).
+//! The record collections of a [`PdbEditor`].
 //!
 //! The `*_mut` functions of the editor give these collections. The
 //! collections change only the model; the plan encodes the streams. See the

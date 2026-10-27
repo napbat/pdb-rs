@@ -3,8 +3,8 @@
 //!
 //! `cvinfo.h`, LLVM and `cvdump` name the kinds but do not define the
 //! layouts. The layouts come from the object files of the `msvc-x64-xfg`
-//! fixture (#27, MSVC 14.44 with `/guard:xfg`), and the decoders check the
-//! sizes that they imply (#31):
+//! fixture (MSVC 14.44 with `/guard:xfg`), and the decoders check the
+//! sizes that they imply:
 //!
 //! - `DEBUG_S_XFGHASH_TYPE`: entries of 12 bytes, a `u64` hash and the type
 //!   index of a function type (`LF_PROCEDURE` or `LF_MFUNCTION`).

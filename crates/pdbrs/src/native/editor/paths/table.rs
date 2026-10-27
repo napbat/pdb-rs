@@ -1,4 +1,4 @@
-//! Build a string table again without the old paths (decision 2 of #46).
+//! Build a string table again without the old paths.
 //!
 //! The new table gets the names of the source table in offset order, with
 //! the insertion rules of `NMT` ([`StringTableBuilder::insert`]). A name that

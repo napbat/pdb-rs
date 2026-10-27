@@ -88,7 +88,7 @@ pub(super) enum Names {
 /// let mut edit = pdb.edit(IdentityPolicy::IncrementAge);
 /// let main = edit.module_mut(index)?.procedure_mut(b"main")?; // a scope of the tree
 /// main.children.retain(|symbol| symbol.kind() != S_LABEL32); // no S_END to keep in step
-/// let added = edit.types_mut()?.push(leaf)?; // decision 6
+/// let added = edit.types_mut()?.push(leaf)?; // the next type index
 ///
 /// // Build: the same type without a source.
 /// let mut build = PdbEditor::new(signature, guid, age)?;
@@ -126,7 +126,7 @@ pub(super) enum Names {
 ///
 /// # Tasks
 ///
-/// The common edits are functions over the same model (#41). Each one checks
+/// The common edits are functions over the same model. Each one checks
 /// all its inputs first, so an error leaves the model unchanged:
 ///
 /// - [`PdbEditor::set_source_link`]: the `sourcelink` named stream.
@@ -135,11 +135,11 @@ pub(super) enum Names {
 /// - [`PdbEditor::rename_symbols`]: public and global symbols, and module
 ///   procedures with their reference records.
 /// - [`PdbEditor::remap_addresses`]: the addresses of an image that a binary
-///   rewriter changed (#43), as OMAP tables or as new addresses in each
+///   rewriter changed, as OMAP tables or as new addresses in each
 ///   record (clean output). The plan applies clean output, so records that
 ///   other edits add or change use the addresses of the source PDB.
 /// - [`PdbEditor::remap_source_paths`]: the source paths of the PDB, with
-///   `/names` again without the old paths (#46).
+///   `/names` again without the old paths.
 ///
 /// # Layouts
 ///
@@ -162,8 +162,8 @@ pub(super) enum Names {
 ///   other stream names; the report gives it as removed.
 ///
 /// In both layouts, type indices, ID indices and `/names` offsets keep their
-/// values: the index spaces only grow (rule 5 of #42). Only
-/// [`PdbEditor::remap_source_paths`] builds `/names` again (#46): it writes
+/// values: the index spaces only grow. Only
+/// [`PdbEditor::remap_source_paths`] builds `/names` again: it writes
 /// the new offsets into every decoded field. A removal of type or ID records
 /// is the other exception: see below.
 ///
@@ -175,7 +175,7 @@ pub(super) enum Names {
 /// records only from a PDB that no other file refers to by index.
 ///
 /// [`TypeList::remove`](super::TypeList::remove) and
-/// [`IdList::remove`](super::IdList::remove) make a record a tombstone (#47).
+/// [`IdList::remove`](super::IdList::remove) make a record a tombstone.
 /// In the model, the other records keep their indices, and a record that
 /// [`TypeList::push`](super::TypeList::push) adds gets the next index. After
 /// a removal, this index is a handle. The plan compacts each index space
@@ -265,7 +265,7 @@ pub(super) enum Names {
 ///   [`PdbEditor::rename_symbols`] renames both.
 /// - A symbol edit of a module whose symbols do not form a scope tree.
 /// - A type or ID record that refers to itself or to a later record of its
-///   index space (decision 7 of #42).
+///   index space.
 /// - A strip together with other edits (see below).
 ///
 /// The plan rejects a reference that does not resolve with
@@ -298,8 +298,8 @@ pub(super) enum Names {
 ///   plan removes the module type streams that the `S_MOD_TYPEREF` records
 ///   name, and the Info stream loses the `NOTM` feature code.
 ///
-/// The strip is a mode of the plan, not a change of the model (rule 13 of
-/// #42). It works together with named stream changes and an identity
+/// The strip is a mode of the plan, not a change of the model. It works
+/// together with named stream changes and an identity
 /// policy. The plan rejects it with [`ErrorKind::UnsupportedEdit`] if the
 /// model has another decoded part, after [`PdbEditor::decode_all`], and
 /// without a source.
@@ -352,11 +352,11 @@ pub struct PdbEditor<'p, S = &'static [u8]> {
     pub(super) unnamed: Option<UnnamedStreams>,
     /// The rebuild state after [`PdbEditor::decode_all`].
     pub(super) rebuild: Option<Rebuild>,
-    /// The clean remaps and the cache of their output (#43).
+    /// The clean remaps and the cache of their output.
     pub(super) clean: Option<CleanRemap>,
     /// `true` after [`PdbEditor::remap_source_paths`] changed a path: the
     /// plan then rejects opaque data that can hold a path or a `/names`
-    /// offset (#46).
+    /// offset.
     pub(super) paths_remapped: bool,
 }
 
@@ -640,7 +640,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     ///
     /// File checksums, frame programs and other records refer to names by
     /// their offset. A new name goes to the end of the table, so the offsets
-    /// of the other names stay (rule 5 of #42).
+    /// of the other names stay.
     ///
     /// # Errors
     ///

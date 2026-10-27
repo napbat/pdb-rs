@@ -352,7 +352,7 @@ impl Error {
     /// and its index in the editor model.
     ///
     /// For example, the plan gives the TPI or IPI record that refers to a
-    /// removed record (#47). This location replaces an index space of
+    /// removed record. This location replaces an index space of
     /// [`Error::with_index_space`].
     #[must_use]
     pub const fn with_record(mut self, space: IndexSpace, index: u32) -> Self {

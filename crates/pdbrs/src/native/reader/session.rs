@@ -5,7 +5,7 @@
 //! stream bytes that the cells hold.
 //!
 //! The cells of raw stream bytes (the symbol record stream and `/names`) do not copy a stream
-//! that the source lends (#48). Such a cell holds only the source location of the stream, and
+//! that the source lends. Such a cell holds only the source location of the stream, and
 //! each access borrows the bytes from the source again. The `Pdb` owns its source, so a cell
 //! cannot hold a borrow of the source.
 
@@ -42,7 +42,7 @@ struct CachedNames {
     layout: StringTableLayout,
 }
 
-/// The bytes of one stream in a session cell (#48).
+/// The bytes of one stream in a session cell.
 #[derive(Debug)]
 enum SessionBytes {
     /// The source lends the whole stream: its source offset and its length.
@@ -168,7 +168,7 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Return the `/names` string table, if the Info stream names it. The session loads it
-    /// once. A source that lends the stream keeps its bytes (#48).
+    /// once. A source that lends the stream keeps its bytes.
     ///
     /// # Errors
     ///
@@ -191,7 +191,7 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Return the symbol record stream that the DBI header names, if any. The session loads
-    /// it once. A source that lends the stream keeps its bytes (#48).
+    /// it once. A source that lends the stream keeps its bytes.
     ///
     /// # Errors
     ///

@@ -2,8 +2,8 @@
 //! object file.
 //!
 //! The subsection is an array of `u32` RVAs without a header, as in LLVM
-//! `DebugSymbolRVASubsection.h`. The MSVC FASTLINK fixture of #12 shows the
-//! meaning (#13): entry `i` is the image RVA of record `i` of the COFF symbol
+//! `DebugSymbolRVASubsection.h`. The MSVC FASTLINK fixture shows the
+//! meaning: entry `i` is the image RVA of record `i` of the COFF symbol
 //! table of the object file. The value is 0 for a record without an image
 //! address, for example an absolute static symbol or an auxiliary record.
 //! The value is 0xffffffff for an external symbol that the linker resolved

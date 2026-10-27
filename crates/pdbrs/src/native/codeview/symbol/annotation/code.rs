@@ -26,7 +26,7 @@
 //! `S_SEPCODE` record of the module whose parent address is the start of the
 //! procedure, in stream order ([`separated_chunks`]). MSVC writes these
 //! records at the top level, after the end of the procedure. The MSVC PGO
-//! fixture `msvc-x64-pgo` of #27 follows these rules: DIA gives the inline
+//! fixture `msvc-x64-pgo` follows these rules: DIA gives the inline
 //! frames of its separated code from the ranges of chunk 1.
 //!
 //! The rules follow `InlineeLineIterator` in the `pdb` crate (version

@@ -1,4 +1,4 @@
-//! The plan check after a path remap (rule 4 of #46).
+//! The plan check after a path remap.
 //!
 //! [`PdbEditor::remap_source_paths`] changes the paths and the `/names`
 //! offsets of the fields that this crate decodes. Data without a decoder can

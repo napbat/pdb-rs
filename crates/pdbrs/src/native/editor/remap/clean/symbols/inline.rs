@@ -1,4 +1,4 @@
-//! Inline sites of a procedure that splits (#43, decision 4).
+//! Inline sites of a procedure that splits.
 //!
 //! The code offsets of the binary annotations are relative to a code chunk of the procedure
 //! ([`CodeState`]). A site whose ranges all lie in the first part keeps its annotations. A

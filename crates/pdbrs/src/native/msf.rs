@@ -300,7 +300,7 @@ impl<S: ReadAt> Msf<S> {
     }
 
     /// Return the `length` bytes at the source offset `physical` as a slice
-    /// of the source, if the source lends them (#48).
+    /// of the source, if the source lends them.
     pub(crate) fn lend_at(&self, physical: u64, length: usize) -> Option<&[u8]> {
         self.source.borrow_at(physical, length)
     }
@@ -399,7 +399,7 @@ impl<S: ReadAt> Stream<'_, S> {
 impl<'a, S: ReadAt> Stream<'a, S> {
     /// Return the `length` bytes at the logical `offset` as a slice of the
     /// source, if their pages are adjacent in the source and the source lends
-    /// them (#48).
+    /// them.
     #[must_use]
     pub(crate) fn lend(&self, offset: u64, length: usize) -> Option<&'a [u8]> {
         let physical = self.source_offset(offset, length)?;

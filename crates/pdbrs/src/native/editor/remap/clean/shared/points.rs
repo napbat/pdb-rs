@@ -1,4 +1,4 @@
-//! The address fields of the records of the symbol record stream (#43, decision 4).
+//! The address fields of the records of the symbol record stream.
 
 use crate::native::address::SectionOffset;
 use crate::native::codeview::symbol::SymbolData;

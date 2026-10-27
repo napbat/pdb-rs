@@ -387,7 +387,7 @@ impl Checker<'_, '_> {
                 self.local_type = Some(value.type_index);
             }
             // LLD replaces a record that it cannot remap with `S_SKIP`, also
-            // between a local and its def-ranges (Rust LLD fixture of #12).
+            // between a local and its def-ranges (Rust LLD fixture).
             SymbolData::Skip(_) => {}
             _ => {
                 if let Some(range) = def_range(symbol) {
@@ -439,7 +439,7 @@ impl Checker<'_, '_> {
         };
         let procedure = self.stack.iter().find_map(|frame| frame.range);
         // LLVM writes a zero-length range for a variable in a block or an
-        // inline site that covers no code (Rust fixtures of #12). Such a
+        // inline site that covers no code (Rust fixtures). Such a
         // range is not a defect.
         if range.length == 0 && !self.stack.last().is_some_and(|frame| frame.empty) {
             self.violate(Rule::DefRangeEmpty, offset, kind)?;
@@ -449,8 +449,7 @@ impl Checker<'_, '_> {
             Some(code) => {
                 self.check_section(&code, offset, kind)?;
                 // A variable in separated code lives in the range of its
-                // `S_SEPCODE` scope, outside the procedure (MSVC PGO fixture
-                // of #27).
+                // `S_SEPCODE` scope, outside the procedure (MSVC PGO fixture).
                 let separated = self.stack.iter().any(|frame| {
                     frame.kind == S_SEPCODE
                         && frame.range.is_some_and(|outer| outer.contains(&code))
