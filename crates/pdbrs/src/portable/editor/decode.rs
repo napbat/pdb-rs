@@ -66,13 +66,9 @@ pub(super) fn local_scopes<S: ReadAt>(pdb: &Pdb<S>) -> Result<LocalScopes> {
                 form(TableId::LOCAL_CONSTANT, runs.row.constant_list.0),
             ];
         }
-        let run = |range: core::ops::Range<u32>| SourceRun {
-            start: range.start,
-            count: range.end - range.start,
-        };
         scopes
             .source
-            .push([run(runs.variables), run(runs.constants)]);
+            .push([source_run(runs.variables), source_run(runs.constants)]);
         scopes.push(scope)?;
     }
     let count = |constants: bool| -> usize {
@@ -132,13 +128,17 @@ pub(super) fn scope_runs<S: ReadAt>(pdb: &Pdb<S>) -> Result<Vec<[SourceRun; 2]>>
     (1..=count)
         .map(|id| {
             let runs = pdb.scope_runs(LocalScopeId(id))?;
-            let run = |range: core::ops::Range<u32>| SourceRun {
-                start: range.start,
-                count: range.end - range.start,
-            };
-            Ok([run(runs.variables), run(runs.constants)])
+            Ok([source_run(runs.variables), source_run(runs.constants)])
         })
         .collect()
+}
+
+/// Return the source run of a range of rows.
+const fn source_run(range: core::ops::Range<u32>) -> SourceRun {
+    SourceRun {
+        start: range.start,
+        count: range.end - range.start,
+    }
 }
 
 /// Read all rows of a table.
