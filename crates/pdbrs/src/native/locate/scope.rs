@@ -170,8 +170,11 @@ impl SymbolLocator {
     fn scopes(&self, procedure: &ProcedureInfo<'_>) -> Result<Vec<ScopeRecord<'_>>> {
         let module = self.module_data(procedure.module)?;
         let mut scopes = Vec::new();
-        let (data, end) = match module_symbol(module, procedure.offset)?.data() {
-            SymbolData::Procedure(value) => (records_at(module, procedure.offset)?, value.end),
+        let symbol = module_symbol(module, procedure.offset)?;
+        let (data, end) = match (symbol.data(), symbol.links()) {
+            (SymbolData::Procedure(_), Some(links)) => {
+                (records_at(module, procedure.offset)?, links.end)
+            }
             _ => return Ok(scopes),
         };
         let map = self.address_map()?;
@@ -190,7 +193,7 @@ impl SymbolLocator {
                 break;
             }
             let symbol = Symbol::decode(record)?;
-            let Some(links) = symbol.scope_links() else {
+            let Some(links) = symbol.links() else {
                 continue;
             };
             let kind = match symbol.data() {

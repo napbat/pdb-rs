@@ -79,7 +79,7 @@ use super::super::Fields;
 use super::super::SymbolKind;
 use super::super::index::{ModuleSymbolOffset, TypeIndex};
 use super::super::numeric::Numeric;
-use super::{LocalFlags, ProcedureFlags, SectionOffset};
+use super::{LocalFlags, ProcedureFlags, ScopeLinks, SectionOffset};
 use crate::bytes::into_owned;
 use crate::native::output::Output;
 use crate::portable::metadata::MetadataToken;
@@ -110,13 +110,12 @@ pub const MANAGED_ATTRIBUTE_OEM_ID: [u8; 16] = [
 ];
 
 /// A managed procedure start record (`S_GMANPROC` and `S_LMANPROC`).
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ManagedProcedure<'a> {
-    /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the record that ends this scope.
-    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0. The
     /// scope check does not use this value.
     pub next: ModuleSymbolOffset,
@@ -140,15 +139,13 @@ pub struct ManagedProcedure<'a> {
 
 into_owned!(struct ManagedProcedure {
     name;
-    parent, end, next, code_length, debug_start, debug_end, token, address, flags,
-    return_register
+    next, code_length, debug_start, debug_end, token, address, flags, return_register
 });
 
 impl<'a> ManagedProcedure<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let next = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let debug_start = fields.u32()?;
@@ -159,8 +156,6 @@ impl<'a> ManagedProcedure<'a> {
         let return_register = fields.u16()?;
         let name = Bytes::new(fields.name()?);
         Ok(Self {
-            parent,
-            end,
             next,
             code_length,
             debug_start,
@@ -173,10 +168,9 @@ impl<'a> ManagedProcedure<'a> {
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.u32(self.next.0)?;
         out.u32(self.code_length)?;
         out.u32(self.debug_start)?;

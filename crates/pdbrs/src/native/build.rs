@@ -13,7 +13,7 @@ use crate::native::IdentityPolicy;
 use crate::native::Producer;
 use crate::native::codeview::SymbolKind;
 use crate::native::codeview::id_record::IdRecord;
-use crate::native::codeview::index::NameOffset;
+use crate::native::codeview::index::{NameOffset, SymbolHandle};
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::dbi::{
@@ -33,9 +33,7 @@ mod options;
 mod plan;
 mod rebuild;
 
-pub use handle::{
-    IdHandle, ModuleHandle, ModuleSymbolHandle, Resolver, StreamHandle, SymbolHandle, TypeHandle,
-};
+pub use handle::{IdHandle, ModuleHandle, Resolver, StreamHandle, TypeHandle};
 pub use module::ModuleBuilder;
 pub use options::BuildOptions;
 pub use plan::PdbWritePlan;
@@ -146,8 +144,8 @@ struct DbiParts {
 /// # Handles
 ///
 /// The builder gives a handle for each item: [`TypeHandle`], [`IdHandle`],
-/// [`ModuleHandle`], [`ModuleSymbolHandle`], [`SymbolHandle`] and
-/// [`StreamHandle`]. See [`crate::native::write`] for the two ways in which
+/// [`ModuleHandle`], [`ModuleSymbolHandle`](crate::native::codeview::index::ModuleSymbolHandle),
+/// [`SymbolHandle`] and [`StreamHandle`]. See [`crate::native::write`] for the two ways in which
 /// a record refers to other items. [`PdbBuilder::reserve_type`] and
 /// [`PdbBuilder::reserve_id`] give a handle before its record exists, for
 /// example for a record that refers to a later record.
@@ -598,6 +596,12 @@ impl<'a> PdbBuilder<'a> {
     }
 
     /// Add a record of `kind` with `data` to the symbol record stream.
+    ///
+    /// A reference, for example `S_PROCREF`, can have a
+    /// [`ModuleSymbolTarget::Handle`](crate::native::codeview::symbol::ModuleSymbolTarget::Handle).
+    /// The plan writes the module index and the module stream offset of the
+    /// handle. It fails with [`ErrorKind::InvalidReference`] if the builder
+    /// has no record with the handle.
     ///
     /// # Errors
     ///

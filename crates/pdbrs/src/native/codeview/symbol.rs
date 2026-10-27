@@ -122,7 +122,8 @@ pub use defrange::{
 };
 pub use frame::{CookieKind, FrameCookie, HeapAllocationSite};
 pub use global::{
-    CoffGroup, ProcedureReference, Public, PublicFlags, S_ANNOTATIONREF, S_DATAREF, Section,
+    CoffGroup, ModuleSymbolTarget, ProcedureReference, Public, PublicFlags, S_ANNOTATIONREF,
+    S_DATAREF, Section,
 };
 pub use hlsl::{
     DefRangeHlsl, DefRangeHlslOffsets, DpcGroupSharedLocal, DpcTag, DpcTagMap, DpcTagMapIter,
@@ -303,7 +304,10 @@ impl SectionOffset {
 /// The parent and end links of a record that starts a scope.
 ///
 /// Both values are offsets in the module stream. They include the 4-byte
-/// signature at the start of the stream.
+/// signature at the start of the stream. The links are positions, so the
+/// scope records do not hold them as fields. [`Symbol::links`] reads them
+/// from the source record, [`SymbolData::encode_scope`] writes the links
+/// that the caller gives, and [`ModuleSymbolWriter`] computes them.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ScopeLinks {
@@ -311,6 +315,27 @@ pub struct ScopeLinks {
     pub parent: ModuleSymbolOffset,
     /// The offset of the record that ends this scope.
     pub end: ModuleSymbolOffset,
+}
+
+impl ScopeLinks {
+    /// Make the links with `parent` and `end`.
+    #[must_use]
+    pub const fn new(parent: ModuleSymbolOffset, end: ModuleSymbolOffset) -> Self {
+        Self { parent, end }
+    }
+
+    /// Read the two links.
+    fn read(fields: &mut Fields<'_>) -> Result<Self> {
+        let parent = ModuleSymbolOffset(fields.u32()?);
+        let end = ModuleSymbolOffset(fields.u32()?);
+        Ok(Self { parent, end })
+    }
+
+    /// Write the two links.
+    fn write(self, out: &mut Output<'_>) -> Result<()> {
+        out.u32(self.parent.0)?;
+        out.u32(self.end.0)
+    }
 }
 
 /// A decoded symbol record.

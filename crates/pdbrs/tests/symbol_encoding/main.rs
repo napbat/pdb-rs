@@ -4,7 +4,7 @@
 use pdbrs::native::codeview::id_record::IdList;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Annotation, BinaryAnnotations, FunctionList, RegisterList, Symbol, SymbolData,
+    Annotation, BinaryAnnotations, FunctionList, RegisterList, ScopeLinks, Symbol, SymbolData,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::{Bytes, ErrorKind};
@@ -47,10 +47,35 @@ fn encode(symbol: &Symbol<'_>) -> pdbrs::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Return `true` if `data` belongs to a record that starts a scope.
+const fn starts_scope(data: &SymbolData<'_>) -> bool {
+    matches!(
+        data,
+        SymbolData::Procedure(_)
+            | SymbolData::MipsProcedure(_)
+            | SymbolData::Ia64Procedure(_)
+            | SymbolData::Block(_)
+            | SymbolData::With(_)
+            | SymbolData::SeparatedCode(_)
+            | SymbolData::Thunk(_)
+            | SymbolData::InlineSite(_)
+            | SymbolData::ManagedProcedure(_)
+    )
+}
+
+/// Encode `data` as `kind`. A record that starts a scope gets zero links.
+fn encode_fields(data: &SymbolData<'_>, kind: u16, out: &mut Vec<u8>) -> pdbrs::Result<()> {
+    if starts_scope(data) {
+        data.encode_scope(SymbolKind(kind), ScopeLinks::default(), out)
+    } else {
+        data.encode(SymbolKind(kind), out)
+    }
+}
+
 /// Return the error kind of encoding `data` as `kind`.
 fn encode_error(data: &SymbolData<'_>, kind: u16) -> ErrorKind {
     let mut out = Vec::new();
-    data.encode(SymbolKind(kind), &mut out).unwrap_err().kind()
+    encode_fields(data, kind, &mut out).unwrap_err().kind()
 }
 
 #[test]
@@ -200,7 +225,7 @@ fn procedure_signature_must_match_the_kind() {
         assert_eq!(encode_error(symbol.data(), kind), ErrorKind::InvalidFormat);
     }
     let mut out = Vec::new();
-    symbol.data().encode(SymbolKind(0x110f), &mut out).unwrap();
+    encode_fields(symbol.data(), 0x110f, &mut out).unwrap();
     assert_eq!(out[2..4], 0x110f_u16.to_le_bytes());
 }
 

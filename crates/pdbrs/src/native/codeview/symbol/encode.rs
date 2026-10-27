@@ -4,6 +4,14 @@
 //! kind, the fields of the kind and the zero padding to a multiple of four
 //! bytes. The field order is the order of the decoders. A value that the
 //! decoder gives for a record encodes to the bytes of that record.
+//!
+//! A record that starts a scope also has the parent and end links. The
+//! fields do not hold them, and the encoder does not invent them:
+//!
+//! - [`SymbolData::encode`] rejects a record that starts a scope.
+//! - [`SymbolData::encode_scope`] writes the links that the caller gives.
+//! - [`Symbol::encode`] writes the links of the source record.
+//! - [`ModuleSymbolWriter`](super::ModuleSymbolWriter) computes the links.
 
 use alloc::vec::Vec;
 
@@ -32,7 +40,8 @@ use super::{
     S_PARAMSLOT, S_PDBMAP, S_POGODATA, S_PROC_ID_END, S_PROCREF, S_PUB32, S_REF_MINIPDB,
     S_REGISTER, S_REGREL32, S_REGREL32_ENCTMP, S_REGREL32_INDIR, S_REGREL32_INDIR_ENCTMP,
     S_SECTION, S_SEPCODE, S_SKIP, S_SOURCELINK, S_STATICLOCAL, S_THUNK32, S_TOKENREF, S_TRAMPOLINE,
-    S_UDT, S_UNAMESPACE, S_VFTABLE32, S_WITH32, SHORT_PAYLOAD, Symbol, SymbolData, decode_data,
+    S_UDT, S_UNAMESPACE, S_VFTABLE32, S_WITH32, SHORT_PAYLOAD, ScopeLinks, Symbol, SymbolData,
+    decode_data,
 };
 use crate::native::output::Output;
 use crate::{Error, ErrorKind, Result};
@@ -47,21 +56,69 @@ impl SymbolData<'_> {
     ///   field breaks a rule of the decoder, for example a name with a NUL
     ///   byte. [`SymbolData::Unsupported`] is valid only for a kind that
     ///   this crate does not decode.
+    /// - [`ErrorKind::InvalidFormat`] if the record starts a scope. Use
+    ///   [`SymbolData::encode_scope`] or
+    ///   [`ModuleSymbolWriter`](super::ModuleSymbolWriter) for it.
+    /// - [`ErrorKind::InvalidReference`] for a reference with a
+    ///   [`ModuleSymbolTarget::Handle`](super::ModuleSymbolTarget::Handle).
+    ///   Only a write plan resolves the handle.
     /// - [`ErrorKind::LimitExceeded`] if the record is longer than its
     ///   `u16` length field allows, a count does not fit its field, or the
     ///   output cannot grow.
     ///
     /// After an error, `out` can hold a part of the record.
     pub fn encode(&self, kind: SymbolKind, out: &mut Vec<u8>) -> Result<()> {
-        self.encode_with(kind, Padding::Zero, out)
+        if self.starts_scope() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None).with_context(
+                "symbol record starts a scope; encode it with its links (encode_scope) \
+                 or with a ModuleSymbolWriter",
+            ));
+        }
+        self.encode_with(kind, ScopeLinks::default(), Padding::Zero, out)
+    }
+
+    /// Append the record of `kind` with these fields and the scope links
+    /// `links` to `out`.
+    ///
+    /// Use this function for a record that starts a scope, for example
+    /// [`S_GPROC32`]. The links are offsets in the module stream:
+    /// [`ModuleSymbolWriter`](super::ModuleSymbolWriter) computes them for
+    /// a whole module.
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if the record does not start a scope.
+    /// - The other errors of [`SymbolData::encode`].
+    ///
+    /// After an error, `out` can hold a part of the record.
+    pub fn encode_scope(
+        &self,
+        kind: SymbolKind,
+        links: ScopeLinks,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        if !self.starts_scope() {
+            return Err(Error::new(ErrorKind::InvalidFormat, None)
+                .with_context("symbol record with scope links does not start a scope"));
+        }
+        self.encode_with(kind, links, Padding::Zero, out)
     }
 
     /// Append the record of `kind` with these fields and `padding` to `out`.
-    fn encode_with(&self, kind: SymbolKind, padding: Padding, out: &mut Vec<u8>) -> Result<()> {
+    ///
+    /// A record that starts a scope gets `links`. The other records ignore
+    /// `links`.
+    pub(super) fn encode_with(
+        &self,
+        kind: SymbolKind,
+        links: ScopeLinks,
+        padding: Padding,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         let mut writer = Output::new(out);
         let start = writer.begin_record(kind)?;
-        let written =
-            self.write_variable(kind, &mut writer)? || self.write_fields(kind, &mut writer)?;
+        let written = self.write_variable(kind, &mut writer)?
+            || self.write_fields(kind, links, &mut writer)?;
         if !written {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("symbol data does not belong to the record kind"));
@@ -71,7 +128,12 @@ impl SymbolData<'_> {
 
     /// Write the fields of a kind that is not a variable, data or def-range
     /// kind. Return `false` if the variant does not belong to `kind`.
-    fn write_fields(&self, kind: SymbolKind, out: &mut Output<'_>) -> Result<bool> {
+    fn write_fields(
+        &self,
+        kind: SymbolKind,
+        links: ScopeLinks,
+        out: &mut Output<'_>,
+    ) -> Result<bool> {
         let id = matches!(
             kind,
             S_GPROC32_ID
@@ -106,27 +168,27 @@ impl SymbolData<'_> {
             ) if signature_matches(value.signature)
                 && extended == value.extended_flags.is_some() =>
             {
-                value.write(out)?;
+                value.write(links, out)?;
             }
             (
                 S_GPROCMIPS | S_LPROCMIPS | S_GPROCMIPS_ID | S_LPROCMIPS_ID,
                 Self::MipsProcedure(value),
-            ) if signature_matches(value.signature) => value.write(out)?,
+            ) if signature_matches(value.signature) => value.write(links, out)?,
             (
                 S_GPROCIA64 | S_LPROCIA64 | S_GPROCIA64_ID | S_LPROCIA64_ID,
                 Self::Ia64Procedure(value),
-            ) if signature_matches(value.signature) => value.write(out)?,
+            ) if signature_matches(value.signature) => value.write(links, out)?,
             (S_FRAMEPROC, Self::FrameProcedure(value)) => value.write(out)?,
-            (S_BLOCK32, Self::Block(value)) => value.write(out)?,
-            (S_WITH32, Self::With(value)) => value.write(out)?,
-            (S_SEPCODE, Self::SeparatedCode(value)) => value.write(out)?,
+            (S_BLOCK32, Self::Block(value)) => value.write(links, out)?,
+            (S_WITH32, Self::With(value)) => value.write(links, out)?,
+            (S_SEPCODE, Self::SeparatedCode(value)) => value.write(links, out)?,
             (S_LABEL32, Self::Label(value)) => value.write(out)?,
-            (S_THUNK32, Self::Thunk(value)) => value.write(out)?,
+            (S_THUNK32, Self::Thunk(value)) => value.write(links, out)?,
             (S_END | S_PROC_ID_END, Self::ScopeEnd) | (S_INLINESITE_END, Self::InlineSiteEnd) => {}
             (S_INLINESITE | S_INLINESITE2, Self::InlineSite(value))
                 if (kind == S_INLINESITE2) == value.invocations.is_some() =>
             {
-                value.write(out)?;
+                value.write(links, out)?;
             }
             (S_INLINEES, Self::Inlinees(value)) => write_id_list(value, out)?,
             (S_CALLEES, Self::Callees(value)) | (S_CALLERS, Self::Callers(value)) => {
@@ -158,7 +220,7 @@ impl SymbolData<'_> {
             (S_PUB32, Self::Public(value)) => value.write(out)?,
             (S_PROCREF | S_LPROCREF | S_TOKENREF, Self::ProcedureReference(value))
             | (S_DATAREF | S_ANNOTATIONREF, Self::SymbolReference(value)) => value.write(out)?,
-            (S_GMANPROC | S_LMANPROC, Self::ManagedProcedure(value)) => value.write(out)?,
+            (S_GMANPROC | S_LMANPROC, Self::ManagedProcedure(value)) => value.write(links, out)?,
             (S_MANTYPREF, Self::ManagedTypeReference(index)) => out.type_index(*index)?,
             (S_OEM, Self::Oem(value)) => value.write(out)?,
             (S_SKIP, Self::Skip(bytes)) => out.bytes(bytes)?,
@@ -257,11 +319,13 @@ impl Symbol<'_> {
     /// Append the record of this symbol to `out`.
     ///
     /// For a symbol that [`Symbol::decode`] returned, the output is equal to
-    /// the bytes of the original record.
+    /// the bytes of the original record. A record that starts a scope gets
+    /// the links of the original record (see [`Symbol::links`]).
     ///
     /// # Errors
     ///
-    /// The errors of [`SymbolData::encode`].
+    /// The errors of [`SymbolData::encode`], but not the error for a record
+    /// that starts a scope.
     ///
     /// The output has the length of the original record: the encoder writes the fields
     /// and then the zero bytes of the original record after them (see [`Symbol::trailing_zeros`]).
@@ -269,7 +333,9 @@ impl Symbol<'_> {
     /// thus keeps its bytes.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         let start = out.len();
-        self.data.encode_with(self.kind(), Padding::None, out)?;
+        let links = self.links().unwrap_or_default();
+        self.data
+            .encode_with(self.kind(), links, Padding::None, out)?;
         // The record had a valid u16 length, so the original length fits.
         let original = self.payload.len() + 4;
         let extra = original.saturating_sub(out.len() - start);
