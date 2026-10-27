@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 public static class Program
 {

@@ -112,7 +112,7 @@ The `cvinfo.h` defines the DPC kinds (`0x1154` to `0x1158`) only if `CC_DP_CXX` 
 | `S_LDATA_HLSL` | `0x1152` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e30], [check][e27]) | 3 fixture PDBs, 8 records; HLSL kind |
 | `S_FILESTATIC` | `0x1153` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e13s], [check][e30]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e13s], [check][e30]) | 2 fixture PDBs, 2 records (`msvc-x64-pgo`, `msvc-x64-release`) |
 | `S_LOCAL_DPC_GROUPSHARED` | `0x1154` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 2 fixture PDBs, 2 records (`msvc-x64-amp`, `msvc-x64-amp-lazy`); C++ AMP (DPC) kind; no consumer decodes its fields; the rebuilt PDB gives the same `llvm-pdbutil` and DIA output (#39) |
-| `S_LPROC32_DPC` | `0x1155` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 1 fixture PDB, 2 records (`msvc-x64-amp`); C++ AMP (DPC) kind; `llvm-pdbutil` decodes it as pdbrs does (#39) |
+| `S_LPROC32_DPC` | `0x1155` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 1 fixture PDB, 2 records (`msvc-x64-amp`); C++ AMP (DPC) kind; `llvm-pdbutil` decodes it as pdb-rs does (#39) |
 | `S_LPROC32_DPC_ID` | `0x1156` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 1 fixture PDB, 2 records (`msvc-x64-amp-lazy`); C++ AMP (DPC) kind; `/DEBUG:LAZY`; the rebuilt PDB gives the same `llvm-pdbutil` and DIA output (#39) |
 | `S_DEFRANGE_DPC_PTR_TAG` | `0x1157` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:def_range_scopes], [check][e30v]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 2 fixture PDBs, 318 records (`msvc-x64-amp`, `msvc-x64-amp-lazy`); C++ AMP (DPC) kind; no consumer decodes its fields; the rebuilt PDB gives the same `llvm-pdbutil` and DIA output (#39) |
 | `S_DPC_SYM_TAG_MAP` | `0x1158` | complete ([code][cv], [code][sym], [check][t:codeview], [check][e15]) | complete ([code][sym], [check][e30], [check][t:symbol_encoding]) | complete ([code][symv], [check][t:symbol_validation], [check][e30]) | complete ([code][syme], [check][t:symbol_encoding], [check][e30]) | complete ([code][srec], [code][gsiw], [code][edsym], [check][e30], [check][e34]) | complete ([code][exs], [check][e39p]) | 2 fixture PDBs, 4 records (`msvc-x64-amp`, `msvc-x64-amp-lazy`); C++ AMP (DPC) kind; no consumer decodes its fields; the rebuilt PDB gives the same `llvm-pdbutil` and DIA output (#39) |
@@ -269,39 +269,39 @@ A legacy record in a modern module stream still keeps its bytes as `SymbolData::
 | `S_MANMANYREG2_ST` | `0x1027` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 | `S_UNAMESPACE_ST` | `0x1029` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 
-[cv]: ../../../crates/pdbrs/src/native/codeview.rs
-[e11]: https://github.com/napbat/pdbrs/issues/11#issuecomment-6408363519
-[e13s]: https://github.com/napbat/pdbrs/issues/13#issuecomment-6409780019
-[e14]: https://github.com/napbat/pdbrs/issues/14#issuecomment-6409977445
-[e15]: https://github.com/napbat/pdbrs/issues/15#issuecomment-6410580545
-[e27]: https://github.com/napbat/pdbrs/issues/27#issuecomment-6412654019
-[e30]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6413701533
-[e30a]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6415860011
-[e30c]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6417232997
-[e30v]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6416233151
-[e32n]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6417232562
-[e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
-[e5]: https://github.com/napbat/pdbrs/issues/5#issuecomment-6407599155
-[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
-[exs]: ../../../crates/pdbrs/examples/native/symbols.rs
-[gsiw]: ../../../crates/pdbrs/src/native/symbols/gsi/write.rs
-[num]: ../../../crates/pdbrs/src/native/codeview/numeric.rs
-[plantypes]: ../../../crates/pdbrs/src/native/editor/plan/layout/module_types.rs
-[sattr]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/attribute.rs
-[scdi]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/custom_debug_info.rs
-[slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs
-[sman]: ../../../crates/pdbrs/src/native/codeview/symbol/managed.rs
-[srec]: ../../../crates/pdbrs/src/native/symbols/records.rs
-[sym]: ../../../crates/pdbrs/src/native/codeview/symbol.rs
-[syme]: ../../../crates/pdbrs/src/native/codeview/symbol/encode.rs
-[symv]: ../../../crates/pdbrs/src/native/codeview/symbol/validate.rs
-[t:codeview]: ../../../crates/pdbrs/tests/codeview.rs
-[t:custom_debug_info]: ../../../crates/pdbrs/tests/custom_debug_info.rs
-[t:def_range_scopes]: ../../../crates/pdbrs/tests/def_range_scopes.rs
-[t:module_types]: ../../../crates/pdbrs/tests/module_types.rs
-[t:symbol_encoding]: ../../../crates/pdbrs/tests/symbol_encoding/main.rs
-[t:symbol_validation]: ../../../crates/pdbrs/tests/symbol_validation.rs
-[e39c]: https://github.com/napbat/pdbrs/issues/39#issuecomment-6419094804
-[e39p]: https://github.com/napbat/pdbrs/issues/39#issuecomment-6419585032
-[e30p]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6419817816
-[e30l]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6419434997
+[cv]: ../../../crates/pdb-rs/src/native/codeview.rs
+[e11]: https://github.com/napbat/pdb-rs/issues/11#issuecomment-6408363519
+[e13s]: https://github.com/napbat/pdb-rs/issues/13#issuecomment-6409780019
+[e14]: https://github.com/napbat/pdb-rs/issues/14#issuecomment-6409977445
+[e15]: https://github.com/napbat/pdb-rs/issues/15#issuecomment-6410580545
+[e27]: https://github.com/napbat/pdb-rs/issues/27#issuecomment-6412654019
+[e30]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6413701533
+[e30a]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6415860011
+[e30c]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6417232997
+[e30v]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6416233151
+[e32n]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6417232562
+[e34]: https://github.com/napbat/pdb-rs/issues/34#issuecomment-6415135725
+[e5]: https://github.com/napbat/pdb-rs/issues/5#issuecomment-6407599155
+[edsym]: ../../../crates/pdb-rs/src/native/editor/symbols.rs
+[exs]: ../../../crates/pdb-rs/examples/native/symbols.rs
+[gsiw]: ../../../crates/pdb-rs/src/native/symbols/gsi/write.rs
+[num]: ../../../crates/pdb-rs/src/native/codeview/numeric.rs
+[plantypes]: ../../../crates/pdb-rs/src/native/editor/plan/layout/module_types.rs
+[sattr]: ../../../crates/pdb-rs/src/native/codeview/symbol/managed/attribute.rs
+[scdi]: ../../../crates/pdb-rs/src/native/codeview/symbol/managed/custom_debug_info.rs
+[slinker]: ../../../crates/pdb-rs/src/native/codeview/symbol/linker.rs
+[sman]: ../../../crates/pdb-rs/src/native/codeview/symbol/managed.rs
+[srec]: ../../../crates/pdb-rs/src/native/symbols/records.rs
+[sym]: ../../../crates/pdb-rs/src/native/codeview/symbol.rs
+[syme]: ../../../crates/pdb-rs/src/native/codeview/symbol/encode.rs
+[symv]: ../../../crates/pdb-rs/src/native/codeview/symbol/validate.rs
+[t:codeview]: ../../../crates/pdb-rs/tests/codeview.rs
+[t:custom_debug_info]: ../../../crates/pdb-rs/tests/custom_debug_info.rs
+[t:def_range_scopes]: ../../../crates/pdb-rs/tests/def_range_scopes.rs
+[t:module_types]: ../../../crates/pdb-rs/tests/module_types.rs
+[t:symbol_encoding]: ../../../crates/pdb-rs/tests/symbol_encoding/main.rs
+[t:symbol_validation]: ../../../crates/pdb-rs/tests/symbol_validation.rs
+[e39c]: https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419094804
+[e39p]: https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419585032
+[e30p]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6419817816
+[e30l]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6419434997

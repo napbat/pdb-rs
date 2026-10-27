@@ -63,7 +63,7 @@ union Bits {
     float: f32,
 }
 
-static GREETING: &str = "pdbrs";
+static GREETING: &str = "pdb-rs";
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 const LIMIT: usize = 4;
 

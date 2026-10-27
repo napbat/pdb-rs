@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using static System.Math;
 using Week = System.DayOfWeek;
 
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 internal static class LocalInfo
 {

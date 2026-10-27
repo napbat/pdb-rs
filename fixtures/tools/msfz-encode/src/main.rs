@@ -1,9 +1,9 @@
 //! `msfz-encode`: write an MSFZ (PDZ) file from an MSF 7.0 PDB with the `ms-pdb-msfz` writer.
 //!
-//! The pdbrs fixture generator uses this tool to make PDZ fixtures with forms that
+//! The pdb-rs fixture generator uses this tool to make PDZ fixtures with forms that
 //! `pdbtool pdz-encode` does not write: raw DEFLATE chunks, a raw DEFLATE stream directory and
 //! files with only uncompressed fragments. The tool reads the input with `ms-pdb-msf` and does
-//! not use pdbrs.
+//! not use the `pdb-rs` crate.
 //!
 //! The tool copies each stream from stream 1. Stream 0 (the previous MSF stream directory) is
 //! an empty stream, as `pdbtool pdz-encode` writes it. A nil stream stays a nil stream.

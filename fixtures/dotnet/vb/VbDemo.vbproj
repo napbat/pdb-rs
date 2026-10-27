@@ -6,7 +6,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
-    <RootNamespace>PdbrsDemo</RootNamespace>
+    <RootNamespace>Pdb.Rs.Demo</RootNamespace>
     <OptionStrict>On</OptionStrict>
     <Deterministic>true</Deterministic>
   </PropertyGroup>

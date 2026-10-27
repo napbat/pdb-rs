@@ -1,6 +1,6 @@
 // The first F# source file. It has the output of the stack mode, an abstract member and an
 // extern function. The abstract member and the extern function have no sequence points.
-module PdbrsDemo.Tracing
+module Pdb.Rs.Demo.Tracing
 
 open System
 open System.Diagnostics

@@ -1,7 +1,7 @@
 // Declarations that the shader stages share. The types and helpers give the debug
 // information vectors, matrices with both layouts, small float types and inlined functions.
-#ifndef PDBRS_COMMON_HLSLI
-#define PDBRS_COMMON_HLSLI
+#ifndef PDB_RS_COMMON_HLSLI
+#define PDB_RS_COMMON_HLSLI
 
 cbuffer Frame : register(b0)
 {

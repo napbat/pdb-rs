@@ -2,9 +2,9 @@
 
 This document gives the coverage of modern native PDBs (MSF 7.0 and MSFZ containers) for each record kind, stream version and container feature.
 It is product documentation: it tells what the library reads, checks, writes and edits today. GitHub issues hold the scope and the evidence.
-The epic [#1](https://github.com/napbat/pdbrs/issues/1) owns the native scope. [#20](https://github.com/napbat/pdbrs/issues/20) (MSFZ) is closed, so #1 also holds the MSFZ coverage. [#28](https://github.com/napbat/pdbrs/issues/28) owns this accounting.
+The epic [#1](https://github.com/napbat/pdb-rs/issues/1) owns the native scope. [#20](https://github.com/napbat/pdb-rs/issues/20) (MSFZ) is closed, so #1 also holds the MSFZ coverage. [#28](https://github.com/napbat/pdb-rs/issues/28) owns this accounting.
 
-Legacy native PDBs ([#16](https://github.com/napbat/pdbrs/issues/16)) and Portable PDBs ([#17](https://github.com/napbat/pdbrs/issues/17)) have their own epics.
+Legacy native PDBs ([#16](https://github.com/napbat/pdb-rs/issues/16)) and Portable PDBs ([#17](https://github.com/napbat/pdb-rs/issues/17)) have their own epics.
 Legacy kinds and versions have rows here, marked `not applicable (legacy, #16)`, so that the inventory is complete. Portable PDB has no rows.
 
 ## Pages
@@ -41,7 +41,7 @@ Each row has six status columns:
 | Reference validation | The library or the `native` example checks every reference that the item holds: type and ID indices, stream IDs, `/names` offsets, scope links, module indices, addresses and container ranges |
 | Writing | An encoder writes the item from its decoded form, to the same bytes for a decoded item |
 | Editing and index rebuilding | `PdbEditor` (#33, #34, #42) or a container conversion (#38) writes or changes the item and rebuilds the streams and indexes that depend on it (hashes, offsets, address maps) |
-| Independent fixture evidence | A PDB from an independent producer holds the item, and an independent consumer (`llvm-pdbutil` 22.1.6, DIA2Dump, `pdbtool` or `llvm-symbolizer`, #21) agrees with pdbrs |
+| Independent fixture evidence | A PDB from an independent producer holds the item, and an independent consumer (`llvm-pdbutil` 22.1.6, DIA2Dump, `pdbtool` or `llvm-symbolizer`, #21) agrees with pdb-rs |
 
 ## Values
 
@@ -54,26 +54,26 @@ Each row has six status columns:
 
 `external-input` in a cell means that the work needs input that is not available here: a producer that writes the item, or a definition of its layout. The issue carries the `external-input` label.
 
-A recognized version that pdbrs does not decode gives `UnsupportedVersion`. Corrupt data gives `InvalidFormat`, `InvalidReference` or `UnexpectedEof`. The two classes stay distinct.
+A recognized version that pdb-rs does not decode gives `UnsupportedVersion`. Corrupt data gives `InvalidFormat`, `InvalidReference` or `UnexpectedEof`. The two classes stay distinct.
 A top-level record of a kind without a decoder keeps its kind and payload (`TypeLeaf::Unsupported`, `SymbolData::Unsupported`, `LineSubsection::Unsupported`), and its encoder writes the bytes again.
 
 ## Fixture evidence
 
-The fixture counts in the notes come from the native PDBs of the fixture manifest (`cargo run -p pdbrs-fixtures`, #12, #27, #1 and #39): 64 PDBs of 56 fixtures, and 92 PDZ files: `pdbtool pdz-encode` wrote 77 of them from the PDBs (#37), and `msfz-encode` (Microsoft's `ms-pdb-msfz` 0.1.10 writer, without pdbrs) wrote 15 in the fixtures `msfz-deflate`, `msfz-deflate-dir` and `msfz-uncompressed` ([#1 evidence](https://github.com/napbat/pdbrs/issues/1#issuecomment-6418248178)).
-A read of every record of the 61 readable PDBs with the pdbrs reader at `9cdb703` gave the counts. The `native` example does not print counts for each kind.
-The 3 PDBs of `hlsl-dxc-debug` are not in the counts: their MSF header declares fewer pages than the streams use, and `pdbtool`, DIA and pdbrs reject them (#27).
+The fixture counts in the notes come from the native PDBs of the fixture manifest (`cargo run -p pdb-rs-fixtures`, #12, #27, #1 and #39): 64 PDBs of 56 fixtures, and 92 PDZ files: `pdbtool pdz-encode` wrote 77 of them from the PDBs (#37), and `msfz-encode` (Microsoft's `ms-pdb-msfz` 0.1.10 writer, without pdb-rs) wrote 15 in the fixtures `msfz-deflate`, `msfz-deflate-dir` and `msfz-uncompressed` ([#1 evidence](https://github.com/napbat/pdb-rs/issues/1#issuecomment-6418248178)).
+A read of every record of the 61 readable PDBs with the pdb-rs reader at `9cdb703` gave the counts. The `native` example does not print counts for each kind.
+The 3 PDBs of `hlsl-dxc-debug` are not in the counts: their MSF header declares fewer pages than the streams use, and `pdbtool`, DIA and pdb-rs reject them (#27).
 
 The fixtures are: `clang-flang-lld-x64-primitives`, `clang-link-x64-debug`, `clang-lld-arm64-debug`, `clang-lld-x64-debug`, `clang-lld-x64-page16384`, `clang-lld-x64-page32768`, `clang-lld-x64-page8192`, `clang-lld-x64-release`, `clang-lld-x64-static`, `clang-lld-x86-debug`, `dotnet-csharp-full`, `dotnet-vb-full`, `hlsl-dxc-debug`, `hlsl-fxc-sm50-debug`, `hlsl-fxc-sm51-debug`, `masm-x64-debug`, `masm-x86-debug`, `msvc-arm64-debug`, `msvc-arm64-debugtype`, `msvc-arm64ec-debug`, `msvc-x64-amp`, `msvc-x64-amp-lazy`, `msvc-x64-annotation`, `msvc-x64-clr`, `msvc-x64-debug`, `msvc-x64-debugtype`, `msvc-x64-dll`, `msvc-x64-fastlink`, `msvc-x64-fastlink-full`, `msvc-x64-incremental`, `msvc-x64-large`, `msvc-x64-lazy`, `msvc-x64-modern`, `msvc-x64-modern-lazy`, `msvc-x64-natvis`, `msvc-x64-page16384`, `msvc-x64-page32768`, `msvc-x64-page8192`, `msvc-x64-pch-lazy`, `msvc-x64-pch-z7`, `msvc-x64-pch-zi`, `msvc-x64-pgo`, `msvc-x64-release`, `msvc-x64-sha1`, `msvc-x64-sourcelink`, `msvc-x64-srcsrv`, `msvc-x64-stripped`, `msvc-x64-vc120`, `msvc-x64-xfg`, `msvc-x64-z7`, `msvc-x86-debug`, `msvc-x86-modern-zi`, `rust-link-x64-debug`, `rust-link-x64-release`, `rust-link-x86-debug`, `rust-lld-x64-debug`.
 
 A fixture cell is `complete` if a fixture PDB holds the item and an evidence comment records an independent consumer check of it:
 
 - a comparison of decoded values with `llvm-pdbutil` or DIA2Dump (#2 to #14, #1 for the `types` example), or
-- the round trip of #29 to #32: pdbrs decodes and encodes every record and stream of every fixture to the same bytes, and copies with the rebuilt streams give the same `llvm-pdbutil` and DIA2Dump output and pass `pdbtool check` and `pdbtool compare`, or
-- the semantic rebuild of #33 (`cargo run -p pdbrs-fixtures --release -- verify-native-build`: 61 of 61 PDBs at `9cdb703`) and the edits of #34 (`verify-native-edit`: 366 edits on 61 PDBs, 0 problems without an explanation), or
+- the round trip of #29 to #32: pdb-rs decodes and encodes every record and stream of every fixture to the same bytes, and copies with the rebuilt streams give the same `llvm-pdbutil` and DIA2Dump output and pass `pdbtool check` and `pdbtool compare`, or
+- the semantic rebuild of #33 (`cargo run -p pdb-rs-fixtures --release -- verify-native-build`: 61 of 61 PDBs at `9cdb703`) and the edits of #34 (`verify-native-edit`: 366 edits on 61 PDBs, 0 problems without an explanation), or
 - for MSFZ, the stream comparison of each PDZ fixture with its MSF 7.0 source (#37) and `verify-msfz` (#38), or
-- the producer fixtures of #39 ([evidence](https://github.com/napbat/pdbrs/issues/39#issuecomment-6419585032), [.NET constants](https://github.com/napbat/pdbrs/issues/39#issuecomment-6419094804)): `pdbtool check`, `llvm-pdbutil` and DIA2Dump read each PDB, and the rebuilt PDB gives the same output.
+- the producer fixtures of #39 ([evidence](https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419585032), [.NET constants](https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419094804)): `pdbtool check`, `llvm-pdbutil` and DIA2Dump read each PDB, and the rebuilt PDB gives the same output.
 
-A kind that only object files hold (for example `LF_PRECOMP` or `DEBUG_S_FRAMEDATA`) is `partial`: pdbrs decodes and encodes the object file data, but no PDB fixture holds it.
+A kind that only object files hold (for example `LF_PRECOMP` or `DEBUG_S_FRAMEDATA`) is `partial`: pdb-rs decodes and encodes the object file data, but no PDB fixture holds it.
 A kind in no fixture is `missing` with `external-input` and the producer that can make it, where one is known.
 
 ## Summary
@@ -92,8 +92,8 @@ Each cell gives `complete / partial / missing / not applicable`.
 
 Each `missing` or `partial` cell of a modern or extension row names its open issue and the reason. The table groups them by issue and column.
 All of them need `external-input`: a producer or a layout definition that is not available here.
-No MSFZ cell is open. Stored chunks, a compressed fragment across chunk boundaries and a stream larger than 4 GiB have no producer, and none can exist: `pdbtool pdz-encode` and Microsoft's writer `ms-pdb-msfz` 0.1.10 cannot write them. Their fixture cells are `not applicable` ([decision](https://github.com/napbat/pdbrs/issues/1#issuecomment-6418690029)); synthetic tests of [#37](https://github.com/napbat/pdbrs/issues/37) and [#38](https://github.com/napbat/pdbrs/issues/38) cover the reader.
-[#39](https://github.com/napbat/pdbrs/issues/39) tried local producers for the open cells; [Producer triage](#producer-triage) gives the results.
+No MSFZ cell is open. Stored chunks, a compressed fragment across chunk boundaries and a stream larger than 4 GiB have no producer, and none can exist: `pdbtool pdz-encode` and Microsoft's writer `ms-pdb-msfz` 0.1.10 cannot write them. Their fixture cells are `not applicable` ([decision](https://github.com/napbat/pdb-rs/issues/1#issuecomment-6418690029)); synthetic tests of [#37](https://github.com/napbat/pdb-rs/issues/37) and [#38](https://github.com/napbat/pdb-rs/issues/38) cover the reader.
+[#39](https://github.com/napbat/pdb-rs/issues/39) tried local producers for the open cells; [Producer triage](#producer-triage) gives the results.
 
 | Issue | Column | Cells | Rows |
 | --- | --- | ---: | --- |
@@ -120,7 +120,7 @@ No MSFZ cell is open. Stored chunks, a compressed fragment across chunk boundari
 
 ## Producer triage
 
-[#39](https://github.com/napbat/pdbrs/issues/39) tried local producers for the open `external-input` cells ([evidence](https://github.com/napbat/pdbrs/issues/39#issuecomment-6419585032), [.NET constants](https://github.com/napbat/pdbrs/issues/39#issuecomment-6419094804)). No PDB came from a symbol server ([decision](https://github.com/napbat/pdbrs/issues/32#issuecomment-6418682256)).
+[#39](https://github.com/napbat/pdb-rs/issues/39) tried local producers for the open `external-input` cells ([evidence](https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419585032), [.NET constants](https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419094804)). No PDB came from a symbol server ([decision](https://github.com/napbat/pdb-rs/issues/32#issuecomment-6418682256)).
 
 Producers found (the cells are now `complete`):
 
@@ -133,8 +133,8 @@ Producers found (the cells are now `complete`):
 | `clang-flang-lld-x64-primitives` | clang-cl and flang of Visual Studio LLVM 22.1.3 | `T_OCT`, `T_UOCT`, `T_REAL16`, `T_REAL80`, `T_REAL128`, `T_CPLX32` to `T_CPLX128`, `Complex16`, `T_BOOL16` to `T_BOOL64` |
 | `msvc-x64-sourcelink` | `link /SOURCELINK` | `sourcelink$<n>` named streams |
 | `msvc-x64-fastlink-full` | `/DEBUG:FASTLINK`, then `mspdbcmf` | TPI hash adjusters |
-| `msvc-x64-pch-lazy` | `/Z7` with a precompiled header and `/DEBUG:LAZY` ([decision](https://github.com/napbat/pdbrs/issues/30#issuecomment-6419817816)) | `S_MOD_TYPEREF` `0x0c` and `0x0a`, precompiled types in an object file |
-| `dotnet-csharp-full`, `dotnet-vb-full` | Roslyn with the Microsoft native PDB writer | `LF_REAL32`, `LF_DATE` ([decision](https://github.com/napbat/pdbrs/issues/29#issuecomment-6418921276)); more `LF_REAL64`, `LF_DECIMAL` and `LF_VARSTRING` values |
+| `msvc-x64-pch-lazy` | `/Z7` with a precompiled header and `/DEBUG:LAZY` ([decision](https://github.com/napbat/pdb-rs/issues/30#issuecomment-6419817816)) | `S_MOD_TYPEREF` `0x0c` and `0x0a`, precompiled types in an object file |
+| `dotnet-csharp-full`, `dotnet-vb-full` | Roslyn with the Microsoft native PDB writer | `LF_REAL32`, `LF_DATE` ([decision](https://github.com/napbat/pdb-rs/issues/29#issuecomment-6418921276)); more `LF_REAL64`, `LF_DECIMAL` and `LF_VARSTRING` values |
 
 Producers tried without a result (the cells stay `external-input` and link the triage):
 
@@ -156,10 +156,10 @@ Producers tried without a result (the cells stay `external-input` and link the t
 ## Reference reconciliation
 
 Every imported reference document has a section on a reconciliation page. The table gives the result for each document.
-"pdbrs" is `implemented`, `partial`, `not implemented` or `not applicable` (no format content). The counts are the listed conflicts and undocumented assumptions.
+"pdb-rs" is `implemented`, `partial`, `not implemented` or `not applicable` (no format content). The counts are the listed conflicts and undocumented assumptions.
 Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not applicable; 358 conflicts and 314 undocumented assumptions.
 
-| Document | pdbrs | Conflicts | Undocumented assumptions |
+| Document | pdb-rs | Conflicts | Undocumented assumptions |
 | --- | --- | ---: | ---: |
 | [`llvm/llvm/docs/PDB/index.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbindexmd) | implemented | 7 | 6 |
 | [`llvm/llvm/docs/PDB/MsfFile.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbmsffilemd) | implemented | 7 | 7 |
@@ -264,27 +264,27 @@ Totals: 96 documents; 78 implemented, 8 partial, 0 not implemented, 10 not appli
 
 These conflicts affect the implementation directly. The reconciliation pages give all of them.
 
-1. FPO `fHasSEH`: LLVM `COFF.h` reads bit 9 (and `fUseBP` bit 10, `cbProlog` 4 bits). `winnt.h` and pdbrs use bit 11 (bit 12, 8 bits). 7 of 8 x86 fixture records have the word `0x0800` (#13). See [`DbiStream.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbdbistreammd) and [`dbi_opt_debug.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbdbi_opt_debugmd).
-2. Page sizes: LLVM `MsfFile.md` allows 512 to 4096. LLVM code accepts 512 to 32768, and pdb-rs `msf.md` and `ms-pdb-msf` accept 512 to 65536. `link.exe` and `lld-link` write 4096 to 32768 (#1). The pdbrs reader accepts 512 to 65536. The writer rejects 65536 because DIA, LLVM and `link.exe` reject it (#15). See [`MsfFile.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbmsffilemd) and [`msf.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfmd).
-3. Page-map pages: pdbrs reads and writes more than one page-map page. LLVM rejects such a file ("Too many directory blocks").
-4. MSFZ: `msfz.md` and `ms-pdb-msfz` 0.1.10 differ. pdbrs follows the reference for the directory layout and the compression codes (code 2 is raw DEFLATE). It follows the specification for reserved location bits (an error), chunk sizes, overlaps and fragments across chunks (read, as the specification allows; never written, because `pdbtool` rejects them) (#37, #38). See [`msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd).
-5. FASTLINK buckets: Microsoft `GSI1::hashSz` truncates the bucket to 16 bits. `ms-pdb` 0.1.22 does not, and LLVM always uses 4096 buckets. pdbrs follows Microsoft, finds all 836 public records of `msvc-x64-fastlink` and rebuilds the index to the same bytes (#13, #30). See [`mini_pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmini_pdbmd).
-6. Named-stream map: LLVM `PdbStream.md` and pdb-rs `pdbi_stream.md` omit the single `niMac` word after the map. An early pdbrs build read it as feature code 0 (#9).
-7. TPI hash adjusters: LLVM `TpiStream.md` calls the keys hash values. Microsoft `tpi.cpp`, LLVM code and pdbrs read them as `/names` offsets (#3).
-8. Section contributions: Microsoft `dbi.cpp` and pdbrs read a substream without the V60 or V2 version as headerless V40 records. LLVM rejects it, and no document describes it.
-9. DBI version: pdb-rs `dbi_stream.md` calls V110 current. Microsoft `dbi.h` and every fixture use V70, the only version that pdbrs accepts.
-10. Symbol padding: pdb-rs `symbols.md` and the `ms-codeview` builder use `f3 f2 f1`. LLD, MSVC and fxc write zero bytes (fxc writes 4 or more), and pdbrs accepts only zero bytes and keeps their count (#30). See [`symbols.md`](native-coverage/reconciliation-codeview-symbols.md#microsoft-pdb-rsdocscodeviewsymbolssymbolsmd).
-11. Kind values in pdb-rs documents: `S_GDATA32`/`S_LDATA32` given as `0x1007`/`0x1008` (the `_ST` values), `S_INLINESITE2` as `0x115c` (`S_POGODATA`), `LF_ARRAY` as `0x1502` (`LF_ENUMERATE`), `LF_FRIENDCLS` as `0x040b` (the 16-bit value).
+1. FPO `fHasSEH`: LLVM `COFF.h` reads bit 9 (and `fUseBP` bit 10, `cbProlog` 4 bits). `winnt.h` and pdb-rs use bit 11 (bit 12, 8 bits). 7 of 8 x86 fixture records have the word `0x0800` (#13). See [`DbiStream.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbdbistreammd) and [`dbi_opt_debug.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbdbi_opt_debugmd).
+2. Page sizes: LLVM `MsfFile.md` allows 512 to 4096. LLVM code accepts 512 to 32768, and Microsoft pdb-rs `msf.md` and `ms-pdb-msf` accept 512 to 65536. `link.exe` and `lld-link` write 4096 to 32768 (#1). The pdb-rs reader accepts 512 to 65536. The writer rejects 65536 because DIA, LLVM and `link.exe` reject it (#15). See [`MsfFile.md`](native-coverage/reconciliation-llvm.md#llvmllvmdocspdbmsffilemd) and [`msf.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfmd).
+3. Page-map pages: pdb-rs reads and writes more than one page-map page. LLVM rejects such a file ("Too many directory blocks").
+4. MSFZ: `msfz.md` and `ms-pdb-msfz` 0.1.10 differ. pdb-rs follows the reference for the directory layout and the compression codes (code 2 is raw DEFLATE). It follows the specification for reserved location bits (an error), chunk sizes, overlaps and fragments across chunks (read, as the specification allows; never written, because `pdbtool` rejects them) (#37, #38). See [`msfz.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmsfzmd).
+5. FASTLINK buckets: Microsoft `GSI1::hashSz` truncates the bucket to 16 bits. `ms-pdb` 0.1.22 does not, and LLVM always uses 4096 buckets. pdb-rs follows Microsoft, finds all 836 public records of `msvc-x64-fastlink` and rebuilds the index to the same bytes (#13, #30). See [`mini_pdb.md`](native-coverage/reconciliation-pdb.md#microsoft-pdb-rsdocspdbmini_pdbmd).
+6. Named-stream map: LLVM `PdbStream.md` and Microsoft pdb-rs `pdbi_stream.md` omit the single `niMac` word after the map. An early pdb-rs build read it as feature code 0 (#9).
+7. TPI hash adjusters: LLVM `TpiStream.md` calls the keys hash values. Microsoft `tpi.cpp`, LLVM code and pdb-rs read them as `/names` offsets (#3).
+8. Section contributions: Microsoft `dbi.cpp` and pdb-rs read a substream without the V60 or V2 version as headerless V40 records. LLVM rejects it, and no document describes it.
+9. DBI version: Microsoft pdb-rs `dbi_stream.md` calls V110 current. Microsoft `dbi.h` and every fixture use V70, the only version that pdb-rs accepts.
+10. Symbol padding: Microsoft pdb-rs `symbols.md` and the `ms-codeview` builder use `f3 f2 f1`. LLD, MSVC and fxc write zero bytes (fxc writes 4 or more), and pdb-rs accepts only zero bytes and keeps their count (#30). See [`symbols.md`](native-coverage/reconciliation-codeview-symbols.md#microsoft-pdb-rsdocscodeviewsymbolssymbolsmd).
+11. Kind values in Microsoft pdb-rs documents: `S_GDATA32`/`S_LDATA32` given as `0x1007`/`0x1008` (the `_ST` values), `S_INLINESITE2` as `0x115c` (`S_POGODATA`), `LF_ARRAY` as `0x1502` (`LF_ENUMERATE`), `LF_FRIENDCLS` as `0x040b` (the 16-bit value).
 12. Marker values that later sources reuse: `cvinfo.h` `S_RECTYPE_MAX` is `0x1166`, which LLVM uses for `S_FRAMEREG`; `LF_TYPE_LAST` `0x151e` is LLVM `LF_TAGGED_UNION`; `LF_ID_LAST` `0x1608` is `LF_CLASS2`.
-13. Ages: pdb-rs `dbi_stream.md` tells readers to accept any age difference. `pdbstr -w` increments only the Info age (#27). pdbrs accepts an Info age larger than the DBI age and rejects a larger DBI age (#32).
-14. `LF_HLSL` property bits: `cvinfo.h` says that bits 4 to 15 are zero. fxc writes other values, and LLVM, DIA and `pdbtool` accept them. pdbrs keeps the raw word (#29).
+13. Ages: Microsoft pdb-rs `dbi_stream.md` tells readers to accept any age difference. `pdbstr -w` increments only the Info age (#27). pdb-rs accepts an Info age larger than the DBI age and rejects a larger DBI age (#32).
+14. `LF_HLSL` property bits: `cvinfo.h` says that bits 4 to 15 are zero. fxc writes other values, and LLVM, DIA and `pdbtool` accept them. pdb-rs keeps the raw word (#29).
 15. `/names` bucket counts: Microsoft `NMT` and LLVM grow the bucket array differently. `StringTableBuilder` follows Microsoft and gives the same bytes for the MSVC tables (#32).
-16. `BA_OP_ChangeCodeOffsetBase`: `cvinfo.h` says that the value selects the n-th separated code chunk. pdbrs uses this rule (the n-th `S_SEPCODE` of the procedure) in the validator and in `SymbolLocator`; DIA agrees at all 720 separated-code addresses of `msvc-x64-pgo`, and `llvm-symbolizer` gives no function there (#30).
+16. `BA_OP_ChangeCodeOffsetBase`: `cvinfo.h` says that the value selects the n-th separated code chunk. pdb-rs uses this rule (the n-th `S_SEPCODE` of the procedure) in the validator and in `SymbolLocator`; DIA agrees at all 720 separated-code addresses of `msvc-x64-pgo`, and `llvm-symbolizer` gives no function there (#30).
 17. `LF_DATE`: `cvinfo.h` names an OLE automation date. Roslyn writes the .NET tick count, and DIA returns the same 8 bytes. `Numeric::date_ticks` gives the tick count; `Numeric::date` keeps the `cvinfo.h` meaning (#29). See [`number.md`](native-coverage/reconciliation-codeview-types.md#microsoft-pdb-rsdocscodeviewnumbermd).
 
 ### Undocumented assumptions
 
-pdbrs uses these layouts and rules, and no imported document states them:
+pdb-rs uses these layouts and rules, and no imported document states them:
 
 - `S_FRAMEREG` (`0x1166`): `u16` register, then 2 zero bytes. Confirmed from `msvc-arm64-debug` bytes (#13).
 - `S_FASTLINK` (`0x1167`): `u32` value, `u16` flags, name. `REFMINIPDB` without the module field; flag bit 6 marks namespaces. Confirmed from `msvc-x64-fastlink` and its object files (#13) and the DIA SDK `REFMINIPDB2` (#30).
@@ -312,7 +312,7 @@ pdbrs uses these layouts and rules, and no imported document states them:
 
 ## External dependencies
 
-pdbrs does not load external files. `Pdb::external_dependencies` lists the type servers with their modules, the precompiled-header groups, the FASTLINK objects, the `NOTM` feature and the module type sources (#32, #30). It opens no file.
+pdb-rs does not load external files. `Pdb::external_dependencies` lists the type servers with their modules, the precompiled-header groups, the FASTLINK objects, the `NOTM` feature and the module type sources (#32, #30). It opens no file.
 
 | Item | Target | State |
 | --- | --- | --- |
@@ -329,13 +329,13 @@ pdbrs does not load external files. `Pdb::external_dependencies` lists the type 
 
 | Format | Decision |
 | --- | --- |
-| MSFZ containers | Implemented: reading (#37), writing and conversion in both directions (#38). Microsoft's writer makes raw DEFLATE directories and chunks (`msfz-*` fixtures, #1), and DIA rejects them as it rejects the pdbrs output. Stored chunks, fragments across chunks and streams larger than 4 GiB have no producer, and none can exist ([decision](https://github.com/napbat/pdbrs/issues/1#issuecomment-6418690029)); the reader supports them |
+| MSFZ containers | Implemented: reading (#37), writing and conversion in both directions (#38). Microsoft's writer makes raw DEFLATE directories and chunks (`msfz-*` fixtures, #1), and DIA rejects them as it rejects the pdb-rs output. Stored chunks, fragments across chunks and streams larger than 4 GiB have no producer, and none can exist ([decision](https://github.com/napbat/pdb-rs/issues/1#issuecomment-6418690029)); the reader supports them |
 | Small MSF and other legacy versions and kinds | Required, deferred (#16) |
 | 65536-byte pages | Read; not written, because consumers reject them (#15) |
 | Edits in place and incremental MSF commits | Not planned ([design](pdb.md#implemented-native-reading)); the editor writes a new file (#34) |
-| OMAP translation | Implemented (#32); the real-producer fixture needs `external-input`, because PDBs from a symbol server are not used ([decision](https://github.com/napbat/pdbrs/issues/32#issuecomment-6418682256)) |
-| OMAP writing and address remap | Implemented (#43): `PdbEditor::remap_addresses` writes OMAP tables (`RemapMode::Omap`) or new record addresses without OMAP (`RemapMode::Clean`) for a rewritten image ([design](pdb.md#address-remap)). pdbrs is not an independent producer, so the OMAP fixture cells stay `external-input` |
+| OMAP translation | Implemented (#32); the real-producer fixture needs `external-input`, because PDBs from a symbol server are not used ([decision](https://github.com/napbat/pdb-rs/issues/32#issuecomment-6418682256)) |
+| OMAP writing and address remap | Implemented (#43): `PdbEditor::remap_addresses` writes OMAP tables (`RemapMode::Omap`) or new record addresses without OMAP (`RemapMode::Clean`) for a rewritten image ([design](pdb.md#address-remap)). pdb-rs is not an independent producer, so the OMAP fixture cells stay `external-input` |
 | Compressed injected sources (run-length, Huffman, LZ) | Required (#32); no producer and no algorithm description (`external-input`) |
-| Natvis XML, Source Link JSON and `srcsrv` text | Decided in #32: pdbrs keeps and checks the bytes and does not interpret them ([decision](https://github.com/napbat/pdbrs/issues/32#issuecomment-6412876796)) |
+| Natvis XML, Source Link JSON and `srcsrv` text | Decided in #32: pdb-rs keeps and checks the bytes and does not interpret them ([decision](https://github.com/napbat/pdb-rs/issues/32#issuecomment-6412876796)) |
 | `hlsl-dxc-debug` PDBs (declared page count too small) | Rejected, as `pdbtool` and DIA reject them (#27) |
 | Producer extensions without a layout (LLVM-only type kinds, `S_ALTOBJNAME`, `S_LOCAL_2005`, `S_DEFRANGE_2005`, `S_DEFRANGE2_2005`, `0xfe`, `S_OEM` of other OEM IDs, other `S_MOD_TYPEREF` flags) | Keep raw and write raw; decode when a source or fixture gives the layout (#29, #30, #31) |

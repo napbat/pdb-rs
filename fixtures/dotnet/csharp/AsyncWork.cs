@@ -1,7 +1,7 @@
 // Async methods, closures captured across await points and the async part of the stack mode.
 using System.Threading.Tasks;
 
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 internal static class AsyncWork
 {

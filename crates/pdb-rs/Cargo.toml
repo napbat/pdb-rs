@@ -1,0 +1,59 @@
+[package]
+name = "pdb-rs"
+version.workspace = true
+edition.workspace = true
+description = "Native PDB reading, MSF 7.0 writing and shared I/O primitives for native and Portable PDBs"
+
+[features]
+default = ["std"]
+std = ["nostdio/std"]
+
+[dependencies]
+miniz_oxide.workspace = true
+nostdio.workspace = true
+ruzstd.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
+
+[[example]]
+name = "inspect"
+required-features = ["std"]
+
+[[example]]
+name = "native"
+required-features = ["std"]
+
+[[example]]
+name = "msf"
+required-features = ["std"]
+
+[[example]]
+name = "portable"
+required-features = ["std"]
+
+[[example]]
+name = "locate"
+required-features = ["std"]
+
+[[example]]
+name = "native_rebuild"
+required-features = ["std"]
+
+[[example]]
+name = "native_synthetic"
+required-features = ["std"]
+
+[[example]]
+name = "edit"
+required-features = ["std"]
+
+[[example]]
+name = "types"
+required-features = ["std"]
+
+[[bench]]
+name = "baseline"
+harness = false
+required-features = ["std"]

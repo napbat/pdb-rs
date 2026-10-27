@@ -6,15 +6,15 @@
 #include "demo_c.h"
 
 #if defined(_MSC_VER) && !defined(__clang__)
-#define PDBRS_MSVC 1
+#define PDB_RS_MSVC 1
 #else
-#define PDBRS_MSVC 0
+#define PDB_RS_MSVC 0
 #endif
 
 #if defined(_M_X64) || defined(_M_IX86)
-#define PDBRS_X86_FAMILY 1
+#define PDB_RS_X86_FAMILY 1
 #else
-#define PDBRS_X86_FAMILY 0
+#define PDB_RS_X86_FAMILY 0
 #endif
 
 namespace demo {

@@ -1,12 +1,12 @@
 # Native coverage: containers and PDB streams
 
 This page is part of the [native coverage](../native-coverage.md) accounting. Read the [column and value definitions](../native-coverage.md#columns) first.
-The version lists come from LLVM `RawConstants.h` (`PdbRaw_ImplVer`, `PdbRaw_TpiVer`, `PdbRaw_DbiVer`, `PdbRaw_DbiSecContribVer`, `PdbRaw_FeatureSig`, `DbgHeaderType`), `cvinfo.h`, Microsoft `pdb.h` and `dbi.h` as the pdbrs sources cite them, and the MSFZ specification `msfz.md` with `ms-pdb-msfz` 0.1.10.
+The version lists come from LLVM `RawConstants.h` (`PdbRaw_ImplVer`, `PdbRaw_TpiVer`, `PdbRaw_DbiVer`, `PdbRaw_DbiSecContribVer`, `PdbRaw_FeatureSig`, `DbgHeaderType`), `cvinfo.h`, Microsoft `pdb.h` and `dbi.h` as the pdb-rs sources cite them, and the MSFZ specification `msfz.md` with `ms-pdb-msfz` 0.1.10.
 
 Every stream keeps its bytes: `Pdb::stream_bytes` reads any stream through `native::container::Container`, and `Msf::repack`, `io::copy_exact` and the MSFZ conversions keep every stream byte (#15, #37, #38).
 Each stream decoder has an encoder that writes a decoded stream again to the same bytes (#29 to #32). `PdbEditor` writes new PDBs (#33), and edits PDBs (#34) and rebuilds the dependent streams.
-A recognized version that pdbrs does not decode gives `UnsupportedVersion`. Malformed data gives `InvalidFormat`, `InvalidReference` or `UnexpectedEof`. The two classes stay distinct.
-An unknown version value also gives `UnsupportedVersion`. pdbrs does not separate it from a recognized older version.
+A recognized version that pdb-rs does not decode gives `UnsupportedVersion`. Malformed data gives `InvalidFormat`, `InvalidReference` or `UnexpectedEof`. The two classes stay distinct.
+An unknown version value also gives `UnsupportedVersion`. pdb-rs does not separate it from a recognized older version.
 
 ## MSF 7.0 container
 
@@ -15,8 +15,8 @@ Portable PDB is a different format (#17). This document does not count it.
 | Kind | Value | Raw preservation | Semantic reading | Reference validation | Writing | Editing and index rebuilding | Independent fixture evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Page size 512 | `512` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | complete ([code][exm], [check][e15], [check][e27h]) | 8 fixture PDBs (`dotnet-csharp-full`, `dotnet-vb-full` and the fxc HLSL PDBs) |
-| Page size 1024 | `1024` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | not applicable (no producer known: `link.exe` and `lld-link` accept only 4096 to 32768; pdbrs output passes DIA2Dump, `llvm-pdbutil` and `pdbtool` (#15)) | No fixture |
-| Page size 2048 | `2048` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | not applicable (no producer known: `link.exe` and `lld-link` accept only 4096 to 32768; pdbrs output passes DIA2Dump, `llvm-pdbutil` and `pdbtool` (#15)) | No fixture |
+| Page size 1024 | `1024` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | not applicable (no producer known: `link.exe` and `lld-link` accept only 4096 to 32768; pdb-rs output passes DIA2Dump, `llvm-pdbutil` and `pdbtool` (#15)) | No fixture |
+| Page size 2048 | `2048` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | not applicable (no producer known: `link.exe` and `lld-link` accept only 4096 to 32768; pdb-rs output passes DIA2Dump, `llvm-pdbutil` and `pdbtool` (#15)) | No fixture |
 | Page size 4096 | `4096` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | complete ([code][exm], [check][e15]) | 47 fixture PDBs |
 | Page size 8192 | `8192` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | complete ([code][exm], [check][e1p]) | 2 fixture PDBs (`clang-lld-x64-page8192`, `msvc-x64-page8192`) (MSVC `link /PDBPAGESIZE` and `lld-link /pdbpagesize`) |
 | Page size 16384 | `16384` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e15], [check][e34]) | complete ([code][exm], [check][e1p]) | 2 fixture PDBs (`clang-lld-x64-page16384`, `msvc-x64-page16384`) (MSVC `link /PDBPAGESIZE` and `lld-link /pdbpagesize`) |
@@ -27,19 +27,19 @@ Portable PDB is a different format (#17). This document does not count it.
 | Active free page map FPM2 | `2` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][fpm], [check][t:free_page_map], [check][e9]) | complete ([code][fpm], [check][t:free_page_map], [check][e9]) | not applicable (the writer always makes FPM1 active and fills FPM2 with `0xFF`; consumers accept both) | not applicable (the writer always makes FPM1 active and fills FPM2 with `0xFF`; consumers accept both) | complete ([code][fpm], [check][e9], [check][e15]) | 18 fixture PDBs (LLD, .NET and fxc) |
 | Free page map intervals after the first | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][fpm], [check][t:free_page_map]) | complete ([code][fpm], [check][t:free_page_map]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][exm], [check][e1p], [check][e15]) | 1 fixture PDB (`msvc-x64-large`), 5217 pages; the interval length is one page size of pages |
 | Stream directory with one page-map page | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf], [check][e9]) | complete ([code][mdir], [code][fpm], [check][t:msf], [check][t:free_page_map], [check][e9]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][mw], [code][mwl], [check][t:msf_write], [check][e15]) | complete ([code][exm], [check][e15]) | 61 fixture PDBs |
-| Stream directory with more than one page-map page | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf_write]) | complete ([code][mdir], [check][t:msf_write]) | complete ([code][mw], [code][mwl], [check][t:msf_write]) | complete ([code][mw], [code][mwl], [check][t:msf_write]) | not applicable (LLVM rejects it ("Too many directory blocks"); only very large directories need it) | Tested with the pdbrs reader only (#15) |
+| Stream directory with more than one page-map page | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [code][mdir], [check][t:msf_write]) | complete ([code][mdir], [check][t:msf_write]) | complete ([code][mw], [code][mwl], [check][t:msf_write]) | complete ([code][mw], [code][mwl], [check][t:msf_write]) | not applicable (LLVM rejects it ("Too many directory blocks"); only very large directories need it) | Tested with the pdb-rs reader only (#15) |
 | Nil stream (size `0xffffffff`) | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [check][t:msf]) | not applicable (no contents) | complete ([code][mw], [check][t:msf_write]) | complete ([code][mw], [code][edit], [check][t:msf_write], [check][e34]) | complete ([code][exm], [check][e27], [check][e34]) | 1 fixture PDB (`msvc-x64-pgo`), 7 nil streams; distinct from an empty stream; the editor writes a removed stream as nil |
 | Empty stream (size 0) | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][msf], [check][t:msf]) | not applicable (no contents) | complete ([code][mw], [check][t:msf_write]) | complete ([code][mw], [check][t:msf_write]) | complete ([code][exm], [check][e15]) | Stream 0 of the LLD fixtures |
 | Stream 0, previous directory (`OldDirectory`) | stream 0 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][old], [check][t:old_directory], [check][e9]) | complete ([code][old], [check][t:old_directory], [check][e9]) | complete ([code][mw], [check][t:msf_write], [check][e15d]) | complete ([code][mw], [check][t:msf_write], [check][e15s]) | complete ([code][exn], [check][e9], [check][e15]) | 51 fixture PDBs (MSVC, MASM, .NET, fxc); `OldDirectoryPolicy::Preserve` needs the source page size |
 | Stream 0, empty | stream 0 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][old], [check][t:old_directory]) | not applicable (no contents) | complete ([code][mw], [check][t:msf_write], [check][e15d]) | complete ([code][mw], [code][edit], [check][e15d], [check][e34]) | complete ([code][exm], [check][e15]) | 10 fixture PDBs (LLD); the default `OldDirectoryPolicy::Empty`; the editor writes it |
-| Small MSF (`Microsoft C/C++ program database 2.00`) | — | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | `pdbrs::probe` identifies the signature |
+| Small MSF (`Microsoft C/C++ program database 2.00`) | — | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | `pdb_rs::probe` identifies the signature |
 
 ## MSFZ container
 
 `native::msfz::Msfz` reads MSFZ containers (PDZ files, #37). `MsfzBuilder`, `Container::to_msfz` and `Container::to_msf` write them and convert between MSF 7.0 and MSFZ (#38).
 The fixtures are 92 PDZ files. `pdbtool pdz-encode` (pinned `microsoft/pdb-rs`) wrote 77 of them from the MSF 7.0 fixtures in five option sets.
-`msfz-encode` (`MsfzWriter` of `ms-pdb-msfz` 0.1.10, without pdbrs) wrote the other 15 in the fixtures `msfz-deflate`, `msfz-deflate-dir` and `msfz-uncompressed` ([fixtures](../../../fixtures/README.md#msfz-forms-of-microsofts-writer), [evidence][e1mz]).
-Every stream of each PDZ file is byte-identical to its MSF 7.0 source through pdbrs and `pdbtool compare`, and the `native` example gives the same output (#37).
+`msfz-encode` (`MsfzWriter` of `ms-pdb-msfz` 0.1.10, without pdb-rs) wrote the other 15 in the fixtures `msfz-deflate`, `msfz-deflate-dir` and `msfz-uncompressed` ([fixtures](../../../fixtures/README.md#msfz-forms-of-microsofts-writer), [evidence][e1mz]).
+Every stream of each PDZ file is byte-identical to its MSF 7.0 source through pdb-rs and `pdbtool compare`, and the `native` example gives the same output (#37).
 `verify-msfz` writes each native fixture in six option sets and converts each PDZ fixture back to MSF 7.0 ([evidence](../pdb.md#implemented-msfz-writing)).
 The fuzz targets `msfz`, `msfz_chunks` and `msfz_convert` cover the reader, the chunks and the conversions ([`docs/fuzzing.md`](../../fuzzing.md)).
 
@@ -49,14 +49,14 @@ The fuzz targets `msfz`, `msfz_chunks` and `msfz_convert` cover the reader, the 
 | Other header versions | not 0 | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | not applicable (only version 0 is defined; `Msfz::read` returns `UnsupportedVersion`) | not applicable (no layout) | not applicable (no layout) | not applicable (no layout) | not applicable (no producer known) |  |
 | Stream directory, uncompressed | — | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzdir], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 83 PDZ files (73 from `pdz-encode`, 10 `msfz-deflate` and `msfz-uncompressed` files); variable-length records, as `ms-pdb-msfz` reads them |
 | Stream directory, zstd | code `1` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzdir], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 4 PDZ files (`pdz-compress-stream-dir`) |
-| Stream directory, raw DEFLATE | code `2` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzdir], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e1mz], [check][fxmz]) | 5 PDZ files (`msfz-deflate-dir`) from Microsoft's writer; `pdbtool` and pdbrs read them, and DIA rejects them (`806D000C`) |
+| Stream directory, raw DEFLATE | code `2` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzdir], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e1mz], [check][fxmz]) | 5 PDZ files (`msfz-deflate-dir`) from Microsoft's writer; `pdbtool` and pdb-rs read them, and DIA rejects them (`806D000C`) |
 | Chunk Table | 20-byte entries | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 92 PDZ files; never compressed; the 5 `msfz-uncompressed` files have an empty Chunk Table |
 | Chunk, stored | code `0` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzcache], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | not applicable (the writer compresses every chunk, as `pdz-encode` does) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | not applicable (no producer can write it: `pdz-encode` and `ms-pdb-msfz` 0.1.10 compress every chunk; synthetic tests of #37 cover the reader, [decision][e1z]) | Compressed size must equal uncompressed size, as in the reference reader |
 | Chunk, zstd | code `1` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzcache], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 82 PDZ files (77 from `pdz-encode`, 5 `msfz-deflate-dir` files); `ruzstd` through `compression.rs` |
-| Chunk, raw DEFLATE | code `2` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzcache], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e1mz], [check][fxmz]) | 5 PDZ files (`msfz-deflate`) from Microsoft's writer; `msvc-x64-large` has 21 chunks and 12 streams in more than one chunk. `pdbtool` and pdbrs read them. DIA rejects raw DEFLATE chunks from Microsoft's writer too (`806D000C`), so the DIA result for the pdbrs output is not a pdbrs defect |
+| Chunk, raw DEFLATE | code `2` | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzcache], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e1mz], [check][fxmz]) | 5 PDZ files (`msfz-deflate`) from Microsoft's writer; `msvc-x64-large` has 21 chunks and 12 streams in more than one chunk. `pdbtool` and pdb-rs read them. DIA rejects raw DEFLATE chunks from Microsoft's writer too (`806D000C`), so the DIA result for the pdb-rs output is not a pdb-rs defect |
 | Other compression codes | any other value | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | not applicable (`UnsupportedVersion`) | not applicable (no layout) | not applicable (no layout) | not applicable (no layout) | not applicable (no producer known) |  |
 | Compressed fragment inside one chunk | bit 63 set | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 87 PDZ files with chunks (77 from `pdz-encode`, 10 `msfz-deflate` and `msfz-deflate-dir` files) |
-| Compressed fragment across chunk boundaries | bit 63 set | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt], [check][e37d]) | complete ([code][mzlay], [check][mzt], [check][e37]) | not applicable (the writer never writes it, because the reference reader rejects it (#38)) | not applicable (the conversions write fragments inside one chunk) | not applicable (no producer can write it: `ms-pdb-msfz` 0.1.10 keeps each write in one chunk, and its reader rejects such a fragment; synthetic tests of #37 cover the reader, [decision][e1z]) | The specification allows it, so pdbrs reads it (#37 decision) |
+| Compressed fragment across chunk boundaries | bit 63 set | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt], [check][e37d]) | complete ([code][mzlay], [check][mzt], [check][e37]) | not applicable (the writer never writes it, because the reference reader rejects it (#38)) | not applicable (the conversions write fragments inside one chunk) | not applicable (no producer can write it: `ms-pdb-msfz` 0.1.10 keeps each write in one chunk, and its reader rejects such a fragment; synthetic tests of #37 cover the reader, [decision][e1z]) | The specification allows it, so pdb-rs reads it (#37 decision) |
 | Uncompressed fragment | bit 63 clear | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt], [check][e37]) | complete ([code][mzlay], [check][mzt], [check][e37]) | not applicable (the writer stores all bytes in compressed chunks (#38 decision)) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr], [check][e38d], [check][e1mz]) | 82 PDZ files: the 77 `pdz-encode` files store the Info stream and the DBI header uncompressed; the 5 `msfz-uncompressed` files have 0 chunks and 318 uncompressed fragments, and DIA reads them; non-zero reserved bits 48 to 62 give `InvalidFormat` |
 | Nil and empty streams | `0xffffffff`, no fragment | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][mzdir], [check][mzt], [check][e37]) | not applicable (no contents) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert], [check][dmzw]) | complete ([code][exm], [check][e37], [check][dmzr]) | 1 PDZ file (`pdz-default/msvc-x64-pgo/demo.pdb`) with nil streams; all PDZ files have an empty stream 0 |
 | Stream larger than 4 GiB | `u64` size | complete ([code][cont], [code][msfz], [check][t:msfz_pdb], [check][e37]) | complete ([code][msfz], [check][mzt]) | complete ([code][mzlay], [check][mzt], [check][e37]) | complete ([code][mzw], [code][mzwl], [check][t:msfz_write], [check][dmzw]) | complete ([code][conv], [check][t:msfz_convert]) | not applicable (no producer can write it: `ms-pdb-msfz` 0.1.10 limits a stream to 32-bit sizes; synthetic tests of #37 cover the reader, [decision][e1z]) | `Container::to_msf` returns `LimitExceeded`, because MSF 7.0 sizes are `u32` |
@@ -145,7 +145,7 @@ No stream directory entry, DBI field or named stream names these streams. `TypeS
 | Section map | substream 3 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dmap], [check][t:dbi_tables], [check][e7]) | complete ([code][exd], [check][e7]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | complete ([code][exd], [check][e7], [check][e32]) | 61 fixture PDBs |
 | Source file information | substream 4 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dsrc], [check][t:dbi_tables], [check][e7]) | complete ([code][dsrc], [check][t:dbi_tables], [check][e7]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | complete ([code][exd], [check][e7], [check][e32]) | 61 fixture PDBs; the layout comes from the summed counts, so 16-bit overflow works |
 | Type server map, empty | substream 5 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dts], [check][t:dbi_tables]) | not applicable (no contents) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | complete ([code][exd], [check][e7], [check][e32]) | 61 fixture PDBs |
-| Type server map, not empty | substream 5 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dts], [check][t:dbi_encode], [check][e32]) | complete ([code][ext], [check][t:external], [check][e32]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | missing (#32: external-input; `link` 14.51 writes an empty map with every `/DEBUG` option; old linkers or `cvpack` write it) | `Pdb::external_dependencies` lists the type servers; pdbrs does not load them |
+| Type server map, not empty | substream 5 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dts], [check][t:dbi_encode], [check][e32]) | complete ([code][ext], [check][t:external], [check][e32]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | missing (#32: external-input; `link` 14.51 writes an empty map with every `/DEBUG` option; old linkers or `cvpack` write it) | `Pdb::external_dependencies` lists the type servers; pdb-rs does not load them |
 | EC names (`/names` layout) | substream 6 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dbi], [code][names], [check][t:dbi_tables], [check][e7]) | complete ([code][names], [check][t:names], [check][e7]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | complete ([code][exd], [check][e7], [check][e32]) | 61 fixture PDBs; hash version 1 in all; new builders write an empty table, as `link.exe` does |
 | Optional debug header | substream 7 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][ddh], [check][t:dbi], [check][e7]) | complete ([code][reader], [check][t:native]) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | complete ([code][exd], [check][e13m], [check][e32]) | 11 slots (16 fixture PDBs) or 12 slots (45 fixture PDBs); `Dbi::debug_streams` also returns slot 11 |
 
@@ -158,14 +158,14 @@ The optional debug header holds one stream index for each slot. The slot order i
 | Slot 0: FPO (`FPO_DATA`, 16-byte records) | `0` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][fpo], [check][t:debug_stream], [check][e32]) | not applicable (no references) | complete ([code][fpo], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | complete ([code][exd], [check][e13m], [check][e32]) | 4 fixture PDBs; `fHasSEH` is bit 11 as in `winnt.h`, not bit 9 as in LLVM |
 | Slot 1: Exception (`IMAGE_FUNCTION_ENTRY`) | `1` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][func], [check][t:debug_stream], [check][e32]) | not applicable (RVAs of the image outside the PDB) | complete ([code][func], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | missing (#32: external-input; no `link` 14.51 `/DEBUG` option writes it (#32 evidence)) | No fixture; Deprecated in Microsoft `pdb.h` |
 | Slot 2: Fixup (`XFIXUP_DATA`) | `2` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][fix], [check][t:debug_stream], [check][e32]) | not applicable (RVAs of the image outside the PDB) | complete ([code][fix], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | complete ([code][exd], [check][e27a], [check][e32]) | 2 fixture PDBs (`msvc-arm64-debugtype`, `msvc-x64-debugtype`); `pdbtool` agrees on 2,793 fixups (#32) |
-| Slot 3: OMAP to source | `3` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][omap], [check][t:omap], [check][e32]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdbrs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Records must be sorted by `rva`; the address remap writes it in OMAP output and removes it in clean output (#43) |
-| Slot 4: OMAP from source | `4` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][omap], [check][t:omap], [check][e32]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdbrs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Records must be sorted by `rva`; the address remap writes it in OMAP output and removes it in clean output (#43) |
+| Slot 3: OMAP to source | `3` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][omap], [check][t:omap], [check][e32]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdb-rs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Records must be sorted by `rva`; the address remap writes it in OMAP output and removes it in clean output (#43) |
+| Slot 4: OMAP from source | `4` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][omap], [check][t:omap], [check][e32]) | complete ([code][omap], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdb-rs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Records must be sorted by `rva`; the address remap writes it in OMAP output and removes it in clean output (#43) |
 | Slot 5: Section headers | `5` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][addr], [check][t:section], [check][e7]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | complete ([code][exd], [check][e7], [check][e32]) | 61 fixture PDBs; the address remap writes the section headers of the new image (#43) |
 | Slot 6: Token to RID map | `6` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][dbg], [check][t:debug_stream], [check][e32]) | not applicable (metadata tokens name the assembly outside the PDB) | complete ([code][dbg], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | missing (#32: external-input; no `link` 14.51 `/DEBUG` option writes it (#32 evidence); C++/CLI with `/clr`, `/clr:pure`, `/clr:safe` and `/clr:netcore` writes none ([triage][e39p])) | No fixture; C++/CLI with MSVC 14.51 writes none (#27) |
 | Slot 7: `.xdata` | `7` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][blob], [check][t:debug_stream], [check][e32]) | not applicable (RVAs of the image outside the PDB) | complete ([code][blob], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | complete ([code][exd], [check][e27a], [check][e32]) | 2 fixture PDBs (`msvc-arm64-debugtype`, `msvc-x64-debugtype`); `DbgRvaVaBlob` header and data |
 | Slot 8: `.pdata` | `8` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][blob], [check][t:debug_stream], [check][e32]) | not applicable (RVAs of the image outside the PDB) | complete ([code][blob], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | complete ([code][exd], [check][e27a], [check][e32]) | 2 fixture PDBs (`msvc-arm64-debugtype`, `msvc-x64-debugtype`); x64 and ARM64 runtime functions |
 | Slot 9: New FPO (`FRAMEDATA`, 32-byte records) | `9` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][fpo], [check][t:debug_stream], [check][e32]) | complete ([code][fpo], [code][exd], [check][t:fpo], [check][e13m]) | complete ([code][fpo], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [check][e32], [check][e33]) | complete ([code][exd], [check][e13m], [check][e32]) | 4 fixture PDBs; Frame programs are `/names` offsets |
-| Slot 10: Original section headers | `10` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][addr], [check][t:omap], [check][e32]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdbrs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Used by OMAP translation; the address remap writes it in OMAP output and removes it in clean output (#43) |
+| Slot 10: Original section headers | `10` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][addr], [check][t:omap], [check][e32]) | complete ([code][sec], [check][t:debug_stream], [check][e32]) | complete ([code][dbg], [code][build], [code][remap], [check][e32], [check][e33], [check][t:remap_omap], [check][e43]) | partial (#32: external-input; no independent producer (binary rewriters such as BBT); DIA agrees on a copy with known OMAP tables (#32) and on the OMAP output of pdb-rs ([check][e43]); PDBs from a symbol server are not used ([decision][e32o])) | No independent fixture; Used by OMAP translation; the address remap writes it in OMAP output and removes it in clean output (#43) |
 | Slot 11 (no name) | `11` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][ddh], [check][t:dbi]) | not applicable (nil in all fixtures) | complete ([code][dbiw], [code][dbib], [check][t:dbi_encode], [check][t:dbi_builder], [check][e32]) | complete ([code][dbib], [code][edit], [check][e32], [check][e34]) | not applicable (nil (`0xffff`) in every MSVC and .NET fixture) | `cvinfo.h`, LLVM and Microsoft `dbi.h` name only slots 0 to 10 |
 
 ## Address translation
@@ -173,7 +173,7 @@ The optional debug header holds one stream index for each slot. The slot order i
 | Kind | Value | Raw preservation | Semantic reading | Reference validation | Writing | Editing and index rebuilding | Independent fixture evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Section offset to RVA and RVA to section offset | — | not applicable (a computation, not stored data) | complete ([code][addr], [check][t:address], [check][e7]) | complete ([code][addr], [check][t:address], [check][e10]) | not applicable (a computation) | not applicable (a computation) | complete ([code][exd], [check][e7], [check][e33]) | The end of a section translates (incremental links put records there) |
-| OMAP translation (both directions) | — | not applicable (a computation, not stored data) | complete ([code][addr], [code][omap], [check][t:omap], [check][e32]) | complete ([code][addr], [check][t:omap], [check][e32]) | not applicable (a computation) | not applicable (a computation) | partial (#32: external-input; DIA agrees on a copy of `msvc-x64-release` with known OMAP tables (30 of 30 maps, 11 of 11 `-sym`, 54 of 54 `-lines`) and on the OMAP output of the address remap of pdbrs ([check][e43]); no independent OMAP producer; PDBs from a symbol server are not used ([decision][e32o])) | An unmapped address gives `BeforeFirstRecord`, `NoTarget` or `AfterLastRecord` |
+| OMAP translation (both directions) | — | not applicable (a computation, not stored data) | complete ([code][addr], [code][omap], [check][t:omap], [check][e32]) | complete ([code][addr], [check][t:omap], [check][e32]) | not applicable (a computation) | not applicable (a computation) | partial (#32: external-input; DIA agrees on a copy of `msvc-x64-release` with known OMAP tables (30 of 30 maps, 11 of 11 `-sym`, 54 of 54 `-lines`) and on the OMAP output of the address remap of pdb-rs ([check][e43]); no independent OMAP producer; PDBs from a symbol server are not used ([decision][e32o])) | An unmapped address gives `BeforeFirstRecord`, `NoTarget` or `AfterLastRecord` |
 | Address queries (`SymbolLocator`) | — | not applicable (a computation, not stored data) | complete ([code][loc], [check][t:locate], [check][e30], [check][e30c]) | not applicable (a computation) | not applicable (a computation) | not applicable (a computation) | complete ([code][loc], [check][e30], [check][e30c], [check][e33]) | Procedure, source lines and inline chain for an RVA, also in separated code (`S_SEPCODE` chunks); agrees with DIA and `llvm-symbolizer --inlines` except the known classes in #30 |
 
 ## `/names` string table
@@ -204,7 +204,7 @@ The symbol records are on the [symbols](symbols.md) page. A `native::Producer` s
 ## Named and auxiliary streams
 
 `NamedStreamKind::classify` selects the decoder by the exact name. An unrecognized name is `NamedStreamKind::Other`, and its stream keeps its bytes.
-By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcsrv` text as checked bytes and does not interpret them.
+By the scope decision of #32, pdb-rs keeps Natvis XML, Source Link JSON and `srcsrv` text as checked bytes and does not interpret them.
 
 | Kind | Value | Raw preservation | Semantic reading | Reference validation | Writing | Editing and index rebuilding | Independent fixture evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -222,176 +222,176 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 | `/src/files/*`, compression Huffman | `2` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | missing (#32: external-input; `verify_content` returns `UnsupportedVersion`; no producer and no algorithm description) | missing (#32: external-input) | partial (#32: the entry and the compressed bytes are written again; external-input) | partial (#32: edits keep the compressed bytes; external-input) | missing (#32: external-input; no local producer writes it) | No fixture |
 | `/src/files/*`, compression LZ | `3` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | missing (#32: external-input; `verify_content` returns `UnsupportedVersion`; no producer and no algorithm description) | missing (#32: external-input) | partial (#32: the entry and the compressed bytes are written again; external-input) | partial (#32: edits keep the compressed bytes; external-input) | missing (#32: external-input; no local producer writes it) | No fixture |
 | `/src/files/*`, .NET document record | `101` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][doc], [check][t:dotnet_documents], [check][e14]) | complete ([code][doc], [check][t:dotnet_documents], [check][e14]) | complete ([code][doc], [check][t:dotnet_documents], [check][e32]) | complete ([code][injb], [check][e32]) | complete ([code][exnm], [check][e14], [check][e32]) | 2 fixture PDBs (`dotnet-csharp-full`, `dotnet-vb-full`); CRC, size and SHA-256 are checked |
-| Natvis file in injected sources | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][natvis], [check][t:natvis], [check][e32s]) | not applicable (no references) | complete ([code][natvis], [check][t:natvis], [check][e32]) | complete ([code][injb], [check][t:native_edit], [check][e34]) | complete ([code][exnm], [check][e32], [check][e27s]) | rustc and `link.exe /NATVIS` embed Natvis files; pdbrs checks the shape and keeps the XML |
+| Natvis file in injected sources | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][natvis], [check][t:natvis], [check][e32s]) | not applicable (no references) | complete ([code][natvis], [check][t:natvis], [check][e32]) | complete ([code][injb], [check][t:native_edit], [check][e34]) | complete ([code][exnm], [check][e32], [check][e27s]) | rustc and `link.exe /NATVIS` embed Natvis files; pdb-rs checks the shape and keeps the XML |
 | `sourcelink` | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][slnk], [check][t:source_link], [check][e32s]) | not applicable (URLs are not fetched) | complete ([code][slnk], [check][t:source_link], [check][e32]) | complete ([code][ednam], [code][edit], [check][e34], [check][t:native_edit]) | complete ([code][exnm], [check][e14], [check][e34]) | 2 fixture PDBs (`dotnet-csharp-full`, `dotnet-vb-full`) (.NET); UTF-8 JSON object; the mappings are not interpreted |
 | `sourcelink$<n>` | decimal `<n>` from 1 | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][slnk], [check][t:source_link], [check][e32l]) | not applicable (URLs are not fetched) | complete ([code][slnk], [check][t:source_link], [check][e32l]) | complete ([code][ednam], [code][edit], [check][e32l], [check][t:native_edit]) | complete ([code][exnm], [check][e39p], [check][e32l]) | 1 fixture PDB (`msvc-x64-sourcelink`): `link /SOURCELINK` writes `sourcelink$1` and `sourcelink$2` with the JSON files and an empty end marker `sourcelink$3`; `NamedStreamKind::NumberedSourceLink`, `SourceLink::parse_numbered`; other names such as `sourcelink$0` stay `Other` |
-| `srcsrv` | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][srv], [check][t:srcsrv], [check][e32s]) | not applicable (commands and URLs are not run or fetched) | complete ([code][srv], [check][t:srcsrv], [check][e32]) | complete ([code][ednam], [code][edit], [check][e34], [check][t:native_edit]) | complete ([code][exnm], [check][e32], [check][e34]) | 1 fixture PDB (`msvc-x64-srcsrv/demo.srcsrv.pdb`); split into sections and lines; `pdbstr -r` reads text that pdbrs writes (#34) |
+| `srcsrv` | — | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][srv], [check][t:srcsrv], [check][e32s]) | not applicable (commands and URLs are not run or fetched) | complete ([code][srv], [check][t:srcsrv], [check][e32]) | complete ([code][ednam], [code][edit], [check][e34], [check][t:native_edit]) | complete ([code][exnm], [check][e32], [check][e34]) | 1 fixture PDB (`msvc-x64-srcsrv/demo.srcsrv.pdb`); split into sections and lines; `pdbstr -r` reads text that pdb-rs writes (#34) |
 | Other named stream | any other name | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | not applicable (no layout; `NamedStreamKind::Other` keeps the bytes) | not applicable (no layout) | complete ([code][ednam], [check][t:native_edit], [check][e34]) | complete ([code][ednam], [code][edit], [check][e34], [check][t:native_edit]) | not applicable (no producer known) | The `native` example reports it; the editor blocks offset-moving edits while it exists |
 
-[addr]: ../../../crates/pdbrs/src/native/address.rs
-[blob]: ../../../crates/pdbrs/src/native/debug_stream/blob.rs
-[build]: ../../../crates/pdbrs/src/native/editor/plan/layout.rs
-[cont]: ../../../crates/pdbrs/src/native/container.rs
-[conv]: ../../../crates/pdbrs/src/native/container/convert.rs
-[dbg]: ../../../crates/pdbrs/src/native/debug_stream.rs
-[dbi]: ../../../crates/pdbrs/src/native/dbi.rs
-[dbib]: ../../../crates/pdbrs/src/native/dbi/builder.rs
-[dbih]: ../../../crates/pdbrs/src/native/dbi/header.rs
-[dbiw]: ../../../crates/pdbrs/src/native/dbi/write.rs
-[ddh]: ../../../crates/pdbrs/src/native/dbi/debug_header.rs
-[dmap]: ../../../crates/pdbrs/src/native/dbi/section_map.rs
-[dmi]: ../../../crates/pdbrs/src/native/dbi/module_info.rs
+[addr]: ../../../crates/pdb-rs/src/native/address.rs
+[blob]: ../../../crates/pdb-rs/src/native/debug_stream/blob.rs
+[build]: ../../../crates/pdb-rs/src/native/editor/plan/layout.rs
+[cont]: ../../../crates/pdb-rs/src/native/container.rs
+[conv]: ../../../crates/pdb-rs/src/native/container/convert.rs
+[dbg]: ../../../crates/pdb-rs/src/native/debug_stream.rs
+[dbi]: ../../../crates/pdb-rs/src/native/dbi.rs
+[dbib]: ../../../crates/pdb-rs/src/native/dbi/builder.rs
+[dbih]: ../../../crates/pdb-rs/src/native/dbi/header.rs
+[dbiw]: ../../../crates/pdb-rs/src/native/dbi/write.rs
+[ddh]: ../../../crates/pdb-rs/src/native/dbi/debug_header.rs
+[dmap]: ../../../crates/pdb-rs/src/native/dbi/section_map.rs
+[dmi]: ../../../crates/pdb-rs/src/native/dbi/module_info.rs
 [dmzr]: ../pdb.md#implemented-msfz-reading
 [dmzw]: ../pdb.md#implemented-msfz-writing
-[doc]: ../../../crates/pdbrs/src/native/injected_source/document.rs
-[dsc]: ../../../crates/pdbrs/src/native/dbi/section_contribution.rs
-[dsrc]: ../../../crates/pdbrs/src/native/dbi/sources.rs
-[dts]: ../../../crates/pdbrs/src/native/dbi/type_server.rs
-[e10]: https://github.com/napbat/pdbrs/issues/10#issuecomment-6407894516
-[e13m]: https://github.com/napbat/pdbrs/issues/13#issuecomment-6409858972
-[e13s]: https://github.com/napbat/pdbrs/issues/13#issuecomment-6409780019
-[e13t]: https://github.com/napbat/pdbrs/issues/13#issuecomment-6409615221
-[e14]: https://github.com/napbat/pdbrs/issues/14#issuecomment-6409977445
-[e15]: https://github.com/napbat/pdbrs/issues/15#issuecomment-6410580545
-[e15d]: https://github.com/napbat/pdbrs/issues/15#issuecomment-6410087219
-[e15s]: https://github.com/napbat/pdbrs/issues/15#issuecomment-6410251692
-[e1p]: https://github.com/napbat/pdbrs/issues/1#issuecomment-6415858998
-[e2]: https://github.com/napbat/pdbrs/issues/2#issuecomment-6407739492
-[e27]: https://github.com/napbat/pdbrs/issues/27#issuecomment-6412654019
-[e27a]: https://github.com/napbat/pdbrs/issues/27#issuecomment-6413593042
-[e27h]: https://github.com/napbat/pdbrs/issues/27#issuecomment-6413409733
-[e27s]: https://github.com/napbat/pdbrs/issues/27#issuecomment-6413702754
-[e29]: https://github.com/napbat/pdbrs/issues/29#issuecomment-6413252748
-[e3]: https://github.com/napbat/pdbrs/issues/3#issuecomment-6407739737
-[e30]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6413701533
-[e30c]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6417232997
-[e30v]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6416233151
-[e32]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6413507592
-[e32f]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6415860466
-[e32n]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6417232562
-[e32s]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6412876796
-[e32t]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6416234014
-[e33]: https://github.com/napbat/pdbrs/issues/33#issuecomment-6415053819
-[e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
-[e37]: https://github.com/napbat/pdbrs/issues/37#issuecomment-6416226843
-[e1mz]: https://github.com/napbat/pdbrs/issues/1#issuecomment-6418248178
+[doc]: ../../../crates/pdb-rs/src/native/injected_source/document.rs
+[dsc]: ../../../crates/pdb-rs/src/native/dbi/section_contribution.rs
+[dsrc]: ../../../crates/pdb-rs/src/native/dbi/sources.rs
+[dts]: ../../../crates/pdb-rs/src/native/dbi/type_server.rs
+[e10]: https://github.com/napbat/pdb-rs/issues/10#issuecomment-6407894516
+[e13m]: https://github.com/napbat/pdb-rs/issues/13#issuecomment-6409858972
+[e13s]: https://github.com/napbat/pdb-rs/issues/13#issuecomment-6409780019
+[e13t]: https://github.com/napbat/pdb-rs/issues/13#issuecomment-6409615221
+[e14]: https://github.com/napbat/pdb-rs/issues/14#issuecomment-6409977445
+[e15]: https://github.com/napbat/pdb-rs/issues/15#issuecomment-6410580545
+[e15d]: https://github.com/napbat/pdb-rs/issues/15#issuecomment-6410087219
+[e15s]: https://github.com/napbat/pdb-rs/issues/15#issuecomment-6410251692
+[e1p]: https://github.com/napbat/pdb-rs/issues/1#issuecomment-6415858998
+[e2]: https://github.com/napbat/pdb-rs/issues/2#issuecomment-6407739492
+[e27]: https://github.com/napbat/pdb-rs/issues/27#issuecomment-6412654019
+[e27a]: https://github.com/napbat/pdb-rs/issues/27#issuecomment-6413593042
+[e27h]: https://github.com/napbat/pdb-rs/issues/27#issuecomment-6413409733
+[e27s]: https://github.com/napbat/pdb-rs/issues/27#issuecomment-6413702754
+[e29]: https://github.com/napbat/pdb-rs/issues/29#issuecomment-6413252748
+[e3]: https://github.com/napbat/pdb-rs/issues/3#issuecomment-6407739737
+[e30]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6413701533
+[e30c]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6417232997
+[e30v]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6416233151
+[e32]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6413507592
+[e32f]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6415860466
+[e32n]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6417232562
+[e32s]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6412876796
+[e32t]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6416234014
+[e33]: https://github.com/napbat/pdb-rs/issues/33#issuecomment-6415053819
+[e34]: https://github.com/napbat/pdb-rs/issues/34#issuecomment-6415135725
+[e37]: https://github.com/napbat/pdb-rs/issues/37#issuecomment-6416226843
+[e1mz]: https://github.com/napbat/pdb-rs/issues/1#issuecomment-6418248178
 [fxmz]: ../../../fixtures/README.md#msfz-forms-of-microsofts-writer
-[e37d]: https://github.com/napbat/pdbrs/issues/37#issuecomment-6415233037
-[e38d]: https://github.com/napbat/pdbrs/issues/38#issuecomment-6416340034
-[e7]: https://github.com/napbat/pdbrs/issues/7#issuecomment-6407578735
-[e8]: https://github.com/napbat/pdbrs/issues/8#issuecomment-6407490702
-[e9]: https://github.com/napbat/pdbrs/issues/9#issuecomment-6407615021
-[edit]: ../../../crates/pdbrs/src/native/editor/model.rs
-[ednam]: ../../../crates/pdbrs/src/native/editor/named.rs
-[edop]: ../../../crates/pdbrs/src/native/editor/plan/opaque.rs
-[edstrip]: ../../../crates/pdbrs/src/native/editor/plan/strip.rs
-[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
-[edtyp]: ../../../crates/pdbrs/src/native/editor/types.rs
-[exd]: ../../../crates/pdbrs/examples/native/dbi.rs
-[exm]: ../../../crates/pdbrs/examples/msf.rs
-[exn]: ../../../crates/pdbrs/examples/native/main.rs
-[exnm]: ../../../crates/pdbrs/examples/native/named.rs
-[exs]: ../../../crates/pdbrs/examples/native/symbols.rs
-[ext]: ../../../crates/pdbrs/src/native/external.rs
-[ext_]: ../../../crates/pdbrs/examples/native/types.rs
-[fix]: ../../../crates/pdbrs/src/native/debug_stream/fixup.rs
-[fpm]: ../../../crates/pdbrs/src/native/msf/free_page_map.rs
-[fpo]: ../../../crates/pdbrs/src/native/fpo.rs
-[func]: ../../../crates/pdbrs/src/native/debug_stream/function.rs
-[gsi]: ../../../crates/pdbrs/src/native/symbols/gsi.rs
-[gsiw]: ../../../crates/pdbrs/src/native/symbols/gsi/write.rs
-[hash]: ../../../crates/pdbrs/src/native/hash.rs
-[ht]: ../../../crates/pdbrs/src/native/hash_table.rs
-[hto]: ../../../crates/pdbrs/src/native/hash_table/owned.rs
-[info]: ../../../crates/pdbrs/src/native/info.rs
-[infob]: ../../../crates/pdbrs/src/native/info/builder.rs
-[inj]: ../../../crates/pdbrs/src/native/injected_source.rs
-[injb]: ../../../crates/pdbrs/src/native/injected_source/builder.rs
-[link]: ../../../crates/pdbrs/src/native/auxiliary/link_info.rs
-[loc]: ../../../crates/pdbrs/src/native/locate.rs
-[mdir]: ../../../crates/pdbrs/src/native/msf/directory.rs
-[msf]: ../../../crates/pdbrs/src/native/msf.rs
-[msfz]: ../../../crates/pdbrs/src/native/msfz.rs
-[mw]: ../../../crates/pdbrs/src/native/msf/write.rs
-[mwl]: ../../../crates/pdbrs/src/native/msf/write/layout.rs
-[mzcache]: ../../../crates/pdbrs/src/native/msfz/cache.rs
-[mzdir]: ../../../crates/pdbrs/src/native/msfz/directory.rs
-[mzhdr]: ../../../crates/pdbrs/src/native/msfz/header.rs
-[mzlay]: ../../../crates/pdbrs/src/native/msfz/layout.rs
-[mzt]: ../../../crates/pdbrs/src/native/msfz/tests.rs
-[mzw]: ../../../crates/pdbrs/src/native/msfz/write.rs
-[mzwl]: ../../../crates/pdbrs/src/native/msfz/write/layout.rs
-[names]: ../../../crates/pdbrs/src/native/names.rs
-[namesb]: ../../../crates/pdbrs/src/native/names/builder.rs
-[natvis]: ../../../crates/pdbrs/src/native/injected_source/natvis.rs
-[old]: ../../../crates/pdbrs/src/native/msf/old_directory.rs
-[omap]: ../../../crates/pdbrs/src/native/debug_stream/omap.rs
-[plantypes]: ../../../crates/pdbrs/src/native/editor/plan/layout/module_types.rs
-[psi]: ../../../crates/pdbrs/src/native/symbols/psi.rs
-[psiw]: ../../../crates/pdbrs/src/native/symbols/psi/write.rs
-[reader]: ../../../crates/pdbrs/src/native/reader.rs
-[rebuild]: ../../../crates/pdbrs/src/native/editor/rebuild.rs
-[remap]: ../../../crates/pdbrs/src/native/editor/remap.rs
-[sec]: ../../../crates/pdbrs/src/native/section.rs
-[slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs
-[slnk]: ../../../crates/pdbrs/src/native/auxiliary/source_link.rs
-[srv]: ../../../crates/pdbrs/src/native/auxiliary/source_server.rs
-[stab]: ../../../crates/pdbrs/src/native/symbols/table.rs
-[syms]: ../../../crates/pdbrs/src/native/symbols.rs
-[symv]: ../../../crates/pdbrs/src/native/codeview/symbol/validate.rs
-[t:address]: ../../../crates/pdbrs/tests/address.rs
-[t:auxiliary]: ../../../crates/pdbrs/tests/auxiliary.rs
-[t:dbi]: ../../../crates/pdbrs/tests/dbi.rs
-[t:dbi_builder]: ../../../crates/pdbrs/tests/dbi_builder.rs
-[t:dbi_encode]: ../../../crates/pdbrs/tests/dbi_encode.rs
-[t:dbi_tables]: ../../../crates/pdbrs/tests/dbi_tables.rs
-[t:debug_stream]: ../../../crates/pdbrs/tests/debug_stream.rs
-[t:dotnet_documents]: ../../../crates/pdbrs/tests/dotnet_documents.rs
-[t:external]: ../../../crates/pdbrs/tests/external.rs
-[t:fpo]: ../../../crates/pdbrs/tests/fpo.rs
-[t:free_page_map]: ../../../crates/pdbrs/tests/free_page_map.rs
-[t:hash_table]: ../../../crates/pdbrs/tests/hash_table.rs
-[t:identity]: ../../../crates/pdbrs/tests/identity.rs
-[t:info]: ../../../crates/pdbrs/tests/info.rs
-[t:info_builder]: ../../../crates/pdbrs/tests/info_builder.rs
-[t:injected_source]: ../../../crates/pdbrs/tests/injected_source.rs
-[t:locate]: ../../../crates/pdbrs/tests/locate/main.rs
-[t:module_types]: ../../../crates/pdbrs/tests/module_types.rs
-[t:msf]: ../../../crates/pdbrs/tests/msf.rs
-[t:msf_write]: ../../../crates/pdbrs/tests/msf_write.rs
-[t:msfz_convert]: ../../../crates/pdbrs/tests/msfz_convert.rs
-[t:msfz_pdb]: ../../../crates/pdbrs/tests/msfz_pdb.rs
-[t:msfz_write]: ../../../crates/pdbrs/tests/msfz_write.rs
-[t:names]: ../../../crates/pdbrs/tests/names.rs
-[t:native]: ../../../crates/pdbrs/tests/native.rs
-[t:native_edit]: ../../../crates/pdbrs/tests/native_edit/main.rs
-[t:native_notm]: ../../../crates/pdbrs/tests/native_notm.rs
-[t:natvis]: ../../../crates/pdbrs/tests/natvis.rs
-[t:old_directory]: ../../../crates/pdbrs/tests/old_directory.rs
-[t:omap]: ../../../crates/pdbrs/tests/omap.rs
-[t:remap_omap]: ../../../crates/pdbrs/tests/remap_omap.rs
-[t:section]: ../../../crates/pdbrs/tests/section.rs
-[t:source_link]: ../../../crates/pdbrs/tests/source_link.rs
-[t:srcsrv]: ../../../crates/pdbrs/tests/srcsrv.rs
-[t:symbol_index_write]: ../../../crates/pdbrs/tests/symbol_index_write.rs
-[t:symbols]: ../../../crates/pdbrs/tests/symbols.rs
-[t:tm_cache]: ../../../crates/pdbrs/tests/tm_cache.rs
-[t:type_hash]: ../../../crates/pdbrs/tests/type_hash.rs
-[t:type_map_validation]: ../../../crates/pdbrs/tests/type_map_validation.rs
-[t:type_references]: ../../../crates/pdbrs/tests/type_references.rs
-[t:type_write]: ../../../crates/pdbrs/tests/type_write.rs
-[t:types]: ../../../crates/pdbrs/tests/types.rs
-[thash]: ../../../crates/pdbrs/src/native/types/hash.rs
-[tmap]: ../../../crates/pdbrs/src/native/auxiliary/type_map.rs
-[tmapv]: ../../../crates/pdbrs/src/native/auxiliary/type_map/validate.rs
-[tmc]: ../../../crates/pdbrs/src/native/auxiliary/tm_cache.rs
-[tval]: ../../../crates/pdbrs/src/native/types/validate.rs
-[tw]: ../../../crates/pdbrs/src/native/types/write.rs
-[types]: ../../../crates/pdbrs/src/native/types.rs
-[udtu]: ../../../crates/pdbrs/src/native/auxiliary/udt_source_line_undone.rs
-[e39p]: https://github.com/napbat/pdbrs/issues/39#issuecomment-6419585032
-[e30p]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6419817816
-[e32l]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6419171850
-[e32o]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6418682256
-[e1z]: https://github.com/napbat/pdbrs/issues/1#issuecomment-6418690029
-[e43]: https://github.com/napbat/pdbrs/issues/43#issuecomment-6441728696
+[e37d]: https://github.com/napbat/pdb-rs/issues/37#issuecomment-6415233037
+[e38d]: https://github.com/napbat/pdb-rs/issues/38#issuecomment-6416340034
+[e7]: https://github.com/napbat/pdb-rs/issues/7#issuecomment-6407578735
+[e8]: https://github.com/napbat/pdb-rs/issues/8#issuecomment-6407490702
+[e9]: https://github.com/napbat/pdb-rs/issues/9#issuecomment-6407615021
+[edit]: ../../../crates/pdb-rs/src/native/editor/model.rs
+[ednam]: ../../../crates/pdb-rs/src/native/editor/named.rs
+[edop]: ../../../crates/pdb-rs/src/native/editor/plan/opaque.rs
+[edstrip]: ../../../crates/pdb-rs/src/native/editor/plan/strip.rs
+[edsym]: ../../../crates/pdb-rs/src/native/editor/symbols.rs
+[edtyp]: ../../../crates/pdb-rs/src/native/editor/types.rs
+[exd]: ../../../crates/pdb-rs/examples/native/dbi.rs
+[exm]: ../../../crates/pdb-rs/examples/msf.rs
+[exn]: ../../../crates/pdb-rs/examples/native/main.rs
+[exnm]: ../../../crates/pdb-rs/examples/native/named.rs
+[exs]: ../../../crates/pdb-rs/examples/native/symbols.rs
+[ext]: ../../../crates/pdb-rs/src/native/external.rs
+[ext_]: ../../../crates/pdb-rs/examples/native/types.rs
+[fix]: ../../../crates/pdb-rs/src/native/debug_stream/fixup.rs
+[fpm]: ../../../crates/pdb-rs/src/native/msf/free_page_map.rs
+[fpo]: ../../../crates/pdb-rs/src/native/fpo.rs
+[func]: ../../../crates/pdb-rs/src/native/debug_stream/function.rs
+[gsi]: ../../../crates/pdb-rs/src/native/symbols/gsi.rs
+[gsiw]: ../../../crates/pdb-rs/src/native/symbols/gsi/write.rs
+[hash]: ../../../crates/pdb-rs/src/native/hash.rs
+[ht]: ../../../crates/pdb-rs/src/native/hash_table.rs
+[hto]: ../../../crates/pdb-rs/src/native/hash_table/owned.rs
+[info]: ../../../crates/pdb-rs/src/native/info.rs
+[infob]: ../../../crates/pdb-rs/src/native/info/builder.rs
+[inj]: ../../../crates/pdb-rs/src/native/injected_source.rs
+[injb]: ../../../crates/pdb-rs/src/native/injected_source/builder.rs
+[link]: ../../../crates/pdb-rs/src/native/auxiliary/link_info.rs
+[loc]: ../../../crates/pdb-rs/src/native/locate.rs
+[mdir]: ../../../crates/pdb-rs/src/native/msf/directory.rs
+[msf]: ../../../crates/pdb-rs/src/native/msf.rs
+[msfz]: ../../../crates/pdb-rs/src/native/msfz.rs
+[mw]: ../../../crates/pdb-rs/src/native/msf/write.rs
+[mwl]: ../../../crates/pdb-rs/src/native/msf/write/layout.rs
+[mzcache]: ../../../crates/pdb-rs/src/native/msfz/cache.rs
+[mzdir]: ../../../crates/pdb-rs/src/native/msfz/directory.rs
+[mzhdr]: ../../../crates/pdb-rs/src/native/msfz/header.rs
+[mzlay]: ../../../crates/pdb-rs/src/native/msfz/layout.rs
+[mzt]: ../../../crates/pdb-rs/src/native/msfz/tests.rs
+[mzw]: ../../../crates/pdb-rs/src/native/msfz/write.rs
+[mzwl]: ../../../crates/pdb-rs/src/native/msfz/write/layout.rs
+[names]: ../../../crates/pdb-rs/src/native/names.rs
+[namesb]: ../../../crates/pdb-rs/src/native/names/builder.rs
+[natvis]: ../../../crates/pdb-rs/src/native/injected_source/natvis.rs
+[old]: ../../../crates/pdb-rs/src/native/msf/old_directory.rs
+[omap]: ../../../crates/pdb-rs/src/native/debug_stream/omap.rs
+[plantypes]: ../../../crates/pdb-rs/src/native/editor/plan/layout/module_types.rs
+[psi]: ../../../crates/pdb-rs/src/native/symbols/psi.rs
+[psiw]: ../../../crates/pdb-rs/src/native/symbols/psi/write.rs
+[reader]: ../../../crates/pdb-rs/src/native/reader.rs
+[rebuild]: ../../../crates/pdb-rs/src/native/editor/rebuild.rs
+[remap]: ../../../crates/pdb-rs/src/native/editor/remap.rs
+[sec]: ../../../crates/pdb-rs/src/native/section.rs
+[slinker]: ../../../crates/pdb-rs/src/native/codeview/symbol/linker.rs
+[slnk]: ../../../crates/pdb-rs/src/native/auxiliary/source_link.rs
+[srv]: ../../../crates/pdb-rs/src/native/auxiliary/source_server.rs
+[stab]: ../../../crates/pdb-rs/src/native/symbols/table.rs
+[syms]: ../../../crates/pdb-rs/src/native/symbols.rs
+[symv]: ../../../crates/pdb-rs/src/native/codeview/symbol/validate.rs
+[t:address]: ../../../crates/pdb-rs/tests/address.rs
+[t:auxiliary]: ../../../crates/pdb-rs/tests/auxiliary.rs
+[t:dbi]: ../../../crates/pdb-rs/tests/dbi.rs
+[t:dbi_builder]: ../../../crates/pdb-rs/tests/dbi_builder.rs
+[t:dbi_encode]: ../../../crates/pdb-rs/tests/dbi_encode.rs
+[t:dbi_tables]: ../../../crates/pdb-rs/tests/dbi_tables.rs
+[t:debug_stream]: ../../../crates/pdb-rs/tests/debug_stream.rs
+[t:dotnet_documents]: ../../../crates/pdb-rs/tests/dotnet_documents.rs
+[t:external]: ../../../crates/pdb-rs/tests/external.rs
+[t:fpo]: ../../../crates/pdb-rs/tests/fpo.rs
+[t:free_page_map]: ../../../crates/pdb-rs/tests/free_page_map.rs
+[t:hash_table]: ../../../crates/pdb-rs/tests/hash_table.rs
+[t:identity]: ../../../crates/pdb-rs/tests/identity.rs
+[t:info]: ../../../crates/pdb-rs/tests/info.rs
+[t:info_builder]: ../../../crates/pdb-rs/tests/info_builder.rs
+[t:injected_source]: ../../../crates/pdb-rs/tests/injected_source.rs
+[t:locate]: ../../../crates/pdb-rs/tests/locate/main.rs
+[t:module_types]: ../../../crates/pdb-rs/tests/module_types.rs
+[t:msf]: ../../../crates/pdb-rs/tests/msf.rs
+[t:msf_write]: ../../../crates/pdb-rs/tests/msf_write.rs
+[t:msfz_convert]: ../../../crates/pdb-rs/tests/msfz_convert.rs
+[t:msfz_pdb]: ../../../crates/pdb-rs/tests/msfz_pdb.rs
+[t:msfz_write]: ../../../crates/pdb-rs/tests/msfz_write.rs
+[t:names]: ../../../crates/pdb-rs/tests/names.rs
+[t:native]: ../../../crates/pdb-rs/tests/native.rs
+[t:native_edit]: ../../../crates/pdb-rs/tests/native_edit/main.rs
+[t:native_notm]: ../../../crates/pdb-rs/tests/native_notm.rs
+[t:natvis]: ../../../crates/pdb-rs/tests/natvis.rs
+[t:old_directory]: ../../../crates/pdb-rs/tests/old_directory.rs
+[t:omap]: ../../../crates/pdb-rs/tests/omap.rs
+[t:remap_omap]: ../../../crates/pdb-rs/tests/remap_omap.rs
+[t:section]: ../../../crates/pdb-rs/tests/section.rs
+[t:source_link]: ../../../crates/pdb-rs/tests/source_link.rs
+[t:srcsrv]: ../../../crates/pdb-rs/tests/srcsrv.rs
+[t:symbol_index_write]: ../../../crates/pdb-rs/tests/symbol_index_write.rs
+[t:symbols]: ../../../crates/pdb-rs/tests/symbols.rs
+[t:tm_cache]: ../../../crates/pdb-rs/tests/tm_cache.rs
+[t:type_hash]: ../../../crates/pdb-rs/tests/type_hash.rs
+[t:type_map_validation]: ../../../crates/pdb-rs/tests/type_map_validation.rs
+[t:type_references]: ../../../crates/pdb-rs/tests/type_references.rs
+[t:type_write]: ../../../crates/pdb-rs/tests/type_write.rs
+[t:types]: ../../../crates/pdb-rs/tests/types.rs
+[thash]: ../../../crates/pdb-rs/src/native/types/hash.rs
+[tmap]: ../../../crates/pdb-rs/src/native/auxiliary/type_map.rs
+[tmapv]: ../../../crates/pdb-rs/src/native/auxiliary/type_map/validate.rs
+[tmc]: ../../../crates/pdb-rs/src/native/auxiliary/tm_cache.rs
+[tval]: ../../../crates/pdb-rs/src/native/types/validate.rs
+[tw]: ../../../crates/pdb-rs/src/native/types/write.rs
+[types]: ../../../crates/pdb-rs/src/native/types.rs
+[udtu]: ../../../crates/pdb-rs/src/native/auxiliary/udt_source_line_undone.rs
+[e39p]: https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419585032
+[e30p]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6419817816
+[e32l]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6419171850
+[e32o]: https://github.com/napbat/pdb-rs/issues/32#issuecomment-6418682256
+[e1z]: https://github.com/napbat/pdb-rs/issues/1#issuecomment-6418690029
+[e43]: https://github.com/napbat/pdb-rs/issues/43#issuecomment-6441728696

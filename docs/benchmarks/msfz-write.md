@@ -12,7 +12,7 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 
 - Before: `main` at `a2162d8`. After: commit `b4154eb`. Both are release builds with the same
   toolchain as [baseline.md](baseline.md), on the same machine.
-- Bench: `cargo bench -p pdbrs --bench baseline -- --filter msfz/write-default --runs 10`. The
+- Bench: `cargo bench -p pdb-rs --bench baseline -- --filter msfz/write-default --runs 10`. The
   row `msfz/write-default` writes `msvc-x64-large` with the default options (1 warm-up run and
   10 timed runs in one child process).
 - Passes: a throwaway program (not in the repository) timed `Container::to_msfz` (the plan) and

@@ -40,7 +40,7 @@ Kinds `0xf1`, `0xf3`, `0xf5`, `0xff` and `0x100` occur in object files; `link.ex
 
 | Kind | Value | Raw preservation | Semantic reading | Reference validation | Writing | Editing and index rebuilding | Independent fixture evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `DEBUG_S_INLINEE_MDTOKEN_MAP` | `0xfe` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | missing (#31: external-input; no layout; `LineSubsection::Unsupported` keeps the bytes) | missing (#31: external-input; no layout) | partial (#31: the encoder copies the raw bytes; external-input) | partial (#31: the module stream writer keeps the raw bytes; external-input) | missing (#31: external-input; no local producer; #39 found no local producer ([triage][e39p])) | Only the pdb-rs `line_data.md` names it; no source gives a layout (#31) |
+| `DEBUG_S_INLINEE_MDTOKEN_MAP` | `0xfe` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | missing (#31: external-input; no layout; `LineSubsection::Unsupported` keeps the bytes) | missing (#31: external-input; no layout) | partial (#31: the encoder copies the raw bytes; external-input) | partial (#31: the module stream writer keeps the raw bytes; external-input) | missing (#31: external-input; no local producer; #39 found no local producer ([triage][e39p])) | Only the Microsoft pdb-rs `line_data.md` names it; no source gives a layout (#31) |
 | `DEBUG_S_XFGHASH_TYPE` | `0xff` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | complete ([code][lxfg], [check][t:lines_codec], [check][e31]) | not applicable (object-file kind; its type indices refer to the object file) | complete ([code][lxfg], [check][t:lines_codec], [check][e31]) | complete ([code][dmodw], [code][lmod], [check][e31], [check][e33]) | partial (#31: only in object files of #27 (7 subsections re-encode); `link.exe` does not copy it to the PDB; external-input; clang-cl `-gcodeview-ghash`, `-gline-tables-only` and `/Z7` with `lld-link` do not write it into a PDB ([triage][e39p])) | No fixture; LLVM `DebugSubsectionKind::XfgHashType`; 12-byte entries from the MSVC 14.44 objects of `msvc-x64-xfg` (#31); `link.exe` drops it (#27) |
 | `DEBUG_S_XFGHASH_VIRTUAL` | `0x100` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | complete ([code][lxfg], [check][t:lines_codec], [check][e31]) | not applicable (object-file kind; its type indices refer to the object file) | complete ([code][lxfg], [check][t:lines_codec], [check][e31]) | complete ([code][dmodw], [code][lmod], [check][e31], [check][e33]) | partial (#31: only in object files of #27 (2 subsections re-encode); `link.exe` does not copy it to the PDB; external-input; clang-cl `-gcodeview-ghash`, `-gline-tables-only` and `/Z7` with `lld-link` do not write it into a PDB ([triage][e39p])) | No fixture; LLVM `DebugSubsectionKind::XfgHashVirtual`; 16-byte entries from the same objects (#31); `link.exe` drops it (#27) |
 | `DEBUG_S_IGNORE` bit | `0x80000000` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | complete ([code][lines], [check][t:lines_codec]) | not applicable (a reader ignores the contents) | complete ([code][lines], [check][t:lines_codec]) | complete ([code][dmodw], [code][lmod], [check][e31], [check][e33]) | missing (#31: external-input; no local producer writes it; #39 found no local producer ([triage][e39p])) | `LineSubsection::Ignored` keeps the kind and the bytes; `cvinfo.h` tells readers to ignore the contents |
@@ -61,43 +61,43 @@ These rows split the layout variants inside the decoded kinds.
 | `DEBUG_S_INLINEELINES` signature `CV_INLINEE_SOURCE_LINE_SIGNATURE` | `0` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | complete ([code][linl], [check][t:lines_codec]) | complete ([code][lmod], [check][e31], [check][t:lines]) | complete ([code][linl], [check][t:lines_codec], [check][e31]) | complete ([code][dmodw], [code][lmod], [check][e31], [check][e33]) | complete ([code][exl], [check][e31], [check][e33]) | 15 fixture PDBs, 93 items |
 | `DEBUG_S_INLINEELINES` signature with extra files | `1` | complete ([code][dmod], [code][lines], [check][t:lines], [check][e15]) | complete ([code][linl], [check][t:lines_codec]) | complete ([code][lmod], [check][e31], [check][t:lines]) | complete ([code][linl], [check][t:lines_codec], [check][e31]) | complete ([code][dmodw], [code][lmod], [check][e31], [check][e33]) | complete ([code][exl], [check][e31], [check][e33]) | 6 fixture PDBs, 6 items |
 
-[dmod]: ../../../crates/pdbrs/src/native/dbi/module.rs
-[dmodw]: ../../../crates/pdbrs/src/native/dbi/module/write.rs
-[e10]: https://github.com/napbat/pdbrs/issues/10#issuecomment-6407894516
-[e13s]: https://github.com/napbat/pdbrs/issues/13#issuecomment-6409780019
-[e15]: https://github.com/napbat/pdbrs/issues/15#issuecomment-6410580545
-[e30]: https://github.com/napbat/pdbrs/issues/30#issuecomment-6413701533
-[e31]: https://github.com/napbat/pdbrs/issues/31#issuecomment-6412958507
-[e31c]: https://github.com/napbat/pdbrs/issues/31#issuecomment-6416233631
-[e31s]: https://github.com/napbat/pdbrs/issues/31#issuecomment-6415859493
-[e33]: https://github.com/napbat/pdbrs/issues/33#issuecomment-6415053819
-[e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
-[e5]: https://github.com/napbat/pdbrs/issues/5#issuecomment-6407599155
-[e6]: https://github.com/napbat/pdbrs/issues/6#issuecomment-6407539677
-[edit]: ../../../crates/pdbrs/src/native/editor/model.rs
-[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
-[exl]: ../../../crates/pdbrs/examples/native/lines.rs
-[gref]: ../../../crates/pdbrs/src/native/dbi/module/global_refs.rs
-[lasm]: ../../../crates/pdbrs/src/native/lines/assembly_input.rs
-[lblk]: ../../../crates/pdbrs/src/native/lines/blocks.rs
-[lchk]: ../../../crates/pdbrs/src/native/lines/checksums.rs
-[lfd]: ../../../crates/pdbrs/src/native/lines/frame_data.rs
-[lines]: ../../../crates/pdbrs/src/native/lines.rs
-[linl]: ../../../crates/pdbrs/src/native/lines/inlinee.rs
-[lmod]: ../../../crates/pdbrs/src/native/lines/module.rs
-[lrva]: ../../../crates/pdbrs/src/native/lines/coff_symbol_rva.rs
-[lstr]: ../../../crates/pdbrs/src/native/lines/string_table.rs
-[lsym]: ../../../crates/pdbrs/src/native/lines/symbol_records.rs
-[ltok]: ../../../crates/pdbrs/src/native/lines/token_map.rs
-[lxfg]: ../../../crates/pdbrs/src/native/lines/xfg_hash.rs
-[lxs]: ../../../crates/pdbrs/src/native/lines/cross_scope.rs
-[sscope]: ../../../crates/pdbrs/src/native/codeview/symbol/scope.rs
-[sscw]: ../../../crates/pdbrs/src/native/codeview/symbol/scope/write.rs
-[symv]: ../../../crates/pdbrs/src/native/codeview/symbol/validate.rs
-[t:cross_scope]: ../../../crates/pdbrs/tests/cross_scope.rs
-[t:dbi]: ../../../crates/pdbrs/tests/dbi.rs
-[t:lines]: ../../../crates/pdbrs/tests/lines.rs
-[t:lines_codec]: ../../../crates/pdbrs/tests/lines_codec/main.rs
-[t:symbol_validation]: ../../../crates/pdbrs/tests/symbol_validation.rs
-[xscope]: ../../../crates/pdbrs/src/native/lines/cross_scope/validate.rs
-[e39p]: https://github.com/napbat/pdbrs/issues/39#issuecomment-6419585032
+[dmod]: ../../../crates/pdb-rs/src/native/dbi/module.rs
+[dmodw]: ../../../crates/pdb-rs/src/native/dbi/module/write.rs
+[e10]: https://github.com/napbat/pdb-rs/issues/10#issuecomment-6407894516
+[e13s]: https://github.com/napbat/pdb-rs/issues/13#issuecomment-6409780019
+[e15]: https://github.com/napbat/pdb-rs/issues/15#issuecomment-6410580545
+[e30]: https://github.com/napbat/pdb-rs/issues/30#issuecomment-6413701533
+[e31]: https://github.com/napbat/pdb-rs/issues/31#issuecomment-6412958507
+[e31c]: https://github.com/napbat/pdb-rs/issues/31#issuecomment-6416233631
+[e31s]: https://github.com/napbat/pdb-rs/issues/31#issuecomment-6415859493
+[e33]: https://github.com/napbat/pdb-rs/issues/33#issuecomment-6415053819
+[e34]: https://github.com/napbat/pdb-rs/issues/34#issuecomment-6415135725
+[e5]: https://github.com/napbat/pdb-rs/issues/5#issuecomment-6407599155
+[e6]: https://github.com/napbat/pdb-rs/issues/6#issuecomment-6407539677
+[edit]: ../../../crates/pdb-rs/src/native/editor/model.rs
+[edsym]: ../../../crates/pdb-rs/src/native/editor/symbols.rs
+[exl]: ../../../crates/pdb-rs/examples/native/lines.rs
+[gref]: ../../../crates/pdb-rs/src/native/dbi/module/global_refs.rs
+[lasm]: ../../../crates/pdb-rs/src/native/lines/assembly_input.rs
+[lblk]: ../../../crates/pdb-rs/src/native/lines/blocks.rs
+[lchk]: ../../../crates/pdb-rs/src/native/lines/checksums.rs
+[lfd]: ../../../crates/pdb-rs/src/native/lines/frame_data.rs
+[lines]: ../../../crates/pdb-rs/src/native/lines.rs
+[linl]: ../../../crates/pdb-rs/src/native/lines/inlinee.rs
+[lmod]: ../../../crates/pdb-rs/src/native/lines/module.rs
+[lrva]: ../../../crates/pdb-rs/src/native/lines/coff_symbol_rva.rs
+[lstr]: ../../../crates/pdb-rs/src/native/lines/string_table.rs
+[lsym]: ../../../crates/pdb-rs/src/native/lines/symbol_records.rs
+[ltok]: ../../../crates/pdb-rs/src/native/lines/token_map.rs
+[lxfg]: ../../../crates/pdb-rs/src/native/lines/xfg_hash.rs
+[lxs]: ../../../crates/pdb-rs/src/native/lines/cross_scope.rs
+[sscope]: ../../../crates/pdb-rs/src/native/codeview/symbol/scope.rs
+[sscw]: ../../../crates/pdb-rs/src/native/codeview/symbol/scope/write.rs
+[symv]: ../../../crates/pdb-rs/src/native/codeview/symbol/validate.rs
+[t:cross_scope]: ../../../crates/pdb-rs/tests/cross_scope.rs
+[t:dbi]: ../../../crates/pdb-rs/tests/dbi.rs
+[t:lines]: ../../../crates/pdb-rs/tests/lines.rs
+[t:lines_codec]: ../../../crates/pdb-rs/tests/lines_codec/main.rs
+[t:symbol_validation]: ../../../crates/pdb-rs/tests/symbol_validation.rs
+[xscope]: ../../../crates/pdb-rs/src/native/lines/cross_scope/validate.rs
+[e39p]: https://github.com/napbat/pdb-rs/issues/39#issuecomment-6419585032

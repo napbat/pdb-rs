@@ -1,7 +1,7 @@
 // The F# demo uses an async workflow, task and sequence expressions, records, discriminated unions
 // and pattern matching. Without arguments, it prints a checksum and exits with code 0. With the
 // argument "stack", it prints a stack trace with file names and line numbers.
-module PdbrsDemo.Program
+module Pdb.Rs.Demo.Program
 
 type Point = { X: int; Y: int }
 

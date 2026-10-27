@@ -2,7 +2,7 @@
 // body to the document Mapped.template, #line hidden gives a hidden sequence point and
 // #line default returns to this file. Compute returns its argument, so the checksum does not
 // change.
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 internal static class MappedRegion
 {

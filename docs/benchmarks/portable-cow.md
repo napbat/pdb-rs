@@ -14,7 +14,7 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 - Before: commit `074c364` (`main` at `d1d3fdd` with the two new bench rows). After: commit
   `13fd082`. Both are release builds with the same toolchain as [baseline.md](baseline.md), on
   the same machine.
-- Bench: `cargo bench -p pdbrs --bench baseline -- --filter portable/ --runs 10`. The rows
+- Bench: `cargo bench -p pdb-rs --bench baseline -- --filter portable/ --runs 10`. The rows
   `portable/edit-document` (the name of document 1 gets the suffix `.edited`) and
   `portable/edit-method` (the lines of the first method with sequence points + 1000) are new
   for #49. All rows use `dotnet-csharp-embed-sources` (21,944 bytes), the largest portable

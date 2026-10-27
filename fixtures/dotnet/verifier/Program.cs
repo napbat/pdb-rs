@@ -1,7 +1,7 @@
 // Print the canonical dump of a Portable PDB through System.Reflection.Metadata (SRM).
 //
 // fixtures/README.md ("Portable PDB verifier") describes the format. The `verify-portable`
-// command of pdbrs-fixtures prints the same format with pdbrs and compares the two outputs.
+// command of pdb-rs-fixtures prints the same format with pdb-rs and compares the two outputs.
 //
 // SRM does not expose the stream headers, the #~ header fields or the external row counts of
 // the #Pdb stream. This program reads these values from the bytes. Then it checks them against

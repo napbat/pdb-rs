@@ -1,23 +1,23 @@
 # Fuzzing
 
-This document records the fuzz targets of `pdbrs`, the commands, the limits and the recorded
-runs (#35). The targets are in `crates/pdbrs/fuzz/`. `crates/pdbrs/fuzz/README.md` tells why the
+This document records the fuzz targets of `pdb-rs`, the commands, the limits and the recorded
+runs (#35). The targets are in `crates/pdb-rs/fuzz/`. `crates/pdb-rs/fuzz/README.md` tells why the
 package is outside the stable workspace and how to install the tools.
 
 ## Targets
 
-Each target calls one function of the `pdbrs-fuzz` library. The library uses only the public API
-of `pdbrs`. A reader target ignores errors, because an error is a valid result for malformed
+Each target calls one function of the `pdb-rs-fuzz` library. The library uses only the public API
+of `pdb-rs`. A reader target ignores errors, because an error is a valid result for malformed
 input. A panic, a failed assertion, a sanitizer report, a hang or memory use above the limit is a
 finding. A round-trip target checks self-consistency only: the output of an encoder must decode
 to the same value. It does not check that other readers accept the output.
 
 | Target | Input | Public API under test |
 | --- | --- | --- |
-| `msf` | MSF 7.0 file | `pdbrs::probe`, `Msf::read`, `Msf::with_limits`, each stream, `validate_free_page_map`, `OldDirectory` |
+| `msf` | MSF 7.0 file | `pdb_rs::probe`, `Msf::read`, `Msf::with_limits`, each stream, `validate_free_page_map`, `OldDirectory` |
 | `msf_repack` | selector byte, MSF file | `Msf::repack` round trip: page size and stream 0 policy, written streams, free page map |
 | `msf_build` | page size byte, tagged streams | `MsfBuilder` round trip: `plan`, `to_vec`, `Msf::read`, stream bytes |
-| `msfz` | MSFZ file | `pdbrs::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
+| `msfz` | MSFZ file | `pdb_rs::probe`, `Msfz::with_limits`, `Container::with_limits`, each stream twice (`read_all` and three windows), small directory limit |
 | `msfz_chunks` | selector byte, two declared chunk sizes, fragment offset, stored chunk bytes | an MSFZ container around one or two chunks (stored, zstd or raw DEFLATE) and one fragment across them; reads with and without the chunk cache must agree; stored chunks must give their bytes |
 | `msfz_convert` | selector byte, MSF 7.0 or MSFZ file | `Container::to_msfz` and `Container::to_msf` round trip (#38): the selector gives the chunk size, one stream for each chunk, the chunk and directory codecs, padding and the stream 0 policy; a second write gives the same bytes; a plan that keeps about half of the compressed chunks (#50) gives the same bytes; both outputs give the input streams; the MSF output has no unreferenced allocated page |
 | `native_pdb` | native PDB file | `native::Pdb` and every stream that it names: Info, named streams, TPI, IPI, hash streams, DBI, FPO, frame data, modules, symbol records, GSI, PSI |
@@ -35,7 +35,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_indexes` | bucket selector, GSI part, PSI part, records | `GlobalSymbolIndex`, `PublicSymbolIndex`, lookup, record and address checks |
 | `native_named` | kind selector, stream | `LinkInfo`, `TmCache`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceHeaderBlock`, `DotNetDocument`, `OldDirectory` |
 | `portable_pdb` | Portable PDB or `MPDB` payload | `portable::Pdb`: rows, heaps, documents, sequence points, scopes, imports, embedded sources, `validate_debug` |
-| `portable_metadata` | file | `MetadataRoot::read`, `pdbrs::probe`, `pdbrs::Pdb::parse` |
+| `portable_metadata` | file | `MetadataRoot::read`, `pdb_rs::probe`, `pdb_rs::Pdb::parse` |
 | `portable_blobs` | kind selector, blob | round trips of `DocumentName`, `SequencePoints`, `LocalConstantSignature`, `Imports`, compressed integers; `split_document_name` |
 | `custom_debug_info` | kind selector, value | round trip of each `CustomDebugValue` kind; native `MD2`, `asyncMethodInfo` and symbol attributes |
 | `mpdb` | payload | `decode_embedded` and `encode_embedded` round trips |
@@ -57,7 +57,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_editor` | PDB part, edit bytes | `native::PdbEditor` (#42): each edit byte inserts, replaces or removes a named stream; renames, removes or pushes a public or global symbol; pushes an `LF_ARGLIST` of earlier type indices; changes or removes a module symbol; changes a line number; calls `decode_all`; switches the strip option; or removes a type or an ID record (#47). A plan error ends the run. Else: a second plan gives the same bytes; the output parses with `Pdb::parse`; its Info identity and its DBI age agree with `plan.identity()`; each inserted named stream has its bytes and each removed one is absent; the report has one entry for each output stream |
 | `native_remap` | shape byte, pieces of `.text` | `PdbEditor::remap_addresses` (#43) on the synthetic program of the `native_synthetic` example, with a def-range, a block and a label more. The input selects the new RVA of `.text`, the section header order and up to 16 pieces of the old `.text`; each piece moves (in an order and with a gap from the input) or is removed. `.data` keeps an identity range. An error of `ImageRemap::with_range` ends the run. OMAP output: the output reads again, its tables equal `ImageRemap::address_tables`, and `AddressMap` and both `OmapStream` tables translate the start, middle and last byte of each range as the range says, in both directions; removed pieces and gaps have no mapping. Clean output with `RemovedCode::Drop` and `RemovedCode::Fail`: the plan fails with `UnsupportedEdit` and names a record (`Error::remap_address`), or the output reads again without OMAP and with the new section headers, and `SymbolLocator::locate` gives the procedure name and the source line of the OMAP output at the sampled new RVAs. `Fail` must fail if a record holds removed code; else both policies give the same result |
 
-The MSFZ targets (#37, #38) use 16 MiB chunks and a 32 MiB chunk cache (`pdbrs_fuzz::msfz::limits`);
+The MSFZ targets (#37, #38) use 16 MiB chunks and a 32 MiB chunk cache (`pdb_rs_fuzz::msfz::limits`);
 `native_pdb` uses the same MSFZ limits. `msfz` does not compare reads without the cache: for
 a whole PDZ file, each uncached read decompresses a chunk again and takes too long.
 
@@ -81,8 +81,8 @@ input bytes again, the target also compares the bytes. These rules apply:
 
 ## Seed corpora
 
-The `seeds` example of the fuzz package writes the corpora to `crates/pdbrs/fuzz/corpus/`.
-It builds these inputs with the public API of `pdbrs`:
+The `seeds` example of the fuzz package writes the corpora to `crates/pdb-rs/fuzz/corpus/`.
+It builds these inputs with the public API of `pdb-rs`:
 
 - A synthetic native PDB with streams 0 to 12: Info with a named stream map, TPI with a hash
   stream, DBI with two modules and each substream, IPI, `/names`, GSI, PSI, symbol records,
@@ -116,7 +116,7 @@ commit them. The compiler PDBs (`obj/compile.pdb`) have no DBI stream, so the ge
 
 ## Commands
 
-Run the commands in `crates/pdbrs/fuzz/` with the nightly toolchain.
+Run the commands in `crates/pdb-rs/fuzz/` with the nightly toolchain.
 
 ```sh
 cargo +nightly run --release --example seeds -- ../../../target/fixtures
@@ -153,7 +153,7 @@ cargo +nightly fuzz run <target> artifacts/<target>/crash-<hash>
 
 The panic hook of `libfuzzer-sys` calls `std::process::abort`. On Windows, `abort` ends the
 process with `__fastfail` (`0xc0000409`), so libFuzzer does not write the input. Each target
-installs `pdbrs_fuzz::exit_on_panic` in its `init` block. The hook prints the panic, writes the
+installs `pdb_rs_fuzz::exit_on_panic` in its `init` block. The hook prints the panic, writes the
 input to `artifacts/<target>/crash-<hash>` and exits with code 101.
 
 ## Recorded runs
@@ -305,21 +305,21 @@ the wall time.
    `SequencePoints::local_signature_form` gave the token form, but `SequencePoints::encode_parts`
    writes a nil row as 0 in both forms, so the output decoded with the row form. The fix gives
    the row form for each nil row, as the documentation says. Regression test:
-   `a_nil_local_signature_token_has_the_row_form` in `crates/pdbrs/tests/portable_debug/sequence.rs`.
+   `a_nil_local_signature_token_has_the_row_form` in `crates/pdb-rs/tests/portable_debug/sequence.rs`.
    After the fix, the three targets ran for the times in the table without a finding.
 2. `native_leaf_encode`: `Symbol::encode` added alignment padding to a decoded record with a
    length that is not a multiple of 4, so the output was not the input record. Regression
-   test: `keeps_the_length_of_an_unaligned_record` in `crates/pdbrs/tests/codeview.rs`.
+   test: `keeps_the_length_of_an_unaligned_record` in `crates/pdb-rs/tests/codeview.rs`.
 3. `native_symbol_encode`: a decoded record with the length field `0xffff` did not encode,
    because the alignment padding made it too long (`LimitExceeded`). Regression test:
-   `encodes_a_record_of_the_largest_length_without_padding` in `crates/pdbrs/tests/codeview.rs`.
+   `encodes_a_record_of_the_largest_length_without_padding` in `crates/pdb-rs/tests/codeview.rs`.
    The fix of findings 2 and 3: `Symbol::encode` writes the fields without alignment padding
    and then the zero bytes of the original record.
 4. `msfz`: a timeout. A real PDZ file with one changed byte in a zstd chunk took 45 s: each
    read of a fragment in the corrupt chunk decoded the chunk again, because the chunk cache
    keeps only decoded chunks. The fix: the cache keeps the error kind of a chunk that does not
    decode, so the reader decodes each chunk at most once. Regression test:
-   `a_corrupt_chunk_is_decoded_once` in `crates/pdbrs/src/native/msfz/tests/reads.rs`. The
+   `a_corrupt_chunk_is_decoded_once` in `crates/pdb-rs/src/native/msfz/tests/reads.rs`. The
    first `msfz` runs also compared reads without the cache for whole PDZ files; that part of
    the target took more than 10 s for the seeds, and the target now leaves it to `msfz_chunks`.
 

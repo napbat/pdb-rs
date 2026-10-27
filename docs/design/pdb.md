@@ -8,13 +8,13 @@ The library writes Portable PDBs: exact copies, new layouts from raw rows and he
 Portable PDB blob decoding is partial. The library builds new native PDBs from semantic records (see [Implemented native building](#implemented-native-building)).
 It edits native PDBs and keeps the streams that an edit does not change (see [Implemented native editing](#implemented-native-editing)).
 
-The root epic [#18](https://github.com/napbat/pdbrs/issues/18) tracks the work. Its children are one epic for each format family:
-[#1](https://github.com/napbat/pdbrs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdbrs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdbrs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdbrs/issues/16) (legacy MSF 2.0, deferred).
+The root epic [#18](https://github.com/napbat/pdb-rs/issues/18) tracks the work. Its children are one epic for each format family:
+[#1](https://github.com/napbat/pdb-rs/issues/1) (native MSF 7.0), [#20](https://github.com/napbat/pdb-rs/issues/20) (native MSFZ), [#17](https://github.com/napbat/pdb-rs/issues/17) (Portable PDB) and [#16](https://github.com/napbat/pdb-rs/issues/16) (legacy MSF 2.0, deferred).
 The [reference snapshots](../reference/README.md) contain the pinned LLVM and Microsoft documentation.
 
 ## Implemented primitives
 
-The `pdbrs` package is a library with no default executable. It uses `nostdio` for sequential I/O.
+The `pdb-rs` package is a library with no default executable. It uses `nostdio` for sequential I/O.
 Its default `std` feature enables `nostdio/std` and native file adapters.
 With `--no-default-features`, the library supports `no_std + alloc`.
 Slice reads, signature probing and fixed-buffer cursor operations do not allocate.
@@ -26,7 +26,7 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
   Subsequent reads move the cursor. The adapter is not `Sync`.
 - `io::FileReader` provides bounded file access on Unix and Windows under `std`.
   It captures the file length and owns the handle. Windows positional reads can change the underlying cursor.
-- `pdbrs::probe` identifies modern MSF, MSFZ, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
+- `pdb_rs::probe` identifies modern MSF, MSFZ, legacy Small MSF, CLI metadata and embedded PDB envelope signatures.
   It examines a bounded prefix, not container or record validity.
   `ContainerKind::CliMetadata` deliberately does not assert that the input is a Portable PDB.
 - `Error` retains an error kind, physical or stream-relative location, operation context and a typed `nostdio::IoError`.
@@ -45,14 +45,14 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
 Run signature inspection on Unix or Windows with:
 
 ```sh
-cargo run -p pdbrs --example inspect -- path/to/input.pdb
+cargo run -p pdb-rs --example inspect -- path/to/input.pdb
 ```
 
 Exercise sequential output and positional input in either feature mode:
 
 ```sh
-cargo run -p pdbrs --example streams
-cargo run -p pdbrs --example streams --no-default-features
+cargo run -p pdb-rs --example streams
+cargo run -p pdb-rs --example streams --no-default-features
 ```
 
 The examples report their validation scope. Semantic editors, PDB builders and embedded compression are not exposed as placeholder APIs.
@@ -106,7 +106,7 @@ It also reconciles each imported reference document with the implementation.
 Read a complete native PDB with:
 
 ```sh
-cargo run -p pdbrs --example native -- path/to/input.pdb
+cargo run -p pdb-rs --example native -- path/to/input.pdb
 ```
 
 The example decodes every stream role and checks the references between streams.
@@ -119,9 +119,9 @@ It runs the checks of `codeview::symbol::validate` on each module stream and on 
 Print the type information of a native PDB in a C-like form with:
 
 ```sh
-cargo run -p pdbrs --example types -- path/to/input.pdb
-cargo run -p pdbrs --example types -- --type <name> path/to/input.pdb
-cargo run -p pdbrs --example types -- --functions path/to/input.pdb
+cargo run -p pdb-rs --example types -- path/to/input.pdb
+cargo run -p pdb-rs --example types -- --type <name> path/to/input.pdb
+cargo run -p pdb-rs --example types -- --functions path/to/input.pdb
 ```
 
 The `types` example uses only the public API: `TypeTable`, `ForwardRefs`, `TypeLeaf`, `TypeTable::members` and `Numeric`.
@@ -153,8 +153,8 @@ Examples: DIA2Dump prints `&&` as `*` and a function pointer as `function *`, an
 The comment on #1 lists each difference class with its count.
 
 `Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
-The decoded records keep their bytes in `pdbrs::Bytes`. A decoder gives records that borrow the stream bytes.
-`into_owned` gives the same record with its own bytes and the `'static` lifetime ([#42](https://github.com/napbat/pdbrs/issues/42)).
+The decoded records keep their bytes in `pdb_rs::Bytes`. A decoder gives records that borrow the stream bytes.
+`into_owned` gives the same record with its own bytes and the `'static` lifetime ([#42](https://github.com/napbat/pdb-rs/issues/42)).
 Iterators, the record frames (`codeview::Record`) and the stream-level tables keep borrowed slices.
 `Pdb::globals` and `Pdb::publics` lend the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
@@ -163,7 +163,7 @@ GitHub issues #1 to #14, #29 to #34, #37 and #38 record the implementation and t
 ## Implemented Portable PDB reading
 
 `portable::Pdb::open` opens a standalone Portable PDB under `std`. `Pdb::parse` borrows a byte slice.
-`Pdb::read` and `Pdb::with_options` accept any stable `ReadAt` source in both feature modes ([#22](https://github.com/napbat/pdbrs/issues/22)).
+`Pdb::read` and `Pdb::with_options` accept any stable `ReadAt` source in both feature modes ([#22](https://github.com/napbat/pdb-rs/issues/22)).
 `portable::ReadOptions` limits the stream count (64), the bytes of one heap value (64 MiB) and the bytes of `Pdb::stream_bytes` (64 MiB).
 
 Opening validates the metadata root, the stream headers and ranges, the `#Pdb` stream, the `#~` header, the table schema and the row extents.
@@ -177,13 +177,13 @@ It does not read rows or heap values. `Pdb::row` and `Pdb::rows` read one row at
 | `#~` | Version 2.0, `HeapSizes`, `Valid` and `Sorted` masks, row counts up to `0xFFFFFF`, heap, table and coded index widths from local and external row counts, row extents. A table outside the debug schema with rows gives `InvalidFormat`; `#-` and delta `HeapSizes` flags give `UnsupportedVersion` | Uncompressed `#-` tables |
 | Heaps | `#Strings` termination, `#Blob` and `#US` length prefixes, `#GUID` indexes, the empty first entry and 16-byte GUID boundaries | — |
 | Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked. `portable::debug` (#23, #42): records of seven tables (`CustomDebugInformation` in `portable::custom`, #24); document names, languages and hash algorithms; sequence points (hidden points, document records, signed deltas, IL offset and line and column bounds); local constant signatures (all type codes, enums, general values, custom modifiers); imports of the nine kinds; an encoder for each blob in the Roslyn form; `Pdb::validate_debug` | Instruction boundaries and the IL size of the first scope of a method: they need the method bodies of the assembly |
-| Dispatch | `pdbrs::Pdb` and `pdbrs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
+| Dispatch | `pdb_rs::Pdb` and `pdb_rs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
 | Embedded data (#25) | `portable::embedded::decode_embedded` and `encode_embedded` for `MPDB` payloads (signature, reserved sizes, limit before allocation, exact output length); `Pdb::document_source` decodes the embedded source of a document and checks it against the document hash; `Document::verify_source` | Hash algorithms other than SHA-256 give `SourceCheck::NotVerified` |
 
 Read a complete Portable PDB or an `MPDB` payload with:
 
 ```sh
-cargo run -p pdbrs --example portable -- path/to/input.pdb
+cargo run -p pdb-rs --example portable -- path/to/input.pdb
 ```
 
 The example reads every row and every heap value that a row refers to. It fails at the first value that it cannot read.
@@ -191,14 +191,14 @@ It decodes every blob of the debug tables and every custom debug information val
 It decodes the embedded source of each document and fails if a source does not match its SHA-256 hash.
 Then it runs `Pdb::validate_debug` and prints the report: each rule with the number of checked items, or the reason why the rule was not checked.
 The .NET verifier in `fixtures/dotnet/verifier/` prints a canonical dump with `System.Reflection.Metadata`.
-`cargo run -p pdbrs-fixtures -- verify-portable` compares it with the pdbrs dump; `fixtures/README.md` describes the format.
+`cargo run -p pdb-rs-fixtures -- verify-portable` compares it with the pdb-rs dump; `fixtures/README.md` describes the format.
 The dump has the raw rows, the decoded debug tables (#23), the decoded custom debug information (#24) and the embedded source checks (#25).
-For the embedded fixture, pdbrs reads the `.mpdb` payload and the verifier reads the assembly with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`.
-Evidence ([#25](https://github.com/napbat/pdbrs/issues/25)): the 15 embedded sources of the five Portable PDB fixtures match their SHA-256 hashes in both dumps.
-Evidence ([#22](https://github.com/napbat/pdbrs/issues/22), [#23](https://github.com/napbat/pdbrs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
+For the embedded fixture, pdb-rs reads the `.mpdb` payload and the verifier reads the assembly with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`.
+Evidence ([#25](https://github.com/napbat/pdb-rs/issues/25)): the 15 embedded sources of the five Portable PDB fixtures match their SHA-256 hashes in both dumps.
+Evidence ([#22](https://github.com/napbat/pdb-rs/issues/22), [#23](https://github.com/napbat/pdb-rs/issues/23)): the four standalone Portable PDB fixtures (C#, C# with embedded sources, VB and F#) and the embedded C# PDB give dumps without differences.
 The encoders give the same bytes for every debug table blob of the four standalone fixtures (62, 62, 25 and 45 blobs).
 In 26 F# sequence point blobs, the `LocalSignature` header is a full `StandAloneSig` token, not a row. `SequencePoints::local_signature_form` reports the form, and `SequencePoints::encode_parts` takes a `LocalSignatureForm` to keep it.
-`cargo run -p pdbrs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
+`cargo run -p pdb-rs-fixtures -- detect` opens the 17 native fixture PDBs with the native backend and the Portable PDBs with the portable backend.
 It rejects the CLI metadata of each fixture assembly as ordinary assembly metadata.
 
 `Pdb::validate_debug` checks these rules and stops at the first violation:
@@ -215,7 +215,7 @@ A nil `VariableList` or `ConstantList` is an empty run if its table has no rows 
 
 ## Implemented Portable PDB writing
 
-The `portable::write` module and `portable::PdbEditor` write Portable PDBs through these operations ([#26](https://github.com/napbat/pdbrs/issues/26), [#42](https://github.com/napbat/pdbrs/issues/42)):
+The `portable::write` module and `portable::PdbEditor` write Portable PDBs through these operations ([#26](https://github.com/napbat/pdb-rs/issues/26), [#42](https://github.com/napbat/pdb-rs/issues/42)):
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
@@ -228,12 +228,12 @@ The `portable::write` module and `portable::PdbEditor` write Portable PDBs throu
 The heap builders remove duplicates. `#Blob`, `#US` and `#GUID` offsets follow the insertion order.
 `StringHeapBuilder::finish` sorts the strings by their reversed bytes and puts each suffix string inside a longer string.
 `Pdb::to_parts` reads all rows and re-adds the heap entries. It keeps the row IDs and the row order.
-If a `#Blob` offset changes, it decodes the document name and imports blobs with the codecs of [#23](https://github.com/napbat/pdbrs/issues/23), gives them the new offsets and adds the encoded blobs.
+If a `#Blob` offset changes, it decodes the document name and imports blobs with the codecs of [#23](https://github.com/napbat/pdb-rs/issues/23), gives them the new offsets and adds the encoded blobs.
 
 `PdbEditor` is the one editor type for builds and edits. It holds the records of `portable::debug` and `portable::custom` with `'static`.
 The identity policy is an argument of the entry (`PdbEditor::new` or `Pdb::edit`); the plan computes a content-derived ID from the output.
 An editor of a source borrows the source and decodes a table on the first `*_mut` call of that table (`documents_mut`, `methods_mut`, `local_scopes_mut`, `import_scopes_mut`, `state_machine_methods_mut`, `custom_debug_information_mut`, or `decode_all`).
-The plan copies the raw rows of a table that no `*_mut` call decoded and does not decode its records or blobs (copy-on-write, [#49](https://github.com/napbat/pdbrs/issues/49)).
+The plan copies the raw rows of a table that no `*_mut` call decoded and does not decode its records or blobs (copy-on-write, [#49](https://github.com/napbat/pdb-rs/issues/49)).
 It decodes such a table in two cases: the `MethodDebugInformation` table if the external `MethodDef` count is not its source row count, and the custom debug information if a change gives a source local scope, local variable or local constant a new row ID.
 A source heap gets its value index only on the first addition, so a heap without additions is one copy in the plan.
 After `decode_all`, the plan encodes all records again.
@@ -255,9 +255,9 @@ It uses the layout of `System.Reflection.Metadata`: the stream order, the `Valid
 `PdbWritePlan::identity`, `codeview` (GUID, age 1, stamp) and `checksum` (SHA-256, SHA-384 or SHA-512 with a zero ID, the PDB checksum entry of the addendum) give the values for the debug directory of the assembly.
 `PdbWritePlan::write_file` and `io::copy_exact_file` use the temporary-sibling contract of the MSF file helpers.
 
-Evidence: `cargo run -p pdbrs-fixtures -- verify-rebuild` rebuilds the four standalone Portable PDB fixtures and the decoded `MPDB` payload of the embedded fixture.
+Evidence: `cargo run -p pdb-rs-fixtures -- verify-rebuild` rebuilds the four standalone Portable PDB fixtures and the decoded `MPDB` payload of the embedded fixture.
 Each rebuild has the original bytes and the original content-derived ID, and its verifier dump has no differences.
-`cargo run -p pdbrs-fixtures -- verify-edit` edits and builds the same five PDBs and compares the verifier dumps with the expected change.
+`cargo run -p pdb-rs-fixtures -- verify-edit` edits and builds the same five PDBs and compares the verifier dumps with the expected change.
 It runs each standalone fixture program with a built PDB and with a PDB whose sequence points move 1000 lines (see `fixtures/README.md`).
 Its section `change and removal cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
 For each case, the verifier dump shows the expected change, and the streams with other bytes are exactly the streams that `PlanReport` does not give as copied.
@@ -266,7 +266,7 @@ Its section `remap cases:` runs `remap_source_paths` (#46): the build root of th
 
 ## Implemented MSF writing
 
-The `native::msf` module writes Big MSF 7.0 containers through three operations ([#15](https://github.com/napbat/pdbrs/issues/15)):
+The `native::msf` module writes Big MSF 7.0 containers through three operations ([#15](https://github.com/napbat/pdb-rs/issues/15)):
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
@@ -294,7 +294,7 @@ The layout is deterministic:
 
 The default page size is 4096. The plan accepts every power of two from 512 to 32768.
 It rejects 65536-byte pages with `UnsupportedVersion` before planning, because independent consumers reject them
-([#15](https://github.com/napbat/pdbrs/issues/15)): DIA2Dump fails with `loadDataFromPdb failed - HRESULT = 806D000C`,
+([#15](https://github.com/napbat/pdb-rs/issues/15)): DIA2Dump fails with `loadDataFromPdb failed - HRESULT = 806D000C`,
 `llvm-pdbutil` reports "Unsupported block size." and `link.exe` 14.51 fails on `/PDBPAGESIZE:65536` with `LNK1399`.
 The reader accepts 65536-byte pages. `link.exe` 14.51 writes 4096 to 32768 with `/PDBPAGESIZE`.
 LLVM also rejects a directory that needs more than one page map page.
@@ -308,21 +308,21 @@ The default stream 0 policy is `OldDirectoryPolicy::Empty`, as LLD and `ms-pdb-m
 Copy or repack a native PDB, and compare the result with its source:
 
 ```sh
-cargo run -p pdbrs --example msf -- copy input.pdb copy.pdb
-cargo run -p pdbrs --example msf -- repack --page-size 8192 --old-directory empty input.pdb repacked.pdb
-cargo run -p pdbrs --example msf -- compare input.pdb repacked.pdb
+cargo run -p pdb-rs --example msf -- copy input.pdb copy.pdb
+cargo run -p pdb-rs --example msf -- repack --page-size 8192 --old-directory empty input.pdb repacked.pdb
+cargo run -p pdb-rs --example msf -- compare input.pdb repacked.pdb
 ```
 
 `compare` compares the presence, size and bytes of each stream and checks the free page map of the written file.
 
-Evidence ([#15](https://github.com/napbat/pdbrs/issues/15)): exact copies of the 17 native producer fixtures are byte-identical.
+Evidence ([#15](https://github.com/napbat/pdb-rs/issues/15)): exact copies of the 17 native producer fixtures are byte-identical.
 Their repacks with 512, 4096, 8192 and 16384-byte pages and both stream 0 policies pass `pdbtool check` and `pdbtool compare`.
 DIA2Dump gives the same output as for the source. `llvm-pdbutil dump --all` gives the same result as for the source.
 Its output differs only in block numbers, block counts and the stream 0 size.
 
 ## Implemented native building
 
-`native::PdbEditor` is the one native write path ([#33](https://github.com/napbat/pdbrs/issues/33), [#34](https://github.com/napbat/pdbrs/issues/34), [#42](https://github.com/napbat/pdbrs/issues/42)).
+`native::PdbEditor` is the one native write path ([#33](https://github.com/napbat/pdb-rs/issues/33), [#34](https://github.com/napbat/pdb-rs/issues/34), [#42](https://github.com/napbat/pdb-rs/issues/42)).
 `PdbEditor::new(signature, guid, age)` starts a build without a source. `Pdb::edit(IdentityPolicy)` starts an edit, and `PdbEditor::decode_all` makes a rebuild of the edit.
 `PdbEditor::plan(EditOptions)` gives one `native::PdbWritePlan` for all three. The documentation of `native::PdbEditor` gives all rules.
 
@@ -348,8 +348,8 @@ It drops stream 0 and the streams that no other stream names; `PlanReport::dropp
 The rebuild puts each public symbol in the bucket of its name; LLD 22.1.3 puts some 8-byte names in another bucket.
 
 ```sh
-cargo run -p pdbrs --example native_rebuild -- input.pdb rebuilt.pdb
-cargo run -p pdbrs --example native_synthetic -- synthetic.pdb
+cargo run -p pdb-rs --example native_rebuild -- input.pdb rebuilt.pdb
+cargo run -p pdb-rs --example native_synthetic -- synthetic.pdb
 ```
 
 DIA lists a procedure only if its record names a TPI type (`S_GPROC32`), as `link.exe` writes it.
@@ -357,7 +357,7 @@ DIA2Dump does not list `S_GPROC32_ID` procedures of the synthetic PDB.
 
 ## Implemented native editing
 
-An editor from `native::Pdb::edit` borrows the source PDB and decodes a part only when a `*_mut` accessor asks for it ([#34](https://github.com/napbat/pdbrs/issues/34), [#42](https://github.com/napbat/pdbrs/issues/42)).
+An editor from `native::Pdb::edit` borrows the source PDB and decodes a part only when a `*_mut` accessor asks for it ([#34](https://github.com/napbat/pdb-rs/issues/34), [#42](https://github.com/napbat/pdb-rs/issues/42)).
 Without `decode_all`, the plan writes the copy-on-write layout. `EditOptions::default()` keeps the page size of the source.
 
 - The output keeps the stream ID of each source stream. The plan reads each unchanged stream from the source when it writes, so `pdbtool compare` shows it as identical.
@@ -373,7 +373,7 @@ Without `decode_all`, the plan writes the copy-on-write layout. `EditOptions::de
   writes the DBI module record sizes, and writes the new targets into the reference records of the symbol record stream (`Remapped(ModuleSymbolOffset)`).
   A module whose records do not form a tree stays opaque: its symbol edits fail with `UnsupportedEdit`, and its lines stay editable.
 - Types and IDs: appended records keep the source header, the hash values, the index offsets and the adjusters of the hash stream. A changed source record makes the plan encode all records and the hash stream again with the source header options.
-- Removal of types and IDs ([#47](https://github.com/napbat/pdbrs/issues/47)): `TypeList::remove` and `IdList::remove` make a record a tombstone, in both layouts.
+- Removal of types and IDs ([#47](https://github.com/napbat/pdb-rs/issues/47)): `TypeList::remove` and `IdList::remove` make a record a tombstone, in both layouts.
   The plan gives the records that are not removed the next output index, in order, and writes the TPI and IPI streams and their hash streams again; a hash adjuster of a removed record goes away.
   It writes the output index into each reference of the symbol record stream, of the module streams (symbol records and C13 subsections), of the type maps and of `/UDTSRCLINEUNDONE`.
   An index keeps its width, so no offset moves, and a copied stream becomes a patched stream (`Remapped(TypeIndex)` or `Remapped(IdIndex)`).
@@ -400,7 +400,7 @@ The plan rejects these edits before it writes a byte. A planning error writes no
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
 Use `IncrementAge` or `Replace` for a semantic change, and write the returned identity to the image.
 
-The editing tasks ([#41](https://github.com/napbat/pdbrs/issues/41)) are functions of `PdbEditor` over the same model. They have no plan path of their own.
+The editing tasks ([#41](https://github.com/napbat/pdb-rs/issues/41)) are functions of `PdbEditor` over the same model. They have no plan path of their own.
 Each task checks all its inputs before it changes the model, so an error leaves the model unchanged. The plan rules above apply to their changes.
 
 | Task | Model change | Checks |
@@ -409,14 +409,14 @@ Each task checks all its inputs before it changes the model, so an error leaves 
 | `set_source_server(text)` | the `srcsrv` named stream | `SourceServer::parse` |
 | `remove_named_stream(name)` | the named stream and its Info entry; the plan writes a nil stream | the rules of `NamedStreams::remove` |
 | `rename_symbols(f)` | the named records of the symbol record stream (not `S_DATAREF` and `S_ANNOTATIONREF`) and the procedures of the modules | no NUL byte; each record encodes; each renamed procedure reference names a procedure with the same new name |
-| `remap_source_paths(f)` | the path fields of [#46](https://github.com/napbat/pdbrs/issues/46) (below); `/names` and the EC names again if a name changes | not empty; no NUL byte; each record encodes; each `srcsrv` line keeps the new path as its first field; no two injected files with one virtual name |
+| `remap_source_paths(f)` | the path fields of [#46](https://github.com/napbat/pdb-rs/issues/46) (below); `/names` and the EC names again if a name changes | not empty; no NUL byte; each record encodes; each `srcsrv` line keeps the new path as its first field; no two injected files with one virtual name |
 
 `rename_symbols` calls the function once for each distinct name, in byte order. It does not undecorate names, so a C++ function needs a new name for its decorated public name and its undecorated procedure name.
 A procedure reference and its procedure have the same name, so they get the same new name; the plan accepts a new name of a reference record only in that case.
 The task decodes only the modules with a renamed procedure, and it does not change IPI records (`LF_FUNC_ID`, `LF_MFUNC_ID`): one function ID names the inlinee of many modules.
 A rename moves records, so the opaque check of the plan applies.
 
-`remap_source_paths` ([#46](https://github.com/napbat/pdbrs/issues/46)) calls the function once for each distinct path, in byte order, and compares paths as bytes.
+`remap_source_paths` ([#46](https://github.com/napbat/pdb-rs/issues/46)) calls the function once for each distinct path, in byte order, and compares paths as bytes.
 It changes the `/names` strings of the path fields (C13 file checksums, cross-scope import module names, `S_FILESTATIC`, `LF_UDT_MOD_SRC_LINE`, injected-source names) and the `/names` strings that no field names,
 the DBI source file names, module and object file names, EC names and type server names and paths, `S_OBJNAME` and each string of `S_ENVBLOCK`,
 each `LF_STRING_ID` string of the IPI and of the module type streams of `S_MOD_TYPEREF`, the `/src/files/` stream names, the first field of the `srcsrv` source file lines and the `/LinkInfo` current directory.
@@ -430,15 +430,15 @@ then each task of #41 with `pdbstr -r` for `srcsrv` and `sourcelink` and DIA2Dum
 and then the path remap of #46 with a byte search for the old build root, `pdbtool check` and `DIA2Dump -l` (see `fixtures/README.md`).
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-native-edit
+cargo run -p pdb-rs-fixtures -- verify-native-edit
 ```
 
 ### Address remap
 
-A binary rewriter moves, splits or removes code after the link. `PdbEditor::remap_addresses(&ImageRemap, RemapMode)` makes the PDB describe the new image ([#43](https://github.com/napbat/pdbrs/issues/43)).
+A binary rewriter moves, splits or removes code after the link. `PdbEditor::remap_addresses(&ImageRemap, RemapMode)` makes the PDB describe the new image ([#43](https://github.com/napbat/pdb-rs/issues/43)).
 The code is in `native/remap.rs`, `native/remap/` (the map, the OMAP tables and the address map of clean output) and `native/editor/remap.rs`, `native/editor/remap/` (the editor model).
 
-- `ImageRemap::new` takes the section headers of the new image. pdbrs has no PE parser, so the caller gives them.
+- `ImageRemap::new` takes the section headers of the new image. pdb-rs has no PE parser, so the caller gives them.
 - `ImageRemap::with_range(old, length, new)` adds a range that maps the old RVAs `old .. old + length` to the new RVAs `new .. new + length`. The map is linear inside a range.
 - An old address without a range has no new address: the rewriter removed its code.
 - `with_range` rejects an empty range, an old or new RVA of 0 (OMAP uses the target 0 for "no mapping"), a range that overlaps an old or a new range of the map, and a new range that no new section holds. The error names the range (`Error::remap_range`).
@@ -493,7 +493,7 @@ For a source record, `Error::stream_location` gives the stream and the offset.
 `PlanReport::remap` gives a `RemapReport` for clean output. For each `RemapItem` it counts the removed records (`removed`, `removed_items`) and the added parts (`added`, `added_items`).
 `cleared_crcs` counts the section contributions with new CRC values: a contribution (also in a DBI module record) whose section, offset or size changes gets data CRC 0 and relocation CRC 0, as the strip writes them. The CRCs describe the old code bytes.
 
-pdbrs does not decode `.xdata`, and the `.pdata` entries point into `.xdata`. Thus clean output takes the `.pdata` and `.xdata` streams of the new image from the caller: `ImageRemap::with_unwind_streams(pdata, xdata)`.
+pdb-rs does not decode `.xdata`, and the `.pdata` entries point into `.xdata`. Thus clean output takes the `.pdata` and `.xdata` streams of the new image from the caller: `ImageRemap::with_unwind_streams(pdata, xdata)`.
 The plan writes them into slots 8 and 7. Without them, clean output of a model with slot 7 or slot 8 fails with `UnsupportedEdit` at the call. OMAP output ignores them and copies the source streams.
 
 Opaque data that can hold an address makes the clean plan fail with `UnsupportedEdit`: a symbol record of a kind without a decoder, a module whose records do not form a scope tree, a `DEBUG_S_SYMBOLS` subsection, a subsection of an unknown kind and C11 line data.
@@ -505,7 +505,7 @@ Use `IdentityPolicy::IncrementAge` or `IdentityPolicy::Replace` for a remap: the
 `verify-remap` writes the OMAP output and the clean output of 5 range sets for each native fixture. It compares the OMAP output with DIA2Dump and `pdbtool`. It compares the clean output with the OMAP output through DIA2Dump and `SymbolLocator`, and checks it with `pdbtool` and `llvm-pdbutil` (see `fixtures/README.md`). The `native_remap` fuzz target compares OMAP output and clean output on a synthetic PDB (see [Fuzzing](../fuzzing.md)).
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-remap
+cargo run -p pdb-rs-fixtures --release -- verify-remap
 ```
 
 ## Required formats and scope
@@ -573,11 +573,11 @@ Use one fallible build path and an immutable output plan.
 
 ## Package and module boundaries
 
-Keep one public library package at `crates/pdbrs`, with its root in `src/lib.rs`.
+Keep one public library package at `crates/pdb-rs`, with its root in `src/lib.rs`.
 Use the `inspect` example for the current signature-inspection workflow.
 Do not add empty modules or another crate just to reserve names.
 
-Proposed modules, relative to `crates/pdbrs/src/`:
+Proposed modules, relative to `crates/pdb-rs/src/`:
 
 | Module | Responsibility |
 | --- | --- |
@@ -811,22 +811,22 @@ Where the MSFZ specification and Microsoft's reference implementation differ, fo
 
 ### Implemented MSFZ reading
 
-Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/37)). The writer and the conversions are in [Implemented MSFZ writing](#implemented-msfz-writing) ([#38](https://github.com/napbat/pdbrs/issues/38)).
+Status: the reader is implemented ([#37](https://github.com/napbat/pdb-rs/issues/37)). The writer and the conversions are in [Implemented MSFZ writing](#implemented-msfz-writing) ([#38](https://github.com/napbat/pdb-rs/issues/38)).
 
-- `pdbrs::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
+- `pdb_rs::probe` gives `ContainerKind::NativeMsfz`. `pdb_rs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
 - `native::msfz::Msfz` checks every invariant above when it opens a file. It decodes stored (code 0), zstd (code 1) and raw DEFLATE (code 2) chunks and stream directories through `compression.rs`. Other codes and versions give `UnsupportedVersion`.
 - `native::container::Container` holds an `Msf` or an `Msfz`. `native::Pdb::container` replaces `Pdb::msf`. All typed accessors and `Pdb::edit` read through it. The editor writes MSF 7.0 output with the default page size (4096) for MSFZ input.
 - The free page map and the stream 0 snapshot are MSF 7.0 structures. `Container::msf` gives them; the `native` example reports them as not applicable for MSFZ.
 - `MsfzLimits` bounds the stream directory (64 MiB), the Chunk Table (64 MiB), one chunk (256 MiB) and the chunk cache (256 MiB). The cache removes the least recently used chunk first; the same reads give the same evictions. The `ContainerLimits` of `ReadOptions::limits` holds the limits.
 - Stream sizes are `u64` values: a stream can be larger than 4 GiB. Nil and empty streams stay distinct.
-- The decisions for the differences between the specification and `ms-pdb-msfz` 0.1.10 are in [#37](https://github.com/napbat/pdbrs/issues/37#issuecomment-6415233037). Two decisions follow the specification, because it is a superset: a compressed fragment can continue into the next chunks, and non-zero reserved location bits are an error.
+- The decisions for the differences between the specification and `ms-pdb-msfz` 0.1.10 are in [#37](https://github.com/napbat/pdb-rs/issues/37#issuecomment-6415233037). Two decisions follow the specification, because it is a superset: a compressed fragment can continue into the next chunks, and non-zero reserved location bits are an error.
 - `pdbtool pdz-encode` writes stream 0 (the previous MSF stream directory) as an empty stream. Stream comparisons start at stream 1, as `pdbtool compare` does.
-- Evidence: every stream of the 63 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdbrs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. At #37, `msvc-x64-lazy` stopped at the same symbol reader error on both files; since the `NOTM` reader of #30, the `native` example reads its PDZ file with `undecoded items: 0`. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
+- Evidence: every stream of the 63 PDZ fixtures (`fixtures/README.md`) is byte-identical to the MSF 7.0 original, through pdb-rs and through `pdbtool compare`. The `native` example gives the same output for each pair, apart from the lines that start with `container:`. At #37, `msvc-x64-lazy` stopped at the same symbol reader error on both files; since the `NOTM` reader of #30, the `native` example reads its PDZ file with `undecoded items: 0`. The `msfz` and `msfz_chunks` fuzz targets are in `docs/fuzzing.md`.
 
 ### Implemented MSFZ writing
 
-The `native::msfz` module writes MSFZ containers, and `native::container::Container` converts between MSF 7.0 and MSFZ ([#38](https://github.com/napbat/pdbrs/issues/38)).
-[#38](https://github.com/napbat/pdbrs/issues/38#issuecomment-6416340034) records the decisions.
+The `native::msfz` module writes MSFZ containers, and `native::container::Container` converts between MSF 7.0 and MSFZ ([#38](https://github.com/napbat/pdb-rs/issues/38)).
+[#38](https://github.com/napbat/pdb-rs/issues/38#issuecomment-6416340034) records the decisions.
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
@@ -859,21 +859,21 @@ The memory is the kept chunks (at most the limit), one chunk buffer, its compres
 Write a PDZ file, convert it back and compare the streams:
 
 ```sh
-cargo run -p pdbrs --example msf -- pdz-encode --max-chunk-size 64K --compress-stream-dir input.pdb output.pdz.pdb
-cargo run -p pdbrs --example msf -- repack output.pdz.pdb back.pdb
-cargo run -p pdbrs --example msf -- compare input.pdb back.pdb
+cargo run -p pdb-rs --example msf -- pdz-encode --max-chunk-size 64K --compress-stream-dir input.pdb output.pdz.pdb
+cargo run -p pdb-rs --example msf -- repack output.pdz.pdb back.pdb
+cargo run -p pdb-rs --example msf -- compare input.pdb back.pdb
 ```
 
 `pdz-encode` takes `--max-chunk-size <bytes>[K|M]`, `--one-stream-per-chunk`, `--compress-stream-dir`, `--pad16k`, `--deflate` and `--old-directory empty|preserve`.
 `repack` reads MSF 7.0 or MSFZ input.
 
-Evidence ([#38](https://github.com/napbat/pdbrs/issues/38)): `cargo run --release -p pdbrs-fixtures -- verify-msfz` (see `fixtures/README.md`).
+Evidence ([#38](https://github.com/napbat/pdb-rs/issues/38)): `cargo run --release -p pdb-rs-fixtures -- verify-msfz` (see `fixtures/README.md`).
 
-- Encode: 48 native PDBs with six option sets (defaults, a compressed directory, one stream for each chunk, 4 KiB chunks, padding and DEFLATE chunks) give 288 PDZ files. All are deterministic, `pdbtool compare` reports "Files are IDENTICAL" for each, and the pdbrs reader and the `native` example give the same streams and output as for the source.
-- DIA2Dump `-all` gives the same output as for the source for 235 files. For `msvc-x64-incremental`, DIA gives another output for each MSFZ file, also for the `pdz-encode` file; the pdbrs files give the same output as the `pdz-encode` file (5 files).
-  DIA rejects all 48 files with raw DEFLATE chunks (`HRESULT = 806D000C`): DIA reads only zstd chunks. `pdbtool` and pdbrs read them.
+- Encode: 48 native PDBs with six option sets (defaults, a compressed directory, one stream for each chunk, 4 KiB chunks, padding and DEFLATE chunks) give 288 PDZ files. All are deterministic, `pdbtool compare` reports "Files are IDENTICAL" for each, and the pdb-rs reader and the `native` example give the same streams and output as for the source.
+- DIA2Dump `-all` gives the same output as for the source for 235 files. For `msvc-x64-incremental`, DIA gives another output for each MSFZ file, also for the `pdz-encode` file; the pdb-rs files give the same output as the `pdz-encode` file (5 files).
+  DIA rejects all 48 files with raw DEFLATE chunks (`HRESULT = 806D000C`): DIA reads only zstd chunks. `pdbtool` and pdb-rs read them.
 - Decode: the 63 PDZ fixtures convert to MSF 7.0 (with the page size of the original) deterministically. `pdbtool check` reports 0 errors, and `llvm-pdbutil dump --all` and DIA2Dump give the same output as for the original. The streams are equal to the PDZ file and, from stream 1, to the original.
-- `pdz-encode` output: no pdbrs file is byte-identical, and none needs to be. `pdz-encode` stores the Info stream and the DBI header uncompressed, ends chunks at record and substream boundaries, and uses the zstd C library. The streams are the same.
+- `pdz-encode` output: no pdb-rs file is byte-identical, and none needs to be. `pdz-encode` stores the Info stream and the DBI header uncompressed, ends chunks at record and substream boundaries, and uses the zstd C library. The streams are the same.
 - The `msfz_convert` fuzz target (`docs/fuzzing.md`) converts MSF 7.0 and MSFZ input to MSFZ and back.
 
 ## Portable metadata invariants
@@ -939,7 +939,7 @@ Check the declared size against a limit before allocation. Decode into a buffer 
 Fail on short output, extra output, unused input or a corrupt stream.
 Report checksums in other algorithms, such as SHA-1 or MD5, as not verified. Do not report them as errors.
 Add another digest only when a fixture needs it, and only inside `crypto.rs`.
-GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
+GitHub issue [#19](https://github.com/napbat/pdb-rs/issues/19) tracks this work.
 
 ## Three distinct write guarantees
 
@@ -953,12 +953,12 @@ Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (
 Exact copies, new layouts, semantic builds and semantic edits are implemented for Portable PDBs (see [Portable PDB writing](#implemented-portable-pdb-writing)).
 Native semantic builds and edits are implemented (see [Implemented native building](#implemented-native-building) and [Implemented native editing](#implemented-native-editing)).
 
-Semantic builds and edits of both backends go through one editor model ([#42](https://github.com/napbat/pdbrs/issues/42)): `native::PdbEditor` and `portable::PdbEditor`.
+Semantic builds and edits of both backends go through one editor model ([#42](https://github.com/napbat/pdb-rs/issues/42)): `native::PdbEditor` and `portable::PdbEditor`.
 An editor decodes a part only on its first `*_mut` access, and each accessor is atomic.
 The plan derives the dependent structures, rejects an edit that opaque data can break, writes nothing on an error,
 and reports each stream as copied or changed, so a normalization is never silent.
 
-The editing tasks ([#41](https://github.com/napbat/pdbrs/issues/41)) are functions over this model, not separate write paths, so they keep the guarantee of a semantic edit:
+The editing tasks ([#41](https://github.com/napbat/pdb-rs/issues/41)) are functions over this model, not separate write paths, so they keep the guarantee of a semantic edit:
 
 | Backend | Tasks |
 | --- | --- |
@@ -1222,10 +1222,10 @@ Run both default features and `--no-default-features` once the library feature c
 ## Research evidence and references
 
 The full-read example decoded four local Rust build outputs with zero undecoded items and zero unread streams:
-`target/debug/pdbrs.pdb` and the `inspect`, `streams` and `native` example PDBs.
+`target/debug/pdb-rs.pdb` and the `inspect`, `streams` and `native` example PDBs.
 LLVM `llvm-pdbutil` 22.1.6 agreed on these counts:
 
-| Item | `pdbrs.pdb` | `inspect.pdb` | `streams.pdb` | `native.pdb` |
+| Item | `pdb-rs.pdb` | `inspect.pdb` | `streams.pdb` | `native.pdb` |
 | --- | ---: | ---: | ---: | ---: |
 | TPI records | 811 | 21,279 | 34,217 | 28,273 |
 | Field-list members | 660 | 10,123 | 16,286 | 12,914 |
@@ -1245,7 +1245,7 @@ DBI substreams, symbol indexes, free-page maps and injected sources.
 LLVM 22.1.6 cannot decode `S_DEFRANGE_REGISTER_REL_INDIR` and hides some def-range gaps;
 issue #5 records the independent checks for those records.
 
-A separate consumer read `pdbrs.pdb` with default features disabled through `SeekReader`.
+A separate consumer read `pdb-rs.pdb` with default features disabled through `SeekReader`.
 It decoded every TPI leaf, module symbol, C13 subsection, shared symbol and global index record.
 A truncated copy of that PDB failed with `UnexpectedEof` and the physical end offset.
 
@@ -1256,7 +1256,7 @@ Legacy fixtures remain required by the acceptance plan.
 
 ### Producer fixtures
 
-`cargo run -p pdbrs-fixtures` built 22 fixtures from the demo programs in `fixtures/` (see its README):
+`cargo run -p pdb-rs-fixtures` built 22 fixtures from the demo programs in `fixtures/` (see its README):
 MSVC 14.51 and 14.44 (`/DEBUG:FASTLINK`), Clang/LLD 22.1.3 from Visual Studio, rustc 1.99 with `link.exe` and LLD,
 and .NET 10 SDK with portable, embedded and Windows PDB output.
 The full-read example read all 17 native fixtures to the end. It reported these gaps:
@@ -1267,7 +1267,7 @@ The full-read example read all 17 native fixtures to the end. It reported these 
   FASTLINK PDBs add `S_FASTLINK` and C13 subsection `0xfd`.
 - .NET Windows PDBs (#14): managed procedures and slots, `S_OEM`, `S_MANCONSTANT`, `S_TOKENREF`,
   .NET document records in `/src/files/` streams (compression byte 101) and the `sourcelink` named stream.
-  `llvm-pdbutil` 22.1.6 cannot dump their symbols. pdbrs now decodes all of them. Its managed procedures
+  `llvm-pdbutil` 22.1.6 cannot dump their symbols. pdb-rs now decodes all of them. Its managed procedures
   (32), blocks (12), slots (11), constants (2) and token references (32) agree with DIA2Dump. The five
   document records have a correct entry CRC and size. The two embedded sources (one raw, one DEFLATE) match
   their SHA-256 checksums. The 22 `MD2` and 3 `asyncMethodInfo` attributes decode with 40 records. Pdb2Pdb
@@ -1280,7 +1280,7 @@ The decoded fields and the counts per kind match `llvm-pdbutil` 22.1.6. `llvm-pd
 them. The example joins all 532 `S_TRAMPOLINE` records of the incremental fixture to the 532 public thunk map
 entries, and resolves the `S_FILESTATIC` file name in `/names`.
 
-The fixtures also exposed a producer defect that pdbrs reports without failing:
+The fixtures also exposed a producer defect that pdb-rs reports without failing:
 
 - LLD 22.1.3 puts some public symbols (`__chkstk`, `g_c_name`, `___favor`) in the wrong hash bucket.
   LLD 22.1.6 puts `__chkstk` in the correct bucket. Each of these names has exactly 8 bytes. LLD hashes the

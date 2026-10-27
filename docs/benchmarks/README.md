@@ -1,6 +1,6 @@
 # Benchmarks
 
-This document records the benchmark of `pdbrs`: the command, the method, the scenarios and the
+This document records the benchmark of `pdb-rs`: the command, the method, the scenarios and the
 limits of each number (#44). [baseline.md](baseline.md) records the machine, the toolchain, the
 commit, the fixtures, the run count and the baseline numbers. The API redesign (#42) and #48,
 #49 and #50 compare their results with this baseline. [msfz-write.md](msfz-write.md) records
@@ -11,7 +11,7 @@ the result of #50, and [portable-cow.md](portable-cow.md) records the result of 
 Run all scenarios from the workspace root:
 
 ```sh
-cargo bench -p pdbrs --bench baseline
+cargo bench -p pdb-rs --bench baseline
 ```
 
 The command prints one Markdown report to standard output. Cargo prints its build messages to
@@ -28,13 +28,13 @@ Give options after `--`:
 | `--filter <text>` | Run only the scenarios whose `<scenario>@<fixture>` contains the text, for example `--filter msvc-x64-large`. |
 | `--fixtures <directory>` | Read the fixtures from this directory. The default is `target/fixtures` of the workspace. |
 
-The bench target is `crates/pdbrs/benches/baseline/`. It needs the `std` feature, so the checks
+The bench target is `crates/pdb-rs/benches/baseline/`. It needs the `std` feature, so the checks
 with `--no-default-features` do not build it. It uses `std::time::Instant` and has no dependency
-other than `pdbrs`.
+other than `pdb-rs`.
 
 ## Fixtures
 
-The bench reads the fixtures from `target/fixtures`. `cargo run -p pdbrs-fixtures` makes them.
+The bench reads the fixtures from `target/fixtures`. `cargo run -p pdb-rs-fixtures` makes them.
 If a fixture file is missing, the row of each scenario on that fixture shows `missing` and no
 number. The report then names each missing file.
 

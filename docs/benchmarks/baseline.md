@@ -1,6 +1,6 @@
 # Baseline benchmark results
 
-This file records the baseline numbers of `pdbrs` before the first change of the API redesign
+This file records the baseline numbers of `pdb-rs` before the first change of the API redesign
 (#42). [README.md](README.md) gives the method, the scenarios and the limits of each number.
 #42, #48, #49 and #50 compare their results with these numbers.
 
@@ -12,13 +12,13 @@ had no other load.
 Caution: other processes change the times. Record the baseline on a quiet machine only.
 
 1. Merge the bench into `main`. Use a commit before the first change of #42.
-2. Make sure that the fixtures exist (`cargo run -p pdbrs-fixtures`).
+2. Make sure that the fixtures exist (`cargo run -p pdb-rs-fixtures`).
 3. Stop builds, tests and other processes that load the machine.
 4. Connect the machine to mains power, and use the same power plan for later comparisons.
 5. Run this command from the workspace root:
 
    ```sh
-   cargo bench -p pdbrs --bench baseline -- --runs 10 > target/baseline.md
+   cargo bench -p pdb-rs --bench baseline -- --runs 10 > target/baseline.md
    ```
 
    Use a POSIX shell or `pwsh` 7. The `>` of Windows PowerShell 5.1 writes UTF-16.
@@ -28,7 +28,7 @@ Caution: other processes change the times. Record the baseline on a quiet machin
 7. Replace the text between the `baseline:start` and `baseline:end` markers with the contents
    of `target/baseline.md`.
 8. Change the status line above to the date of the run.
-9. Commit the change with the message `pdbrs: record the baseline benchmark numbers (#44)`.
+9. Commit the change with the message `pdb-rs: record the baseline benchmark numbers (#44)`.
 
 For a comparison, run the same command on the same machine at the later commit. Compare only
 rows with the same count.

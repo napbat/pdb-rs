@@ -22,12 +22,12 @@ rules below. The STE dictionary does not apply: use any clear English word.
 - Put a warning or a caution before the instruction it applies to.
 
 Write a commit message as `area: summary`, with a lowercase summary. Use the crate or module
-name as the area (for example `pdbrs`).
+name as the area (for example `pdb-rs`).
 
 ## Project
 
-The repository is a Cargo workspace. Its `pdbrs` library uses edition 2024 and lives in
-`crates/pdbrs/`. The library root is `crates/pdbrs/src/lib.rs`.
+The repository is a Cargo workspace. Its `pdb-rs` library uses edition 2024 and lives in
+`crates/pdb-rs/`. The library root is `crates/pdb-rs/src/lib.rs`.
 
 The default `std` feature enables `nostdio/std` and file access on Unix and Windows.
 Use `nostdio` for sequential I/O. Keep `ReadAt` for positional access.
@@ -101,7 +101,7 @@ Put each crate in `crates/<crate-name>/`. The paths below are relative to each c
 
 ## Tracking
 
-- Track all work in GitHub issues in `napbat/pdbrs`. Do not add ticket or tracking files to the
+- Track all work in GitHub issues in `napbat/pdb-rs`. Do not add ticket or tracking files to the
   repository.
 - Put the scope and acceptance criteria of each work area in its issue. Link a sub-issue to its
   parent issue.

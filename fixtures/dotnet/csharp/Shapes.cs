@@ -2,7 +2,7 @@
 using System;
 using System.Diagnostics;
 
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 internal abstract record Shape(string Name);
 

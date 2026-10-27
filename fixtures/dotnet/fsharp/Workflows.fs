@@ -1,6 +1,6 @@
 // The second F# source file. It has sequence expressions (iterators) and task expressions (async
 // state machines).
-module PdbrsDemo.Workflows
+module Pdb.Rs.Demo.Workflows
 
 open System.Threading.Tasks
 

@@ -1,6 +1,6 @@
 # PDB fixtures
 
-This directory holds small demo programs. The `pdbrs-fixtures` generator builds them with
+This directory holds small demo programs. The `pdb-rs-fixtures` generator builds them with
 different producers. The resulting PDBs are local test inputs for the native PDB reader and
 for future Portable PDB work.
 
@@ -20,7 +20,7 @@ exception handling and .NET async state machines.
 | `dotnet/vb/` | A Visual Basic console project with three source files: `Program.vb`, `Tracing.vb` and `Mapping.vb`. |
 | `dotnet/fsharp/` | An F# console project with three source files: `Tracing.fs`, `Workflows.fs` and `Program.fs`. It needs the `FSharp.Core` package from NuGet. |
 | `hlsl/` | HLSL shaders for `fxc` and `dxc`: `vertex.hlsl`, `pixel.hlsl`, `compute.hlsl` and the shared header `common.hlsli`. |
-| `tools/msfz-encode/` | Not a demo program: the standalone Cargo project of `msfz-encode`, the producer of the `msfz-*` fixtures (see [Consumer tools](#consumer-tools)). It uses Microsoft's `ms-pdb-msf` and `ms-pdb-msfz` crates, not pdbrs. |
+| `tools/msfz-encode/` | Not a demo program: the standalone Cargo project of `msfz-encode`, the producer of the `msfz-*` fixtures (see [Consumer tools](#consumer-tools)). It uses Microsoft's `ms-pdb-msf` and `ms-pdb-msfz` crates, not the `pdb-rs` crate. |
 
 Each program runs without arguments, prints a checksum and exits with code 0. MSVC-only
 constructs are behind `#if defined(_MSC_VER) && !defined(__clang__)`. The `__m128` and
@@ -261,7 +261,7 @@ Each fixture converts `msvc-x64-debug`, `clang-lld-x64-debug`, `rust-link-x64-de
 
 DIA rejects the `msfz-deflate` and `msfz-deflate-dir` files (`loadDataFromPdb failed -
 HRESULT = 806D000C`). DIA reads the `msfz-uncompressed` files and gives the same
-`DIA2Dump -all` output as for the source. `pdbtool` and pdbrs read all three forms.
+`DIA2Dump -all` output as for the source. `pdbtool` and pdb-rs read all three forms.
 
 Microsoft's writer cannot make these forms of the MSFZ specification. Thus no fixture has them:
 
@@ -278,10 +278,10 @@ Microsoft's writer cannot make these forms of the MSFZ specification. Thus no fi
 Run these commands from the workspace root. You do not need a developer command prompt.
 
 ```sh
-cargo run -p pdbrs-fixtures -- --list
-cargo run -p pdbrs-fixtures
-cargo run -p pdbrs-fixtures -- --only msvc-x64-debug --only rust-lld-x64-debug
-cargo run -p pdbrs-fixtures -- --out D:/pdb-fixtures
+cargo run -p pdb-rs-fixtures -- --list
+cargo run -p pdb-rs-fixtures
+cargo run -p pdb-rs-fixtures -- --only msvc-x64-debug --only rust-lld-x64-debug
+cargo run -p pdb-rs-fixtures -- --out D:/pdb-fixtures
 ```
 
 The generator does these steps:
@@ -323,7 +323,7 @@ For each fixture the manifest records:
   and the SHA-256 digest of its contents (`sha256`, 64 lowercase hexadecimal digits)
 
 The generator calculates the digest with its own SHA-256 code
-(`crates/pdbrs-fixtures/src/sha256.rs`). It does not use the `pdbrs` library or a host tool for
+(`crates/pdb-rs-fixtures/src/sha256.rs`). It does not use the `pdb-rs` library or a host tool for
 the digest.
 
 The output kind comes from the file contents: the MSF 7.0 signature, the `BSJB` signature, the
@@ -333,7 +333,7 @@ workspace commit and the host.
 For an `embedded-in-image` output, the generator writes the data of the debug directory entry
 of type 17 to a file next to the image, with the extension `.mpdb` (for example
 `CSharpDemo.mpdb`). The manifest records this file as an `embedded-pdb-payload` output. Tests
-and examples read the payload from this file, so pdbrs does not need a PE parser.
+and examples read the payload from this file, so pdb-rs does not need a PE parser.
 
 The `consumer_tools` section of `manifest.json` copies the tool records of
 `target/tools/manifest.json` (see [Consumer tools](#consumer-tools)). If that file is missing,
@@ -348,19 +348,19 @@ They are committed, and the generator builds with `--locked`, so Cargo does not 
 ## Consumer tools
 
 The `tools` command makes three independent consumers of PDB files and one MSFZ producer.
-Other work compares the output of pdbrs with the output of the consumers (#21, #22).
+Other work compares the output of pdb-rs with the output of the consumers (#21, #22).
 
 | Tool | Source | Use |
 | --- | --- | --- |
 | `pdbtool` | The `pdbtool` crate 0.1.22 from crates.io. This is the version at the pinned `microsoft/pdb-rs` revision `2081a0dd` in `docs/reference/SOURCES.json`. | `check`, `pdz-encode`, `copy`, `compare`, `container` |
 | `DIA2Dump` | The DIA SDK sample of the latest Visual Studio installation with the x64 C++ tools. | Dumps a PDB or an MSFZ file through `msdia140.dll`. |
 | `PortableVerifier` | The C# program in `dotnet/verifier/`. It uses `System.Reflection.Metadata` from the .NET shared framework, so it needs no NuGet package. | Prints the canonical dump of a Portable PDB (see [Portable PDB verifier](#portable-pdb-verifier)). |
-| `msfz-encode` | The Cargo project in `tools/msfz-encode/`. It uses `ms-pdb-msf` 0.1.7 and `ms-pdb-msfz` 0.1.10 of the pinned `microsoft/pdb-rs` revision `2081a0dd`, not pdbrs. Its empty `[workspace]` table keeps it out of the root workspace, and its `Cargo.lock` is committed. | Writes an MSFZ file from an MSF 7.0 PDB with Microsoft's `MsfzWriter` (see [MSFZ forms of Microsoft's writer](#msfz-forms-of-microsofts-writer)). |
+| `msfz-encode` | The Cargo project in `tools/msfz-encode/`. It uses `ms-pdb-msf` 0.1.7 and `ms-pdb-msfz` 0.1.10 of the pinned `microsoft/pdb-rs` revision `2081a0dd`, not the `pdb-rs` crate. Its empty `[workspace]` table keeps it out of the root workspace, and its `Cargo.lock` is committed. | Writes an MSFZ file from an MSF 7.0 PDB with Microsoft's `MsfzWriter` (see [MSFZ forms of Microsoft's writer](#msfz-forms-of-microsofts-writer)). |
 
 Run this command from the workspace root. It takes no other arguments:
 
 ```sh
-cargo run -p pdbrs-fixtures -- tools
+cargo run -p pdb-rs-fixtures -- tools
 ```
 
 The command does these steps:
@@ -444,7 +444,7 @@ The commands `detect`, `verify-portable`, `verify-rebuild`, `verify-edit`,
 worker threads (#45). The option `--jobs <n>` sets the number of workers:
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-native-build --jobs 8
+cargo run -p pdb-rs-fixtures --release -- verify-native-build --jobs 8
 ```
 
 - `<n>` must be a whole number greater than 0.
@@ -470,20 +470,20 @@ to one worker.
 ## Portable PDB verifier
 
 `PortableVerifier` reads a Portable PDB with `System.Reflection.Metadata` (SRM) and prints a
-canonical text dump. pdbrs prints the same format. Compare the two dumps of each `portable-pdb`
+canonical text dump. pdb-rs prints the same format. Compare the two dumps of each `portable-pdb`
 and each `embedded-pdb-payload` output of `manifest.json` with this command:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures -- verify-portable [--fixtures <dir>] [--jobs <n>]
 ```
 
-For an `embedded-pdb-payload` output, pdbrs decodes the `.mpdb` file with
+For an `embedded-pdb-payload` output, pdb-rs decodes the `.mpdb` file with
 `portable::embedded::decode_embedded`. The verifier reads the `embedded-in-image` output of the
 same fixture with `PEReader.ReadEmbeddedPortablePdbDebugDirectoryData`. The verifier also
 decompresses the payload with `DeflateStream` to read the stream headers, and checks that its
 length is equal to the SRM metadata length.
 
-The command writes `<fixture>.pdbrs.txt` and `<fixture>.srm.txt` to `target/verify-portable/`.
+The command writes `<fixture>.pdb-rs.txt` and `<fixture>.srm.txt` to `target/verify-portable/`.
 It prints the line count and the number of different lines for each fixture, and the first
 different lines. It exits with a failure code if a dump fails or the dumps differ. Run the
 verifier alone with `dotnet target/tools/bin/portable-verifier/PortableVerifier.dll <file.pdb>`,
@@ -499,10 +499,10 @@ them against the SRM views of the same data. A failed check stops the verifier w
 
 ### Rebuild check
 
-The `verify-rebuild` command checks the Portable PDB writer of pdbrs with the same inputs:
+The `verify-rebuild` command checks the Portable PDB writer of pdb-rs with the same inputs:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures -- verify-rebuild [--fixtures <dir>] [--jobs <n>]
 ```
 
 For each input, the command checks these items and prints `yes` or `NO` for each one:
@@ -521,10 +521,10 @@ check fails.
 
 ### Edit check
 
-The `verify-edit` command checks the Portable PDB editor of pdbrs with the same inputs:
+The `verify-edit` command checks the Portable PDB editor of pdb-rs with the same inputs:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures -- verify-edit [--fixtures <dir>] [--jobs <n>]
 ```
 
 For each input, the command checks these items:
@@ -534,7 +534,7 @@ For each input, the command checks these items:
    lines of its verifier dump (all lines after the `row` lines) are the same as those of the
    original.
 3. An edit renames document 1 (suffix `.edited`), moves each visible sequence point 1000 lines
-   down, adds the local constant `pdbrsAdded` (`i4=42`) to the last local scope and adds a
+   down, adds the local constant `pdb_rs_added` (`i4=42`) to the last local scope and adds a
    custom debug information value of the unknown kind `70646272-7365-4564-6974-2d636865636b`
    to `MethodDef` 1. The same edit again gives the same bytes. The decoded lines of the
    verifier dump are the expected change of the original lines. The command compares the
@@ -626,7 +626,7 @@ it.
 #### Debug table lines
 
 The decoded debug table sections come after the `row` lines and before the custom debug
-information section (#23). pdbrs decodes the values with `portable::debug`. The verifier uses
+information section (#23). pdb-rs decodes the values with `portable::debug`. The verifier uses
 the SRM views of documents, sequence points, scopes and imports. SRM does not decode local
 constant signatures, so the verifier decodes them with `BlobReader` in
 `dotnet/verifier/DebugDump.cs`. Names and text are quoted like the metadata version string.
@@ -659,7 +659,7 @@ field for each custom modifier, then the value:
 
 The custom debug information section comes last. Each `CustomDebugInformation` row gives a
 `cdi` line: `id`, `parent` (token), `kind` (the GUID as lowercase text) and `codec`. The detail
-lines of its decoded value follow. Each detail line starts with the `id` of the row. pdbrs
+lines of its decoded value follow. Each detail line starts with the `id` of the row. pdb-rs
 decodes the values with `portable::custom`. The verifier decodes the SRM blobs with
 `BlobReader` in `dotnet/verifier/CustomDebugInfoDump.cs`. IL offsets and sizes are hexadecimal;
 syntax offsets, state numbers, slot kinds, ordinals and row IDs are signed decimal.
@@ -688,19 +688,19 @@ embedded source of a document gives a `source` line, in `Document` row order: `d
 row ID), `cdi` (the `CustomDebugInformation` row ID), `size` (the decoded size) and `check`.
 The `check` field is `verified` if the hash algorithm is SHA-256 and the SHA-256 digest of the
 decoded source is equal to the document hash. It is `mismatch` if the digest differs. It is
-`not-verified` for other hash algorithms. pdbrs uses `Pdb::document_source`. The verifier
+`not-verified` for other hash algorithms. pdb-rs uses `Pdb::document_source`. The verifier
 decodes the blob with `DeflateStream` and computes the digest with `SHA256.HashData`.
 
 To extend the format, add new keywords after the `row` lines. Add each new line type to the
-verifier and to `crates/pdbrs-fixtures/src/verify/dump.rs` (or a module below it) together,
+verifier and to `crates/pdb-rs-fixtures/src/verify/dump.rs` (or a module below it) together,
 and increase the version only if an existing line changes.
 
 ### Format detection
 
-Open each output of `manifest.json` with the format facade `pdbrs::Pdb` with this command:
+Open each output of `manifest.json` with the format facade `pdb_rs::Pdb` with this command:
 
 ```sh
-cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures -- detect [--fixtures <dir>] [--jobs <n>]
 ```
 
 It prints a Markdown table. A native PDB must open as `native`, and a Portable PDB as
@@ -714,7 +714,7 @@ code if a result differs.
 Run the full native reader on each native PDB that `manifest.json` lists:
 
 ```sh
-cargo run -p pdbrs --example native -- target/fixtures/msvc-x64-debug/demo.pdb
+cargo run -p pdb-rs --example native -- target/fixtures/msvc-x64-debug/demo.pdb
 ```
 
 The reader prints counts, undecoded record kinds and producer inconsistencies. It exits with a
@@ -728,7 +728,7 @@ gives the issue (#29 to #32) that decodes each item.
 Read every row and heap value of a Portable PDB with:
 
 ```sh
-cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-portable/artifacts/bin/CSharpDemo/debug/CSharpDemo.pdb
+cargo run -p pdb-rs --example portable -- target/fixtures/dotnet-csharp-portable/artifacts/bin/CSharpDemo/debug/CSharpDemo.pdb
 ```
 
 The example prints the stream headers, the heap sizes, the `#Pdb` fields and the row counts. It
@@ -742,7 +742,7 @@ verified.
 The example also reads an embedded PDB payload. It decodes the `MPDB` envelope first:
 
 ```sh
-cargo run -p pdbrs --example portable -- target/fixtures/dotnet-csharp-embedded/artifacts/bin/CSharpDemo/debug/CSharpDemo.mpdb
+cargo run -p pdb-rs --example portable -- target/fixtures/dotnet-csharp-embedded/artifacts/bin/CSharpDemo/debug/CSharpDemo.mpdb
 ```
 
 ### Input modes
@@ -752,12 +752,12 @@ The `native` and `portable` examples read the file in one of three modes. Select
 
 | Mode | Reader |
 | --- | --- |
-| `file` (default) | `Pdb::open`: positional reads through `pdbrs::io::FileReader` |
+| `file` (default) | `Pdb::open`: positional reads through `pdb_rs::io::FileReader` |
 | `slice` | `Pdb::parse`: the example reads all file bytes, and the reader borrows them |
-| `seek` | `Pdb::read` with `pdbrs::io::SeekReader` around `std::fs::File` |
+| `seek` | `Pdb::read` with `pdb_rs::io::SeekReader` around `std::fs::File` |
 
 ```sh
-cargo run -p pdbrs --example native -- --input seek target/fixtures/msvc-x64-debug/demo.pdb
+cargo run -p pdb-rs --example native -- --input seek target/fixtures/msvc-x64-debug/demo.pdb
 ```
 
 For an `MPDB` payload, the `portable` example writes the decoded PDB to a temporary file. Then
@@ -766,11 +766,11 @@ it reads that file in the selected mode and deletes it. All modes must give the 
 
 ## Native build check
 
-The `verify-native-build` command checks the native rebuild of pdbrs (#33, #42) with each
+The `verify-native-build` command checks the native rebuild of pdb-rs (#33, #42) with each
 `native-pdb` output of `manifest.json`:
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-native-build [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures --release -- verify-native-build [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, because `pdbtool`, `llvm-pdbutil` and `DIA2Dump` reject
@@ -827,11 +827,11 @@ or a difference is unexplained.
 
 ## Native edit check
 
-The `verify-native-edit` command checks the native PDB editor of pdbrs (#34, #42) with each
+The `verify-native-edit` command checks the native PDB editor of pdb-rs (#34, #42) with each
 `native-pdb` output of `manifest.json`:
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-native-edit [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures --release -- verify-native-edit [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It applies each edit to
@@ -839,11 +839,11 @@ each other PDB with `Pdb::edit` and `PdbEditor::plan`:
 
 | Edit | Changes | Identity |
 | --- | --- | --- |
-| `named` | Add or replace `srcsrv`, `sourcelink` and the raw stream `pdbrs-edit`. Remove `/LinkInfo` if present | `Preserve` |
-| `add-symbols` | Add the public symbol `pdbrs_edit_public` and the `S_GDATA32` global `pdbrs_edit_global` | `IncrementAge` |
-| `rename-symbols` | Append `_pdbrs_renamed` to a unique public name and to a unique data, constant or UDT global name. The later records move | `IncrementAge` |
-| `types` | Add a field list, the structure `PdbrsEditType`, its `S_UDT` global and the `LF_STRING_ID` record `pdbrs edit string` | `IncrementAge` |
-| `identity` | Write the signature `0x52444250`, the GUID `pdbrs-edit-guid!` and age 7 | `Replace` |
+| `named` | Add or replace `srcsrv`, `sourcelink` and the raw stream `pdb-rs-edit`. Remove `/LinkInfo` if present | `Preserve` |
+| `add-symbols` | Add the public symbol `pdb_rs_edit_public` and the `S_GDATA32` global `pdb_rs_edit_global` | `IncrementAge` |
+| `rename-symbols` | Append `_pdb_rs_renamed` to a unique public name and to a unique data, constant or UDT global name. The later records move | `IncrementAge` |
+| `types` | Add a field list, the structure `pdb_rs_edit_type`, its `S_UDT` global and the `LF_STRING_ID` record `pdb-rs edit string` | `IncrementAge` |
+| `identity` | Write the signature `0x52444250`, the GUID `pdb-rs-edit-guid` and age 7 | `Replace` |
 | `strip` | `EditOptions::with_strip_private(true)` | `Preserve` |
 
 The edited PDB is `target/verify-native-edit/<fixture>/<PDB file stem>/<edit>.pdb`. For each
@@ -860,7 +860,7 @@ edited PDB, the command does these checks:
      not the old names. `llvm-pdbutil --globals` and `DIA2Dump -sym` find the added and renamed
      global names. For an old global name, `DIA2Dump -sym` finds one symbol less than on the
      source PDB.
-   - `llvm-pdbutil --types` and `DIA2Dump -type` find `PdbrsEditType`, and `llvm-pdbutil --ids`
+   - `llvm-pdbutil --types` and `DIA2Dump -type` find `pdb_rs_edit_type`, and `llvm-pdbutil --ids`
      finds the added string.
    - `llvm-pdbutil --summary` shows the new signature, age and GUID, and
      `PdbWritePlan::identity` gives the GUID and the age.
@@ -901,7 +901,7 @@ output.
 
 Each case writes `target/verify-native-edit/<fixture>/<PDB file stem>/<case>.pdb` and gets
 checks 1 to 3 above, the name lookups of the removed names, and a read of the output with
-pdbrs that finds the new value (or no record).
+pdb-rs that finds the new value (or no record).
 
 The section then has two more steps:
 
@@ -925,12 +925,12 @@ runs each editing task of `PdbEditor` on each PDB. A case that does not apply to
 | `set-source-link` | `set_source_link` with a Source Link file; `pdbstr -r -s:sourcelink` must read it | `Preserve` |
 | `set-source-server` | `set_source_server` with a `srcsrv` stream; `pdbstr -r -s:srcsrv` must read it | `Preserve` |
 | `remove-named-stream` | `remove_named_stream` of the first named stream in map order that the editor can remove (not `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or `/src/`); `llvm-pdbutil --named-streams` must not list it | `Preserve` |
-| `rename-symbols` | `rename_symbols` gives the suffix `_pdbrs_task` to the first unique public name, the first unique data, constant or UDT global name and the first unique `S_PROCREF` or `S_LPROCREF` name | `IncrementAge` |
+| `rename-symbols` | `rename_symbols` gives the suffix `_pdb_rs_task` to the first unique public name, the first unique data, constant or UDT global name and the first unique `S_PROCREF` or `S_LPROCREF` name | `IncrementAge` |
 
 Each case writes `target/verify-native-edit/<fixture>/<PDB file stem>/task-<case>.pdb` and gets
 checks 1 to 3 above. For `rename-symbols`, `llvm-pdbutil --publics` and `--globals` and
 `DIA2Dump -p` must list the new names and not the old names, `DIA2Dump -sym` must find a
-function with the new procedure name and no function with the old name, and a read with pdbrs
+function with the new procedure name and no function with the old name, and a read with pdb-rs
 must find the new name in each renamed reference record and in the procedure that it names.
 The last line of the section gives the counts. The command fails for a problem in the section.
 
@@ -962,7 +962,7 @@ plans with `IdentityPolicy::IncrementAge` and `EditOptions::default()`:
 
 | Case | Removed records | Method |
 | --- | --- | --- |
-| `remove-types` | The TPI records that pdbrs decodes and that are not UDTs (`LF_CLASS`, `LF_STRUCTURE`, `LF_INTERFACE`, `LF_UNION`, `LF_ENUM` and their `2` variants) or modifiers of UDTs | `TypeList::remove` |
+| `remove-types` | The TPI records that pdb-rs decodes and that are not UDTs (`LF_CLASS`, `LF_STRUCTURE`, `LF_INTERFACE`, `LF_UNION`, `LF_ENUM` and their `2` variants) or modifiers of UDTs | `TypeList::remove` |
 | `remove-ids` | The `LF_UDT_SRC_LINE` and `LF_UDT_MOD_SRC_LINE` records of the IPI stream | `IdList::remove` |
 
 DIA lists the UDTs, and it lists a modifier of a UDT as a UDT, so `remove-types` keeps them.
@@ -1005,14 +1005,14 @@ The last line of the section gives the counts. The command fails for a problem i
 
 ## MSFZ writer check
 
-The `verify-msfz` command checks the MSFZ writer and the conversions of pdbrs (#38):
+The `verify-msfz` command checks the MSFZ writer and the conversions of pdb-rs (#38):
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-msfz [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures --release -- verify-msfz [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It builds the `native`
-example of pdbrs first. It has three parts.
+example of pdb-rs first. It has three parts.
 
 1. Encode. The command writes each `native-pdb` output as MSFZ with `Container::to_msfz` and
    each of six option sets: `default`, `compress-stream-dir` (zstd directory),
@@ -1023,7 +1023,7 @@ example of pdbrs first. It has three parts.
    - A second write gives the same bytes.
    - `pdbtool compare <source> <output>` reports no stream with differences.
    - `DIA2Dump -all` gives the same masked output as for the source.
-   - The pdbrs reader gives the same streams from stream 1, and an empty stream 0.
+   - The pdb-rs reader gives the same streams from stream 1, and an empty stream 0.
    - The `native` example gives the same output, apart from the lines that start with
      `container:`.
 2. Reference. The command writes the source of each `pdz-*` fixture with the matching option
@@ -1046,7 +1046,7 @@ example of pdbrs first. It has three parts.
 Two `DIA2Dump` results are explained and do not make the command fail:
 
 - DIA rejects each file with raw DEFLATE chunks (`loadDataFromPdb failed - HRESULT =
-  806D000C`). DIA reads only zstd chunks. `pdbtool` and pdbrs read the DEFLATE files. DIA also
+  806D000C`). DIA reads only zstd chunks. `pdbtool` and pdb-rs read the DEFLATE files. DIA also
   rejects the `msfz-deflate` and `msfz-deflate-dir` files of Microsoft's writer. The decode part
   runs DIA on the MSF 7.0 output, not on the PDZ file, so these files pass.
 - For `msvc-x64-incremental`, DIA prints function names with their signatures for each MSFZ
@@ -1059,10 +1059,10 @@ the output file.
 ## Remap check
 
 The `verify-remap` command checks the OMAP output and the clean output of the address remap
-of pdbrs (#43):
+of pdb-rs (#43):
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-remap [--fixtures <dir>] [--jobs <n>]
+cargo run -p pdb-rs-fixtures --release -- verify-remap [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, as `verify-native-build` does. For each other
@@ -1089,7 +1089,7 @@ For each set, the command remaps the PDB with `PdbEditor::remap_addresses` and
 
 1. `PlanReport::changed` lists the Info stream, the DBI stream and each of the 4 OMAP output
    streams (slots 3, 4, 5 and 10) with new bytes. `PlanReport::dropped` is empty.
-2. The pdbrs reader finds the address tables of `ImageRemap::address_tables`.
+2. The pdb-rs reader finds the address tables of `ImageRemap::address_tables`.
 3. The same ranges, added in reverse order, give the same bytes.
 4. `pdbtool check` shows 0 PDBs with errors.
 5. DIA2Dump on the output gives each procedure, public symbol, data symbol and line the new
@@ -1134,7 +1134,7 @@ writes the output of `RemovedCode::Drop` to
    range and the same unwind information, sorted by the new start. It gives both streams
    with `ImageRemap::with_unwind_streams`.
 4. The report and the reader. The output DBI stream names no OMAP stream and no original
-   section headers (slots 3, 4 and 10). The pdbrs reader finds the section headers of the set
+   section headers (slots 3, 4 and 10). The pdb-rs reader finds the section headers of the set
    and no OMAP. `PlanReport::dropped` is empty. For the `identity` set of a PDB without OMAP
    and without removed records, `PlanReport::changed` lists only the Info stream and the DBI
    stream. The ranges in reverse order must give the same bytes.

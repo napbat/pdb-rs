@@ -9,7 +9,7 @@ publish = false
 [workspace]
 
 # The crates of the pinned `microsoft/pdb-rs` revision `2081a0dd`
-# (`docs/reference/SOURCES.json`). The tool does not use pdbrs.
+# (`docs/reference/SOURCES.json`). The tool does not use the `pdb-rs` crate.
 [dependencies]
 ms-pdb-msf = "=0.1.7"
 ms-pdb-msfz = "=0.1.10"

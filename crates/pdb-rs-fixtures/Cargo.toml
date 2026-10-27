@@ -1,0 +1,14 @@
+[package]
+name = "pdb-rs-fixtures"
+version.workspace = true
+edition.workspace = true
+description = "Build the demo programs in fixtures/ and record their PDB outputs"
+publish = false
+
+[dependencies]
+# The commands use only the `no_std + alloc` API. Without default features, the workspace
+# check with `--no-default-features` still builds pdb-rs without `std`.
+pdb-rs = { path = "../pdb-rs", default-features = false }
+
+[lints]
+workspace = true

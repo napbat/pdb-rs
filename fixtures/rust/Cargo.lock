@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "pdbrs-rust-demo"
+name = "pdb-rs-rust-demo"
 version = "0.1.0"

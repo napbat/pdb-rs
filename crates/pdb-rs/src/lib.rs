@@ -1,0 +1,62 @@
+//! Building blocks for native Windows and Portable .NET PDB files.
+//!
+//! The API reads MSF 7.0 and MSFZ containers and native PDB streams. [`native::Pdb`]
+//! decodes every modern `CodeView` record kind, numeric leaf and C13 subsection
+//! that has a layout definition, and checks the references between records.
+//! Record kinds without a layout remain available as raw bytes.
+//! [`native::container::Container`] gives one stream reader for both containers.
+//!
+//! [`portable::Pdb`] reads standalone Portable PDBs: the metadata root, the
+//! heaps, the `#Pdb` stream, the `#~` table layout and the raw rows of the
+//! eight debug tables. Semantic decoding of the debug blobs is not complete.
+//!
+//! [`Pdb`] detects the format from the contents and opens the input with the
+//! native or the portable backend. It rejects ordinary CLI metadata (for
+//! example the metadata of an assembly) because it has no `#Pdb` stream.
+//!
+//! [`io::copy_exact`] makes exact copies. [`native::msf`] writes MSF 7.0
+//! containers: stream-preserving repacks and new layouts of arbitrary
+//! streams. [`native::msfz`] writes MSFZ containers, and
+//! [`native::container::Container`] converts between MSF 7.0 and MSFZ. Each
+//! native record and stream has an encoder. [`native::PdbEditor`] builds,
+//! edits and rebuilds native PDBs with one model, and its plan writes the
+//! dependent indexes. [`portable::write`] writes Portable PDBs in new layouts
+//! from raw rows and heaps. [`portable::PdbEditor`] builds and edits Portable
+//! PDBs from records.
+//!
+//! [`probe`] identifies containers, not valid PDBs. In particular,
+//! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification
+//! does not imply support for decoding legacy records.
+//!
+//! Disable the default `std` feature to use `no_std + alloc`. Sequential I/O
+//! comes from `nostdio`; [`io::SeekReader`] adapts seekable streams to [`io::ReadAt`].
+//! Slice reads, probing and fixed-buffer cursor operations do not allocate.
+//!
+//! # Example
+//!
+//! ```
+//! use pdb_rs::{ContainerKind, probe};
+//!
+//! let bytes = b"BSJB";
+//! assert_eq!(probe(bytes.as_slice())?, ContainerKind::CliMetadata);
+//! # Ok::<(), pdb_rs::Error>(())
+//! ```
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+mod bytes;
+mod compression;
+mod crypto;
+mod error;
+mod format;
+pub mod io;
+pub mod native;
+pub mod portable;
+#[cfg(test)]
+mod test_support;
+
+pub use bytes::Bytes;
+pub use error::{Error, ErrorKind, PortableLocation, Result};
+pub use format::{ContainerKind, Format, PROBE_LEN, Pdb, probe};

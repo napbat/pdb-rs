@@ -3,7 +3,7 @@
 // signature. Check returns 0, so the checksum of the demo does not change.
 using System;
 
-namespace PdbrsDemo;
+namespace Pdb.Rs.Demo;
 
 internal enum Level : sbyte
 {

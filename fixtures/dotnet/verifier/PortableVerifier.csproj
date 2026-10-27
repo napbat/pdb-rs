@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The `tools` command of pdbrs-fixtures builds this program into target/tools/bin/. -->
+  <!-- The `tools` command of pdb-rs-fixtures builds this program into target/tools/bin/. -->
   <!-- It uses System.Reflection.Metadata from the shared framework, so it needs no NuGet package. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

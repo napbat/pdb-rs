@@ -1,6 +1,6 @@
 /* Declarations that the C translation unit shares with the C++ translation units. */
-#ifndef PDBRS_DEMO_C_H
-#define PDBRS_DEMO_C_H
+#ifndef PDB_RS_DEMO_C_H
+#define PDB_RS_DEMO_C_H
 
 #ifdef __cplusplus
 extern "C" {

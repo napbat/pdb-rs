@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#if PDBRS_X86_FAMILY
+#if PDB_RS_X86_FAMILY
 #include <xmmintrin.h>
 #endif
 
-#if PDBRS_MSVC
+#if PDB_RS_MSVC
 #include <excpt.h>
 #endif
 
@@ -22,7 +22,7 @@ namespace demo {
 thread_local int tls_counter = 7;
 thread_local std::uint64_t tls_wide = 0x1122334455667788ull;
 
-#if PDBRS_X86_FAMILY
+#if PDB_RS_X86_FAMILY
 __m128 g_vector;
 #endif
 
@@ -92,7 +92,7 @@ __declspec(noinline) int throw_and_catch(int value) {
     }
 }
 
-#if PDBRS_MSVC
+#if PDB_RS_MSVC
 __declspec(noinline) int structured_exception(volatile int* pointer) {
     __try {
         return *pointer + 1;
@@ -106,14 +106,14 @@ __declspec(noinline) int __stdcall std_add(int a, int b) { return a + b; }
 
 __declspec(noinline) int __fastcall fast_add(int a, int b, int c) { return a + b + c; }
 
-#if PDBRS_X86_FAMILY
+#if PDB_RS_X86_FAMILY
 __declspec(noinline) __m128 __vectorcall vector_add(__m128 a, __m128 b) { return _mm_add_ps(a, b); }
 #endif
 
 __declspec(noinline) int containers() {
     std::vector<int> values{3, 1, 4, 1, 5};
     std::map<std::string, int> counts;
-    std::string text = "pdbrs";
+    std::string text = "pdb-rs";
     for (char c : text) counts[std::string(1, c)] += 1;
     int base = 10;
     auto add_base = [base](int value) { return value + base; };
@@ -140,7 +140,7 @@ __declspec(noinline) int heap_sites() {
 
 __declspec(noinline) int calling_conventions() {
     int total = std_add(1, 2) + fast_add(3, 4, 5);
-#if PDBRS_X86_FAMILY
+#if PDB_RS_X86_FAMILY
     g_vector = vector_add(_mm_set1_ps(1.0f), _mm_set1_ps(2.0f));
     total += static_cast<int>(_mm_cvtss_f32(g_vector));
 #endif
@@ -152,7 +152,7 @@ int run_control() {
     int total = next_sequence() + next_sequence() + inline_cube(input) + dense_switch(input) +
                 with_goto(input) + throw_and_catch(input) + containers() + heap_sites() +
                 calling_conventions() + tls_counter + static_cast<int>(tls_wide & 0xff);
-#if PDBRS_MSVC
+#if PDB_RS_MSVC
     total += structured_exception(&input);
 #endif
     return total;

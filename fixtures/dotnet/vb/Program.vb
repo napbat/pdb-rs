@@ -4,7 +4,7 @@ Imports System
 Imports System.Collections.Generic
 Imports System.Threading.Tasks
 Imports Gen = System.Collections.Generic
-Imports <xmlns:demo="urn:pdbrs-demo">
+Imports <xmlns:demo="urn:pdb-rs-demo">
 
 Module Program
 
