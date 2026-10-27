@@ -29,6 +29,7 @@ mod native;
 mod native_edit;
 mod rebuild;
 mod remap;
+mod source_paths;
 
 pub use edit::verify_edit;
 pub use msfz::verify_msfz;
