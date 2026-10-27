@@ -6,6 +6,7 @@
 //! - `opaque.rs`: a module whose symbols do not form a scope tree.
 //! - `rejected.rs`: the rejected edits and the editor after a rejection.
 //! - `determinism.rs`: the output depends only on the final model.
+//! - `views.rs`: borrowed and copied stream views (#48).
 //!
 //! The source PDB is the synthetic program of the `native_synthetic`
 //! example. `layout.rs` parses the MSF stream directory without the reader
@@ -20,6 +21,7 @@ mod opaque;
 mod patched;
 mod read_count;
 mod rejected;
+mod views;
 
 use pdbrs::Bytes;
 use pdbrs::native::codeview::index::TypeIndex;

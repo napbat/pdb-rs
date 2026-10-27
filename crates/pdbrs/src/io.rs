@@ -77,6 +77,20 @@ pub trait ReadAt {
         Ok(self.len()? == 0)
     }
 
+    /// Return the `length` bytes at `offset` as a slice of the input, if the
+    /// input can lend them (#48).
+    ///
+    /// The default returns `None`: the input cannot lend bytes, and the
+    /// caller reads them with [`ReadAt::read_exact_at`]. A byte slice lends
+    /// each range inside it. An implementation that lends a range must lend
+    /// it for the full life of the input, with the bytes that
+    /// [`ReadAt::read_exact_at`] gives. It returns `None` for a range that
+    /// is not inside the input.
+    fn borrow_at(&self, offset: u64, length: usize) -> Option<&[u8]> {
+        let _ = (offset, length);
+        None
+    }
+
     /// Read a little-endian `u16` at `offset`.
     ///
     /// # Errors
@@ -130,6 +144,11 @@ impl ReadAt for [u8] {
         buffer.copy_from_slice(source);
         Ok(())
     }
+
+    fn borrow_at(&self, offset: u64, length: usize) -> Option<&[u8]> {
+        let start = usize::try_from(offset).ok()?;
+        self.get(start..start.checked_add(length)?)
+    }
 }
 
 impl<R: ReadAt + ?Sized> ReadAt for &R {
@@ -139,6 +158,10 @@ impl<R: ReadAt + ?Sized> ReadAt for &R {
 
     fn read_exact_at(&self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         (**self).read_exact_at(offset, buffer)
+    }
+
+    fn borrow_at(&self, offset: u64, length: usize) -> Option<&[u8]> {
+        (**self).borrow_at(offset, length)
     }
 
     fn is_empty(&self) -> Result<bool> {

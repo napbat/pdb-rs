@@ -3,6 +3,11 @@
 //! The first call of an accessor loads and validates its structure and stores it in a cell.
 //! Later calls lend the stored value. [`super::ReadOptions::max_cached_bytes`] limits the
 //! stream bytes that the cells hold.
+//!
+//! The cells of raw stream bytes (the symbol record stream and `/names`) do not copy a stream
+//! that the source lends (#48). Such a cell holds only the source location of the stream, and
+//! each access borrows the bytes from the source again. The `Pdb` owns its source, so a cell
+//! cannot hold a borrow of the source.
 
 use alloc::vec::Vec;
 
@@ -10,6 +15,7 @@ use super::cache::{Cache, Cell};
 use super::{Pdb, require_stream};
 use crate::io::ReadAt;
 use crate::native::codeview::index::ModuleIndex;
+use crate::native::container::StreamBytes;
 use crate::native::dbi::{Dbi, Module, ModuleStream};
 use crate::native::msf::StreamId;
 use crate::native::names::{StringTable, StringTableLayout};
@@ -31,9 +37,23 @@ struct CachedDbi {
 #[derive(Debug)]
 struct CachedNames {
     /// The stream bytes.
-    bytes: Vec<u8>,
+    bytes: SessionBytes,
     /// The validated layout of `bytes`.
     layout: StringTableLayout,
+}
+
+/// The bytes of one stream in a session cell (#48).
+#[derive(Debug)]
+enum SessionBytes {
+    /// The source lends the whole stream: its source offset and its length.
+    Lent {
+        /// The source offset of the first byte.
+        offset: u64,
+        /// The length in bytes.
+        length: usize,
+    },
+    /// A copy of the stream.
+    Copied(StreamBytes<'static>),
 }
 
 /// The cells of the reader session. A cell holds `None` for an absent structure.
@@ -46,7 +66,7 @@ pub(super) struct Session {
     /// The `/names` stream.
     names: Cell<Option<CachedNames>>,
     /// The symbol record stream.
-    symbol_records: Cell<Option<Vec<u8>>>,
+    symbol_records: Cell<Option<SessionBytes>>,
     /// The global symbol index.
     globals: Cell<Option<GlobalSymbolIndex>>,
     /// The public symbol index.
@@ -148,7 +168,7 @@ impl<S: ReadAt> Pdb<S> {
     }
 
     /// Return the `/names` string table, if the Info stream names it. The session loads it
-    /// once.
+    /// once. A source that lends the stream keeps its bytes (#48).
     ///
     /// # Errors
     ///
@@ -157,18 +177,21 @@ impl<S: ReadAt> Pdb<S> {
     /// [`super::ReadOptions::max_cached_bytes`].
     pub fn names(&self) -> Result<Option<StringTable<'_>>> {
         let cached = self.session.cache.get_or_load(&self.session.names, || {
-            let Some(bytes) = self.named_stream_bytes(b"/names")? else {
+            let Some(id) = self.info.named_stream(b"/names") else {
                 return Ok(absent());
             };
-            let layout = StringTableLayout::parse(&bytes)?;
-            let size = bytes.len();
+            let (bytes, size) = self.load_bytes(id)?;
+            let layout = StringTableLayout::parse(self.cell_bytes(&bytes)?)?;
             Ok((Some(CachedNames { bytes, layout }), size))
         })?;
-        Ok(cached.as_ref().map(|names| names.layout.view(&names.bytes)))
+        match cached {
+            Some(names) => Ok(Some(names.layout.view(self.cell_bytes(&names.bytes)?))),
+            None => Ok(None),
+        }
     }
 
     /// Return the symbol record stream that the DBI header names, if any. The session loads
-    /// it once.
+    /// it once. A source that lends the stream keeps its bytes (#48).
     ///
     /// # Errors
     ///
@@ -186,11 +209,42 @@ impl<S: ReadAt> Pdb<S> {
                 else {
                     return Ok(absent());
                 };
-                let bytes = self.stream_bytes(id)?;
-                let size = bytes.len();
+                let (bytes, size) = self.load_bytes(id)?;
                 Ok((Some(bytes), size))
             })?;
-        Ok(cached.as_deref())
+        cached
+            .as_ref()
+            .map(|bytes| self.cell_bytes(bytes))
+            .transpose()
+    }
+
+    /// Load the stream `id` for a session cell. Return the cell value and the number of
+    /// bytes that it holds: 0 for a stream that the source lends.
+    fn load_bytes(&self, id: StreamId) -> Result<(SessionBytes, usize)> {
+        let stream = require_stream(&self.container, id)?;
+        let view = stream.view(self.options.max_stream_bytes)?;
+        if view.is_borrowed()
+            && let Some(offset) = stream.lent_offset()
+        {
+            let length = view.len();
+            return Ok((SessionBytes::Lent { offset, length }, 0));
+        }
+        let bytes = StreamBytes::from(view.into_vec());
+        let size = bytes.len();
+        Ok((SessionBytes::Copied(bytes), size))
+    }
+
+    /// Return the bytes of a session cell.
+    fn cell_bytes<'s>(&'s self, bytes: &'s SessionBytes) -> Result<&'s [u8]> {
+        match bytes {
+            SessionBytes::Copied(bytes) => Ok(bytes.as_bytes()),
+            SessionBytes::Lent { offset, length } => {
+                self.container.lend_at(*offset, *length).ok_or_else(|| {
+                    Error::new(ErrorKind::Io, Some(*offset))
+                        .with_context("the source does not lend bytes that it lent before")
+                })
+            }
+        }
     }
 
     /// Return the global symbol index that the DBI header names, with the symbol record

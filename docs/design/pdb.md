@@ -573,6 +573,10 @@ A native stream can cross arbitrary, noncontiguous blocks. A field can cross a b
 Use a stream cursor that translates logical offsets into physical blocks.
 Decode small fields through fixed-size scratch storage.
 Borrow contiguous bytes when the source permits it. Do not promise universal zero-copy access.
+`ReadAt::borrow_at` lends a range of a source that can lend bytes, for example a byte slice. A
+native stream view (`StreamBytes`) borrows an MSF 7.00 stream whose pages are adjacent in such a
+source, and copies the other streams (#48). MSFZ streams do not lend, because their bytes are
+compressed.
 
 Native record readers load the bytes of a stream and bound them before they iterate.
 Use ordinary `Iterator` types over these loaded, bounded stream bytes. Do not use a lending iterator.

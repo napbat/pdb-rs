@@ -13,6 +13,9 @@
 use alloc::vec::Vec;
 
 mod convert;
+mod view;
+
+pub use view::StreamBytes;
 
 use super::msf::{self, Msf, MsfLimits, StreamId};
 use super::msfz::{self, Msfz, MsfzLimits};
@@ -155,6 +158,18 @@ impl<S> Container<S> {
     }
 }
 
+impl<S: ReadAt> Container<S> {
+    /// Return the `length` bytes at the source offset `physical` as a slice
+    /// of the source, if the source lends them. An MSFZ container does not
+    /// lend (#48).
+    pub(crate) fn lend_at(&self, physical: u64, length: usize) -> Option<&[u8]> {
+        match self {
+            Self::Msf(msf) => msf.lend_at(physical, length),
+            Self::Msfz(_) => None,
+        }
+    }
+}
+
 /// A reader for the bytes of one stream of either container.
 ///
 /// Offsets for [`ReadAt`] are logical offsets in the stream. See [`msf::Stream`] and
@@ -206,5 +221,9 @@ impl<S: ReadAt> ReadAt for Stream<'_, S> {
             Self::Msf(stream) => stream.read_exact_at(offset, buffer),
             Self::Msfz(stream) => stream.read_exact_at(offset, buffer),
         }
+    }
+
+    fn borrow_at(&self, offset: u64, length: usize) -> Option<&[u8]> {
+        self.lend(offset, length)
     }
 }

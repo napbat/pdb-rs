@@ -298,6 +298,12 @@ impl<S: ReadAt> Msf<S> {
             pages,
         }))
     }
+
+    /// Return the `length` bytes at the source offset `physical` as a slice
+    /// of the source, if the source lends them (#48).
+    pub(crate) fn lend_at(&self, physical: u64, length: usize) -> Option<&[u8]> {
+        self.source.borrow_at(physical, length)
+    }
 }
 
 impl<S> Msf<S> {
@@ -390,9 +396,47 @@ impl<S: ReadAt> Stream<'_, S> {
     }
 }
 
+impl<'a, S: ReadAt> Stream<'a, S> {
+    /// Return the `length` bytes at the logical `offset` as a slice of the
+    /// source, if their pages are adjacent in the source and the source lends
+    /// them (#48).
+    #[must_use]
+    pub(crate) fn lend(&self, offset: u64, length: usize) -> Option<&'a [u8]> {
+        let physical = self.source_offset(offset, length)?;
+        self.source.borrow_at(physical, length)
+    }
+
+    /// Return the source offset of the `length` bytes at the logical
+    /// `offset`, if the range is inside the stream and its pages are
+    /// adjacent in the source.
+    pub(crate) fn source_offset(&self, offset: u64, length: usize) -> Option<u64> {
+        let end = offset.checked_add(u64::try_from(length).ok()?)?;
+        if end > u64::from(self.size) {
+            return None;
+        }
+        let block_size = u64::from(self.block_size);
+        let first = usize::try_from(offset / block_size).ok()?;
+        let last = usize::try_from(end.saturating_sub(1) / block_size)
+            .ok()?
+            .max(first);
+        let pages = self.pages.get(first..=last)?;
+        if pages
+            .windows(2)
+            .any(|pair| pair[0].checked_add(1) != Some(pair[1]))
+        {
+            return None;
+        }
+        Some(u64::from(pages[0]) * block_size + offset % block_size)
+    }
+}
+
 impl<S: ReadAt> ReadAt for Stream<'_, S> {
     fn len(&self) -> Result<u64> {
         Ok(u64::from(self.size))
+    }
+
+    fn borrow_at(&self, offset: u64, length: usize) -> Option<&[u8]> {
+        self.lend(offset, length)
     }
 
     fn read_exact_at(&self, offset: u64, buffer: &mut [u8]) -> Result<()> {

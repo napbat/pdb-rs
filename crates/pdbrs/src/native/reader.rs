@@ -11,7 +11,7 @@
 
 use alloc::vec::Vec;
 
-use super::container::{Container, ContainerLimits, Stream};
+use super::container::{Container, ContainerLimits, Stream, StreamBytes};
 use super::info::Info;
 use super::msf::{Msf, MsfWriteOptions, StreamId};
 use super::symbols::BucketCount;
@@ -192,6 +192,17 @@ impl<S: ReadAt> Pdb<S> {
     /// limit, allocation or I/O errors.
     pub fn stream_bytes(&self, id: StreamId) -> Result<Vec<u8>> {
         require_stream(&self.container, id)?.read_all(self.options.max_stream_bytes)
+    }
+
+    /// Return the bytes of a present stream within the configured stream
+    /// limit: borrowed from the source if the source lends the whole stream,
+    /// else a copy (#48). See [`StreamBytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Pdb::stream_bytes`].
+    pub fn stream_view(&self, id: StreamId) -> Result<StreamBytes<'_>> {
+        require_stream(&self.container, id)?.view(self.options.max_stream_bytes)
     }
 
     /// Load all bytes of a named stream, if the Info stream names it.
