@@ -2,6 +2,7 @@
 
 use core::fmt;
 
+use crate::native::RemapRange;
 use crate::native::msf::StreamId;
 use crate::portable::metadata::{MetadataStream, TableId};
 
@@ -176,6 +177,18 @@ impl fmt::Display for PortableLocation {
     }
 }
 
+/// The location of an error in the data of one backend.
+///
+/// The two kinds never occur in one error. One field holds them, so that [`Error`] stays
+/// small.
+#[derive(Clone, Copy, Debug)]
+enum Location {
+    /// A location in Portable PDB metadata.
+    Portable(PortableLocation),
+    /// A rejected range of an [`ImageRemap`](crate::native::ImageRemap).
+    Remap(RemapRange),
+}
+
 /// An error with an optional physical byte offset.
 #[derive(Debug)]
 pub struct Error {
@@ -184,7 +197,7 @@ pub struct Error {
     source: Option<nostdio::IoError>,
     context: Option<&'static str>,
     stream: Option<(StreamId, u64)>,
-    portable: Option<PortableLocation>,
+    location: Option<Location>,
 }
 
 impl Error {
@@ -197,7 +210,7 @@ impl Error {
             source: None,
             context: None,
             stream: None,
-            portable: None,
+            location: None,
         }
     }
 
@@ -218,7 +231,7 @@ impl Error {
             source: Some(source),
             context: None,
             stream: None,
-            portable: None,
+            location: None,
         }
     }
 
@@ -260,17 +273,38 @@ impl Error {
     /// are absent, so an outer operation can add the table and row to a heap error.
     #[must_use]
     pub const fn with_portable(mut self, location: PortableLocation) -> Self {
-        self.portable = Some(match self.portable {
-            Some(current) => current.merge(location),
-            None => location,
-        });
+        self.location = Some(Location::Portable(match self.location {
+            Some(Location::Portable(current)) => current.merge(location),
+            _ => location,
+        }));
         self
     }
 
     /// Return the Portable PDB metadata location, if known.
     #[must_use]
     pub const fn portable_location(&self) -> Option<&PortableLocation> {
-        self.portable.as_ref()
+        match &self.location {
+            Some(Location::Portable(location)) => Some(location),
+            _ => None,
+        }
+    }
+
+    /// Attach the address range of an [`ImageRemap`](crate::native::ImageRemap) that
+    /// the operation rejects.
+    #[must_use]
+    pub const fn with_remap_range(mut self, range: RemapRange) -> Self {
+        self.location = Some(Location::Remap(range));
+        self
+    }
+
+    /// Return the rejected address range of an [`ImageRemap`](crate::native::ImageRemap),
+    /// if known.
+    #[must_use]
+    pub const fn remap_range(&self) -> Option<RemapRange> {
+        match self.location {
+            Some(Location::Remap(range)) => Some(range),
+            _ => None,
+        }
     }
 
     /// Return the static structure or operation description, if known.
@@ -306,8 +340,16 @@ impl fmt::Display for Error {
         if let Some((stream, offset)) = self.stream {
             write!(formatter, " in stream {} at {offset:#x}", stream.0)?;
         }
-        if let Some(location) = &self.portable {
-            write!(formatter, " in Portable PDB metadata: {location}")?;
+        match &self.location {
+            Some(Location::Portable(location)) => {
+                write!(formatter, " in Portable PDB metadata: {location}")?;
+            }
+            Some(Location::Remap(range)) => write!(
+                formatter,
+                " for the remap range: old RVA {:#x}, length {:#x}, new RVA {:#x}",
+                range.old.0, range.length, range.new.0
+            )?,
+            None => {}
         }
         if let Some(source) = &self.source {
             write!(formatter, ": {source}")?;
