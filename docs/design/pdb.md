@@ -464,6 +464,7 @@ Clean output has these rules:
 - The plan rewrites the module symbols, the C13 line blocks (`DEBUG_S_LINES`), the module frame data (`DEBUG_S_FRAMEDATA`), the COFF symbol RVAs, the symbol record stream with the GSI and the PSI (address map, thunk table and section starts),
   the DBI section contributions with the contribution of each module record, the section map, and the FPO, new FPO, exception data and fixup records. `DEBUG_S_IL_LINES` holds IL offsets: only its header start maps, as a point.
 - The plan sorts again what the format sorts by address: the PSI address map, the section contributions, and the FPO, new FPO and exception data records. The fixups keep their order.
+- The plan sorts each run of `S_HYBRIDRANGE` records of a module by the new address. DIA finds the machine of a procedure (`MachineType`) with a binary search over these records.
 - New section headers get a new section map: one entry for each section, and a last entry for the absolute symbols with frame 0, as `link.exe` writes it. `lld-link` writes the number of the entry there, but then DIA finds no address in the last section.
 - In the copy-on-write layout, a stream whose bytes do not change stays `Copied`. An identity map thus keeps the source bytes of each stream except the Info stream and the DBI stream.
 

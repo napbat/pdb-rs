@@ -10,6 +10,8 @@
 //!   scope after the procedure ([`procedure`]).
 //! - A def-range gets one record for each part ([`defrange`]).
 //! - An inline site of a procedure that splits gets new code offsets ([`inline`]).
+//! - After the walk, each run of `S_HYBRIDRANGE` records gets the order of its new
+//!   addresses ([`sort_hybrid_ranges`]).
 //!
 //! A record that holds removed code makes the rewrite fail with [`RemovedCode::Fail`]. With
 //! [`RemovedCode::Drop`], the rewrite removes the record (with its scope) and adds it to
@@ -65,16 +67,20 @@ pub(super) fn rewrite(
                 None => error,
             })
         }
-        Symbols::Tree(nodes) => Walker {
-            context,
-            removed,
-            module: index,
-            source,
-            separated: Vec::new(),
-            dropped: Vec::new(),
-            split: Vec::new(),
+        Symbols::Tree(nodes) => {
+            Walker {
+                context,
+                removed,
+                module: index,
+                source,
+                separated: Vec::new(),
+                dropped: Vec::new(),
+                split: Vec::new(),
+            }
+            .list(nodes, Frame::Keep)?;
+            sort_hybrid_ranges(nodes);
+            Ok(())
         }
-        .list(nodes, Frame::Keep),
     }
 }
 
@@ -460,6 +466,35 @@ fn follows(node: &ModuleSymbol, parent: SectionOffset) -> bool {
         ModuleSymbol::Scope(scope)
             if matches!(scope.opener.data(), SymbolData::SeparatedCode(value) if value.parent_address == parent)
     )
+}
+
+/// Sort each run of `S_HYBRIDRANGE` records in `nodes` by the new address.
+///
+/// The linker writes these records in address order, and DIA finds the machine of a
+/// procedure with a binary search over them. A map that moves code can break the order.
+/// A run in address order stays the same.
+fn sort_hybrid_ranges(nodes: &mut [ModuleSymbol]) {
+    let key = |node: &ModuleSymbol| match node {
+        ModuleSymbol::Record(record) => match record.data() {
+            SymbolData::HybridRange(range) => Some((
+                range.address.section,
+                range.address.offset,
+                range.length,
+                range.architecture,
+            )),
+            _ => None,
+        },
+        ModuleSymbol::Scope(_) => None,
+    };
+    let mut start = 0;
+    while start < nodes.len() {
+        let run = nodes[start..]
+            .iter()
+            .take_while(|node| key(node).is_some())
+            .count();
+        nodes[start..start + run].sort_unstable_by_key(key);
+        start += run.max(1);
+    }
 }
 
 /// Append `node` to `list` with a checked allocation.

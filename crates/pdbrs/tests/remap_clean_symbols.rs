@@ -21,9 +21,9 @@ use pdbrs::native::codeview::SymbolKind;
 use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     AddressGap, AddressGaps, AddressRange, Annotation, BinaryAnnotations, Block,
-    DefRangeFramePointerRelative, InlineSite, Local, LocalFlags, Procedure, ProcedureFlags,
-    ProcedureType, S_BLOCK32, S_DEFRANGE_FRAMEPOINTER_REL, S_END, S_GPROC32, S_INLINESITE,
-    S_INLINESITE_END, S_LOCAL, S_SEPCODE, Symbol, SymbolData,
+    DefRangeFramePointerRelative, HybridRange, InlineSite, Local, LocalFlags, Procedure,
+    ProcedureFlags, ProcedureType, S_BLOCK32, S_DEFRANGE_FRAMEPOINTER_REL, S_END, S_GPROC32,
+    S_HYBRIDRANGE, S_INLINESITE, S_INLINESITE_END, S_LOCAL, S_SEPCODE, Symbol, SymbolData,
 };
 use pdbrs::native::lines::{DEBUG_S_INLINEELINES, LineSubsection};
 use pdbrs::native::locate::SymbolLocator;
@@ -476,4 +476,54 @@ fn a_removed_procedure_goes_away_with_the_drop_policy() {
         text(0x50)
     );
     assert!(find_procedure(&symbols, b"main").is_some());
+}
+
+/// Return the addresses of the `S_HYBRIDRANGE` records of module 0, in stream order.
+fn hybrid_ranges(bytes: &[u8]) -> Vec<(SectionOffset, u32)> {
+    let (_, symbols) = module_symbols(bytes);
+    symbols
+        .iter()
+        .filter_map(|(_, symbol)| match symbol.data() {
+            SymbolData::HybridRange(range) => Some((range.address, range.length)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn hybrid_ranges_stay_in_address_order_after_a_reorder() {
+    // DIA finds the machine of a procedure with a binary search over the `S_HYBRIDRANGE`
+    // records. The linker writes them in address order.
+    let mut editor = program::build().expect("synthetic program");
+    let module = editor.module_mut(ModuleIndex(0)).expect("module 0");
+    for (offset, length) in [(0x50, 0x40), (0x90, 0x70)] {
+        let mut range = HybridRange::default();
+        range.length = length;
+        range.address = text(offset);
+        range.architecture = 0xa641;
+        module
+            .push(S_HYBRIDRANGE, SymbolData::HybridRange(range))
+            .expect("hybrid range");
+    }
+    let source = editor
+        .plan(EditOptions::default())
+        .and_then(|plan| plan.to_vec())
+        .expect("source PDB");
+    let (output, _) = clean(&source, &MOVED, RemovedCode::Fail, &[]).expect("clean output");
+    assert_eq!(
+        hybrid_ranges(&output),
+        [(text(0x50), 0x70), (text(0xc0), 0x40)]
+    );
+    // A map that keeps the order keeps the records.
+    let (output, _) = clean(
+        &source,
+        &[(0x1000, 0x100, 0x1000), DATA],
+        RemovedCode::Fail,
+        &[],
+    )
+    .expect("identity output");
+    assert_eq!(
+        hybrid_ranges(&output),
+        [(text(0x50), 0x40), (text(0x90), 0x70)]
+    );
 }
