@@ -249,6 +249,34 @@ impl ImageRemap {
     }
 }
 
+/// The output mode of [`PdbEditor::remap_addresses`](super::PdbEditor::remap_addresses).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum RemapMode {
+    /// Write the OMAP tables and the section headers of the new image, and keep the
+    /// records. A consumer translates each address through OMAP, as DIA does.
+    Omap,
+    /// Write the new address into each record. The output has no OMAP stream.
+    ///
+    /// The editor does not support this mode yet (#43, work order step 4):
+    /// [`PdbEditor::remap_addresses`](super::PdbEditor::remap_addresses) returns
+    /// [`ErrorKind::UnsupportedEdit`].
+    Clean(RemovedCode),
+}
+
+/// The policy of [`RemapMode::Clean`] for a record that holds removed code: an old address
+/// without a range.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum RemovedCode {
+    /// Fail with [`ErrorKind::UnsupportedEdit`], and name the first record that holds
+    /// removed code.
+    #[default]
+    Fail,
+    /// Remove each record that holds removed code, and the references to it.
+    Drop,
+}
+
 /// Return `true` if one section of `sections` holds all RVAs from `start` to `end`.
 ///
 /// A section holds the RVAs from its virtual address to its virtual address plus its

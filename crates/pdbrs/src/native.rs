@@ -48,7 +48,7 @@ pub use editor::plan::PdbWritePlan;
 pub use editor::report::{IndexSpace, PlanReport, RebuildReason, StreamChange, StreamReport};
 pub use producer::Producer;
 pub use reader::{Pdb, ReadOptions};
-pub use remap::{ImageRemap, RemapRange};
+pub use remap::{ImageRemap, RemapMode, RemapRange, RemovedCode};
 
 /// The matching identity of a native PDB and its PE debug reference.
 ///
