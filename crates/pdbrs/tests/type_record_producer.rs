@@ -3,7 +3,7 @@
 //! Microsoft Macro Assembler (`ml64` 14.50) writes `f1` and two stale bytes after the name
 //! of some `LF_STRUCTURE` records, instead of the `LF_PAD` run `f3 f2 f1`. The static runtime
 //! libraries (`libvcruntime.lib`, `libcmt.lib`) contain these records, and `link.exe` and
-//! `lld-link` copy them to the PDB without a change (#29).
+//! `lld-link` copy them to the PDB without a change.
 
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
@@ -145,7 +145,7 @@ fn encoder_rejects_producer_padding_outside_the_masm_form() {
 #[test]
 fn masm_padding_must_end_the_record_on_a_4_byte_boundary() {
     // Without the last stale byte, the record has 39 bytes. The encoder cannot write such a
-    // record, so the decoder rejects it (fuzz finding, #40).
+    // record, so the decoder rejects it (fuzz finding).
     let error = decode(LF_STRUCTURE, &CS_FRAME_ENCODED[4..39]).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
 }

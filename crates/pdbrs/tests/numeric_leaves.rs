@@ -182,7 +182,7 @@ fn decimal_and_date_leaves_give_their_fields() {
     assert_eq!(round_trip(&encoded).date(), Some(36526.5));
 }
 
-/// Roslyn writes the .NET tick count of a VB `Date` constant in `LF_DATE` (#29). The bytes come
+/// Roslyn writes the .NET tick count of a VB `Date` constant in `LF_DATE`. The bytes come
 /// from the `S_MANCONSTANT` record of `#2024-01-02 13:45:30#` in the `dotnet-vb-full` fixture.
 #[test]
 fn roslyn_date_leaf_gives_the_tick_count() {

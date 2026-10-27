@@ -1,4 +1,4 @@
-//! Tests of the OMAP output of `PdbEditor::remap_addresses` (#43, work order step 3).
+//! Tests of the OMAP output of `PdbEditor::remap_addresses`.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example: `.text` at RVA
 //! `0x1000` (`sum` at `0x1000`, `main` at `0x1020`) and `.data` at RVA `0x2000` (`g_value`).

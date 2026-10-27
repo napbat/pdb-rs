@@ -1,5 +1,5 @@
 //! Tests of the clean output of `PdbEditor::remap_addresses` for the DBI values and the
-//! optional debug streams (#43, decisions 4 to 7 and 11).
+//! optional debug streams.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example: `.text` at RVA
 //! `0x1000` (`sum` at `0x1000`, `main` at `0x1020`) and `.data` at RVA `0x2000` (`g_value`).

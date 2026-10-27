@@ -1,5 +1,4 @@
-//! Tests of the strip of private data: `EditOptions::with_strip_private`
-//! (#34).
+//! Tests of the strip of private data: `EditOptions::with_strip_private`.
 
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};

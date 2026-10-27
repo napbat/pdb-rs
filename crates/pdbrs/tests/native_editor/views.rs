@@ -1,4 +1,4 @@
-//! Borrowed and copied stream views (#48).
+//! Borrowed and copied stream views.
 //!
 //! A byte slice lends the bytes of a stream whose pages are adjacent. A
 //! source that cannot lend bytes gives copies. Both give the same records.

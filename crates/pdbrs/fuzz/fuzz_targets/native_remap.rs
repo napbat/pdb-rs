@@ -1,4 +1,4 @@
-//! Fuzz the address remap (#43): OMAP output and clean output of a synthetic PDB.
+//! Fuzz the address remap: OMAP output and clean output of a synthetic PDB.
 
 #![no_main]
 

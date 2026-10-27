@@ -1,4 +1,4 @@
-//! Tests of the native `Pdb` facade on MSFZ input (#37).
+//! Tests of the native `Pdb` facade on MSFZ input.
 //!
 //! The test converts the synthetic program of the `native_synthetic` example to MSFZ. It
 //! stores the streams with odd IDs in stored chunks (compression code 0) of 1000 bytes, so

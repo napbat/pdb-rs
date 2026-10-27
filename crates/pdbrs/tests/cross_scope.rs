@@ -1,4 +1,4 @@
-//! Tests for the reference validation of cross-scope subsections (#31).
+//! Tests for the reference validation of cross-scope subsections.
 
 use pdbrs::native::codeview::index::{IdIndex, NameOffset, TypeIndex};
 use pdbrs::native::dbi::{Dbi, ModuleRegionSizes, ModuleStream, ModuleStreamParts};

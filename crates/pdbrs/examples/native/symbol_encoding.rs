@@ -36,7 +36,7 @@ pub(crate) fn reencode(symbol: &Symbol<'_>, report: &mut Report) -> Outcome {
     symbol.encode(&mut encoded)?;
     report.add("symbols re-encoded", 1);
     if symbol.trailing_zeros() >= 4 {
-        // The HLSL compiler fxc writes S_LOCAL records of a fixed length (#30).
+        // The HLSL compiler fxc writes S_LOCAL records of a fixed length.
         report.add("symbols with four or more padding bytes", 1);
     }
     // The run stops at the first difference, so a finished run prints 0.

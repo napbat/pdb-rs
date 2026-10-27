@@ -1,4 +1,4 @@
-//! Tests of the reader session of `native::Pdb` (#42 stage 5): each cached structure loads
+//! Tests of the reader session of `native::Pdb`: each cached structure loads
 //! once, the cache limit, and `Pdb<S>: Sync` with `std`.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example.
@@ -186,7 +186,7 @@ fn the_cache_limit_rejects_a_structure_above_the_limit() {
     let exact = open(dbi_size);
     assert!(exact.debug_info().expect("DBI fits").is_some());
     // A slice source lends the symbol record stream, so its cell holds no
-    // stream bytes and fits (#48).
+    // stream bytes and fits.
     assert!(exact.symbol_records().expect("lent records").is_some());
     // The stored DBI stream stays available.
     assert!(exact.debug_info().expect("DBI stays").is_some());

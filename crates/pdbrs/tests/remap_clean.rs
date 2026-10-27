@@ -1,5 +1,5 @@
-//! Tests of the clean output of `PdbEditor::remap_addresses` (#43, work order step 4): the
-//! identity map, determinism, other edits in the same session (rule 6) and a sequence of
+//! Tests of the clean output of `PdbEditor::remap_addresses`: the identity map, determinism,
+//! other edits in the same session and a sequence of
 //! remaps.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example: `.text` at RVA

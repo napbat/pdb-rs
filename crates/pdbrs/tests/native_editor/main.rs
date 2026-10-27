@@ -1,16 +1,15 @@
-//! Tests of the verification additions of `native::PdbEditor` (stage 6c of
-//! #42), of its editing tasks (#41) and of the removal of type and ID
-//! records (#47):
+//! Tests of the verification additions of `native::PdbEditor`, of its
+//! editing tasks and of the removal of type and ID records:
 //!
 //! - `read_count.rs`: the reads of a named stream change and its output.
-//! - `patched.rs`: the reads of a patched stream and its output (#48).
-//! - `names.rs`: the name lookups of the editor (#48).
+//! - `patched.rs`: the reads of a patched stream and its output.
+//! - `names.rs`: the name lookups of the editor.
 //! - `opaque.rs`: a module whose symbols do not form a scope tree.
 //! - `rejected.rs`: the rejected edits and the editor after a rejection.
 //! - `determinism.rs`: the output depends only on the final model.
-//! - `views.rs`: borrowed and copied stream views (#48).
+//! - `views.rs`: borrowed and copied stream views.
 //! - `tasks.rs`: the editing tasks and their rejected inputs.
-//! - `paths.rs`: the source path remap (#46).
+//! - `paths.rs`: the source path remap.
 //! - `removal.rs`: the removal of type and ID records with index compaction.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic`

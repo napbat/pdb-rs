@@ -1,4 +1,4 @@
-//! Copy-on-write edits (#49): the plan keeps the raw rows of a table that no `*_mut` call
+//! Copy-on-write edits: the plan keeps the raw rows of a table that no `*_mut` call
 //! decoded, and encodes them with the index widths of the output.
 
 use pdbrs::portable::custom::{CustomDebugKind, CustomDebugParent};

@@ -1,4 +1,4 @@
-//! The type records of the modules of a PDB without type merging (`NOTM`, #30).
+//! The type records of the modules of a PDB without type merging (`NOTM`).
 //!
 //! MSVC `link /DEBUG:LAZY` leaves TPI and IPI empty. The `S_MOD_TYPEREF` record of each module
 //! names the streams with the records of its input object. The example decodes every record of
@@ -89,7 +89,7 @@ pub(crate) fn streams(
             checked: true,
         },
         // `/DEBUG:LAZY` with `/Z7` precompiled headers: the own records are in the PDB, the
-        // precompiled types stay in the object file of the owner module (#30, #39).
+        // precompiled types stay in the object file of the owner module.
         Some(
             ModuleTypeSource::PrecompiledTypeOwner { stream }
             | ModuleTypeSource::PrecompiledTypeUser { stream, .. },

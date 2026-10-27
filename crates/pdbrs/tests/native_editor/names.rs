@@ -1,4 +1,4 @@
-//! Name lookups of the editor (#48): the source hash buckets and the
+//! Name lookups of the editor: the source hash buckets and the
 //! records with a changed name.
 
 use pdbrs::native::codeview::symbol::{Public, SymbolData};

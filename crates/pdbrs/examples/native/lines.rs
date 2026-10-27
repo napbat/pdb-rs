@@ -14,7 +14,7 @@ use pdbrs::native::symbols::RecordOffsets;
 use crate::dbi::translate;
 use crate::{Context, Outcome, Report};
 
-/// Validate the cross-scope imports and exports of all modules (#31).
+/// Validate the cross-scope imports and exports of all modules.
 ///
 /// The first pass collects the names and the exports of all modules, so that
 /// an import can name a later module. The second pass reports each finding

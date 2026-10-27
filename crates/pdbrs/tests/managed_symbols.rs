@@ -162,7 +162,7 @@ fn rejects_truncated_managed_procedures() {
 fn rejects_managed_procedure_padding_that_is_not_zero() {
     let payload = managed_procedure(b"f\0").bytes(&[0, 1]).0;
     assert_eq!(error(S_GMANPROC, &payload), ErrorKind::InvalidFormat);
-    // Four zero bytes are padding that the decoder keeps (#30).
+    // Four zero bytes are padding that the decoder keeps.
     let payload = managed_procedure(b"f\0").bytes(&[0; 4]).0;
     decode(S_LMANPROC, &payload, |symbol| {
         assert!(symbol.trailing_zeros() >= 4);

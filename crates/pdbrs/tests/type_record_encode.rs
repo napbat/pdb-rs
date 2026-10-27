@@ -277,7 +277,7 @@ fn pointer_encoder_rejects_data_that_does_not_match_the_kind() {
 }
 
 /// `ml64 /Zi` 14.51 writes 6 zero bytes after the pointer data of each
-/// `LF_POINTER` record (#29, #39). The record must decode and encode again.
+/// `LF_POINTER` record. The record must decode and encode again.
 #[test]
 fn masm_pointer_keeps_its_trailing_zero_bytes() {
     let full = [
@@ -430,7 +430,7 @@ fn dimension_bounds_need_a_primitive_integer_type() {
 #[test]
 fn shader_records_keep_fxc_property_bits() {
     // An `LF_HLSL` record of the Windows SDK `fxc` compiler: kind 0x219 and
-    // the property word 0x07c0, with nonzero bits 4 to 15 (#29).
+    // the property word 0x07c0, with nonzero bits 4 to 15.
     let full = [
         0x0e, 0x00, 0x17, 0x15, 0x75, 0, 0, 0, 0x19, 0x02, 0xc0, 0x07, 0, 0, 0xf2, 0xf1,
     ];

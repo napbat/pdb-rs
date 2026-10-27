@@ -207,7 +207,7 @@ fn the_fsharp_token_form_of_the_local_signature_round_trips() {
 
 #[test]
 fn a_nil_local_signature_token_has_the_row_form() {
-    // Regression (#35, fuzz target `portable_blobs`): the header `0x11000000` is a
+    // Regression (fuzz target `portable_blobs`): the header `0x11000000` is a
     // `StandAloneSig` token with the nil row. The decoder gave the token form, but the encoder
     // writes a nil row as 0 in both forms, so the encoded blob decoded with the row form.
     let blob = [0xd1, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00];

@@ -348,7 +348,7 @@ pub(crate) fn shared_symbols(
 ///
 /// In the MSVC FASTLINK fixture, 0 marks a record without an image address
 /// and 0xffffffff marks an external symbol that the linker resolved to an
-/// absolute value, for example `__guard_flags` (#13).
+/// absolute value, for example `__guard_flags`.
 fn coff_symbol_rvas(
     rvas: impl Iterator<Item = Rva>,
     context: &Context<'_>,

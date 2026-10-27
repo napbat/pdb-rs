@@ -1,4 +1,4 @@
-//! Tests of the scope links and the reference targets (#42 stage 4).
+//! Tests of the scope links and the reference targets.
 //!
 //! The scope records do not hold their parent and end links: `Symbol::links`
 //! reads them from the source record. A reference record holds a

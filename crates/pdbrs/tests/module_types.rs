@@ -155,7 +155,7 @@ fn gives_the_source_of_module_type_records() {
 
 /// `cl /Z7 /Yc` and `/Yu` with `link /DEBUG:LAZY` (MSVC 14.51) write `0x0c`
 /// for the owner of the precompiled types and `0x0a` with the owner module in
-/// word1 (`msvc-x64-pch-lazy`, #30, #39).
+/// word1 (`msvc-x64-pch-lazy`).
 #[test]
 fn gives_the_source_of_precompiled_type_modules() {
     let owner = reference(0x0c, 35, 0).source();

@@ -1,4 +1,4 @@
-//! Tests of the clean rewrite of the module symbols (#43, decisions 4 and 5).
+//! Tests of the clean rewrite of the module symbols.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example (`sum` at
 //! `.text+0x0`, `main` at `.text+0x20`) with two more procedures in module 0:

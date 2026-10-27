@@ -1,4 +1,4 @@
-//! Tests for the reference validation of type map streams (#32).
+//! Tests for the reference validation of type map streams.
 
 use pdbrs::native::auxiliary::{TypeMapContext, TypeMapRule, TypeMapStream};
 use pdbrs::native::codeview::id_record::IdTable;

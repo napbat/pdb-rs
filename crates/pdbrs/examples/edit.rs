@@ -1,4 +1,4 @@
-//! Recipes for the editing tasks of the native and the portable editor (#41).
+//! Recipes for the editing tasks of the native and the portable editor.
 //!
 //! The `native` command applies each native task to a native PDB:
 //!

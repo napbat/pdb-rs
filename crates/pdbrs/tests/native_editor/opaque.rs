@@ -1,4 +1,4 @@
-//! A module whose symbols do not form a scope tree (S6-3 and S6c-4 of #42).
+//! A module whose symbols do not form a scope tree.
 //!
 //! A byte patch changes the `S_END` record that closes the `S_GPROC32` scope
 //! of `sum` into an `S_INLINESITE_END` record: a closer of another kind.

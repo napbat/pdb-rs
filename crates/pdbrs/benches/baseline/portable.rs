@@ -182,7 +182,7 @@ pub(crate) fn edit(path: &Path, bench: &mut Bench) -> Outcome {
     })
 }
 
-/// Rename document 1 and write the PDB with the content-derived ID (#49).
+/// Rename document 1 and write the PDB with the content-derived ID.
 pub(crate) fn edit_document(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let pdb = Pdb::parse(&bytes)?;
@@ -194,7 +194,7 @@ pub(crate) fn edit_document(path: &Path, bench: &mut Bench) -> Outcome {
 }
 
 /// Shift the lines of the first method with sequence points and write the PDB with the
-/// content-derived ID (#49).
+/// content-derived ID.
 pub(crate) fn edit_method(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let pdb = Pdb::parse(&bytes)?;

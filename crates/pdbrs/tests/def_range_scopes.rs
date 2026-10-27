@@ -1,4 +1,4 @@
-//! Tests for the def-range checks against inline sites and type sizes (#30).
+//! Tests for the def-range checks against inline sites and type sizes.
 
 use pdbrs::native::codeview::SymbolKind;
 use pdbrs::native::codeview::index::{IdIndex, ModuleSymbolOffset, TypeIndex};

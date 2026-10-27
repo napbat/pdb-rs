@@ -1,4 +1,4 @@
-//! The removal of type and ID records with index compaction (#47).
+//! The removal of type and ID records with index compaction.
 //!
 //! The synthetic program has the type records `0x1000` to `0x1007` and the ID
 //! records `0x1000` and `0x1001`. [`source`] adds an unreferenced forward

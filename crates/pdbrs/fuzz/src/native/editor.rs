@@ -1,4 +1,4 @@
-//! The native editor (#42): edits of a parsed PDB, a write plan and checks of its output.
+//! The native editor: edits of a parsed PDB, a write plan and checks of its output.
 //!
 //! The input is a part with the PDB bytes ([`Input::part`]) and then the edit bytes. Each edit
 //! byte selects one operation, and the operation reads its arguments from the input. An
@@ -269,14 +269,14 @@ fn record_index(end: u32, input: &mut Input<'_>) -> Option<u32> {
     Some(FIRST_RECORD_INDEX + u32::from(input.u16()) % count)
 }
 
-/// Remove a type record (#47). The plan rejects a removal of a referenced record.
+/// Remove a type record. The plan rejects a removal of a referenced record.
 fn remove_type<S: ReadAt>(editor: &mut PdbEditor<'_, S>, input: &mut Input<'_>) -> Option<()> {
     let types = ok(editor.types_mut())?;
     let index = record_index(ok(types.end())?.0, input)?;
     ok(types.remove(TypeIndex(index)))
 }
 
-/// Remove an ID record (#47). The plan rejects a removal of a referenced record.
+/// Remove an ID record. The plan rejects a removal of a referenced record.
 fn remove_id<S: ReadAt>(editor: &mut PdbEditor<'_, S>, input: &mut Input<'_>) -> Option<()> {
     let ids = ok(editor.ids_mut())?;
     let index = record_index(ok(ids.end())?.0, input)?;

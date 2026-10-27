@@ -158,7 +158,7 @@ fn keeps_four_or_more_zero_padding_bytes() {
 
 #[test]
 fn keeps_the_length_of_an_unaligned_record() {
-    // Regression (#35, fuzz target `native_leaf_encode`): a decoded record whose length is
+    // Regression (fuzz target `native_leaf_encode`): a decoded record whose length is
     // not a multiple of 4 encoded with alignment padding, so the bytes differed from the
     // input record.
     for bytes in [
@@ -175,7 +175,7 @@ fn keeps_the_length_of_an_unaligned_record() {
 
 #[test]
 fn encodes_a_record_of_the_largest_length_without_padding() {
-    // Regression (#35, fuzz target `native_symbol_encode`): a decoded record with the length
+    // Regression (fuzz target `native_symbol_encode`): a decoded record with the length
     // field 0xffff did not encode, because the alignment padding made it too long.
     let mut name = vec![b'a'; 0xfff2];
     name.push(0);

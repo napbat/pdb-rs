@@ -1,4 +1,4 @@
-//! Tests for `ImageRemap`: range validation, OMAP table construction and composition (#43).
+//! Tests for `ImageRemap`: range validation, OMAP table construction and composition.
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::{AddressTables, PdbRva, Rva, Translation, Unmapped};

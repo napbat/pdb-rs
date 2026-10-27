@@ -1,5 +1,5 @@
-//! Tests of the clean output of the symbol record stream and its indexes (#43, decisions 4
-//! and 5): the addresses of the publics and the global data, the address map of the public
+//! Tests of the clean output of the symbol record stream and its indexes: the addresses of
+//! the publics and the global data, the address map of the public
 //! index, the thunk table, the section starts, and the records with removed code.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example: `.text` at RVA

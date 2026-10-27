@@ -1,4 +1,4 @@
-//! Rejected edits (S6-3, S6-6, S6-7 and S6c-4 of #42).
+//! Rejected edits.
 //!
 //! Each rejected plan writes nothing. After the rejection, the editor stays
 //! usable: when the test undoes the change, the plan succeeds.

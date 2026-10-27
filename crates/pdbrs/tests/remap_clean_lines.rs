@@ -1,5 +1,5 @@
 //! Tests of the clean output of `PdbEditor::remap_addresses` for the C13 subsections of a
-//! module (#43): line blocks, IL lines, frame data, COFF symbol RVAs and opaque subsections.
+//! module: line blocks, IL lines, frame data, COFF symbol RVAs and opaque subsections.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example: `.text` at RVA
 //! `0x1000` (`sum` at `0x1000`, 0x20 bytes, lines 3, 4 and 5 at the offsets 0, 8 and 0x1a;

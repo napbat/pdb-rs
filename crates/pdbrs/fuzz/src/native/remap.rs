@@ -1,4 +1,4 @@
-//! The address remap of a rewritten image (#43): OMAP output and clean output of
+//! The address remap of a rewritten image: OMAP output and clean output of
 //! [`PdbEditor::remap_addresses`](pdbrs::native::PdbEditor::remap_addresses).
 //!
 //! The source PDB is the synthetic program of the `native_synthetic` example ([`program`]),

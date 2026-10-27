@@ -49,7 +49,7 @@ fn rejects_text_that_is_not_a_json_object() {
 }
 
 /// `link /SOURCELINK` 14.51 writes `sourcelink$1` and the following numbers
-/// (#32, #39). Only decimal numbers from 1 without leading zeros are numbered
+/// (`msvc-x64-sourcelink`). Only decimal numbers from 1 without leading zeros are numbered
 /// streams.
 #[test]
 fn classifies_the_numbered_stream_names_of_link() {

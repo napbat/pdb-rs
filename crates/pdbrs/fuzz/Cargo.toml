@@ -1,4 +1,4 @@
-# The fuzz targets of `pdbrs` (#35). See `README.md`.
+# The fuzz targets of `pdbrs`. See `README.md`.
 #
 # This package has its own workspace. The stable workspace checks of `AGENTS.md` do not build
 # it, because `libfuzzer-sys` and the sanitizers need a nightly toolchain.

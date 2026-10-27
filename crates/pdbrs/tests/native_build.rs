@@ -1,5 +1,5 @@
 //! Tests of a new `native::PdbEditor`: the synthetic program, the rebuild
-//! of a built PDB, determinism, reference checks and width checks (#33, #42).
+//! of a built PDB, determinism, reference checks and width checks.
 
 #[path = "../examples/native_synthetic/program.rs"]
 mod program;
@@ -246,8 +246,8 @@ fn plan_type_reference(target: TypeIndex) -> pdbrs::Error {
 
 #[test]
 fn forward_type_reference_is_rejected() {
-    // A record can refer only to earlier records of its index space
-    // (decision 7 of #42): not to a later record and not to itself.
+    // A record can refer only to earlier records of its index space: not to a
+    // later record and not to itself.
     for target in [0x1001, 0x1000] {
         let error = plan_type_reference(TypeIndex(target));
         assert_eq!(

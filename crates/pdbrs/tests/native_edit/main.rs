@@ -1,5 +1,5 @@
 //! Tests of `native::PdbEditor`: unchanged streams, named streams, symbol,
-//! type and identity edits, and the rejections before output (#34).
+//! type and identity edits, and the rejections before output.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic`
 //! example. `strip.rs` has the strip tests.

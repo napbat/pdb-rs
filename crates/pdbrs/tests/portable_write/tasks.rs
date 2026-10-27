@@ -1,5 +1,5 @@
-//! The editing tasks of #41 (`set_source_link`, `embed_source`) and the source path remap of
-//! #46 (`remap_source_paths`).
+//! The editing tasks `set_source_link` and `embed_source`, and the source path remap
+//! `remap_source_paths`.
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugKind, CustomDebugParent};

@@ -148,7 +148,7 @@ fn record_writer_returns_the_record_offsets() {
 }
 
 /// The `S_LOCAL` record at offset 172 of module stream 10 of the fxc
-/// shader model 5.0 vertex shader fixture of #27: the name `input` and 32
+/// shader model 5.0 vertex shader fixture: the name `input` and 32
 /// zero bytes.
 fn fxc_local() -> Vec<u8> {
     let mut bytes = vec![

@@ -1,4 +1,4 @@
-//! The output depends only on the final model (S6c-4 of #42): the same
+//! The output depends only on the final model: the same
 //! edits give the same bytes, and two call sequences with the same final
 //! model give the same bytes.
 

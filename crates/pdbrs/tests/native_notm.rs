@@ -3,7 +3,7 @@
 //! The `S_MOD_TYPEREF` record of a module names the stream with the type
 //! records of the module. A plan without a source checks the module symbols
 //! against these records, a rebuild carries the streams, and an edit treats
-//! them as streams of the module (#32, #33, #34).
+//! them as streams of the module.
 
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
@@ -266,7 +266,7 @@ fn precompiled() -> Vec<u8> {
 }
 
 /// The precompiled types of `/DEBUG:LAZY` stay in the object file of the
-/// `/Yc` module (#30, #39: `msvc-x64-pch-lazy`). The dependency list names it,
+/// `/Yc` module (`msvc-x64-pch-lazy`). The dependency list names it,
 /// and the rebuild carries the own records of both modules.
 #[test]
 fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {

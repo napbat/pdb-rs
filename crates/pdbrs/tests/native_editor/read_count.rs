@@ -1,4 +1,4 @@
-//! The reads of a named stream change and of its output (S6c-3 of #42).
+//! The reads of a named stream change and of its output.
 //!
 //! A counting input records each read of the source PDB. The stream
 //! directory of `layout.rs` maps each read to the stream pages.

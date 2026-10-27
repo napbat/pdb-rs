@@ -1,4 +1,4 @@
-//! The baseline benchmark of `pdbrs` (#44).
+//! The baseline benchmark of `pdbrs`.
 //!
 //! Run all scenarios:
 //!

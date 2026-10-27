@@ -1,4 +1,4 @@
-//! The library checks of module and shared symbol records (#30).
+//! The library checks of module and shared symbol records.
 //!
 //! The example reports each broken rule as an inconsistency and continues.
 

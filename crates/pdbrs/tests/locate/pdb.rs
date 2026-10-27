@@ -615,7 +615,7 @@ fn inline_sites_need_the_ipi_stream() {
 
 /// `link /DEBUG:LAZY` keeps the inline sites of the object files. Their
 /// inlinees refer to the ID records of the module, not to the empty IPI
-/// stream (#30, #39: `msvc-x64-modern-lazy`).
+/// stream (`msvc-x64-modern-lazy`).
 #[test]
 fn inline_sites_of_a_pdb_without_type_merging_use_the_module_ids() {
     let bytes = notm_pdb_bytes();

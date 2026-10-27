@@ -1,11 +1,11 @@
-//! The reads of a patched stream (#48).
+//! The reads of a patched stream.
 //!
 //! A rename of a global symbol moves the later records of the symbol record
 //! stream. A module that the editor did not decode then gets only new
 //! global reference offsets. The plan keeps such a module stream as the
 //! source stream and patches, and reads the source stream when it writes.
 //!
-//! The opaque check of #42 reads each module stream while the plan checks a
+//! The opaque check of the plan reads each module stream while the plan checks a
 //! move of symbol records. The plan does not keep these bytes.
 
 use std::collections::{BTreeMap, BTreeSet};

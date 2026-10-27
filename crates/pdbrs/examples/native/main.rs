@@ -283,7 +283,7 @@ fn container(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
 ///
 /// An unclaimed stream with the same bytes as a type map stream that `/TMCache` names is an
 /// unowned type map: two inputs with the same type section checksum share one `/TMCache` entry,
-/// and the entry keeps only the last stream (#13).
+/// and the entry keeps only the last stream.
 fn unclaimed_streams(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
     let streams = pdb.container();
     for index in 0..streams.stream_count() {

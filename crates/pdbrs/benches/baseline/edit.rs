@@ -95,7 +95,7 @@ pub(crate) fn rename_public(path: &Path, bench: &mut Bench) -> Outcome {
 /// Rename the first public symbol with a unique name in a rebuild of the fixture.
 ///
 /// The rebuild happens before the timed runs. Its streams are contiguous, so a slice source
-/// can lend them (#48).
+/// can lend them.
 pub(crate) fn rebuilt_rename_public(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let rebuilt = {

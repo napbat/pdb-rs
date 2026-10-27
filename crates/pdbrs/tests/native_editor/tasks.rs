@@ -1,4 +1,4 @@
-//! The editing tasks of #41: `set_source_link`, `set_source_server`,
+//! The editing tasks `set_source_link`, `set_source_server`,
 //! `remove_named_stream` and `rename_symbols`.
 
 use pdbrs::io::ReadAt;

@@ -1,4 +1,4 @@
-//! The source path remap of #46: `remap_source_paths`.
+//! The source path remap: `remap_source_paths`.
 //!
 //! The synthetic program has its paths below `C:\synthetic\`: the file checksum name in
 //! `/names`, the DBI source file name, the module and object file names and `S_OBJNAME`. The

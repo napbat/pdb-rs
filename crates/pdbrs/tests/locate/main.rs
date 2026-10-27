@@ -1,4 +1,4 @@
-//! Tests for the address and name queries of `native::locate` (#30).
+//! Tests for the address and name queries of `native::locate`.
 
 mod pdb;
 mod ranges;
