@@ -234,6 +234,66 @@ bytes that the decoder rejects. With the AddressSanitizer build, the seed of
 `msvc-x64-large/demo.pdb` (21 MiB) with `decode_all` takes 66 s. libFuzzer does not make
 inputs above 1 MiB, so this time is not a timeout of the target.
 
+### Corpus replay after #42
+
+Date: 2026-10-27. Branch `redesign-s8-cleanup` (#42 stage 8, based on `main` bfaec6f). The
+`seeds` example wrote the corpora again from the synthetic inputs and the 203 fixture files of
+`target/fixtures/`. Then each of the 41 targets ran once over its seed corpus with this command,
+8 targets at the same time:
+
+```sh
+target/x86_64-pc-windows-msvc/release/<target>.exe corpus/<target> -runs=0 -rss_limit_mb=2048 -timeout=10 -print_final_stats=1
+```
+
+All 41 runs exit with code 0 and write no input to `artifacts/`. libFuzzer cuts an input above
+1 MiB to 1 MiB, because `-max_len` is not set. The replays are not new fuzzing time. The table
+gives the seeds, the executed units (libFuzzer adds 2 or 3 units of its own), the peak RSS and
+the wall time.
+
+| Target | Seeds | Executed | Peak RSS (MiB) | Time (s) |
+| --- | ---: | ---: | ---: | ---: |
+| `custom_debug_info` | 111 | 113 | 45 | 0.9 |
+| `embedded_source` | 16 | 18 | 54 | 0.6 |
+| `mpdb` | 8 | 10 | 50 | 0.5 |
+| `msf` | 99 | 101 | 272 | 1.8 |
+| `msf_build` | 1 | 3 | 43 | 0.4 |
+| `msf_repack` | 293 | 295 | 402 | 3.7 |
+| `msfz` | 96 | 99 | 406 | 13.6 |
+| `msfz_chunks` | 967 | 970 | 807 | 83.4 |
+| `msfz_convert` | 569 | 571 | 902 | 417.2 |
+| `native_dbi` | 61 | 63 | 71 | 1.5 |
+| `native_dbi_encode` | 61 | 63 | 119 | 2.2 |
+| `native_debug_stream_encode` | 153 | 155 | 47 | 0.1 |
+| `native_editor` | 1512 | 1515 | 847 | 238.0 |
+| `native_frames` | 51 | 53 | 44 | 0.1 |
+| `native_hash_table` | 47 | 49 | 43 | 0.1 |
+| `native_id_encode` | 92 | 94 | 129 | 3.8 |
+| `native_ids` | 92 | 94 | 88 | 1.6 |
+| `native_index_encode` | 60 | 62 | 114 | 2.9 |
+| `native_indexes` | 60 | 62 | 81 | 2.0 |
+| `native_info` | 94 | 96 | 44 | 1.0 |
+| `native_info_encode` | 94 | 96 | 45 | 0.4 |
+| `native_leaf` | 1673 | 1675 | 60 | 0.8 |
+| `native_leaf_encode` | 1673 | 1675 | 66 | 2.1 |
+| `native_lines` | 275 | 277 | 48 | 0.2 |
+| `native_lines_encode` | 275 | 277 | 53 | 0.3 |
+| `native_module` | 2132 | 2134 | 169 | 7.7 |
+| `native_module_encode` | 2132 | 2134 | 251 | 7.1 |
+| `native_named` | 159 | 161 | 50 | 0.4 |
+| `native_named_encode` | 30 | 32 | 44 | 0.1 |
+| `native_names` | 56 | 57 | 49 | 1.1 |
+| `native_names_encode` | 56 | 57 | 58 | 0.3 |
+| `native_pdb` | 189 | 192 | 446 | 26.4 |
+| `native_symbol_encode` | 2118 | 2120 | 315 | 13.6 |
+| `native_symbols` | 2118 | 2119 | 111 | 2.5 |
+| `native_type_encode` | 72 | 75 | 406 | 12.8 |
+| `native_types` | 72 | 75 | 151 | 6.7 |
+| `portable_blobs` | 106 | 108 | 44 | 0.2 |
+| `portable_build` | 1 | 3 | 45 | 0.1 |
+| `portable_metadata` | 6 | 8 | 42 | 0.1 |
+| `portable_pdb` | 7 | 9 | 48 | 0.1 |
+| `portable_rebuild` | 6 | 8 | 60 | 0.5 |
+
 ## Findings
 
 1. `portable_blobs`, `portable_pdb` and `portable_rebuild`: the sequence point round trip
