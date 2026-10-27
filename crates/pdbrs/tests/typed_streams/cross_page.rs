@@ -1,7 +1,7 @@
 //! Records and fields that cross a page boundary of a stream with noncontiguous pages.
 
 use pdbrs::ErrorKind;
-use pdbrs::native::codeview::index::{ChecksumOffset, NameOffset, TypeIndex};
+use pdbrs::native::codeview::index::{ChecksumOffset, ModuleIndex, NameOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{Symbol, SymbolData};
 use pdbrs::native::codeview::type_record::TypeLeaf;
 use pdbrs::native::dbi::{Dbi, DebugStream, Module, ModuleStream};
@@ -25,15 +25,15 @@ const ORDERS: [Order; 2] = [Order::Contiguous, Order::Scattered];
 
 /// Return the target module record of `dbi`.
 fn target_module(dbi: &Dbi) -> Module<'_> {
-    dbi.modules().nth(4).unwrap().unwrap()
+    dbi.modules().nth(4).unwrap().unwrap().1
 }
 
 /// Return the name of an `S_UDT` symbol.
-fn udt_name(symbol: Symbol<'_>) -> &[u8] {
-    let SymbolData::UserDefinedType(udt) = *symbol.data() else {
+fn udt_name<'a>(symbol: &'a Symbol<'_>) -> &'a [u8] {
+    let SymbolData::UserDefinedType(udt) = symbol.data() else {
         panic!("not a user-defined type: {symbol:?}");
     };
-    udt.name
+    &udt.name
 }
 
 #[test]
@@ -112,14 +112,18 @@ fn truncated_type_record_across_pages_is_eof() {
 fn module_record_across_pages_decodes_like_one_buffer() {
     let (_, sizes) = module_stream();
     let expected = Dbi::parse(dbi_stream(sizes, None)).unwrap();
-    let expected: Vec<Module<'_>> = expected.modules().map(Result::unwrap).collect();
+    let expected: Vec<Module<'_>> = expected.modules().map(|module| module.unwrap().1).collect();
     for order in ORDERS {
         let bytes = Streams::new().container(order);
         let dbi = open(&bytes).debug_info().unwrap().unwrap();
-        let modules: Vec<Module<'_>> = dbi.modules().map(Result::unwrap).collect();
+        let modules: Vec<Module<'_>> = dbi.modules().map(|module| module.unwrap().1).collect();
         assert_eq!(modules, expected, "{order:?}");
-        let target = target_module(&dbi);
-        assert_eq!(target.offset, to_u32(TARGET_MODULE_OFFSET));
+        // The module info substream starts after the 64-byte DBI header.
+        let mut records = dbi.modules();
+        records.by_ref().take(4).for_each(drop);
+        assert_eq!(64 + records.position(), TARGET_MODULE_OFFSET);
+        let (index, target) = records.next().unwrap().unwrap();
+        assert_eq!(index, ModuleIndex(4));
         assert_eq!(target.name, TARGET_MODULE);
         assert_eq!(target.object_file, TARGET_MODULE);
         assert_eq!(target.stream, Some(MODULE));
@@ -162,7 +166,7 @@ fn module_symbol_and_checksum_across_pages_decode_like_one_buffer() {
         );
         let target = records[15];
         assert_eq!(target.offset, to_u32(TARGET_SYMBOL_OFFSET));
-        assert_eq!(udt_name(Symbol::decode(target).unwrap()), TARGET_SYMBOL);
+        assert_eq!(udt_name(&Symbol::decode(target).unwrap()), TARGET_SYMBOL);
 
         let lines = ModuleLines::parse(&stream).unwrap();
         assert_eq!(lines, reference_lines, "{order:?}");
@@ -213,7 +217,7 @@ fn global_symbol_across_pages_resolves_like_one_buffer() {
         let target = SymbolOffset(to_u32(TARGET_SYMBOL_OFFSET));
         assert!(found.iter().any(|record| record.symbol == target));
         let symbol = Symbol::decode(target.record(&symbols).unwrap()).unwrap();
-        assert_eq!(udt_name(symbol), TARGET_SYMBOL);
+        assert_eq!(udt_name(&symbol), TARGET_SYMBOL);
     }
 }
 

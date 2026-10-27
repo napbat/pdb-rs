@@ -69,7 +69,8 @@ pub(crate) fn streams(
         let owner = dbi
             .modules()
             .nth(usize::try_from(module.0)?)
-            .ok_or("S_MOD_TYPEREF names a missing module")??;
+            .ok_or("S_MOD_TYPEREF names a missing module")??
+            .1;
         let owner = pdb
             .module_stream(&owner)?
             .ok_or("S_MOD_TYPEREF names a module without a stream")?;

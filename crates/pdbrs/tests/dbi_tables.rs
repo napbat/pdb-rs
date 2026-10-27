@@ -200,7 +200,7 @@ fn section_map_decodes_descriptors() {
         u32::MAX,
     ]);
     let map = SectionMap::parse(&bytes).unwrap();
-    assert_eq!((map.len(), map.logical_count()), (2, 2));
+    assert_eq!((map.len(), map.logical_count), (2, 2));
     let entries: Vec<_> = (&map).into_iter().collect();
     let text = entries[0];
     assert!(text.flags.contains(SegmentFlags::READ));
@@ -253,42 +253,28 @@ fn source_info_lists_files_per_module() {
     let names = b"a.rs\0lib\\b.h\0\0\0";
     let bytes = source_info(3, &[0, 2], &[&[0, 5], &[5]], names);
     let info = SourceInfo::parse(&bytes).unwrap();
-    assert_eq!(info.module_count(), 2);
-    assert_eq!(info.raw_file_count(), 3);
+    assert_eq!(info.modules.len(), 2);
+    assert_eq!(info.raw_file_count, 3);
     assert_eq!(info.file_count(), 3);
-    assert_eq!(info.names(), names);
+    assert_eq!(info.names, names);
     assert_eq!(info.file_name(9).unwrap(), b"b.h");
     assert_eq!(info.file_name(14).unwrap(), b"");
     assert_error(info.file_name(15), ErrorKind::InvalidReference);
     assert_error(info.file_name(u32::MAX), ErrorKind::InvalidReference);
 
-    let modules: Vec<_> = info.modules().collect();
+    let modules = &info.modules;
     assert_eq!(modules.len(), 2);
-    assert_eq!(
-        (
-            modules[0].module,
-            modules[0].raw_start,
-            modules[0].first_file
-        ),
-        (ModuleIndex(0), 0, 0)
-    );
-    assert_eq!(modules[0].file_count(), 2);
-    assert_eq!(modules[0].name_offsets().collect::<Vec<_>>(), [0, 5]);
-    let files: Vec<_> = modules[0]
-        .file_names()
+    assert_eq!(modules[0].raw_start, 0);
+    assert_eq!(modules[0].name_offsets, [0, 5]);
+    let files: Vec<_> = info
+        .file_names(&modules[0])
         .collect::<pdbrs::Result<_>>()
         .unwrap();
     assert_eq!(files, [b"a.rs".as_slice(), b"lib\\b.h"]);
+    assert_eq!(modules[1].raw_start, 2);
+    assert_eq!(modules[1].name_offsets, [5]);
     assert_eq!(
-        (
-            modules[1].module,
-            modules[1].raw_start,
-            modules[1].first_file
-        ),
-        (ModuleIndex(1), 2, 2)
-    );
-    assert_eq!(
-        modules[1].file_names().next().unwrap().unwrap(),
+        info.file_names(&modules[1]).next().unwrap().unwrap(),
         b"lib\\b.h"
     );
 }
@@ -301,21 +287,22 @@ fn source_info_ignores_overflowed_16_bit_counts() {
     let raw_count = u16::try_from(70_000_u32 % 65_536).unwrap();
     let bytes = source_info(raw_count, &[0, 40_000], &[&first, &second], b"x\0y\0");
     let info = SourceInfo::parse(&bytes).unwrap();
-    assert_eq!(info.raw_file_count(), 4464);
+    assert_eq!(info.raw_file_count, 4464);
     assert_eq!(info.file_count(), 70_000);
-    let modules: Vec<_> = info.modules().collect();
-    assert_eq!(modules[1].first_file, 40_000);
-    assert_eq!(modules[1].file_count(), 30_000);
-    assert!(modules[1].file_names().all(|name| name.unwrap() == b"y"));
-    assert_eq!(info.names(), b"x\0y\0");
+    assert_eq!(info.modules[0].name_offsets.len(), 40_000);
+    assert_eq!(info.modules[1].name_offsets.len(), 30_000);
+    assert!(
+        info.file_names(&info.modules[1])
+            .all(|name| name.unwrap() == b"y")
+    );
+    assert_eq!(info.names, b"x\0y\0");
 }
 
 #[test]
 fn source_info_bad_name_offset_is_reported_per_file() {
     let bytes = source_info(1, &[0], &[&[7, 2]], b"a\0b");
     let info = SourceInfo::parse(&bytes).unwrap();
-    let module = info.modules().next().unwrap();
-    let mut names = module.file_names();
+    let mut names = info.file_names(&info.modules[0]);
     // The first offset is past the buffer; the second name has no NUL.
     assert_error(names.next().unwrap(), ErrorKind::InvalidReference);
     assert_error(names.next().unwrap(), ErrorKind::InvalidReference);
@@ -329,7 +316,7 @@ fn source_info_truncation() {
     for end in 0..bytes.len() {
         assert_error(SourceInfo::parse(&bytes[..end]), ErrorKind::UnexpectedEof);
     }
-    assert_eq!(SourceInfo::parse(&bytes).unwrap().names(), b"");
+    assert_eq!(SourceInfo::parse(&bytes).unwrap().names, b"");
 }
 
 fn string_table() -> Vec<u8> {
@@ -363,7 +350,7 @@ fn dbi_accessors_decode_substreams() {
     assert_eq!(contributions.iter().next().unwrap().module, ModuleIndex(1));
     assert!(dbi.section_map().unwrap().unwrap().is_empty());
     let sources = dbi.source_info().unwrap().unwrap();
-    assert_eq!(sources.modules().nth(1).unwrap().file_count(), 1);
+    assert_eq!(sources.modules[1].name_offsets.len(), 1);
     assert_eq!(dbi.type_server_map().unwrap(), []);
     let names = dbi.ec_names().unwrap().unwrap();
     assert_eq!(names.find(b"a").unwrap(), Some(NameOffset(1)));

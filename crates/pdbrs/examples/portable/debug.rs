@@ -201,7 +201,7 @@ fn scopes(pdb: &Pdb<impl ReadAt>, counts: &mut Counts) -> Outcome {
             let modifiers: Vec<_> = signature.modifiers().collect();
             counts.add("local constant custom modifiers", modifiers.len());
             let mut encoded = Vec::new();
-            LocalConstantSignature::encode_parts(&modifiers, &signature.value(), &mut encoded)?;
+            LocalConstantSignature::encode_parts(&modifiers, signature.value(), &mut encoded)?;
             let what = format!("LocalConstant row {}", id.0);
             compare(
                 counts,

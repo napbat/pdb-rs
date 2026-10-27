@@ -1,6 +1,5 @@
 //! Each type leaf kind: decoding, exact re-encoding and boundaries.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::type_record::{
@@ -14,6 +13,7 @@ use pdbrs::native::codeview::type_record::{
     PointerAttributes, TypeLeaf, VirtualFunctionTable, VtableShape,
 };
 use pdbrs::native::codeview::{LeafKind, Record};
+use pdbrs::{Bytes, ErrorKind};
 
 /// Concatenate fields.
 fn bytes(fields: &[&[u8]]) -> Vec<u8> {
@@ -174,7 +174,7 @@ fn udt_records_round_trip() {
             ]),
         );
         let leaf = decode(&full);
-        let TypeLeaf::WideClass(class) = leaf else {
+        let TypeLeaf::WideClass(class) = &leaf else {
             panic!("not a wide class");
         };
         assert_eq!(class.options, 0x0001_0200);
@@ -182,7 +182,10 @@ fn udt_records_round_trip() {
             class.member_count.integer(),
             Some(Integer::Unsigned(0x1_0000))
         );
-        assert_eq!(leaf.tag().unwrap().unique_name, Some(&b".?AUS@@"[..]));
+        assert_eq!(
+            leaf.tag().unwrap().unique_name,
+            Some(Bytes::new(b".?AUS@@"))
+        );
     }
     check(
         LF_UNION,
@@ -220,7 +223,7 @@ fn pointer_records_round_trip_with_their_base_data() {
             panic!("not a pointer");
         };
         let base = pointer.based.unwrap();
-        assert_eq!(base, BasedPointer::Symbol(&symbol));
+        assert_eq!(base, BasedPointer::Symbol(Bytes::new(&symbol)));
         assert_eq!(base.symbol_record().unwrap().kind, 0x110c);
     }
     let full = check(
@@ -234,7 +237,7 @@ fn pointer_records_round_trip_with_their_base_data() {
         pointer.based,
         Some(BasedPointer::Type {
             base_type: TypeIndex(0x1000),
-            name: b"base",
+            name: Bytes::new(b"base"),
         })
     );
     let full = check(LF_POINTER, &bytes(&[&u32le(0x74), &attributes(9, 0)]));
@@ -264,7 +267,7 @@ fn pointer_encoder_rejects_data_that_does_not_match_the_kind() {
         pointer(near64, Some(BasedPointer::Segment(1))),
         pointer(segment, None),
         pointer(segment, Some(BasedPointer::SelfBased)),
-        pointer(segment, Some(BasedPointer::Symbol(&[2, 0]))),
+        pointer(segment, Some(BasedPointer::Symbol(Bytes::new(&[2, 0])))),
     ] {
         let error = TypeLeaf::Pointer(pointer)
             .encode(&mut Vec::new())
@@ -486,8 +489,8 @@ fn class<'a>(name: &'a [u8], unique_name: Option<&'a [u8]>, options: u16) -> Typ
     let mut class = Class::new(ClassKind::Structure);
     class.options = ClassOptions(options);
     class.size = Numeric::from_integer(Integer::Unsigned(0));
-    class.name = name;
-    class.unique_name = unique_name;
+    class.name = Bytes::new(name);
+    class.unique_name = unique_name.map(Bytes::new);
     TypeLeaf::Class(class)
 }
 

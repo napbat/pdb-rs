@@ -1,7 +1,6 @@
 //! General numeric leaves: every tag, typed values, exact re-encoding and
 //! boundaries.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::LeafKind;
 use pdbrs::native::codeview::numeric::{
     Decimal, Integer, IntegerKind, IntegerLeaf, LF_CHAR, LF_COMPLEX32, LF_COMPLEX64, LF_COMPLEX80,
@@ -9,6 +8,7 @@ use pdbrs::native::codeview::numeric::{
     LF_REAL48, LF_REAL64, LF_REAL80, LF_REAL128, LF_SHORT, LF_ULONG, LF_UOCTWORD, LF_UQUADWORD,
     LF_USHORT, LF_UTF8STRING, LF_VARSTRING, Numeric,
 };
+use pdbrs::{Bytes, ErrorKind};
 
 /// Encode a tag and a value.
 fn leaf(tag: LeafKind, value: &[u8]) -> Vec<u8> {
@@ -210,16 +210,16 @@ fn string_leaves_keep_their_bytes() {
 #[test]
 fn string_encoders_check_their_limits() {
     let long = vec![b'x'; 0x1_0000];
-    let error = Numeric::VarString(&long)
+    let error = Numeric::VarString(Bytes::new(&long))
         .encode(&mut Vec::new())
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::LimitExceeded);
-    let error = Numeric::Utf8String(b"a\0b")
+    let error = Numeric::Utf8String(Bytes::new(b"a\0b"))
         .encode(&mut Vec::new())
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let mut out = Vec::new();
-    Numeric::VarString(&long[..0xffff])
+    Numeric::VarString(Bytes::new(&long[..0xffff]))
         .encode(&mut out)
         .unwrap();
     assert_eq!(out.len(), 4 + 0xffff);

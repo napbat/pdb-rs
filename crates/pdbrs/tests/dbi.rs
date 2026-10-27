@@ -62,7 +62,7 @@ fn module_dbi(stream: u16, sizes: [u32; 3]) -> Dbi {
 }
 
 fn first_module(dbi: &Dbi) -> Module<'_> {
-    dbi.modules().next().unwrap().unwrap()
+    dbi.modules().next().unwrap().unwrap().1
 }
 
 fn assert_error<T: core::fmt::Debug>(
@@ -115,7 +115,19 @@ fn header_and_modules_keep_raw_values() {
     assert_eq!(header.flags, 1);
     assert_eq!(header.machine, Machine::AMD64);
 
-    let modules: Vec<_> = dbi.modules().collect::<pdbrs::Result<_>>().unwrap();
+    // The module info substream starts after the 64-byte header.
+    let mut iter = dbi.modules();
+    let mut indices = Vec::new();
+    let mut offsets = Vec::new();
+    let mut modules = Vec::new();
+    loop {
+        let offset = 64 + iter.position();
+        let Some(result) = iter.next() else { break };
+        let (index, module) = result.unwrap();
+        offsets.push(offset);
+        indices.push(index);
+        modules.push(module);
+    }
     assert_eq!(modules.len(), 2);
     assert_eq!(modules[0].name, b"C:\\src\\\xff\xfe.o");
     assert_eq!(modules[0].object_file, b"lib.rlib");
@@ -129,15 +141,11 @@ fn header_and_modules_keep_raw_values() {
         (12, 0, 24)
     );
     assert_eq!(modules[0].source_file_count, 3);
-    assert_eq!((modules[0].index, modules[0].offset), (ModuleIndex(0), 64));
+    assert_eq!((indices[0], offsets[0]), (ModuleIndex(0), 64));
     assert_eq!(modules[1].name, b"* Linker *");
     assert_eq!(modules[1].object_file, b"");
     assert_eq!(modules[1].stream, None);
-    let second_offset = 64 + u32::try_from(first.len()).unwrap();
-    assert_eq!(
-        (modules[1].index, modules[1].offset),
-        (ModuleIndex(1), second_offset)
-    );
+    assert_eq!((indices[1], offsets[1]), (ModuleIndex(1), 64 + first.len()));
 }
 
 #[test]
@@ -235,7 +243,7 @@ fn module_records_reject_truncation() {
         let info = [valid.as_slice(), tail.as_slice()].concat();
         let dbi = Dbi::parse(modules_only(&info)).unwrap();
         let mut modules = dbi.modules();
-        assert_eq!(modules.next().unwrap().unwrap().name, b"ok");
+        assert_eq!(modules.next().unwrap().unwrap().1.name, b"ok");
         assert_error(
             modules.next().unwrap(),
             ErrorKind::UnexpectedEof,

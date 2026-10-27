@@ -29,7 +29,7 @@ fn members(data: &[u8]) -> Vec<Member<'_>> {
     FieldList::parse(data)
         .unwrap()
         .members()
-        .map(Result::unwrap)
+        .map(|member| member.unwrap().into_owned())
         .collect()
 }
 
@@ -74,7 +74,10 @@ fn decodes_data_members_and_enumerators() {
     assert_eq!(static_member.name, b"s");
     assert_eq!(enumerator.value.integer(), Some(Integer::Signed(-1)));
     assert_eq!(enumerator.name, b"Minus");
-    assert_eq!(FieldList::parse(&data).unwrap().continuation(), None);
+    assert_eq!(
+        FieldList::parse(data.as_slice()).unwrap().continuation(),
+        None
+    );
 }
 
 #[test]
@@ -187,7 +190,7 @@ fn reports_final_continuation() {
         member(LF_INDEX, &[&0_u16.to_le_bytes(), &0x1020_u32.to_le_bytes()]),
     ]
     .concat();
-    let list = FieldList::parse(&data).unwrap();
+    let list = FieldList::parse(data.as_slice()).unwrap();
     assert_eq!(list.continuation(), Some(TypeIndex(0x1020)));
     assert_eq!(list.data(), data.as_slice());
     assert_eq!(

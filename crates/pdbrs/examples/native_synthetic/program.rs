@@ -40,8 +40,8 @@ use pdbrs::native::codeview::type_record::{
     MemberAttributes, Pointer, PointerAttributes, Procedure as ProcedureLeaf, TypeLeaf,
 };
 use pdbrs::native::dbi::{
-    DbiHeader, DebugStream, OwnedModule, OwnedSectionMap, SectionContribution,
-    SectionContributionVersion, SectionMapEntry, SegmentFlags,
+    DbiHeader, DebugStream, Module, SectionContribution, SectionContributionVersion, SectionMap,
+    SectionMapEntry, SegmentFlags,
 };
 use pdbrs::native::debug_stream::RecordStream;
 use pdbrs::native::lines::{
@@ -120,7 +120,7 @@ fn point_class(
     class.derivation_list = TypeIndex::NONE;
     class.vtable_shape = TypeIndex::NONE;
     class.size = number(size);
-    class.name = b"Point";
+    class.name = b"Point".into();
     class.unique_name = None;
     class
 }
@@ -131,7 +131,7 @@ fn int_member(attributes: MemberAttributes, offset: u32, name: &'static [u8]) ->
     member.attributes = attributes;
     member.member_type = T_INT4;
     member.offset = number(offset);
-    member.name = name;
+    member.name = name.into();
     Member::DataMember(member)
 }
 
@@ -223,7 +223,7 @@ fn function_id(function_type: TypeIndex, name: &[u8]) -> IdRecord<'_> {
     let mut function = FunctionId::default();
     function.scope = None;
     function.function_type = function_type;
-    function.name = name;
+    function.name = name.into();
     function.decorated_name_hash = None;
     IdRecord::Function(function)
 }
@@ -234,22 +234,22 @@ fn add_module(
     file: NameOffset,
     functions: [(TypeHandle, TypeHandle); 2],
 ) -> Result<[ModuleSymbolHandle; 2]> {
-    let mut record = OwnedModule::default();
+    let mut record = Module::default();
     record.section_contribution = contribution(1, 0, 0x50, TEXT_CHARACTERISTICS);
-    record.name = b"C:\\synthetic\\synthetic.obj".to_vec();
-    record.object_file = b"C:\\synthetic\\synthetic.obj".to_vec();
+    record.name = b"C:\\synthetic\\synthetic.obj".into();
+    record.object_file = b"C:\\synthetic\\synthetic.obj".into();
     let module = builder.add_module(record)?;
     module.push_file(SOURCE)?;
     let mut object = ObjectName::default();
     object.signature = 0;
-    object.name = b"C:\\synthetic\\synthetic.obj";
+    object.name = b"C:\\synthetic\\synthetic.obj".into();
     module.push_symbol_fields(S_OBJNAME, SymbolData::ObjectName(object))?;
     let mut compile = Compile3::default();
     compile.flags = CompileFlags(0);
     compile.machine = CV_CFL_AMD64;
     compile.frontend = [19, 51, 0, 0];
     compile.backend = [19, 51, 0, 0];
-    compile.version = b"pdbrs synthetic";
+    compile.version = b"pdbrs synthetic".into();
     compile.trailing_zeros = 0;
     module.push_symbol_fields(S_COMPILE3, SymbolData::Compile3(compile))?;
     let mut handles = [None, None];
@@ -270,7 +270,7 @@ fn add_module(
             procedure.address = at(1, function.offset);
             procedure.flags = ProcedureFlags(0);
             procedure.extended_flags = None;
-            procedure.name = function.name;
+            procedure.name = function.name.into();
             SymbolData::Procedure(procedure).encode(S_GPROC32, out)
         })?;
         let mut frame = FrameProcedure::default();
@@ -287,7 +287,7 @@ fn add_module(
             relative.offset = 0x30;
             relative.type_index = resolver.type_index(local_type)?;
             relative.register = CV_AMD64_RSP;
-            relative.name = local;
+            relative.name = local.into();
             SymbolData::RegisterRelative(relative).encode(S_REGREL32, out)
         })?;
         module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
@@ -350,7 +350,7 @@ fn add_globals(
             reference.name_checksum = 0;
             reference.offset = resolver.module_symbol_offset(procedure)?;
             reference.module = Some(resolver.module_index(procedure.module())?);
-            reference.name = name;
+            reference.name = name.into();
             SymbolData::ProcedureReference(reference).encode(S_PROCREF, out)
         })?;
         builder.index_global(reference, 1)?;
@@ -358,13 +358,13 @@ fn add_globals(
     let mut global = Data::default();
     global.type_index = T_INT4;
     global.address = at(2, 0);
-    global.name = b"g_value";
+    global.name = b"g_value".into();
     let data = builder.add_symbol_fields(S_GDATA32, SymbolData::Data(global))?;
     builder.index_global(data, 1)?;
     let udt = builder.add_symbol_with(move |resolver, out| {
         let mut udt = UserDefinedType::default();
         udt.type_index = resolver.type_index(point)?;
-        udt.name = b"Point";
+        udt.name = b"Point".into();
         SymbolData::UserDefinedType(udt).encode(S_UDT, out)
     })?;
     builder.index_global(udt, 1)?;
@@ -377,7 +377,7 @@ fn add_globals(
         let mut symbol = Public::default();
         symbol.flags = flags;
         symbol.address = address;
-        symbol.name = name;
+        symbol.name = name.into();
         let public = builder.add_symbol_fields(S_PUB32, SymbolData::Public(symbol))?;
         builder.index_public(public)?;
     }
@@ -423,7 +423,7 @@ fn add_image_tables(builder: &mut PdbBuilder<'_>) -> Result<()> {
         entry
     };
     let selector = SegmentFlags::IS_SELECTOR.0 | SegmentFlags::ADDRESS_IS_32_BIT.0;
-    let mut map = OwnedSectionMap::default();
+    let mut map = SectionMap::default();
     map.logical_count = 3;
     map.entries = vec![
         segment(

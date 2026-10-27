@@ -126,7 +126,7 @@ fn decodes_the_fixture_md2_attribute() {
     );
     assert_eq!(
         records[0].decode().unwrap(),
-        CustomDebugInfoData::StateMachineTypeName(&utf16("<ComputeAsync>d__0"))
+        CustomDebugInfoData::StateMachineTypeName(pdbrs::Bytes::from(utf16("<ComputeAsync>d__0")))
     );
     // The alignment size 2 removes the two padding bytes.
     assert_eq!(records[1].alignment, 2);
@@ -204,7 +204,7 @@ fn splits_symbol_attributes_at_the_nul_code_unit() {
     assert_eq!(attribute.value, [9, 8, 0]);
     assert_eq!(
         attribute.decode().unwrap(),
-        AttributeValue::Other(&[9, 8, 0])
+        AttributeValue::Other(pdbrs::Bytes::new(&[9, 8, 0]))
     );
     // A zero byte pair across two code units is not a NUL code unit.
     let error = SymbolAttribute::parse(&[0x41, 0, 0, 0x42, 1]).unwrap_err();
@@ -309,11 +309,8 @@ fn checks_record_sizes() {
     assert_eq!(parse_error(&md2(1, &[past])), ErrorKind::InvalidFormat);
     // A header without a body is a valid frame.
     let value = md2(1, &[record(4, 7, 0, &[], 0)]);
-    let record = CustomDebugInfo::parse(&value)
-        .unwrap()
-        .records()
-        .next()
-        .unwrap();
+    let info = CustomDebugInfo::parse(&value).unwrap();
+    let record = info.records().next().unwrap();
     assert_eq!(record.data, b"");
 }
 
@@ -322,11 +319,8 @@ fn applies_the_alignment_size_after_kind_5() {
     // Kinds after 5 remove the padding.
     for alignment in 0..4 {
         let value = md2(1, &[record(4, 8, alignment, &[0, 0, 0, 0], 0)]);
-        let record = CustomDebugInfo::parse(&value)
-            .unwrap()
-            .records()
-            .next()
-            .unwrap();
+        let info = CustomDebugInfo::parse(&value).unwrap();
+        let record = info.records().next().unwrap();
         assert_eq!(record.data.len(), 4 - usize::from(alignment));
     }
     // The alignment size must be at most 3 and at most the body size.
@@ -363,7 +357,7 @@ fn keeps_unknown_kinds_and_versions_framed() {
     let records: Vec<_> = info.records().collect();
     assert_eq!(
         records[0].decode().unwrap(),
-        CustomDebugInfoData::Unknown(&[1, 2, 3])
+        CustomDebugInfoData::Unknown(pdbrs::Bytes::new(&[1, 2, 3]))
     );
     assert_eq!(records[1].version, 3);
     assert_eq!(records[1].data, [9; 4]);
@@ -440,26 +434,20 @@ fn decodes_state_machine_type_names() {
     decode_one(4, &utf16("<Evens>d__0\0"), |data| {
         assert_eq!(
             data,
-            CustomDebugInfoData::StateMachineTypeName(&utf16("<Evens>d__0"))
+            CustomDebugInfoData::StateMachineTypeName(pdbrs::Bytes::from(utf16("<Evens>d__0")))
         );
     });
     // Old compilers omit the NUL code unit.
     let value = md2(1, &[record(4, 4, 0, &utf16("<A>d"), 0)]);
-    let record = CustomDebugInfo::parse(&value)
-        .unwrap()
-        .records()
-        .next()
-        .unwrap();
+    let info = CustomDebugInfo::parse(&value).unwrap();
+    let record = info.records().next().unwrap();
     assert_eq!(
         record.decode().unwrap(),
-        CustomDebugInfoData::StateMachineTypeName(&utf16("<A>d"))
+        CustomDebugInfoData::StateMachineTypeName(pdbrs::Bytes::from(utf16("<A>d")))
     );
     let value = md2(1, &[record_of(4, &[0x41, 0, 0x42])]);
-    let record = CustomDebugInfo::parse(&value)
-        .unwrap()
-        .records()
-        .next()
-        .unwrap();
+    let info = CustomDebugInfo::parse(&value).unwrap();
+    let record = info.records().next().unwrap();
     assert_eq!(
         record.decode().unwrap_err().kind(),
         ErrorKind::InvalidFormat
@@ -498,8 +486,10 @@ fn decodes_dynamic_locals() {
         };
         let locals: Vec<_> = locals.iter().collect();
         assert_eq!(locals.len(), 2);
-        assert_eq!((locals[0].flags, locals[0].flag_count), (&[1, 0, 1][..], 3));
-        assert_eq!((locals[0].slot, locals[0].name), (2, &utf16("d")[..]));
+        assert_eq!(locals[0].flags, [1, 0, 1]);
+        assert_eq!(locals[0].flag_count, 3);
+        assert_eq!(locals[0].slot, 2);
+        assert_eq!(locals[0].name, utf16("d"));
         // The flag field holds at most 64 flags, and a full name has no NUL code unit.
         assert_eq!((locals[1].flags.len(), locals[1].flag_count), (64, 70));
         assert_eq!(locals[1].name, utf16(&full));
@@ -541,7 +531,8 @@ fn decodes_tuple_element_names() {
         let entries: Vec<_> = names.iter().collect();
         let first: Vec<&[u8]> = entries[0].element_names.iter().collect();
         assert_eq!(first, [&b"a"[..], b""]);
-        assert_eq!((entries[0].slot, entries[0].name), (1, &b"t"[..]));
+        assert_eq!(entries[0].slot, 1);
+        assert_eq!(entries[0].name, b"t");
         assert_eq!(entries[1].element_names.len(), 3);
         assert_eq!(entries[1].slot, -1);
         assert_eq!(
@@ -552,11 +543,8 @@ fn decodes_tuple_element_names() {
     });
     for length in 0..payload.len() {
         let value = md2(1, &[record_of(8, &payload[..length])]);
-        let record = CustomDebugInfo::parse(&value)
-            .unwrap()
-            .records()
-            .next()
-            .unwrap();
+        let info = CustomDebugInfo::parse(&value).unwrap();
+        let record = info.records().next().unwrap();
         assert_eq!(
             record.decode().unwrap_err().kind(),
             ErrorKind::InvalidFormat,

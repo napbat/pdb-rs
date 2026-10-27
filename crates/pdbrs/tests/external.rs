@@ -3,7 +3,7 @@
 use pdbrs::native::Pdb;
 use pdbrs::native::Producer;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
-use pdbrs::native::dbi::{DbiBuilder, DbiHeader, OwnedModule, SectionContribution, TypeServer};
+use pdbrs::native::dbi::{DbiBuilder, DbiHeader, Module, SectionContribution, TypeServer};
 use pdbrs::native::info::{Feature, InfoBuilder};
 use pdbrs::native::msf::{MsfBuilder, MsfWriteOptions, StreamId};
 
@@ -26,7 +26,7 @@ fn module_stream(signature: u32, fastlink: usize) -> Vec<u8> {
     symbols
 }
 
-fn module(name: &[u8], stream: u32, symbol_bytes: usize, type_server: u8) -> OwnedModule {
+fn module(name: &[u8], stream: u32, symbol_bytes: usize, type_server: u8) -> Module<'static> {
     let mut contribution = SectionContribution::default();
     contribution.section = 0;
     contribution.padding1 = 0;
@@ -38,7 +38,7 @@ fn module(name: &[u8], stream: u32, symbol_bytes: usize, type_server: u8) -> Own
     contribution.data_crc = Some(0);
     contribution.reloc_crc = Some(0);
     contribution.coff_section = None;
-    let mut module = OwnedModule::default();
+    let mut module = Module::default();
     module.unused1 = 0;
     module.section_contribution = contribution;
     module.flags = u16::from(type_server) << 8;
@@ -51,8 +51,8 @@ fn module(name: &[u8], stream: u32, symbol_bytes: usize, type_server: u8) -> Own
     module.file_name_offset = 0;
     module.source_file_name_index = 0;
     module.pdb_file_path_index = 0;
-    module.name = name.to_vec();
-    module.object_file = b"lib.lib".to_vec();
+    module.name = name.to_vec().into();
+    module.object_file = b"lib.lib".into();
     module.name_padding = [0; 3];
     module
 }

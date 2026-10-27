@@ -74,7 +74,7 @@ fn rebuild(
 fn resplit_chains(table: &TypeTable<'_>, heads: &[TypeIndex]) -> Outcome<(usize, usize)> {
     let mut different = 0;
     for &head in heads {
-        let mut members: Vec<Member<'_>> = Vec::new();
+        let mut members: Vec<Member<'static>> = Vec::new();
         let mut sizes = Vec::new();
         let mut next = Some(head);
         while let Some(index) = next {
@@ -85,7 +85,7 @@ fn resplit_chains(table: &TypeTable<'_>, heads: &[TypeIndex]) -> Outcome<(usize,
             for member in list.members() {
                 let member = member?;
                 if !matches!(member, Member::Continuation(_)) {
-                    members.push(member);
+                    members.push(member.into_owned());
                 }
             }
         }

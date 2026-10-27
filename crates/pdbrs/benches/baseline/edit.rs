@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use pdbrs::Bytes;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::field_list::{
     DataMember, LLVM_FIELD_LIST_LIMIT, Member, encode_field_list,
@@ -109,7 +110,7 @@ fn field_list() -> Outcome<Vec<u8>> {
     member.attributes = MemberAttributes::from_raw(3)?;
     member.member_type = T_INT4;
     member.offset = number(0);
-    member.name = b"value";
+    member.name = b"value".into();
     let mut bytes = Vec::new();
     encode_field_list(
         &[Member::DataMember(member)],
@@ -139,9 +140,9 @@ pub(crate) fn append_type(path: &Path, bench: &mut Bench) -> Outcome {
         class.derivation_list = TypeIndex::NONE;
         class.vtable_shape = TypeIndex::NONE;
         class.size = number(4);
-        class.name = ADDED_TYPE;
+        class.name = ADDED_TYPE.into();
         class.unique_name = None;
-        class.trailing = &[];
+        class.trailing = Bytes::new(&[]);
         editor.add_type(&TypeLeaf::Class(class))?;
         write(&editor)
     })

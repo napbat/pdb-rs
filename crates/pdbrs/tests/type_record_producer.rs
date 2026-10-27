@@ -5,13 +5,13 @@
 //! libraries (`libvcruntime.lib`, `libcmt.lib`) contain these records, and `link.exe` and
 //! `lld-link` copy them to the PDB without a change (#29).
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::type_record::{
     ClassKind, LF_ARRAY, LF_STRUCTURE, LF_UNION, TypeLeaf, Union,
 };
 use pdbrs::native::codeview::{LeafKind, Record};
+use pdbrs::{Bytes, ErrorKind};
 
 /// The `CsFrameEncoded` record of `handlers.obj` in `libvcruntimed.lib` (MSVC 14.51.36231,
 /// MASM 14.50.35721), with the length field and the kind.
@@ -28,7 +28,7 @@ fn decode(kind: LeafKind, data: &[u8]) -> pdbrs::Result<TypeLeaf<'_>> {
 #[test]
 fn masm_structure_padding_decodes_and_encodes_to_the_same_bytes() {
     let leaf = decode(LF_STRUCTURE, &CS_FRAME_ENCODED[4..]).unwrap();
-    let TypeLeaf::Class(class) = leaf else {
+    let TypeLeaf::Class(class) = &leaf else {
         panic!("not a structure");
     };
     assert_eq!(class.kind, ClassKind::Structure);
@@ -74,7 +74,7 @@ fn every_udt_kind_keeps_the_masm_form() {
     let mut data = vec![0x02, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x04, 0x00];
     data.extend_from_slice(b"Un\0\xf1\x6d\x65");
     let leaf = decode(LF_UNION, &data).unwrap();
-    let TypeLeaf::Union(value) = leaf else {
+    let TypeLeaf::Union(value) = &leaf else {
         panic!("not a union");
     };
     assert_eq!(value.trailing, [0xf1, 0x6d, 0x65]);
@@ -114,8 +114,8 @@ fn union_leaf(producer_padding: &[u8]) -> TypeLeaf<'_> {
     union.member_count = 2;
     union.field_list = TypeIndex(0x1000);
     union.size = Numeric::from_integer(Integer::Unsigned(4));
-    union.name = b"Un";
-    union.trailing = producer_padding;
+    union.name = Bytes::new(b"Un");
+    union.trailing = Bytes::new(producer_padding);
     TypeLeaf::Union(union)
 }
 

@@ -39,11 +39,11 @@ fn module_stream(subsections: &[(SubsectionKind, Vec<u8>)]) -> ModuleStream {
             .unwrap();
     }
     let mut parts = ModuleStreamParts::default();
-    parts.c13 = &c13;
+    parts.c13 = c13.into();
     let mut bytes = Vec::new();
     let sizes = parts.encode(&mut bytes).unwrap();
     let dbi = module_dbi(sizes);
-    let module = dbi.modules().next().unwrap().unwrap();
+    let (_, module) = dbi.modules().next().unwrap().unwrap();
     ModuleStream::parse(bytes, &module).unwrap()
 }
 

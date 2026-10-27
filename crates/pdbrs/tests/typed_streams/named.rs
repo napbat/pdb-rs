@@ -1,6 +1,5 @@
 //! Named streams with noncontiguous pages: the Info stream, `/LinkInfo` and injected sources.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::auxiliary::{LINK_INFO_STREAM_NAME, LINK_INFO_VERSION_TWO, LinkInfo};
 use pdbrs::native::injected_source::{
     HEADER_BLOCK_STREAM_NAME, InjectedFile, InjectedSource, SourceCompression, SourceHeaderBlock,
@@ -9,6 +8,7 @@ use pdbrs::native::injected_source::{
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{HashVersion, StringTableBuilder};
 use pdbrs::native::{Pdb, Producer, ReadOptions};
+use pdbrs::{Bytes, ErrorKind};
 
 use super::{Order, PAGE, container, crosses_page, info, open, to_u32, to_u64};
 
@@ -81,7 +81,7 @@ impl Named {
         let record = LinkInfo::new(
             LINK_INFO_VERSION_TWO,
             b"C:\\build",
-            &command,
+            command.as_slice(),
             output,
             b"a.lib\0",
         )
@@ -95,12 +95,12 @@ impl Named {
         for index in 0..FILE_COUNT {
             let (virtual_file_name, stream) = (virtual_name(index), content(index));
             let mut file = InjectedFile::default();
-            file.file_name = &virtual_file_name;
-            file.object_name = b"";
-            file.virtual_file_name = &virtual_file_name;
+            file.file_name = Bytes::new(&virtual_file_name);
+            file.object_name = Bytes::new(b"");
+            file.virtual_file_name = Bytes::new(&virtual_file_name);
             file.compression = SourceCompression::NONE;
             file.is_virtual = false;
-            file.stream = &stream;
+            file.stream = Bytes::new(&stream);
             sources.push(builder.add_file(&mut names, &file).unwrap());
         }
         let mut header_block = Vec::new();

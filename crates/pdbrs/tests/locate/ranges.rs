@@ -185,7 +185,7 @@ fn invalid_programs_give_errors() {
 #[test]
 fn errors_stop_the_iterator() {
     let bytes = [annotation(8, &[2]), annotation(3, &[0])].concat();
-    let annotations = BinaryAnnotations::parse(&bytes).unwrap();
+    let annotations = BinaryAnnotations::parse(bytes.as_slice()).unwrap();
     let mut iterator = InlineRanges::new(&annotations, ChecksumOffset(0), 1);
     assert!(iterator.next().unwrap().is_err());
     assert!(iterator.next().is_none());

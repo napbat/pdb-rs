@@ -143,14 +143,14 @@ fn definitions(
         let Some(tag) = leaf.tag() else {
             continue;
         };
-        if tag.options.is_forward_reference() || only.is_some_and(|name| name != tag.name) {
+        if tag.options.is_forward_reference() || only.is_some_and(|name| name != &*tag.name) {
             continue;
         }
         if let TypeLeaf::Enum(value) = &leaf {
             print_enum(
                 types,
                 index,
-                value.name,
+                &value.name,
                 value.underlying_type,
                 value.field_list,
             )

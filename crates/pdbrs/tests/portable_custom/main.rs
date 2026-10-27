@@ -9,10 +9,10 @@ mod rows;
 mod sources;
 mod state_machine;
 
-use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue, TypeDefinitionDocuments};
 use pdbrs::portable::embedded::EmbeddedSource;
 use pdbrs::portable::metadata::DocumentId;
+use pdbrs::{Bytes, ErrorKind};
 
 /// Run an encoder that appends to a buffer, and return the bytes.
 fn encoded(encode: impl FnOnce(&mut Vec<u8>) -> pdbrs::Result<()>) -> pdbrs::Result<Vec<u8>> {
@@ -111,7 +111,13 @@ fn keeps_unknown_kinds_raw() {
     let kind = CustomDebugKind([7; 16]);
     for blob in [&[][..], &[0xff, 0xe0, 0x00], b"any bytes"] {
         let value = round_trip(kind, blob);
-        assert_eq!(value, CustomDebugValue::Unknown { kind, value: blob });
+        assert_eq!(
+            value,
+            CustomDebugValue::Unknown {
+                kind,
+                value: Bytes::new(blob)
+            }
+        );
     }
 }
 
@@ -148,7 +154,7 @@ fn decodes_embedded_source_through_the_shared_codec() {
     let raw = [0, 0, 0, 0, b'a', b'b', b'c'];
     assert_eq!(
         round_trip(CustomDebugKind::EMBEDDED_SOURCE, &raw),
-        CustomDebugValue::EmbeddedSource(EmbeddedSource::Raw(b"abc"))
+        CustomDebugValue::EmbeddedSource(EmbeddedSource::Raw(Bytes::new(b"abc")))
     );
     let deflate = [3, 0, 0, 0, 0x01, 0x03, 0x00, 0xfc, 0xff, b'a', b'b', b'c'];
     let CustomDebugValue::EmbeddedSource(source) =

@@ -230,7 +230,7 @@ fn sample_names(locator: &SymbolLocator, count: usize) -> Outcome<Vec<String>> {
             && let Some(public) = locator.public_at(start)?
             && public.displacement == 0
         {
-            names.insert(text(public.public.name));
+            names.insert(text(&public.public.name));
         }
     }
     Ok(names
@@ -263,7 +263,7 @@ fn print_location(out: &mut String, locator: &SymbolLocator, rva: u32, kind: &st
         writeln!(
             out,
             "PUBLIC {} {:#010x}",
-            text(public.public.name),
+            text(&public.public.name),
             public.rva.0
         )?;
     }
@@ -309,7 +309,7 @@ fn print_name(out: &mut String, locator: &SymbolLocator, name: &str) -> Outcome 
                 out,
                 "MATCH public {:#010x} {}",
                 rva.map_or(0, |rva| rva.0),
-                text(public.name)
+                text(&public.name)
             )?,
             NameMatch::Global { symbol, .. } => {
                 let rva = match symbol.address() {
@@ -320,7 +320,7 @@ fn print_name(out: &mut String, locator: &SymbolLocator, name: &str) -> Outcome 
                     out,
                     "MATCH global {:#06x} {rva:#010x} {}",
                     symbol.kind(),
-                    text(symbol.name().unwrap_or_default())
+                    text(symbol.name().map_or(&[], |name| name))
                 )?;
             }
             _ => writeln!(out, "MATCH other")?,

@@ -1,13 +1,13 @@
 //! Tests that every decoded symbol kind encodes to its original bytes, and
 //! the boundary and error cases of the encoders.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::id_record::IdList;
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     Annotation, BinaryAnnotations, FunctionList, RegisterList, Symbol, SymbolData,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
+use pdbrs::{Bytes, ErrorKind};
 
 /// `S_ALTOBJNAME`: no reference gives its layout, so it stays raw.
 const S_ALTOBJNAME: u16 = 0x1181;
@@ -114,7 +114,7 @@ fn every_decoded_kind_has_a_case() {
     for kind in 0..=u16::MAX {
         let bytes = unpadded(kind, &[]);
         if matches!(
-            decode(&bytes).map(|symbol| *symbol.data()),
+            decode(&bytes).map(|symbol| symbol.data().clone()),
             Ok(SymbolData::Unsupported(_))
         ) {
             continue;
@@ -130,11 +130,14 @@ fn unsupported_kinds_stay_raw_and_encode_raw() {
     let payload = [1, 2, 3, 4];
     let bytes = padded(S_ALTOBJNAME, &payload);
     let symbol = decode(&bytes).unwrap();
-    assert_eq!(*symbol.data(), SymbolData::Unsupported(&payload));
+    assert_eq!(
+        *symbol.data(),
+        SymbolData::Unsupported(Bytes::new(&payload))
+    );
     assert_eq!(encode(&symbol).unwrap(), bytes);
     // Raw bytes are not valid for a kind with a decoder.
     assert_eq!(
-        encode_error(&SymbolData::Unsupported(&payload), 0x110e),
+        encode_error(&SymbolData::Unsupported(Bytes::new(&payload)), 0x110e),
         ErrorKind::InvalidFormat
     );
 }
@@ -144,10 +147,10 @@ fn names_with_nul_bytes_are_rejected() {
     let payload = Payload::default().u32(0).u32(0x10).u16(1).name(b"main");
     let bytes = padded(0x110e, &payload.0);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::Public(mut public) = *symbol.data() else {
+    let SymbolData::Public(mut public) = symbol.data().clone() else {
         panic!("expected a public");
     };
-    public.name = b"ma\0in";
+    public.name = Bytes::new(b"ma\0in");
     assert_eq!(
         encode_error(&SymbolData::Public(public), 0x110e),
         ErrorKind::InvalidFormat
@@ -159,26 +162,29 @@ fn records_longer_than_the_length_field_are_rejected() {
     let payload = Payload::default().u32(0).u32(0x10).u16(1).name(b"main");
     let bytes = padded(0x110e, &payload.0);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::Public(mut public) = *symbol.data() else {
+    let SymbolData::Public(mut public) = symbol.data().clone() else {
         panic!("expected a public");
     };
     // 10 bytes of fields, the name and its NUL: 65524 + 10 + 1 + 2 = 65537.
     let long = vec![b'x'; 0xfff4];
-    public.name = &long;
+    public.name = Bytes::new(&long);
     let mut out = vec![0xaa];
-    let error = SymbolData::Public(public).encode(SymbolKind(0x110e), &mut out);
+    let error = SymbolData::Public(public.clone()).encode(SymbolKind(0x110e), &mut out);
     assert_eq!(error.unwrap_err().kind(), ErrorKind::LimitExceeded);
     // The output is unchanged after the error.
     assert_eq!(out, [0xaa]);
     // One byte shorter fits: the length field is 0xfffe after padding.
     let fits = vec![b'x'; 0xfff1];
-    public.name = &fits;
+    public.name = Bytes::new(&fits);
     out.clear();
     SymbolData::Public(public)
         .encode(SymbolKind(0x110e), &mut out)
         .unwrap();
     assert_eq!(out.len(), 0x1_0000);
-    assert_eq!(decode(&out).unwrap().name(), Some(&fits[..]));
+    assert_eq!(
+        decode(&out).unwrap().name().map(Bytes::as_bytes),
+        Some(&fits[..])
+    );
 }
 
 #[test]
@@ -209,7 +215,7 @@ fn constant_keeps_its_stored_leaf_and_encodes_new_values_canonically() {
     let bytes = padded(0x1107, &payload.0);
     let symbol = decode(&bytes).unwrap();
     assert_eq!(encode(&symbol).unwrap(), bytes);
-    let SymbolData::Constant(mut constant) = *symbol.data() else {
+    let SymbolData::Constant(mut constant) = symbol.data().clone() else {
         panic!("expected a constant");
     };
     constant.value = Numeric::from_integer(Integer::Unsigned(8));
@@ -234,10 +240,10 @@ fn thunk_variant_data_needs_a_variant_kind() {
         .name(b"t");
     let bytes = padded(0x1102, &payload.0);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::Thunk(mut thunk) = *symbol.data() else {
+    let SymbolData::Thunk(mut thunk) = symbol.data().clone() else {
         panic!("expected a thunk");
     };
-    thunk.variant = &[1, 2];
+    thunk.variant = Bytes::new(&[1, 2]);
     assert_eq!(
         encode_error(&SymbolData::Thunk(thunk), 0x1102),
         ErrorKind::InvalidFormat
@@ -263,7 +269,7 @@ fn register_lists_check_their_count_width() {
 #[test]
 fn function_lists_check_their_counts() {
     let functions = IdList::parse(&[1, 0, 0, 0]).unwrap();
-    assert!(FunctionList::new(functions, &[5, 0, 0, 0]).is_ok());
+    assert!(FunctionList::new(functions.clone(), &[5, 0, 0, 0]).is_ok());
     assert_eq!(
         FunctionList::new(functions, &[5, 0, 0, 0, 6, 0, 0, 0])
             .unwrap_err()
@@ -304,7 +310,8 @@ fn annotations_encode_to_their_compressed_form() {
     for annotation in &annotations {
         annotation.encode(&mut bytes).unwrap();
     }
-    let decoded: Vec<Annotation> = BinaryAnnotations::parse(&bytes).unwrap().iter().collect();
+    let parsed = BinaryAnnotations::parse(bytes.as_slice()).unwrap();
+    let decoded: Vec<Annotation> = parsed.iter().collect();
     assert_eq!(decoded, annotations);
     assert_eq!(bytes[..2], [1, 0x7f]);
     assert_eq!(bytes[2..5], [3, 0x80, 0x80]);
@@ -337,7 +344,7 @@ fn hlsl_def_range_offsets_follow_the_flags() {
         .unwrap();
     let bytes = padded(case.kind, &case.payload);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::DefRangeHlsl(mut range) = *symbol.data() else {
+    let SymbolData::DefRangeHlsl(mut range) = symbol.data().clone() else {
         panic!("expected an HLSL def-range");
     };
     assert_eq!(range.register_index_count(), 1);
@@ -358,12 +365,12 @@ fn narrow_hlsl_slots_must_fit_in_16_bits() {
         .unwrap();
     let bytes = padded(case.kind, &case.payload);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::HlslData(mut data) = *symbol.data() else {
+    let SymbolData::HlslData(mut data) = symbol.data().clone() else {
         panic!("expected HLSL data");
     };
     data.uav_slot = 0x1_0000;
     assert_eq!(
-        encode_error(&SymbolData::HlslData(data), 0x1151),
+        encode_error(&SymbolData::HlslData(data.clone()), 0x1151),
         ErrorKind::LimitExceeded
     );
     // The 32-bit kind keeps the wide slot.
@@ -371,7 +378,7 @@ fn narrow_hlsl_slots_must_fit_in_16_bits() {
     SymbolData::HlslData(data)
         .encode(SymbolKind(0x1162), &mut out)
         .unwrap();
-    let SymbolData::HlslData(wide) = *decode(&out).unwrap().data() else {
+    let SymbolData::HlslData(wide) = decode(&out).unwrap().data().clone() else {
         panic!("expected HLSL data");
     };
     assert_eq!(wide.uav_slot, 0x1_0000);
@@ -385,16 +392,16 @@ fn pdb_map_names_are_utf16_without_nul() {
         .unwrap();
     let bytes = padded(case.kind, &case.payload);
     let symbol = decode(&bytes).unwrap();
-    let SymbolData::PdbMap(mut map) = *symbol.data() else {
+    let SymbolData::PdbMap(mut map) = symbol.data().clone() else {
         panic!("expected a PDB map");
     };
     assert_eq!(map.from, b"a\0");
-    map.to = b"b\0\0\0";
+    map.to = Bytes::new(b"b\0\0\0");
     assert_eq!(
-        encode_error(&SymbolData::PdbMap(map), 0x1161),
+        encode_error(&SymbolData::PdbMap(map.clone()), 0x1161),
         ErrorKind::InvalidFormat
     );
-    map.to = b"b";
+    map.to = Bytes::new(b"b");
     assert_eq!(
         encode_error(&SymbolData::PdbMap(map), 0x1161),
         ErrorKind::InvalidFormat

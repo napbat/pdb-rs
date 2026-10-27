@@ -43,8 +43,8 @@ fn assembly_input<'a>(
     input.timestamp = timestamp;
     input.index = index;
     input.has_pdb = has_pdb;
-    input.version = version;
-    input.name = name;
+    input.version = version.into();
+    input.name = name.into();
     input
 }
 
@@ -316,6 +316,12 @@ fn ignored_subsections_keep_their_bytes() {
     let data = [9, 8, 7];
     let kind = SubsectionKind(DEBUG_S_IGNORE.0 | DEBUG_S_STRINGTABLE.0);
     let decoded = round_trip(kind, &data);
-    assert_eq!(decoded, LineSubsection::Ignored { kind, data: &data });
+    assert_eq!(
+        decoded,
+        LineSubsection::Ignored {
+            kind,
+            data: (&data).into()
+        }
+    );
     round_trip(DEBUG_S_IGNORE, &[]);
 }

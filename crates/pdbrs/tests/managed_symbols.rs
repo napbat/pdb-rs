@@ -1,6 +1,5 @@
 //! Tests for the managed symbol kinds that .NET symbol writers produce.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
@@ -10,6 +9,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::portable::metadata::MetadataToken;
+use pdbrs::{Bytes, ErrorKind};
 
 /// The module symbol offset `value`.
 const fn at(value: u32) -> ModuleSymbolOffset {
@@ -126,7 +126,10 @@ fn decodes_managed_procedures() {
             assert!(value.flags.contains(ProcedureFlags::HAS_FRAME_POINTER));
             assert!(value.flags.contains(ProcedureFlags::OPTIMIZED_DEBUG_INFO));
             assert_eq!(value.return_register, 0xffff);
-            assert_eq!(symbol.name(), Some(&b"ComputeAsync"[..]));
+            assert_eq!(
+                symbol.name().map(Bytes::as_bytes),
+                Some(&b"ComputeAsync"[..])
+            );
             assert_eq!(symbol.address(), Some(address));
             assert_eq!(symbol.type_index(), None);
             let links = symbol.scope_links().unwrap();
@@ -144,7 +147,7 @@ fn managed_procedure_name_can_be_empty() {
     let padded = padded(&payload);
     assert_eq!(padded.len(), 40);
     decode(S_GMANPROC, &padded, |symbol| {
-        assert_eq!(symbol.name(), Some(&b""[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b""[..]));
     });
     decode(S_GMANPROC, &payload, |symbol| {
         assert_eq!(symbol.record().data.len(), 38);
@@ -198,7 +201,7 @@ fn decodes_managed_slots() {
                 }
             );
             assert_eq!(value.flags, LocalFlags::COMPILER_GENERATED);
-            assert_eq!(symbol.name(), Some(&b"visible"[..]));
+            assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"visible"[..]));
             // The token is not a TPI index, and the live address is not a symbol address.
             assert_eq!(symbol.type_index(), None);
             assert_eq!(symbol.address(), None);
@@ -229,9 +232,9 @@ fn constant_value(value: &[u8], check: impl FnOnce(Numeric<'_>)) {
             panic!("expected S_MANCONSTANT");
         };
         assert_eq!(constant.type_or_token, 0x1100_000e);
-        assert_eq!(symbol.name(), Some(&b"Seed"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"Seed"[..]));
         assert_eq!(symbol.type_index(), None);
-        check(constant.value);
+        check(constant.value.clone());
     });
 }
 
@@ -255,11 +258,11 @@ fn decodes_managed_string_constants() {
     constant_value(
         &[0x10, 0x80, 6, 0, b'c', b's', b'h', b'a', b'r', b'p'],
         |value| {
-            assert_eq!(value, Numeric::VarString(b"csharp"));
+            assert_eq!(value, Numeric::VarString(Bytes::new(b"csharp")));
         },
     );
     constant_value(&[0x10, 0x80, 0, 0], |value| {
-        assert_eq!(value, Numeric::VarString(b""));
+        assert_eq!(value, Numeric::VarString(Bytes::new(b"")));
     });
 }
 
@@ -381,7 +384,7 @@ fn decodes_token_references_as_procedure_references() {
         assert_eq!(reference.offset, at(0x34));
         assert_eq!(reference.module, Some(ModuleIndex(5)));
         assert_eq!(reference.name, b"06000017");
-        assert_eq!(symbol.name(), Some(&b"06000017"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"06000017"[..]));
         assert!(matches!(symbol.data(), SymbolData::ProcedureReference(_)));
         assert_ne!(symbol.kind(), S_PROCREF);
     });

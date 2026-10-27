@@ -8,7 +8,6 @@
 mod program;
 mod strip;
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::id_record::{IdRecord, StringId};
 use pdbrs::native::codeview::index::{IdIndex, TypeIndex};
@@ -23,6 +22,7 @@ use pdbrs::native::msf::{MsfWriteOptions, StreamId};
 use pdbrs::native::symbols::{HashTable, RecordOffsets, indexed_name};
 use pdbrs::native::types::TypeHashes;
 use pdbrs::native::{BuildOptions, EditOptions, Identity, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::{Bytes, ErrorKind};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);
@@ -32,7 +32,7 @@ fn public(flags: PublicFlags, address: SectionOffset, name: &[u8]) -> Public<'_>
     let mut public = Public::default();
     public.flags = flags;
     public.address = address;
-    public.name = name;
+    public.name = Bytes::new(name);
     public
 }
 
@@ -40,7 +40,7 @@ fn public(flags: PublicFlags, address: SectionOffset, name: &[u8]) -> Public<'_>
 fn udt(type_index: TypeIndex, name: &[u8]) -> SymbolData<'_> {
     let mut udt = UserDefinedType::default();
     udt.type_index = type_index;
-    udt.name = name;
+    udt.name = Bytes::new(name);
     SymbolData::UserDefinedType(udt)
 }
 
@@ -286,7 +286,7 @@ fn added_symbols_are_indexed_without_moving_records() {
         section: 2,
         offset: 0,
     };
-    data.name = b"g_added";
+    data.name = Bytes::new(b"g_added");
     editor
         .add_global(S_GDATA32, &SymbolData::Data(data))
         .expect("global");
@@ -496,7 +496,7 @@ fn forward(name: &[u8]) -> TypeLeaf<'_> {
     class.derivation_list = TypeIndex::NONE;
     class.vtable_shape = TypeIndex::NONE;
     class.size = number(0);
-    class.name = name;
+    class.name = Bytes::new(name);
     class.unique_name = None;
     TypeLeaf::Class(class)
 }
@@ -514,7 +514,7 @@ fn added_types_get_the_next_indices_and_hash_values() {
         .add_id(&IdRecord::String({
             let mut string = StringId::default();
             string.substrings = None;
-            string.string = b"added string";
+            string.string = Bytes::new(b"added string");
             string
         }))
         .expect("ID");

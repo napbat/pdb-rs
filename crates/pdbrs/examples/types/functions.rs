@@ -27,12 +27,12 @@ fn function_id(
                 ids.resolve_string(scope, &mut name)?;
                 name.extend_from_slice(b"::");
             }
-            name.extend_from_slice(function.name);
+            name.extend_from_slice(&function.name);
             Some((function.function_type, text(&name)))
         }
         IdRecord::MemberFunction(function) => {
             let parent = types.name(function.parent_type)?;
-            let name = format!("{parent}::{}", text(function.name));
+            let name = format!("{parent}::{}", text(&function.name));
             Some((function.function_type, name))
         }
         _ => None,
@@ -56,7 +56,7 @@ pub fn procedures(
     };
     let mut count = 0;
     for module in dbi.modules() {
-        let Some(stream) = pdb.module_stream(&module?)? else {
+        let Some(stream) = pdb.module_stream(&module?.1)? else {
             continue;
         };
         for record in stream.symbols() {
@@ -68,7 +68,7 @@ pub fn procedures(
                 S_GPROC32 | S_GPROC32_ID | S_GPROC32EX | S_GPROC32EX_ID => "global",
                 _ => "local",
             };
-            let name = text(procedure.name);
+            let name = text(&procedure.name);
             let function_type = match procedure.signature {
                 ProcedureType::Type(index) => Some(index),
                 ProcedureType::Id(IdIndex::NONE) => None,

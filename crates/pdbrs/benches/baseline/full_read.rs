@@ -70,7 +70,7 @@ fn named_streams(pdb: &Pdb<impl ReadAt>) -> Outcome<u64> {
     for named in info.named_streams() {
         let bytes = pdb.stream_bytes(named.stream)?;
         count += 1;
-        match NamedStreamKind::classify(named.name) {
+        match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::LinkInfo => {
                 supported(LinkInfo::parse(&bytes, named.stream))?;
             }
@@ -173,8 +173,8 @@ fn debug_info_tables(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
         count += u64::try_from(map.iter().count())?;
     }
     if let Some(sources) = dbi.source_info()? {
-        for module in sources.modules() {
-            for name in module.file_names() {
+        for module in &sources.modules {
+            for name in sources.file_names(module) {
                 name?;
                 count += 1;
             }
@@ -200,7 +200,7 @@ fn debug_info_tables(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
 fn modules(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
     let mut count = 0;
     for module in dbi.modules() {
-        let module = module?;
+        let (_, module) = module?;
         let Some(stream) = pdb.module_stream(&module)? else {
             continue;
         };

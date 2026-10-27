@@ -1,10 +1,10 @@
 //! Tests for compilation options and compilation metadata references.
 
-use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{
     CompilationMetadataReferences, CompilationOption, CompilationOptions, CustomDebugKind,
-    CustomDebugValue, MetadataReference, Utf8Bytes,
+    CustomDebugValue, MetadataReference,
 };
+use pdbrs::{Bytes, ErrorKind};
 
 use super::{encoded, error, round_trip};
 
@@ -22,13 +22,13 @@ fn decodes_compilation_options() {
     assert_eq!(options.as_bytes(), OPTIONS);
     let pairs: Vec<_> = options
         .iter()
-        .map(|option| (option.name.as_bytes(), option.value.as_bytes()))
+        .map(|option| (option.name, option.value))
         .collect();
     assert_eq!(
         pairs,
         [
-            (&b"language"[..], &b"C#"[..]),
-            (b"compiler-version", b"4.14.0")
+            (Bytes::new(b"language"), Bytes::new(b"C#")),
+            (Bytes::new(b"compiler-version"), Bytes::new(b"4.14.0"))
         ]
     );
     assert_eq!(
@@ -39,7 +39,7 @@ fn decodes_compilation_options() {
     // An empty name or value is valid.
     assert_eq!(
         CompilationOptions::parse(b"\0\0").unwrap().get(b""),
-        Some(Utf8Bytes::new(b""))
+        Some(Bytes::new(b""))
     );
     assert!(CompilationOptions::parse(&[]).unwrap().is_empty());
 }
@@ -57,8 +57,8 @@ fn rejects_malformed_compilation_options() {
     );
     let option = |name: &'static [u8], value: &'static [u8]| {
         let mut option = CompilationOption::default();
-        option.name = Utf8Bytes::new(name);
-        option.value = Utf8Bytes::new(value);
+        option.name = Bytes::new(name);
+        option.value = Bytes::new(value);
         option
     };
     for options in [
@@ -136,16 +136,16 @@ fn rejects_malformed_compilation_metadata_references() {
         );
     }
     let mut reference = MetadataReference::default();
-    reference.file_name = Utf8Bytes::new(b"a\0.dll");
+    reference.file_name = Bytes::new(b"a\0.dll");
     reference.flags = 1;
     assert_eq!(
-        encoded(|out| CompilationMetadataReferences::encode_parts([reference], out))
+        encoded(|out| CompilationMetadataReferences::encode_parts([reference.clone()], out))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidFormat
     );
-    reference.file_name = Utf8Bytes::new(b"a.dll");
-    reference.aliases = Utf8Bytes::new(b"x\0");
+    reference.file_name = Bytes::new(b"a.dll");
+    reference.aliases = Bytes::new(b"x\0");
     assert_eq!(
         encoded(|out| CompilationMetadataReferences::encode_parts([reference], out))
             .unwrap_err()

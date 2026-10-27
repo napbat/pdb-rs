@@ -4,8 +4,8 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::{ModuleIndex, NameOffset, TypeIndex};
 use pdbrs::native::dbi::{
-    Dbi, DbiBuilder, DbiHeader, DebugStream, OwnedModule, OwnedSourceInfo,
-    SECTION_CONTRIBUTION_V60, SectionContribution, Substream, TypeServer, encode_debug_streams,
+    Dbi, DbiBuilder, DbiHeader, DebugStream, Module, SECTION_CONTRIBUTION_V60, SectionContribution,
+    SourceInfo, Substream, TypeServer, encode_debug_streams,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::names::{HashVersion, SIGNATURE, StringTableBuilder};
@@ -232,7 +232,7 @@ fn encode_errors_remove_appended_bytes() {
     assert_eq!(bytes, [7]);
 }
 
-fn owned_module(name: &[u8]) -> OwnedModule {
+fn owned_module(name: &[u8]) -> Module<'static> {
     let mut contribution = SectionContribution::default();
     contribution.section = 1;
     contribution.padding1 = 0;
@@ -244,7 +244,7 @@ fn owned_module(name: &[u8]) -> OwnedModule {
     contribution.data_crc = Some(0);
     contribution.reloc_crc = Some(0);
     contribution.coff_section = None;
-    let mut module = OwnedModule::default();
+    let mut module = Module::default();
     module.unused1 = 0;
     module.section_contribution = contribution;
     module.flags = 0;
@@ -257,8 +257,8 @@ fn owned_module(name: &[u8]) -> OwnedModule {
     module.file_name_offset = 0;
     module.source_file_name_index = 0;
     module.pdb_file_path_index = 0;
-    module.name = name.to_vec();
-    module.object_file = name.to_vec();
+    module.name = name.to_vec().into();
+    module.object_file = name.to_vec().into();
     module.name_padding = [0; 3];
     module
 }
@@ -275,7 +275,7 @@ fn builder_fills_a_new_stream() {
     module.source_file_name_index = names.insert(b"a.c").unwrap().0;
     builder.modules.push(module);
     builder.ec_names = Some(names);
-    builder.source_info = Some(OwnedSourceInfo::from_file_names([[&b"a.c"[..]]]).unwrap());
+    builder.source_info = Some(SourceInfo::from_file_names([[&b"a.c"[..]]]).unwrap());
     builder.debug_streams = vec![None; 11];
     let bytes = builder.to_bytes().unwrap();
 
@@ -283,7 +283,7 @@ fn builder_fills_a_new_stream() {
     assert_eq!(*decoded.header(), header);
     // V60 without records keeps its version value.
     assert_eq!(decoded.substream(Substream::SectionContributions).len(), 4);
-    let module = decoded.modules().next().unwrap().unwrap();
+    let (_, module) = decoded.modules().next().unwrap().unwrap();
     let ec = decoded.ec_names().unwrap().unwrap();
     assert_eq!(
         ec.get(NameOffset(module.source_file_name_index)).unwrap(),
@@ -301,7 +301,7 @@ fn builder_checks_widths_and_counts() {
     builder.modules.truncate(2);
     builder.to_bytes().unwrap();
 
-    builder.source_info = Some(OwnedSourceInfo::from_file_names([[&b"x"[..]]]).unwrap());
+    builder.source_info = Some(SourceInfo::from_file_names([[&b"x"[..]]]).unwrap());
     assert_error(builder.to_bytes(), ErrorKind::InvalidFormat);
     builder.source_info = None;
 

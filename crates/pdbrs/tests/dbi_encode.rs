@@ -4,10 +4,9 @@
 use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::ModuleIndex;
 use pdbrs::native::dbi::{
-    Dbi, DbiBuilder, DbiHeader, Module, OwnedModule, OwnedModuleSources, OwnedSectionMap,
-    OwnedSourceInfo, SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
-    SectionContributionVersion, SectionContributions, SectionMap, SectionMapEntry, SegmentFlags,
-    SourceInfo, Substream,
+    Dbi, DbiBuilder, DbiHeader, Module, ModuleSources, SECTION_CONTRIBUTION_V2,
+    SECTION_CONTRIBUTION_V60, SectionContribution, SectionContributionVersion,
+    SectionContributions, SectionMap, SectionMapEntry, SegmentFlags, SourceInfo, Substream,
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::section::Machine;
@@ -145,7 +144,10 @@ fn module_dbi(bytes: &[u8]) -> Dbi {
 }
 
 fn modules(dbi: &Dbi) -> Vec<Module<'_>> {
-    dbi.modules().collect::<pdbrs::Result<_>>().unwrap()
+    dbi.modules()
+        .map(|result| result.map(|(_, module)| module))
+        .collect::<pdbrs::Result<_>>()
+        .unwrap()
 }
 
 /// Build a DBI header for a stream with only a module info substream.
@@ -162,7 +164,7 @@ fn module_records_decode_and_encode_all_fields() {
     let record = module_record(b"a.obj", b"lib", 0xee);
     let dbi = module_dbi(&record);
     let decoded = modules(&dbi);
-    let module = decoded[0];
+    let module = &decoded[0];
     assert_eq!(module.unused1, 0x1111_1111);
     let contribution = module.section_contribution;
     assert_eq!(
@@ -194,11 +196,12 @@ fn module_records_decode_and_encode_all_fields() {
     let mut bytes = Vec::new();
     module.encode(&mut bytes).unwrap();
     assert_eq!(bytes, record);
-    let owned = OwnedModule::from_module(&module).unwrap();
+    let owned = module.clone().into_owned();
+    assert_eq!(owned, *module);
     let mut bytes = Vec::new();
     owned.encode(&mut bytes).unwrap();
     assert_eq!(bytes, record);
-    assert_eq!(owned.as_module().name, b"a.obj");
+    assert_eq!(owned.name, b"a.obj");
 }
 
 #[test]
@@ -223,11 +226,11 @@ fn module_records_keep_each_padding_length() {
 fn module_encode_rejects_bad_values() {
     let record = module_record(b"m", b"o", 0);
     let dbi = module_dbi(&record);
-    let mut owned = OwnedModule::from_module(&modules(&dbi)[0]).unwrap();
+    let mut owned = modules(&dbi).remove(0).into_owned();
     let mut bytes = Vec::new();
-    owned.name = b"a\0b".to_vec();
+    owned.name = b"a\0b".into();
     assert_error(owned.encode(&mut bytes), ErrorKind::InvalidFormat);
-    owned.name = b"m".to_vec();
+    owned.name = b"m".into();
     owned.stream = Some(StreamId(0xffff));
     assert_error(owned.encode(&mut bytes), ErrorKind::LimitExceeded);
     owned.stream = None;
@@ -363,20 +366,16 @@ fn section_map_round_trip() {
     }
     assert_eq!(bytes.len(), 44);
     let map = SectionMap::parse(&bytes).unwrap();
-    assert_eq!(map.iter().nth(1), Some(map_entry(2)));
+    assert_eq!(map.iter().nth(1), Some(&map_entry(2)));
     let mut again = Vec::new();
     map.encode(&mut again).unwrap();
     assert_eq!(again, bytes);
-    let owned = OwnedSectionMap::from_map(&map).unwrap();
-    assert_eq!(owned.logical_count, 1);
-    let mut again = Vec::new();
-    owned.encode(&mut again).unwrap();
-    assert_eq!(again, bytes);
+    assert_eq!(map.logical_count, 1);
 }
 
 #[test]
 fn section_map_count_overflow() {
-    let mut map = OwnedSectionMap::default();
+    let mut map = SectionMap::default();
     map.logical_count = 0;
     map.entries = vec![SectionMapEntry::default(); 65_536];
     let mut bytes = Vec::new();
@@ -395,7 +394,8 @@ fn source_info_round_trip_keeps_raw_values() {
     let mut again = Vec::new();
     info.encode(&mut again).unwrap();
     assert_eq!(again, bytes);
-    let owned = OwnedSourceInfo::from_info(&info).unwrap();
+    let owned = info.clone().into_owned();
+    assert_eq!(owned, info);
     assert_eq!(owned.raw_file_count, 0x7777);
     assert_eq!(owned.modules[1].raw_start, 0x5678);
     assert_eq!(owned.modules[1].name_offsets, [2, 0]);
@@ -407,8 +407,8 @@ fn source_info_round_trip_keeps_raw_values() {
 #[test]
 fn source_info_from_file_names() {
     let modules: [&[&[u8]]; 3] = [&[b"a.c", b"x.h"], &[], &[b"x.h", b"b.c"]];
-    let info = OwnedSourceInfo::from_file_names(modules.iter().map(|files| files.iter().copied()))
-        .unwrap();
+    let info =
+        SourceInfo::from_file_names(modules.iter().map(|files| files.iter().copied())).unwrap();
     assert_eq!(info.raw_file_count, 4);
     assert_eq!(
         info.modules.iter().map(|m| m.raw_start).collect::<Vec<_>>(),
@@ -421,8 +421,9 @@ fn source_info_from_file_names() {
     assert!(bytes.len().is_multiple_of(4));
     let parsed = SourceInfo::parse(&bytes).unwrap();
     let names: Vec<Vec<&[u8]>> = parsed
-        .modules()
-        .map(|module| module.file_names().map(Result::unwrap).collect())
+        .modules
+        .iter()
+        .map(|module| parsed.file_names(module).map(Result::unwrap).collect())
         .collect();
     assert_eq!(
         names,
@@ -430,10 +431,10 @@ fn source_info_from_file_names() {
     );
 
     // Names that need padding get zero bytes after the last name.
-    let info = OwnedSourceInfo::from_file_names([[&b"ab"[..]]]).unwrap();
+    let info = SourceInfo::from_file_names([[&b"ab"[..]]]).unwrap();
     assert_eq!(info.names, b"ab\0\0");
     assert_error(
-        OwnedSourceInfo::from_file_names([[&b"a\0b"[..]]]),
+        SourceInfo::from_file_names([[&b"a\0b"[..]]]),
         ErrorKind::InvalidFormat,
     );
 }
@@ -442,24 +443,24 @@ fn source_info_from_file_names() {
 fn source_info_16_bit_overflow() {
     // 70000 file entries: the raw values keep the low 16 bits.
     let files: Vec<&[u8]> = vec![b"f"; 35_000];
-    let info = OwnedSourceInfo::from_file_names([files.clone(), files]).unwrap();
+    let info = SourceInfo::from_file_names([files.clone(), files]).unwrap();
     assert_eq!(u32::from(info.raw_file_count), 70_000 - 65_536);
     assert_eq!(info.modules[1].raw_start, 35_000);
     let mut bytes = Vec::new();
     info.encode(&mut bytes).unwrap();
     assert_eq!(SourceInfo::parse(&bytes).unwrap().file_count(), 70_000);
 
-    let mut module = OwnedModuleSources::default();
+    let mut module = ModuleSources::default();
     module.raw_start = 0;
     module.name_offsets = vec![0; 65_536];
-    let mut wide = OwnedSourceInfo::default();
+    let mut wide = SourceInfo::default();
     wide.raw_file_count = 0;
     wide.modules = vec![module];
-    wide.names = vec![0; 4];
+    wide.names = vec![0; 4].into();
     assert_error(wide.encode(&mut Vec::new()), ErrorKind::LimitExceeded);
-    let mut many = OwnedSourceInfo::default();
+    let mut many = SourceInfo::default();
     many.raw_file_count = 0;
-    many.modules = vec![OwnedModuleSources::default(); 65_536];
-    many.names = Vec::new();
+    many.modules = vec![ModuleSources::default(); 65_536];
+    many.names = Vec::new().into();
     assert_error(many.encode(&mut Vec::new()), ErrorKind::LimitExceeded);
 }

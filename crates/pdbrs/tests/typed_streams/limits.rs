@@ -14,7 +14,7 @@ fn load(pdb: &Pdb<&[u8]>, dbi: &Dbi, id: StreamId) -> Result<()> {
         DBI => pdb.debug_info().map(drop),
         NAMES => pdb.named_stream_bytes(b"/names").map(drop),
         MODULE => {
-            let module = dbi.modules().nth(4).unwrap()?;
+            let (_, module) = dbi.modules().nth(4).unwrap()?;
             pdb.module_stream(&module).map(drop)
         }
         SYMBOLS => pdb.stream_bytes(SYMBOLS).map(drop),

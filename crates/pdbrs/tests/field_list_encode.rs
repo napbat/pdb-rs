@@ -121,7 +121,7 @@ fn every_member_kind_decodes_and_re_encodes() {
         .iter()
         .flat_map(|(_, bytes)| bytes.clone())
         .collect();
-    let list = FieldList::parse(&data).unwrap();
+    let list = FieldList::parse(data.as_slice()).unwrap();
     assert_eq!(list.continuation(), Some(TypeIndex(0x100a)));
     let decoded: Vec<Member<'_>> = list.members().collect::<Result<_, _>>().unwrap();
     assert_eq!(decoded.len(), members.len());
@@ -163,7 +163,7 @@ fn each_truncated_member_is_an_error() {
 fn reserved_fields_must_be_zero() {
     for kind in [LF_FRIENDCLS, LF_VFUNCOFF, LF_FRIENDFCN] {
         let bytes = member(kind, &[&[1, 0], &u32le(0x1000), &u32le(0), b"\0"]);
-        let error = FieldList::parse(&bytes).unwrap_err();
+        let error = FieldList::parse(bytes.as_slice()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat, "kind {kind:#x}");
     }
 }
@@ -175,7 +175,7 @@ fn one_method_offset_must_match_the_method_property() {
     method.attributes = introducing;
     method.method_type = TypeIndex(0x1000);
     method.vtable_offset = None;
-    method.name = b"f";
+    method.name = b"f".into();
     let error = Member::OneMethod(method)
         .encode(&mut Vec::new())
         .unwrap_err();
@@ -188,7 +188,7 @@ fn enumerator(value: u16) -> Member<'static> {
     let mut enumerator = Enumerator::default();
     enumerator.attributes = MemberAttributes::from_raw(3).unwrap();
     enumerator.value = Numeric::from_integer(Integer::Unsigned(u128::from(value)));
-    enumerator.name = b"Item_000";
+    enumerator.name = b"Item_000".into();
     Member::Enumerator(enumerator)
 }
 
@@ -294,7 +294,7 @@ fn base_interface_is_a_base_class_layout() {
     base.base_type = TypeIndex(0x1000);
     base.offset = Numeric::from_integer(Integer::Unsigned(0));
     let mut class = Vec::new();
-    Member::BaseClass(base).encode(&mut class).unwrap();
+    Member::BaseClass(base.clone()).encode(&mut class).unwrap();
     let mut interface = Vec::new();
     Member::BaseInterface(base).encode(&mut interface).unwrap();
     assert_eq!(class[2..], interface[2..]);

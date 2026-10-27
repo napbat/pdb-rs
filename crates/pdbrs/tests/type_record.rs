@@ -1,6 +1,5 @@
 //! Tests for typed TPI leaf decoding.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::numeric::Integer;
 use pdbrs::native::codeview::type_record::{
@@ -10,7 +9,8 @@ use pdbrs::native::codeview::type_record::{
     LabelMode, MemberAccess, MemberAttributes, MemberPointerRepresentation, MethodKind, MocomKind,
     PointerAttributes, PointerKind, PointerMode, TypeLeaf, VtableSlotKind,
 };
-use pdbrs::native::codeview::{LeafKind, Record};
+use pdbrs::native::codeview::{LeafKind, RawRecord, Record};
+use pdbrs::{Bytes, ErrorKind};
 
 /// Add `LF_PAD` bytes so that `payload` plus the 4-byte prefix is aligned to 4.
 fn padded(mut payload: Vec<u8>) -> Vec<u8> {
@@ -323,8 +323,9 @@ fn decodes_class_kinds_and_unique_names() {
         assert_eq!(class.vtable_shape, TypeIndex(0x1003));
         assert_eq!(class.size.integer(), Some(Integer::Unsigned(24)));
         assert_eq!(class.name, b"a::B");
-        assert_eq!(class.unique_name, Some(&b".?AUB@a@@"[..]));
-        let tag = decode(kind, &data).tag().unwrap();
+        assert_eq!(class.unique_name, Some(Bytes::new(b".?AUB@a@@")));
+        let leaf = decode(kind, &data);
+        let tag = leaf.tag().unwrap();
         assert_eq!(tag.name, b"a::B");
         assert_eq!(tag.options, ClassOptions(options));
     }
@@ -425,7 +426,10 @@ fn decodes_vtable_shape_descriptors() {
 fn keeps_unsupported_kind_and_payload() {
     let data = [1, 2, 3];
     let leaf = decode(LeafKind(0x1601), &data);
-    assert_eq!(leaf, TypeLeaf::Unsupported(Record::new(0, 0x1601, &data)));
+    assert_eq!(
+        leaf,
+        TypeLeaf::Unsupported(RawRecord::new(0, 0x1601, &data))
+    );
     assert_eq!(leaf.tag(), None);
 }
 

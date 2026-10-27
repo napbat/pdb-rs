@@ -1,8 +1,8 @@
 //! Behavior tests for the `srcsrv` named stream.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::auxiliary::{SourceServer, SourceServerSection};
 use pdbrs::native::msf::StreamId;
+use pdbrs::{Bytes, ErrorKind};
 
 const STREAM: StreamId = StreamId(74);
 
@@ -37,13 +37,22 @@ fn assert_invalid(bytes: &[u8], offset: usize) {
 fn sections_and_lines_are_framed_with_raw_bytes() {
     let server = parse(SAMPLE).unwrap();
     let ini: Vec<_> = server.ini().map(|v| (v.key, v.value)).collect();
-    assert_eq!(ini, [(&b"VERSION"[..], &b"2"[..]), (b"VERCTRL", b"http")]);
+    assert_eq!(
+        ini,
+        [
+            (Bytes::new(b"VERSION"), Bytes::new(b"2")),
+            (Bytes::new(b"VERCTRL"), Bytes::new(b"http")),
+        ]
+    );
     let variables: Vec<_> = server.variables().map(|v| (v.key, v.value)).collect();
     assert_eq!(
         variables,
         [
-            (&b"SRCSRVTRG"[..], &b"https://example.test/%var2%"[..]),
-            (b"EMPTY", b""),
+            (
+                Bytes::new(b"SRCSRVTRG"),
+                Bytes::new(b"https://example.test/%var2%")
+            ),
+            (Bytes::new(b"EMPTY"), Bytes::new(b"")),
         ]
     );
     let files: Vec<_> = server.source_files().collect();

@@ -128,7 +128,7 @@ fn id_lists_check_their_lengths() {
     // A list that makes the record longer than its `u16` length is an error.
     let data = [&u32le(0x1_0000)[..], &vec![0; 4 * 0x1_0000]].concat();
     let decoded = IdRecord::decode(Record::new(0, LF_SUBSTR_LIST.0, &data)).unwrap();
-    let IdRecord::SubstringList(list) = decoded else {
+    let IdRecord::SubstringList(list) = &decoded else {
         panic!("not a list");
     };
     let mut out = Vec::new();
