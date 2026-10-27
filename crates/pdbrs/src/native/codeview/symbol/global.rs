@@ -4,7 +4,7 @@
 //! `CoffGroupSym` in LLVM `SymbolRecordMapping.cpp`. The reserved byte of
 //! `S_SECTION` comes from `SECTIONSYM` in `cvinfo.h`.
 
-use super::super::index::{ModuleIndex, ModuleSymbolOffset};
+use super::super::index::{ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset};
 use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
 use crate::bytes::into_owned;
@@ -65,23 +65,54 @@ impl<'a> Public<'a> {
     }
 }
 
-/// A reference to a procedure in a module (`S_PROCREF` and `S_LPROCREF`).
+/// The module symbol record that a reference record names.
+///
+/// A decoded record gives a [`ModuleSymbolTarget::Position`]. A builder
+/// record can give a [`ModuleSymbolTarget::Handle`]: the write plan then
+/// writes the module index and the module stream offset of the handle.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ModuleSymbolTarget {
+    /// A position in the module streams of a PDB.
+    Position {
+        /// The index of the module in the DBI module list, or `None` if the
+        /// record does not give a module. The record stores the index
+        /// plus 1.
+        module: Option<ModuleIndex>,
+        /// The offset of the record in the module stream. The offset
+        /// includes the 4-byte signature at the start of the stream.
+        offset: ModuleSymbolOffset,
+    },
+    /// A module symbol record of a builder.
+    ///
+    /// Only a write plan resolves the handle. [`SymbolData::encode`](super::SymbolData::encode)
+    /// gives [`ErrorKind::InvalidReference`] for it.
+    Handle(ModuleSymbolHandle),
+}
+
+impl Default for ModuleSymbolTarget {
+    /// Return a position without a module and with offset 0.
+    fn default() -> Self {
+        Self::Position {
+            module: None,
+            offset: ModuleSymbolOffset(0),
+        }
+    }
+}
+
+/// A reference to a record in a module: `S_PROCREF`, `S_LPROCREF`,
+/// `S_TOKENREF`, `S_DATAREF` and `S_ANNOTATIONREF`.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ProcedureReference<'a> {
     /// The `SUC` name checksum. Linkers usually write 0.
     pub name_checksum: u32,
-    /// The offset of the procedure record in the module stream. The offset
-    /// includes the 4-byte signature at the start of the stream.
-    pub offset: ModuleSymbolOffset,
-    /// The index of the module in the DBI module list, or `None` if the
-    /// record does not give a module. The record stores the index plus 1.
-    pub module: Option<ModuleIndex>,
+    /// The module symbol record that the reference names.
+    pub target: ModuleSymbolTarget,
     /// The name.
     pub name: Bytes<'a>,
 }
 
-into_owned!(struct ProcedureReference { name; name_checksum, offset, module });
+into_owned!(struct ProcedureReference { name; name_checksum, target });
 
 impl<'a> ProcedureReference<'a> {
     /// Read the fields.
@@ -95,18 +126,23 @@ impl<'a> ProcedureReference<'a> {
         let name = Bytes::new(fields.name()?);
         Ok(Self {
             name_checksum,
-            offset,
-            module,
+            target: ModuleSymbolTarget::Position { module, offset },
             name,
         })
     }
 
     /// Write the fields.
     ///
-    /// Returns [`ErrorKind::LimitExceeded`] if the module number does not fit
-    /// in 16 bits.
+    /// Returns [`ErrorKind::InvalidReference`] for a
+    /// [`ModuleSymbolTarget::Handle`] and [`ErrorKind::LimitExceeded`] if the
+    /// module number does not fit in 16 bits.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        let module = match self.module {
+        let ModuleSymbolTarget::Position { module, offset } = self.target else {
+            return Err(Error::new(ErrorKind::InvalidReference, None).with_context(
+                "reference target is a module symbol handle; only a write plan resolves it",
+            ));
+        };
+        let module = match module {
             None => 0,
             Some(index) => index
                 .0
@@ -118,7 +154,7 @@ impl<'a> ProcedureReference<'a> {
                 })?,
         };
         out.u32(self.name_checksum)?;
-        out.u32(self.offset.0)?;
+        out.u32(offset.0)?;
         out.u16(module)?;
         out.c_string(&self.name)
     }

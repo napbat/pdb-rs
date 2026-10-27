@@ -77,6 +77,36 @@ pub struct ModuleIndex(pub u32);
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ModuleSymbolOffset(pub u32);
 
+/// A symbol record of a module stream before it has a module stream offset.
+///
+/// A builder gives the handle for each module symbol record. A
+/// [`ModuleSymbolTarget::Handle`](crate::native::codeview::symbol::ModuleSymbolTarget::Handle)
+/// holds it. Only a write plan converts the handle to a module index and a
+/// [`ModuleSymbolOffset`].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ModuleSymbolHandle {
+    /// The module index.
+    pub(crate) module: u32,
+    /// The position of the record in the module.
+    pub(crate) position: u32,
+}
+
+impl ModuleSymbolHandle {
+    /// Return the index of the module of the record in the DBI module list.
+    #[must_use]
+    pub const fn module(self) -> ModuleIndex {
+        ModuleIndex(self.module)
+    }
+}
+
+/// A record of the symbol record stream before it has a symbol offset.
+///
+/// A builder gives the handle for each record of the symbol record stream.
+/// Only a write plan converts it to a
+/// [`SymbolOffset`](crate::native::symbols::SymbolOffset).
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SymbolHandle(pub(crate) u32);
+
 /// The byte offset of a string in the string buffer of the `/names` stream.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NameOffset(pub u32);

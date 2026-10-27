@@ -5,7 +5,8 @@
 //! [`Resolver`] to each deferred record.
 
 use crate::native::codeview::index::{
-    FIRST_RECORD_INDEX, IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex,
+    FIRST_RECORD_INDEX, IdIndex, ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset, SymbolHandle,
+    TypeIndex,
 };
 use crate::native::msf::StreamId;
 use crate::native::symbols::SymbolOffset;
@@ -26,27 +27,6 @@ pub struct StreamHandle(pub(super) u32);
 /// A module of the DBI stream.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ModuleHandle(pub(super) u32);
-
-/// A record of the symbol record stream before it has a [`SymbolOffset`].
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SymbolHandle(pub(super) u32);
-
-/// A symbol record of a module stream before it has a module stream offset.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ModuleSymbolHandle {
-    /// The module.
-    pub(super) module: u32,
-    /// The position of the record in the module.
-    pub(super) position: u32,
-}
-
-impl ModuleSymbolHandle {
-    /// Return the module of the record.
-    #[must_use]
-    pub const fn module(self) -> ModuleHandle {
-        ModuleHandle(self.module)
-    }
-}
 
 /// Return the error for a handle that the resolver cannot convert.
 pub(super) fn unresolved(context: &'static str) -> Error {

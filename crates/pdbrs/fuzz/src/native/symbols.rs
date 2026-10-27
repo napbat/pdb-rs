@@ -77,10 +77,10 @@ pub(crate) fn walk_records(records: &[u8], stream: StreamId) -> Option<RecordOff
 
 /// Call the accessors of a decoded symbol and decode its nested data.
 pub(crate) fn walk_symbol(symbol: &Symbol<'_>) {
-    let _ = (symbol.name(), symbol.address(), symbol.scope_links());
+    let _ = (symbol.name(), symbol.address(), symbol.links());
     let _ = (symbol.type_index(), symbol.id_index());
     if let Some(reference) = symbol.procedure_reference() {
-        let _ = (reference.module, reference.offset);
+        let _ = reference.target;
     }
     if let Some(index) = symbol.type_index() {
         let _ = index.primitive();

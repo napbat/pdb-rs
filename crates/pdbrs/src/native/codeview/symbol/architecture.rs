@@ -6,7 +6,7 @@
 
 use super::super::index::ModuleSymbolOffset;
 use super::super::{Fields, SymbolKind};
-use super::{ProcedureFlags, ProcedureType, SectionOffset};
+use super::{ProcedureFlags, ProcedureType, ScopeLinks, SectionOffset};
 use crate::bytes::into_owned;
 use crate::native::output::Output;
 use crate::{Bytes, Result};
@@ -28,14 +28,15 @@ pub const S_LPROCIA64_ID: SymbolKind = SymbolKind(0x114a);
 /// The kind of a global IA64 procedure start with an ID index (`S_GPROCIA64_ID`).
 pub const S_GPROCIA64_ID: SymbolKind = SymbolKind(0x114b);
 
-/// The links and the code range that all procedure records start with.
+/// The `next` link and the code range that the MIPS and IA64 procedure
+/// records start with.
+///
+/// The records start with the parent and end links before these fields.
+/// The links are positions in the module stream, so they are not fields.
+/// Read them with [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ProcedureHeader {
-    /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the record that ends this scope.
-    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0.
     pub next: ModuleSymbolOffset,
     /// The length of the procedure code in bytes.
@@ -49,19 +50,16 @@ pub struct ProcedureHeader {
 impl ProcedureHeader {
     /// A header with all fields zero.
     const ZERO: Self = Self {
-        parent: ModuleSymbolOffset(0),
-        end: ModuleSymbolOffset(0),
         next: ModuleSymbolOffset(0),
         code_length: 0,
         debug_start: 0,
         debug_end: 0,
     };
 
-    /// Read the six `u32` fields.
+    /// Skip the two links and read the four `u32` fields.
     fn read(fields: &mut Fields<'_>) -> Result<Self> {
+        ScopeLinks::read(fields)?;
         Ok(Self {
-            parent: ModuleSymbolOffset(fields.u32()?),
-            end: ModuleSymbolOffset(fields.u32()?),
             next: ModuleSymbolOffset(fields.u32()?),
             code_length: fields.u32()?,
             debug_start: fields.u32()?,
@@ -69,11 +67,10 @@ impl ProcedureHeader {
         })
     }
 
-    /// Write the six `u32` fields.
-    fn write(self, out: &mut Output<'_>) -> Result<()> {
+    /// Write the links `links` and the four `u32` fields.
+    fn write(self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         for value in [
-            self.parent.0,
-            self.end.0,
             self.next.0,
             self.code_length,
             self.debug_start,
@@ -99,7 +96,7 @@ fn read_signature(fields: &mut Fields<'_>, id: bool) -> Result<ProcedureType> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MipsProcedure<'a> {
-    /// The links and the code range.
+    /// The `next` link and the code range.
     pub header: ProcedureHeader,
     /// The save mask of the integer registers.
     pub integer_save_mask: u32,
@@ -174,9 +171,9 @@ impl<'a> MipsProcedure<'a> {
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        self.header.write(out)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        self.header.write(links, out)?;
         out.u32(self.integer_save_mask)?;
         out.u32(self.float_save_mask)?;
         out.u32(self.integer_save_offset)?;
@@ -194,7 +191,7 @@ impl<'a> MipsProcedure<'a> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Ia64Procedure<'a> {
-    /// The links and the code range.
+    /// The `next` link and the code range.
     pub header: ProcedureHeader,
     /// The procedure type or the function ID.
     pub signature: ProcedureType,
@@ -245,9 +242,9 @@ impl<'a> Ia64Procedure<'a> {
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        self.header.write(out)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        self.header.write(links, out)?;
         self.signature.write(out)?;
         self.address.write(out)?;
         out.u16(self.return_register)?;

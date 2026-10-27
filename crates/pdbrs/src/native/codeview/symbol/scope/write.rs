@@ -3,9 +3,13 @@
 //! [`ModuleSymbolWriter`] encodes records in stream order. For each record
 //! that starts a scope, it writes the parent link: the offset of the
 //! enclosing scope record, or 0 at the top level. When the matching end
-//! record arrives, it writes the end link of the scope record. The links of
-//! the given [`SymbolData`] values are ignored. All scope records start
-//! with the parent and end links (`pParent` and `pEnd` in `cvinfo.h`).
+//! record arrives, it writes the end link of the scope record. All scope
+//! records start with the parent and end links (`pParent` and `pEnd` in
+//! `cvinfo.h`). The writer replaces the links of a decoded [`Symbol`] and
+//! the links of a record that a deferred encoder gives.
+//!
+//! The writer is the only encoder that writes links that no caller gives:
+//! it writes 0 for both links of a scope record and patches them later.
 //!
 //! The `next` link of procedures and thunks keeps its given value. The MSVC,
 //! LLVM and .NET producers of the fixtures write 0 (#30).
@@ -14,7 +18,8 @@ use alloc::vec::Vec;
 
 use super::super::super::SymbolKind;
 use super::super::super::index::ModuleSymbolOffset;
-use super::super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
+use super::super::super::writer::Padding;
+use super::super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, ScopeLinks, Symbol, SymbolData};
 use crate::{Error, ErrorKind, Result};
 
 /// The byte offset of the parent link in a record, after the length and kind.
@@ -92,7 +97,9 @@ impl ModuleSymbolWriter {
     ///
     /// After an error, the writer is unchanged.
     pub fn push(&mut self, kind: SymbolKind, data: &SymbolData<'_>) -> Result<ModuleSymbolOffset> {
-        self.push_with(kind, data, |out| data.encode(kind, out))
+        self.push_with(kind, data, |out| {
+            data.encode_with(kind, ScopeLinks::default(), Padding::Zero, out)
+        })
     }
 
     /// Encode a decoded symbol and return its module stream offset.
@@ -116,7 +123,7 @@ impl ModuleSymbolWriter {
     ) -> Result<ModuleSymbolOffset> {
         let offset = self.next_offset()?;
         let position = self.out.len();
-        let starts_scope = data.scope_links().is_some();
+        let starts_scope = data.starts_scope();
         let ends_scope = matches!(data, SymbolData::ScopeEnd | SymbolData::InlineSiteEnd);
         if ends_scope {
             let inline = kind == S_INLINESITE_END;

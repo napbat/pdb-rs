@@ -16,7 +16,7 @@
 use super::super::id_record::IdList;
 use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
 use super::super::{Fields, SymbolKind};
-use super::{BinaryAnnotations, SectionOffset};
+use super::{BinaryAnnotations, ScopeLinks, SectionOffset};
 use crate::bytes::into_owned;
 use crate::native::output::Output;
 use crate::{Bytes, Error, ErrorKind, Result};
@@ -95,13 +95,13 @@ flags! {
 /// The kinds are [`S_GPROC32`](super::S_GPROC32),
 /// [`S_LPROC32`](super::S_LPROC32), [`S_LPROC32_DPC`], the `_ID` kinds of
 /// these and the `EX` kinds, for example [`S_GPROC32EX`].
+///
+/// The record starts a scope. Its parent and end links are positions in the
+/// module stream, so they are not fields. Read them with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Procedure<'a> {
-    /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the record that ends this scope.
-    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next procedure record, or 0. The
     /// scope check does not use this value.
     pub next: ModuleSymbolOffset,
@@ -125,8 +125,7 @@ pub struct Procedure<'a> {
 
 into_owned!(struct Procedure {
     name;
-    parent, end, next, code_length, debug_start, debug_end, signature, address, flags,
-    extended_flags
+    next, code_length, debug_start, debug_end, signature, address, flags, extended_flags
 });
 
 impl<'a> Procedure<'a> {
@@ -134,8 +133,6 @@ impl<'a> Procedure<'a> {
     #[must_use]
     pub const fn new(signature: ProcedureType) -> Self {
         Self {
-            parent: ModuleSymbolOffset(0),
-            end: ModuleSymbolOffset(0),
             next: ModuleSymbolOffset(0),
             code_length: 0,
             debug_start: 0,
@@ -154,8 +151,7 @@ impl<'a> Procedure<'a> {
     /// Read the fields. Set `id` for the `_ID` kinds and `extended` for the
     /// `EX` kinds.
     pub(super) fn read(fields: &mut Fields<'a>, id: bool, extended: bool) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let next = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let debug_start = fields.u32()?;
@@ -174,8 +170,6 @@ impl<'a> Procedure<'a> {
         };
         let name = Bytes::new(fields.name()?);
         Ok(Self {
-            parent,
-            end,
             next,
             code_length,
             debug_start,
@@ -188,10 +182,9 @@ impl<'a> Procedure<'a> {
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.u32(self.next.0)?;
         out.u32(self.code_length)?;
         out.u32(self.debug_start)?;
@@ -345,13 +338,12 @@ impl FrameProcedure {
 }
 
 /// A block start record (`S_BLOCK32`).
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Block<'a> {
-    /// The module stream offset of the enclosing scope record.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the `S_END` record of this block.
-    pub end: ModuleSymbolOffset,
     /// The length of the block code in bytes.
     pub code_length: u32,
     /// The start address.
@@ -360,29 +352,25 @@ pub struct Block<'a> {
     pub name: Bytes<'a>,
 }
 
-into_owned!(struct Block { name; parent, end, code_length, address });
+into_owned!(struct Block { name; code_length, address });
 
 impl<'a> Block<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
         let name = Bytes::new(fields.name()?);
         Ok(Self {
-            parent,
-            end,
             code_length,
             address,
             name,
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
         out.c_string(&self.name)
@@ -445,13 +433,12 @@ values! {
 }
 
 /// A thunk start record (`S_THUNK32`).
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Thunk<'a> {
-    /// The module stream offset of the enclosing scope record, or 0.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the `S_END` record of this thunk.
-    pub end: ModuleSymbolOffset,
     /// The module stream offset of the next record in the chain, or 0.
     pub next: ModuleSymbolOffset,
     /// The start address.
@@ -471,13 +458,12 @@ pub struct Thunk<'a> {
     pub variant: Bytes<'a>,
 }
 
-into_owned!(struct Thunk { name, variant; parent, end, next, address, length, ordinal });
+into_owned!(struct Thunk { name, variant; next, address, length, ordinal });
 
 impl<'a> Thunk<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let next = ModuleSymbolOffset(fields.u32()?);
         let address = SectionOffset::read(fields)?;
         let length = fields.u16()?;
@@ -489,8 +475,6 @@ impl<'a> Thunk<'a> {
             Bytes::new(fields.bytes(fields.rest().len())?)
         };
         Ok(Self {
-            parent,
-            end,
             next,
             address,
             length,
@@ -500,17 +484,16 @@ impl<'a> Thunk<'a> {
         })
     }
 
-    /// Write the fields.
+    /// Write the fields with the scope links `links`.
     ///
     /// A [`ThunkOrdinal::STANDARD`] thunk with variant data gives
     /// [`ErrorKind::InvalidFormat`], because the decoder rejects it.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
         if self.ordinal == ThunkOrdinal::STANDARD && !self.variant.is_empty() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("standard S_THUNK32 record has variant data"));
         }
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+        links.write(out)?;
         out.u32(self.next.0)?;
         self.address.write(out)?;
         out.u16(self.length)?;
@@ -521,13 +504,12 @@ impl<'a> Thunk<'a> {
 }
 
 /// An inline site start record (`S_INLINESITE` and [`S_INLINESITE2`]).
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineSite<'a> {
-    /// The module stream offset of the enclosing scope record.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the `S_INLINESITE_END` record.
-    pub end: ModuleSymbolOffset,
     /// The ID index of the inlined function in the IPI stream.
     pub inlinee: IdIndex,
     /// The entry count of an [`S_INLINESITE2`] record, or `None` for an
@@ -537,30 +519,26 @@ pub struct InlineSite<'a> {
     pub annotations: BinaryAnnotations<'a>,
 }
 
-into_owned!(struct InlineSite { annotations; parent, end, inlinee, invocations });
+into_owned!(struct InlineSite { annotations; inlinee, invocations });
 
 impl<'a> InlineSite<'a> {
     /// Read the fields. Set `counted` for [`S_INLINESITE2`].
     pub(super) fn read(fields: &mut Fields<'a>, counted: bool) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let inlinee = fields.id_index()?;
         let invocations = if counted { Some(fields.u32()?) } else { None };
         let annotations = BinaryAnnotations::parse(fields.rest())?;
         fields.bytes(fields.rest().len())?;
         Ok(Self {
-            parent,
-            end,
             inlinee,
             invocations,
             annotations,
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.id_index(self.inlinee)?;
         if let Some(invocations) = self.invocations {
             out.u32(invocations)?;

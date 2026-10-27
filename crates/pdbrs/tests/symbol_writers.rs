@@ -65,14 +65,14 @@ fn module_writer_sets_scope_links() {
         .collect();
     assert_eq!(walked.len(), 6);
     assert_eq!(walked[0].offset, ModuleSymbolOffset(4));
-    let links = walked[0].symbol.scope_links().unwrap();
+    let links = walked[0].symbol.links().unwrap();
     assert_eq!(
         (links.parent, links.end),
         (ModuleSymbolOffset(0), offsets[5])
     );
-    let links = walked[1].symbol.scope_links().unwrap();
+    let links = walked[1].symbol.links().unwrap();
     assert_eq!((links.parent, links.end), (offsets[0], offsets[4]));
-    let links = walked[2].symbol.scope_links().unwrap();
+    let links = walked[2].symbol.links().unwrap();
     assert_eq!((links.parent, links.end), (offsets[1], offsets[3]));
 }
 

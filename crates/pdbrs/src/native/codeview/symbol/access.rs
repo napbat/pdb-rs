@@ -1,11 +1,12 @@
 //! Accessors for the fields that many symbol kinds share.
 
+use super::super::Fields;
 use super::super::index::{IdIndex, TypeIndex};
 use super::{
     ProcedureReference, ProcedureType, S_MANFRAMEREL, S_MANMANYREG, S_MANMANYREG2, S_MANREGISTER,
-    S_MANREGREL, ScopeLinks, SectionOffset, Symbol, SymbolData,
+    S_MANREGREL, SHORT_PAYLOAD, ScopeLinks, SectionOffset, Symbol, SymbolData,
 };
-use crate::Bytes;
+use crate::{Bytes, ErrorKind};
 
 impl<'a> Symbol<'a> {
     /// Return the name bytes, if the kind has a name.
@@ -210,31 +211,37 @@ impl<'a> Symbol<'a> {
     /// Return the parent and end links, if the record starts a scope.
     ///
     /// Procedures of all architectures, managed procedures, blocks, `with`
-    /// blocks, separated code, thunks and inline sites start a scope.
+    /// blocks, separated code, thunks and inline sites start a scope. The
+    /// links are the first two `u32` fields of the source record. The
+    /// typed fields do not hold them, because they are positions in the
+    /// module stream.
     #[must_use]
-    pub const fn scope_links(&self) -> Option<ScopeLinks> {
-        self.data.scope_links()
+    pub fn links(&self) -> Option<ScopeLinks> {
+        if !self.data.starts_scope() {
+            return None;
+        }
+        // The decoder read the two links, so the payload holds them.
+        let mut fields = Fields::new(&self.payload, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
+        ScopeLinks::read(&mut fields).ok()
     }
 }
 
 impl SymbolData<'_> {
-    /// Return the parent and end links, if the fields start a scope.
+    /// Return `true` if the fields belong to a record that starts a scope.
     ///
-    /// See [`Symbol::scope_links`].
-    #[must_use]
-    pub const fn scope_links(&self) -> Option<ScopeLinks> {
-        let (parent, end) = match self {
-            SymbolData::Procedure(value) => (value.parent, value.end),
-            SymbolData::MipsProcedure(value) => (value.header.parent, value.header.end),
-            SymbolData::Ia64Procedure(value) => (value.header.parent, value.header.end),
-            SymbolData::Block(value) => (value.parent, value.end),
-            SymbolData::With(value) => (value.parent, value.end),
-            SymbolData::SeparatedCode(value) => (value.parent, value.end),
-            SymbolData::Thunk(value) => (value.parent, value.end),
-            SymbolData::InlineSite(value) => (value.parent, value.end),
-            SymbolData::ManagedProcedure(value) => (value.parent, value.end),
-            _ => return None,
-        };
-        Some(ScopeLinks { parent, end })
+    /// See [`Symbol::links`].
+    pub(crate) const fn starts_scope(&self) -> bool {
+        matches!(
+            self,
+            SymbolData::Procedure(_)
+                | SymbolData::MipsProcedure(_)
+                | SymbolData::Ia64Procedure(_)
+                | SymbolData::Block(_)
+                | SymbolData::With(_)
+                | SymbolData::SeparatedCode(_)
+                | SymbolData::Thunk(_)
+                | SymbolData::InlineSite(_)
+                | SymbolData::ManagedProcedure(_)
+        )
     }
 }

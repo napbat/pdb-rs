@@ -4,8 +4,9 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::entry::{Entry, SymbolEntry};
-use super::handle::{ModuleHandle, ModuleSymbolHandle, Resolver, SymbolHandle};
+use super::handle::{ModuleHandle, Resolver};
 use crate::native::codeview::SymbolKind;
+use crate::native::codeview::index::{ModuleSymbolHandle, SymbolHandle};
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::native::dbi::Module;
 use crate::native::lines::LineSubsection;
@@ -121,6 +122,12 @@ impl<'a> ModuleBuilder<'a> {
 
     /// Add a symbol record of `kind` with `data`.
     ///
+    /// The plan sets the scope links of a record that starts a scope. A
+    /// reference with a
+    /// [`ModuleSymbolTarget::Handle`](crate::native::codeview::symbol::ModuleSymbolTarget::Handle)
+    /// makes the plan fail with [`ErrorKind::InvalidReference`]: the plan
+    /// encodes the module streams before it knows their offsets.
+    ///
     /// # Errors
     ///
     /// - [`ErrorKind::InvalidFormat`] if the module has no symbol region.
@@ -139,6 +146,10 @@ impl<'a> ModuleBuilder<'a> {
     /// The resolver of a module symbol record gives type indices, ID
     /// indices, stream IDs and module indexes. It does not give symbol
     /// offsets.
+    ///
+    /// For a record that starts a scope, encode it with
+    /// [`SymbolData::encode_scope`] and any links, for example
+    /// `ScopeLinks::default()`. The plan replaces the links.
     ///
     /// # Errors
     ///

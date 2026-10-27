@@ -10,9 +10,9 @@
 //! Visual Studio 18 (`lib/amd64/diaguids.lib`) give `STATICLOCAL` and
 //! `HYBRIDRANGESYM`, and they confirm `HOTPATCHFUNC` and `ASSOCIATION`.
 
-use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
+use super::super::index::{IdIndex, TypeIndex};
 use super::super::{Fields, SymbolKind};
-use super::SectionOffset;
+use super::{ScopeLinks, SectionOffset};
 use crate::bytes::into_owned;
 use crate::native::output::Output;
 use crate::{Bytes, Error, ErrorKind, Result};
@@ -35,13 +35,12 @@ pub const S_ASSOCIATION: SymbolKind = SymbolKind(0x117c);
 pub const S_HYBRIDRANGE: SymbolKind = SymbolKind(0x117d);
 
 /// A `with` block start record ([`S_WITH32`]).
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct With<'a> {
-    /// The module stream offset of the enclosing scope record.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the `S_END` record of this block.
-    pub end: ModuleSymbolOffset,
     /// The length of the block code in bytes.
     pub code_length: u32,
     /// The start address.
@@ -50,29 +49,25 @@ pub struct With<'a> {
     pub expression: Bytes<'a>,
 }
 
-into_owned!(struct With { expression; parent, end, code_length, address });
+into_owned!(struct With { expression; code_length, address });
 
 impl<'a> With<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
         let expression = Bytes::new(fields.name()?);
         Ok(Self {
-            parent,
-            end,
             code_length,
             address,
             expression,
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
         out.c_string(&self.expression)
@@ -93,13 +88,12 @@ flags! {
 ///
 /// The compiler moves a part of a procedure to a different place, for
 /// example cold code after profile-guided optimization.
+///
+/// The record starts a scope. Read its links with
+/// [`Symbol::links`](super::Symbol::links).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SeparatedCode {
-    /// The module stream offset of the enclosing scope record.
-    pub parent: ModuleSymbolOffset,
-    /// The module stream offset of the `S_END` record of this block.
-    pub end: ModuleSymbolOffset,
     /// The length of the separated code in bytes.
     pub code_length: u32,
     /// The flags.
@@ -113,14 +107,11 @@ pub struct SeparatedCode {
 impl SeparatedCode {
     /// Read the fields. Both offsets come before both section numbers.
     pub(super) fn read(fields: &mut Fields<'_>) -> Result<Self> {
-        let parent = ModuleSymbolOffset(fields.u32()?);
-        let end = ModuleSymbolOffset(fields.u32()?);
+        ScopeLinks::read(fields)?;
         let code_length = fields.u32()?;
         let flags = SeparatedCodeFlags(fields.u32()?);
         let (address, parent_address) = read_address_pair(fields)?;
         Ok(Self {
-            parent,
-            end,
             code_length,
             flags,
             address,
@@ -128,10 +119,9 @@ impl SeparatedCode {
         })
     }
 
-    /// Write the fields.
-    pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.u32(self.parent.0)?;
-        out.u32(self.end.0)?;
+    /// Write the fields with the scope links `links`.
+    pub(super) fn write(&self, links: ScopeLinks, out: &mut Output<'_>) -> Result<()> {
+        links.write(out)?;
         out.u32(self.code_length)?;
         out.u32(self.flags.0)?;
         write_address_pair(out, self.address, self.parent_address)

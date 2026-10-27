@@ -4,8 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use super::super::{
-    BuildOptions, IdHandle, ModuleHandle, ModuleSymbolHandle, PdbBuilder, Resolver, StreamHandle,
-    SymbolHandle, TypeHandle,
+    BuildOptions, IdHandle, ModuleHandle, PdbBuilder, Resolver, StreamHandle, TypeHandle,
 };
 use super::{NamedContent, PdbContents};
 use crate::native::Identity;
@@ -16,8 +15,9 @@ use crate::native::auxiliary::{
 };
 use crate::native::codeview::Records;
 use crate::native::codeview::id_record::IdRecord;
+use crate::native::codeview::index::{ModuleSymbolHandle, SymbolHandle};
 use crate::native::codeview::symbol::{
-    ModuleTypeReference, ProcedureReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_MOD_TYPEREF,
+    ModuleSymbolTarget, ModuleTypeReference, S_ANNOTATIONREF, S_DATAREF, S_LPROCREF, S_MOD_TYPEREF,
     S_PROCREF, S_TOKENREF, Symbol, SymbolData,
 };
 use crate::native::codeview::type_record::TypeLeaf;
@@ -260,21 +260,7 @@ impl PdbContents {
             let record = record?;
             let symbol = Symbol::decode(record)?;
             let handle = match module_target(&symbol, modules) {
-                Some((reference, target)) => {
-                    let kind = symbol.kind();
-                    let wide = matches!(symbol.data(), SymbolData::SymbolReference(_));
-                    builder.add_symbol_with(move |resolver, out| {
-                        let mut reference = reference.clone();
-                        reference.offset = resolver.module_symbol_offset(target)?;
-                        reference.module = Some(resolver.module_index(target.module())?);
-                        let data = if wide {
-                            SymbolData::SymbolReference(reference)
-                        } else {
-                            SymbolData::ProcedureReference(reference)
-                        };
-                        data.encode(kind, out)
-                    })?
-                }
+                Some(data) => builder.add_symbol_fields(symbol.kind(), data)?,
                 None => builder.add_symbol(symbol)?,
             };
             handles.insert(SymbolOffset(record.offset), handle);
@@ -400,12 +386,9 @@ fn adjusters(
     }
 }
 
-/// Return the reference and the target handle of a shared record that
-/// names a module record.
-fn module_target<'a>(
-    symbol: &Symbol<'a>,
-    modules: &ModuleSymbols,
-) -> Option<(ProcedureReference<'a>, ModuleSymbolHandle)> {
+/// Return the fields of a shared record that names a module record, with
+/// the handle of that record as the target.
+fn module_target<'a>(symbol: &Symbol<'a>, modules: &ModuleSymbols) -> Option<SymbolData<'a>> {
     let (SymbolData::ProcedureReference(reference) | SymbolData::SymbolReference(reference)) =
         symbol.data()
     else {
@@ -417,9 +400,21 @@ fn module_target<'a>(
     ) {
         return None;
     }
-    let module = u16::try_from(reference.module?.0).ok()?;
-    let target = *modules.get(&(module, reference.offset.0))?;
-    Some((reference.clone(), target))
+    let ModuleSymbolTarget::Position {
+        module: Some(module),
+        offset,
+    } = reference.target
+    else {
+        return None;
+    };
+    let module = u16::try_from(module.0).ok()?;
+    let target = *modules.get(&(module, offset.0))?;
+    let mut reference = reference.clone();
+    reference.target = ModuleSymbolTarget::Handle(target);
+    Some(match symbol.data() {
+        SymbolData::SymbolReference(_) => SymbolData::SymbolReference(reference),
+        _ => SymbolData::ProcedureReference(reference),
+    })
 }
 
 /// Return the record and the stream handles of an `S_MOD_TYPEREF` record

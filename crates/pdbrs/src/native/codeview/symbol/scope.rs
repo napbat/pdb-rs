@@ -150,7 +150,7 @@ impl<'a> ModuleSymbols<'a> {
             .map_err(|error| error.with_stream(StreamId(self.stream), u64::from(offset)))?;
         let depth = self.stack.len();
         let scope = self.stack.last().map(|open| open.offset);
-        if let Some(links) = symbol.scope_links() {
+        if let Some(links) = symbol.links() {
             if links.parent.0 != scope.unwrap_or(0) {
                 return Err(self.error(
                     ErrorKind::InvalidReference,

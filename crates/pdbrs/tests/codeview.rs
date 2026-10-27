@@ -210,7 +210,7 @@ fn decodes_data_symbols() {
         };
         assert_eq!(symbol.address(), Some(address));
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x1003)));
-        assert_eq!(symbol.scope_links(), None);
+        assert_eq!(symbol.links(), None);
     }
 }
 
@@ -242,17 +242,14 @@ fn decodes_procedure_fields() {
         assert_eq!(procedure.address.offset, 0x30);
         assert_eq!(procedure.code_length, 0x55);
         assert_eq!(procedure.signature, signature);
-        assert_eq!(
-            (procedure.end, procedure.debug_start),
-            (ModuleSymbolOffset(0x200), 4)
-        );
+        assert_eq!(procedure.debug_start, 4);
         assert_eq!(procedure.debug_end, 0x50);
         assert!(
             procedure
                 .flags
                 .contains(ProcedureFlags::OPTIMIZED_DEBUG_INFO)
         );
-        let links = symbol.scope_links().unwrap();
+        let links = symbol.links().unwrap();
         assert_eq!(
             (links.parent, links.end),
             (ModuleSymbolOffset(0), ModuleSymbolOffset(0x200))

@@ -321,7 +321,13 @@ It reuses the encoders of each record family. The documentation of `native::PdbB
 - The caller gives the identity (signature, GUID and age). `PdbBuilder::apply_identity` applies an `IdentityPolicy`.
   `PdbWritePlan::identity` returns the GUID and the DBI age (`native::Identity::Modern`) for the `RSDS` entry of the image.
 - `TypeHandle`, `IdHandle`, `ModuleHandle`, `ModuleSymbolHandle`, `SymbolHandle` and `StreamHandle` exist before on-disk values.
+  `ModuleSymbolHandle` and `SymbolHandle` are in `native::codeview::index`; the others are in `native::write`.
   A deferred record gets a `Resolver` when the plan encodes it. `reserve_type` and `reserve_id` give a handle before its record.
+  A reference record (for example `S_PROCREF`) of the symbol record stream can hold `ModuleSymbolTarget::Handle`;
+  the plan writes the module index and the module stream offset of the handle (#42).
+- Scope records (procedures, blocks, thunks, inline sites and the others) have no parent and end fields.
+  `Symbol::links` reads the links of a decoded record. `SymbolData::encode` rejects a scope record,
+  `SymbolData::encode_scope` writes the links that the caller gives, and `ModuleSymbolWriter` computes them (#42).
 - `PdbBuilder::plan` assigns type indices, ID indices, stream IDs, module symbol offsets and symbol record offsets.
   It checks the TPI, IPI, module symbol, shared symbol and C13 references, and it checks each field width before output.
 - The plan builds the TPI and IPI hash streams, the scope links, the global and public indexes, the DBI source info,

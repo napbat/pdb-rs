@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 use super::scope::optional_rva;
 use super::{ProcedureInfo, ProcedureKey, PublicMatch, SymbolLocator, push};
 use crate::native::address::Rva;
-use crate::native::codeview::symbol::{ProcedureReference, Public, Symbol, SymbolData};
+use crate::native::codeview::symbol::{
+    ModuleSymbolTarget, ProcedureReference, Public, Symbol, SymbolData,
+};
 use crate::native::symbols::SymbolOffset;
 use crate::{Bytes, Error, ErrorKind, Result};
 
@@ -155,13 +157,14 @@ impl SymbolLocator {
         &self,
         reference: &ProcedureReference<'_>,
     ) -> Result<ProcedureInfo<'_>> {
-        let module = reference.module.ok_or_else(|| {
-            Error::new(ErrorKind::InvalidReference, None)
-                .with_context("procedure reference has module number 0")
-        })?;
-        self.procedure_info(ProcedureKey {
-            module,
-            offset: reference.offset,
-        })
+        let ModuleSymbolTarget::Position {
+            module: Some(module),
+            offset,
+        } = reference.target
+        else {
+            return Err(Error::new(ErrorKind::InvalidReference, None)
+                .with_context("procedure reference has module number 0"));
+        };
+        self.procedure_info(ProcedureKey { module, offset })
     }
 }

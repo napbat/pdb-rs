@@ -10,8 +10,8 @@ use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::id_record::IdRecord;
 use pdbrs::native::codeview::index::{ChecksumOffset, ModuleSymbolOffset};
 use pdbrs::native::codeview::symbol::{
-    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolWriter, ModuleSymbols, Oem,
-    Symbol, SymbolData, Trampoline, TrampolineKind,
+    Annotation, AttributeValue, CustomDebugInfoData, ModuleSymbolTarget, ModuleSymbolWriter,
+    ModuleSymbols, Oem, Symbol, SymbolData, Trampoline, TrampolineKind,
 };
 use pdbrs::native::dbi::{Dbi, ModuleStream};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
@@ -122,6 +122,11 @@ fn module_symbols(
             break;
         };
         let symbol = scoped.symbol;
+        if let Some(links) = symbol.links()
+            && links.parent != scoped.scope.unwrap_or_default()
+        {
+            return Err("a scope parent link is not the enclosing scope".into());
+        }
         check_symbol(&symbol, context, report)?;
         reencode(&symbol, report)?;
         if let Some(writer) = &mut writer {
@@ -281,14 +286,16 @@ pub(crate) fn shared_symbols(
             return Err("a rewritten symbol record moves to another offset".into());
         }
         if let Some(reference) = symbol.procedure_reference() {
-            let module = reference
-                .module
+            let ModuleSymbolTarget::Position { module, offset } = reference.target else {
+                return Err("a decoded procedure reference has a handle target".into());
+            };
+            let module = module
                 .and_then(|module| u16::try_from(module.0).ok())
                 .filter(|&module| usize::from(module) < context.module_count)
                 .ok_or("procedure reference names a missing module")?;
             if procedures.incomplete.contains(&module) {
                 report.add("procedure references into partly decoded modules", 1);
-            } else if !procedures.offsets.contains(&(module, reference.offset.0)) {
+            } else if !procedures.offsets.contains(&(module, offset.0)) {
                 return Err("procedure reference does not name a module procedure".into());
             }
         }

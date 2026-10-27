@@ -399,7 +399,7 @@ impl Checker<'_, '_> {
                 }
             }
         }
-        if symbol.scope_links().is_some() {
+        if symbol.links().is_some() {
             self.open(symbol, offset)?;
         } else if matches!(
             symbol.data(),

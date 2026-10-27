@@ -6,13 +6,13 @@ use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, T
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
     AddressGap, CompileFlags, CpuType, FramePointer, FrameProcedureFlags, JumpTableEntry,
-    LocalFlags, ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO, S_CALLEES, S_CALLERS,
-    S_CALLSITEINFO, S_COFFGROUP, S_COMPILE2, S_COMPILE3, S_CONSTANT, S_DEFRANGE_FRAMEPOINTER_REL,
-    S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER, S_DEFRANGE_REGISTER_REL,
-    S_DEFRANGE_REGISTER_REL_INDIR, S_END, S_ENVBLOCK, S_FRAMEPROC, S_INLINEES, S_INLINESITE,
-    S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROCREF, S_OBJNAME, S_PROC_ID_END, S_PROCREF,
-    S_REGREL32, S_SECTION, S_SKIP, S_THUNK32, S_UDT, S_UNAMESPACE, SourceLanguage, Symbol,
-    SymbolData, ThunkOrdinal,
+    LocalFlags, ModuleSymbolTarget, ProcedureFlags, S_ARMSWITCHTABLE, S_BLOCK32, S_BUILDINFO,
+    S_CALLEES, S_CALLERS, S_CALLSITEINFO, S_COFFGROUP, S_COMPILE2, S_COMPILE3, S_CONSTANT,
+    S_DEFRANGE_FRAMEPOINTER_REL, S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE, S_DEFRANGE_REGISTER,
+    S_DEFRANGE_REGISTER_REL, S_DEFRANGE_REGISTER_REL_INDIR, S_END, S_ENVBLOCK, S_FRAMEPROC,
+    S_INLINEES, S_INLINESITE, S_INLINESITE_END, S_LABEL32, S_LOCAL, S_LPROCREF, S_OBJNAME,
+    S_PROC_ID_END, S_PROCREF, S_REGREL32, S_SECTION, S_SKIP, S_THUNK32, S_UDT, S_UNAMESPACE,
+    SourceLanguage, Symbol, SymbolData, ThunkOrdinal,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::{Bytes, ErrorKind};
@@ -288,12 +288,9 @@ fn decodes_block_and_label() {
             panic!("expected S_BLOCK32");
         };
         let (parent, end) = (ModuleSymbolOffset(4), ModuleSymbolOffset(96));
-        assert_eq!(
-            (value.parent, value.end, value.code_length),
-            (parent, end, 0x20)
-        );
+        assert_eq!(value.code_length, 0x20);
         assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b""[..]));
-        let scope = symbol.scope_links().unwrap();
+        let scope = symbol.links().unwrap();
         assert_eq!((scope.parent, scope.end), (parent, end));
     });
     let label = Payload::default()
@@ -335,7 +332,8 @@ fn decodes_standard_thunk() {
             panic!("expected S_THUNK32");
         };
         assert_eq!(value.ordinal, ThunkOrdinal::STANDARD);
-        assert_eq!((value.end, value.length), (ModuleSymbolOffset(112), 6));
+        assert_eq!(value.length, 6);
+        assert_eq!(symbol.links().unwrap().end, ModuleSymbolOffset(112));
         assert_eq!(value.variant, b"");
         assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"memset"[..]));
         assert_eq!(symbol.address().unwrap().offset, 0x1234);
@@ -387,8 +385,9 @@ fn decodes_inline_site() {
         let SymbolData::InlineSite(value) = symbol.data() else {
             panic!("expected S_INLINESITE");
         };
+        let links = symbol.links().unwrap();
         assert_eq!(
-            (value.parent, value.end),
+            (links.parent, links.end),
             (ModuleSymbolOffset(4), ModuleSymbolOffset(80))
         );
         assert_eq!(symbol.id_index(), Some(IdIndex(0x11fd)));
@@ -709,8 +708,11 @@ fn decodes_procedure_references() {
         decode(kind, &payload, |symbol| {
             let reference = symbol.procedure_reference().unwrap();
             assert_eq!(
-                (reference.offset, reference.module),
-                (ModuleSymbolOffset(396), Some(ModuleIndex(2)))
+                reference.target,
+                ModuleSymbolTarget::Position {
+                    module: Some(ModuleIndex(2)),
+                    offset: ModuleSymbolOffset(396),
+                }
             );
             assert_eq!(reference.name_checksum, 0);
             assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"main"[..]));
@@ -718,7 +720,13 @@ fn decodes_procedure_references() {
     }
     let payload = Payload::default().u32(0).u32(4).u16(0).bytes(b"x\0");
     decode(S_PROCREF, &payload, |symbol| {
-        assert_eq!(symbol.procedure_reference().unwrap().module, None);
+        assert_eq!(
+            symbol.procedure_reference().unwrap().target,
+            ModuleSymbolTarget::Position {
+                module: None,
+                offset: ModuleSymbolOffset(4),
+            }
+        );
     });
 }
 

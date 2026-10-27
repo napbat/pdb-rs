@@ -48,7 +48,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - "The reference graph is acyclic": `/TMCache` version 2 type map streams can name a precompiled-header cache stream, and stream references in Info and DBI can name any stream; the document gives no proof. Inference, not tested: Not a format defect, but an unverified claim.
   - Missing edges (all observed in pdbrs decoders): GSS `S_PROCREF`/`S_LPROCREF`/`S_TOKENREF`/`S_DATAREF`/`S_ANNOTATIONREF` → module symbol streams (1-based module index + offset); module global references → GSS; section contributions → module index; PSI address map/thunk map/section starts; IPI `LF_UDT_MOD_SRC_LINE` → `/names`; `S_FILESTATIC` → `/names`; new-FPO frame programs → `/names` (`fpo.rs`); TPI hash adjusters → `/names`; `/src/headerblock` → `/names` and `/src/files/*`; module streams → DBI EC names; module `iTSM` → DBI type server map (`external.rs`, #32); `/TMCache` → type map streams and precompiled-header cache streams (#13); type map values → TPI and IPI (`TypeMapStream::validate`, #32); `S_MOD_TYPEREF` → module type streams or another module (`NOTM`, #32); C13 cross-scope exports → TPI or IPI, and imports → `/names` and other modules (`lines::validate_cross_scope`, #31); `BA_OP_ChangeCodeOffsetBase` → the `n`-th `S_SEPCODE` of the procedure (#30).
 - Undocumented assumptions:
-  - pdbrs treats the module index in `S_PROCREF` as 1-based (`codeview/symbol/global.rs` `ProcedureReference::module`, #5).
+  - pdbrs treats the module index in `S_PROCREF` as 1-based (`codeview/symbol/global.rs` `ModuleSymbolTarget::Position::module`, #5, #42).
   - The `native` example joins `S_TRAMPOLINE` to the PSI thunk map by `(thunk offset - thunk_table_offset) / thunk_size` (#13).
   - `PdbBuilder` assigns stream IDs in a fixed order: 0 to 4, the TPI and IPI hash streams, GSI, PSI, the symbol record stream, the module streams, the optional debug streams by slot, `/names`, the named streams in insertion order, then other streams (#33). A semantic rebuild therefore changes stream IDs, but it keeps type indices, ID indices and `/names` offsets.
   - `PdbEditor` rejects an edit that moves a symbol offset when the PDB has opaque data that can hold offsets or indices: an unnamed stream that does not decode as a type map, a named stream of an unknown kind, or a symbol or C13 subsection of an unknown kind (#34).
@@ -191,7 +191,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
   - The writer requires the symbol records and the C13 region to end at a 4-byte boundary, as mspdb `Mod1::fCommit` asserts (`dbi/module/write.rs`, #31).
   - A module with more than one checksum subsection is rejected (`lines/module.rs`, #6).
   - A C13 kind with the ignore flag 0x80000000 gives `LineSubsection::Ignored` with the raw data, for every value of the other bits; the encoder writes the data again (`lines.rs`, #31).
-  - `ModuleSymbolWriter` recomputes the parent and end links of scope records and keeps the `next` link (#30).
+  - `ModuleSymbolWriter` recomputes the parent and end links of scope records and keeps the `next` link (#30). The scope records have no link fields; `Symbol::links` reads them (#42).
   - The Windows SDK `fxc` compiler writes `S_LOCAL` records with four or more zero bytes after the name. The decoder accepts zero bytes after the fields and keeps their count (`Symbol::trailing_zeros`), so the record encodes to the same bytes (#30).
   - The symbol validation accepts a def-range of a procedure inside a later `S_SEPCODE` whose parent address is the procedure start (MSVC PGO fixture, #30).
   - `DEBUG_S_XFGHASH_TYPE` and `DEBUG_S_XFGHASH_VIRTUAL` have no document. pdbrs uses 12-byte entries (`u64` hash, function type index) and 16-byte entries (`u64` hash, class type index, `u32` offset) from the MSVC 14.44 object files of `msvc-x64-xfg`. `link.exe` does not copy these subsections to the PDB (#31).
@@ -340,7 +340,7 @@ The comparison used `main` at `b4d4cdc`, `cvinfo.h` at `805655a2`, LLVM at `b9f2
 - Documents: glossary: age, binding key, COFF, contribution, DIA, executable, GSS, interval, module index, MSF, FPM, `ItemId`, module, `NameIndex`, page, stream, TPI, `TypeIndex`, UDT.
 - pdbrs: not applicable — glossary; the terms map to `native::info::Identity`, `native::msf`, `native::codeview::index`.
 - Conflicts:
-  - "module index ... 0-based": `S_PROCREF`/`S_LPROCREF`/`S_TOKENREF` store a 1-based module number; pdbrs converts it to a 0-based `ModuleIndex` (`ProcedureReference::module`). The glossary does not say so.
+  - "module index ... 0-based": `S_PROCREF`/`S_LPROCREF`/`S_TOKENREF` store a 1-based module number; pdbrs converts it to a 0-based `ModuleIndex` (`ModuleSymbolTarget::Position::module`). The glossary does not say so.
   - "age ... tools should verify that the age in the executable matches": the glossary does not say which age. The image `RSDS` age matches the DBI age (`PdbWritePlan::identity`). pdbrs accepts an Info age that is larger than the DBI age and rejects a larger DBI age (`reader.rs`, #32).
 - Undocumented assumptions: None.
 

@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use super::handle::Resolver;
 use crate::native::codeview::id_record::IdRecord;
 use crate::native::codeview::index::ModuleSymbolOffset;
-use crate::native::codeview::symbol::{ModuleSymbolWriter, Symbol, SymbolData};
+use crate::native::codeview::symbol::{ModuleSymbolTarget, ModuleSymbolWriter, Symbol, SymbolData};
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::codeview::{Records, SymbolKind};
 use crate::native::lines::LineSubsection;
@@ -136,6 +136,9 @@ impl SymbolEntry<'_> {
     }
 
     /// Encode the record in the symbol record stream and return its offset.
+    ///
+    /// A reference with a [`ModuleSymbolTarget::Handle`] gets the module
+    /// index and the module stream offset of the handle.
     pub(super) fn push_shared(
         &self,
         writer: &mut SymbolRecordWriter,
@@ -143,13 +146,40 @@ impl SymbolEntry<'_> {
     ) -> Result<SymbolOffset> {
         match self {
             Self::Decoded(symbol) => writer.push_symbol(symbol),
-            Self::Fields(kind, data) => writer.push(*kind, data),
+            Self::Fields(kind, data) => match resolve_target(data, resolver)? {
+                Some(positioned) => writer.push(*kind, &positioned),
+                None => writer.push(*kind, data),
+            },
             Self::Deferred(encode) => {
                 let bytes = deferred_record(encode, resolver)?;
                 writer.push_symbol(&decode_one(&bytes)?)
             }
         }
     }
+}
+
+/// Return a copy of the reference `data` with the position of its handle
+/// target, or `None` if `data` is not a reference with a handle target.
+fn resolve_target<'a>(
+    data: &SymbolData<'a>,
+    resolver: &Resolver<'_>,
+) -> Result<Option<SymbolData<'a>>> {
+    let (SymbolData::ProcedureReference(reference) | SymbolData::SymbolReference(reference)) = data
+    else {
+        return Ok(None);
+    };
+    let ModuleSymbolTarget::Handle(handle) = reference.target else {
+        return Ok(None);
+    };
+    let mut reference = reference.clone();
+    reference.target = ModuleSymbolTarget::Position {
+        offset: resolver.module_symbol_offset(handle)?,
+        module: Some(handle.module()),
+    };
+    Ok(Some(match data {
+        SymbolData::SymbolReference(_) => SymbolData::SymbolReference(reference),
+        _ => SymbolData::ProcedureReference(reference),
+    }))
 }
 
 /// Append a C13 subsection with its header and padding to `out`.

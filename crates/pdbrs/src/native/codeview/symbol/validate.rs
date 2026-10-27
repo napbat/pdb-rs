@@ -32,12 +32,12 @@ use super::super::index::{
 };
 use super::super::{LeafKind, Records, SymbolKind};
 use super::{
-    S_ANNOTATION, S_ANNOTATIONREF, S_BUILDINFO, S_DATAREF, S_GDATA32, S_GMANDATA, S_GMANPROC,
-    S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, S_GPROCIA64, S_GPROCIA64_ID, S_GPROCMIPS,
-    S_GPROCMIPS_ID, S_GTHREAD32, S_LDATA32, S_LMANDATA, S_LMANPROC, S_LPROC32, S_LPROC32_DPC,
-    S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROC32EX, S_LPROC32EX_ID, S_LPROCIA64, S_LPROCIA64_ID,
-    S_LPROCMIPS, S_LPROCMIPS_ID, S_LPROCREF, S_LTHREAD32, S_PROCREF, S_SOURCELINK, S_TOKENREF,
-    Symbol, SymbolData,
+    ModuleSymbolTarget, S_ANNOTATION, S_ANNOTATIONREF, S_BUILDINFO, S_DATAREF, S_GDATA32,
+    S_GMANDATA, S_GMANPROC, S_GPROC32, S_GPROC32_ID, S_GPROC32EX, S_GPROC32EX_ID, S_GPROCIA64,
+    S_GPROCIA64_ID, S_GPROCMIPS, S_GPROCMIPS_ID, S_GTHREAD32, S_LDATA32, S_LMANDATA, S_LMANPROC,
+    S_LPROC32, S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROC32EX, S_LPROC32EX_ID,
+    S_LPROCIA64, S_LPROCIA64_ID, S_LPROCMIPS, S_LPROCMIPS_ID, S_LPROCREF, S_LTHREAD32, S_PROCREF,
+    S_SOURCELINK, S_TOKENREF, Symbol, SymbolData,
 };
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
@@ -418,15 +418,14 @@ fn check_references(
     for id in functions.into_iter().flatten() {
         check_id(id, Some(FUNCTION_IDS), offset, kind, context, report)?;
     }
-    if let Some(reference) = symbol.reference() {
-        check_module_reference(
-            kind,
-            reference.module,
-            reference.offset,
-            offset,
-            context,
-            report,
-        )?;
+    // A decoded record always gives a position target.
+    if let Some(reference) = symbol.reference()
+        && let ModuleSymbolTarget::Position {
+            module,
+            offset: target,
+        } = reference.target
+    {
+        check_module_reference(kind, module, target, offset, context, report)?;
     }
     Ok(())
 }

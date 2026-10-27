@@ -3,9 +3,9 @@
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
-    FrameProcedure, FrameProcedureFlags, Procedure, ProcedureFlags, ProcedureReference,
-    ProcedureType, Public, PublicFlags, S_END, S_FRAMEPROC, S_LPROC32, S_LPROCREF, Symbol,
-    SymbolData,
+    FrameProcedure, FrameProcedureFlags, ModuleSymbolTarget, Procedure, ProcedureFlags,
+    ProcedureReference, ProcedureType, Public, PublicFlags, S_END, S_FRAMEPROC, S_LPROC32,
+    S_LPROCREF, Symbol, SymbolData,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::native::dbi::Module;
@@ -48,8 +48,6 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     record.name_padding = [0; 3];
     let module = builder.add_module(record)?;
     let mut local = Procedure::new(ProcedureType::Type(T_INT4));
-    local.parent = ModuleSymbolOffset(0);
-    local.end = ModuleSymbolOffset(0);
     local.next = ModuleSymbolOffset(0);
     local.code_length = 0x10;
     local.debug_start = 0;
@@ -74,14 +72,12 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     frame.flags = FrameProcedureFlags(0);
     module.push_symbol_fields(S_FRAMEPROC, SymbolData::FrameProcedure(frame))?;
     module.push_symbol_fields(S_END, SymbolData::ScopeEnd)?;
-    let reference = builder.add_symbol_with(move |resolver, out| {
-        let mut reference = ProcedureReference::default();
-        reference.name_checksum = 0;
-        reference.offset = resolver.module_symbol_offset(procedure)?;
-        reference.module = Some(resolver.module_index(procedure.module())?);
-        reference.name = Bytes::new(LOCAL);
-        SymbolData::ProcedureReference(reference).encode(S_LPROCREF, out)
-    })?;
+    let mut reference = ProcedureReference::default();
+    reference.name_checksum = 0;
+    reference.target = ModuleSymbolTarget::Handle(procedure);
+    reference.name = Bytes::new(LOCAL);
+    let reference =
+        builder.add_symbol_fields(S_LPROCREF, SymbolData::ProcedureReference(reference))?;
     builder.index_global(reference, 1)
 }
 
@@ -122,17 +118,15 @@ fn strip_keeps_publics_and_local_procedures() {
         .collect();
     assert_eq!(kinds, [S_LPROC32, S_END]);
     let first = stream.symbols().next().expect("record").expect("framed");
-    let SymbolData::Procedure(procedure) = Symbol::decode(first).expect("decoded").data().clone()
-    else {
+    let symbol = Symbol::decode(first).expect("decoded");
+    let SymbolData::Procedure(procedure) = symbol.data() else {
         panic!("procedure");
     };
     assert_eq!(procedure.signature, ProcedureType::Type(TypeIndex::NONE));
+    assert_eq!(&procedure.name[..], LOCAL);
     assert_eq!(
-        (procedure.end, &procedure.name[..]),
-        (
-            ModuleSymbolOffset(8 + u32::try_from(first.data.len()).expect("record size")),
-            LOCAL
-        )
+        symbol.links().expect("links").end,
+        ModuleSymbolOffset(8 + u32::try_from(first.data.len()).expect("record size"))
     );
     let symbols = symbols(&edited);
     assert_eq!(symbols.globals, [LOCAL.to_vec()]);
@@ -151,8 +145,11 @@ fn strip_keeps_publics_and_local_procedures() {
         panic!("reference");
     };
     assert_eq!(
-        (reference.offset, reference.module),
-        (ModuleSymbolOffset(4), Some(ModuleIndex(1)))
+        reference.target,
+        ModuleSymbolTarget::Position {
+            module: Some(ModuleIndex(1)),
+            offset: ModuleSymbolOffset(4),
+        }
     );
     let refs: Vec<_> = stream.global_refs().expect("refs").iter().collect();
     assert_eq!(refs.len(), 1);

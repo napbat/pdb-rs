@@ -26,14 +26,14 @@ use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::field_list::{DataMember, Member, encode_field_list};
 use pdbrs::native::codeview::id_record::{FunctionId, IdRecord};
 use pdbrs::native::codeview::index::{
-    ChecksumOffset, ModuleIndex, ModuleSymbolOffset, NameOffset, TypeIndex,
+    ChecksumOffset, ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset, NameOffset, TypeIndex,
 };
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    Compile3, CompileFlags, CpuType, Data, FrameProcedure, FrameProcedureFlags, ObjectName,
-    Procedure, ProcedureFlags, ProcedureReference, ProcedureType, Public, PublicFlags,
+    Compile3, CompileFlags, CpuType, Data, FrameProcedure, FrameProcedureFlags, ModuleSymbolTarget,
+    ObjectName, Procedure, ProcedureFlags, ProcedureReference, ProcedureType, Public, PublicFlags,
     RegisterRelative, S_COMPILE3, S_END, S_FRAMEPROC, S_GDATA32, S_GPROC32, S_OBJNAME, S_PROCREF,
-    S_PUB32, S_REGREL32, S_UDT, SymbolData, UserDefinedType,
+    S_PUB32, S_REGREL32, S_UDT, ScopeLinks, SymbolData, UserDefinedType,
 };
 use pdbrs::native::codeview::type_record::{
     ArgumentList, CallingConvention, Class, ClassKind, ClassOptions, FunctionOptions,
@@ -49,7 +49,7 @@ use pdbrs::native::lines::{
     LineSubsection, LinesHeader, SubsectionKind,
 };
 use pdbrs::native::section::{Machine, SectionHeader};
-use pdbrs::native::write::{ModuleSymbolHandle, TypeHandle};
+use pdbrs::native::write::TypeHandle;
 
 /// The identity of the synthetic PDB.
 pub const GUID: [u8; 16] = *b"pdbrs-synthetic!";
@@ -261,8 +261,6 @@ fn add_module(
         let procedure = module.push_symbol_with(move |resolver, out| {
             let mut procedure =
                 Procedure::new(ProcedureType::Type(resolver.type_index(procedure_type)?));
-            procedure.parent = ModuleSymbolOffset(0);
-            procedure.end = ModuleSymbolOffset(0);
             procedure.next = ModuleSymbolOffset(0);
             procedure.code_length = function.size;
             procedure.debug_start = 0;
@@ -271,7 +269,8 @@ fn add_module(
             procedure.flags = ProcedureFlags(0);
             procedure.extended_flags = None;
             procedure.name = function.name.into();
-            SymbolData::Procedure(procedure).encode(S_GPROC32, out)
+            // The plan replaces the scope links.
+            SymbolData::Procedure(procedure).encode_scope(S_GPROC32, ScopeLinks::default(), out)
         })?;
         let mut frame = FrameProcedure::default();
         frame.frame_size = 0x28;
@@ -345,14 +344,13 @@ fn add_globals(
     point: TypeHandle,
 ) -> Result<()> {
     for (procedure, name) in procedures.into_iter().zip([SUM.name, MAIN.name]) {
-        let reference = builder.add_symbol_with(move |resolver, out| {
-            let mut reference = ProcedureReference::default();
-            reference.name_checksum = 0;
-            reference.offset = resolver.module_symbol_offset(procedure)?;
-            reference.module = Some(resolver.module_index(procedure.module())?);
-            reference.name = name.into();
-            SymbolData::ProcedureReference(reference).encode(S_PROCREF, out)
-        })?;
+        let mut reference = ProcedureReference::default();
+        reference.name_checksum = 0;
+        // The plan writes the module index and the offset of the procedure.
+        reference.target = ModuleSymbolTarget::Handle(procedure);
+        reference.name = name.into();
+        let reference =
+            builder.add_symbol_fields(S_PROCREF, SymbolData::ProcedureReference(reference))?;
         builder.index_global(reference, 1)?;
     }
     let mut global = Data::default();

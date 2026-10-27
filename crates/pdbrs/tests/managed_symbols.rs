@@ -4,8 +4,8 @@ use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::symbol::{
-    LocalFlags, MANAGED_ATTRIBUTE_OEM_ID, ProcedureFlags, S_GMANPROC, S_LMANPROC, S_MANCONSTANT,
-    S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, Symbol, SymbolData,
+    LocalFlags, MANAGED_ATTRIBUTE_OEM_ID, ModuleSymbolTarget, ProcedureFlags, S_GMANPROC,
+    S_LMANPROC, S_MANCONSTANT, S_MANSLOT, S_OEM, S_PROCREF, S_TOKENREF, Symbol, SymbolData,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
 use pdbrs::portable::metadata::MetadataToken;
@@ -111,10 +111,7 @@ fn decodes_managed_procedures() {
             let SymbolData::ManagedProcedure(value) = symbol.data() else {
                 panic!("expected a managed procedure");
             };
-            assert_eq!(
-                (value.parent, value.end, value.next),
-                (at(0x10), at(0xb0), at(u32::MAX))
-            );
+            assert_eq!(value.next, at(u32::MAX));
             assert_eq!(value.code_length, 0x38);
             assert_eq!((value.debug_start, value.debug_end), (1, 0x37));
             assert_eq!(value.token, MetadataToken::from_raw(0x0600_0001));
@@ -132,7 +129,7 @@ fn decodes_managed_procedures() {
             );
             assert_eq!(symbol.address(), Some(address));
             assert_eq!(symbol.type_index(), None);
-            let links = symbol.scope_links().unwrap();
+            let links = symbol.links().unwrap();
             assert_eq!((links.parent, links.end), (at(0x10), at(0xb0)));
         });
     }
@@ -205,7 +202,7 @@ fn decodes_managed_slots() {
             // The token is not a TPI index, and the live address is not a symbol address.
             assert_eq!(symbol.type_index(), None);
             assert_eq!(symbol.address(), None);
-            assert_eq!(symbol.scope_links(), None);
+            assert_eq!(symbol.links(), None);
         });
     }
 }
@@ -381,8 +378,13 @@ fn decodes_token_references_as_procedure_references() {
     let payload = padded(&token_reference(6).0);
     decode(S_TOKENREF, &payload, |symbol| {
         let reference = symbol.procedure_reference().unwrap();
-        assert_eq!(reference.offset, at(0x34));
-        assert_eq!(reference.module, Some(ModuleIndex(5)));
+        assert_eq!(
+            reference.target,
+            ModuleSymbolTarget::Position {
+                module: Some(ModuleIndex(5)),
+                offset: at(0x34),
+            }
+        );
         assert_eq!(reference.name, b"06000017");
         assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"06000017"[..]));
         assert!(matches!(symbol.data(), SymbolData::ProcedureReference(_)));
@@ -390,7 +392,13 @@ fn decodes_token_references_as_procedure_references() {
     });
     // The raw module number 0 has no module index.
     decode(S_TOKENREF, &token_reference(0).0, |symbol| {
-        assert_eq!(symbol.procedure_reference().unwrap().module, None);
+        assert_eq!(
+            symbol.procedure_reference().unwrap().target,
+            ModuleSymbolTarget::Position {
+                module: None,
+                offset: at(0x34),
+            }
+        );
     });
 }
 
