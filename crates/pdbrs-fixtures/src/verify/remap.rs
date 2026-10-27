@@ -31,6 +31,7 @@ mod unwind;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use pdbrs::native::address::{AddressTables, Rva};
 use pdbrs::native::codeview::symbol::{ModuleSymbolTarget, SymbolData};
@@ -356,15 +357,18 @@ fn check_fixture(tools: &Tools, fixture: &NativeFixture, work: &Path) -> Fixture
     if let Err(error) = fs::create_dir_all(&directory) {
         return failed(format!("cannot make {}: {error}", directory.display()));
     }
+    let label = fixture.label();
     let sections: Vec<_> = source.tables.sections.iter().collect();
     let mut sets = Vec::new();
     let mut clean = Vec::new();
     for kind in SetKind::ALL {
         let path = directory.join(format!("{}.pdb", kind.name()));
         let clean_path = directory.join(format!("{}.clean.pdb", kind.name()));
+        let started = Instant::now();
         let (result, clean_result) = match ranges::range_set(kind, &sections, &source.procedures) {
             Ok(set) => {
                 let (result, omap) = check_set(tools, &source, &baseline, &set, &path);
+                let omap_time = started.elapsed();
                 let omap = omap.as_ref().map(|(bytes, dumps)| clean::OmapOutput {
                     bytes,
                     path: &path,
@@ -372,6 +376,12 @@ fn check_fixture(tools: &Tools, fixture: &NativeFixture, work: &Path) -> Fixture
                 });
                 let clean_result =
                     clean::check_set(tools, &source, &clean_baseline, &set, omap, &clean_path);
+                eprintln!(
+                    "verify-remap: {label}: {}: OMAP {:.1} s, clean {:.1} s",
+                    kind.name(),
+                    omap_time.as_secs_f64(),
+                    started.elapsed().saturating_sub(omap_time).as_secs_f64()
+                );
                 (result, clean_result)
             }
             Err(error) => (

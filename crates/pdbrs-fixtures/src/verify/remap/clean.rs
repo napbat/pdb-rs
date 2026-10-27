@@ -545,6 +545,7 @@ fn compare(
             dia2dump: &tools.dia2dump,
             set,
             omap: omap.path,
+            lazy: source.lazy,
             clean: path,
         };
         if let Err(error) = dia::compare(&context, dumps, &samples, &source.facts.frames, tally) {

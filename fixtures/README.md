@@ -1142,14 +1142,17 @@ writes the output of `RemovedCode::Drop` to
 6. DIA2Dump on the clean output must give the answers of the OMAP output of the same set. The
    OMAP output keeps the source section and offset, so the command compares the RVA of each
    address only. It also ignores the DIA symbol IDs (`SymIndex` and the properties that end
-   with `Id`).
+   with `Id`) and the PDB name in the `Executable (Global)` line of `-sym`.
    - `-s` line by line, `-p` and `-g` as sorted lists (their order follows the hash tables).
      An OMAP line with RVA 0 in a section has no clean line: the clean output removed the
-     record. In `-s`, the lines of such a procedure up to the next empty line go with it.
+     record. In `-s`, the child lines of such a symbol (up to the next empty line or the next
+     symbol line with the same or a smaller indent) go with it, and so does the empty line
+     that DIA2Dump prints before a procedure.
    - `-l <RVA> 1` at the new RVA of each line start of the OMAP check.
    - `-sym <RVA>` at 3 addresses (the second byte, the middle and the last byte) of up to 100
      procedures, and `-fpo <RVA>` at the addresses of these that an FPO or new FPO record of
-     the source holds. A query without an answer (DIA2Dump stops at it) runs again alone.
+     the source holds. DIA2Dump stops at a query without an answer and exits with -1. The
+     command counts that query as one without an answer and runs the queries after it again.
 7. `SymbolLocator::locate` on both outputs at the same 3 addresses of each procedure must give
    the same procedure name, innermost block, inline call chain (names and call site lines)
    and line (file and line number).
@@ -1164,6 +1167,15 @@ the compared, removed and explained items of checks 6 and 7. The lines
   a block, and the clean output adds one for each part of a split procedure after the first.
 - A line that differs only in a smaller length, for a record that a range boundary cuts: the
   clean record describes the first part.
+- A `FuncDebugEnd` line at the end of its procedure. The OMAP output translates the address
+  after the procedure through OMAP, so it gets the RVA of the next range (or 0). The clean
+  record keeps the offset in the procedure, so DIA gives the new end of the procedure.
+- In a PDB without type merging (`NOTM`), DIA stops the `-s` list of a module at the first
+  symbol that it cannot read, for example a procedure whose type is in the object file. If the
+  clean output removed that symbol, DIA lists more symbols of the module. The extra clean
+  lines must end the list of the same module.
 
 The line `clean outputs: ...` ends the clean part. The last line is `result: pass`, or
-`result: FAIL` with the problems of both parts.
+`result: FAIL` with the problems of both parts. The command prints the results at the end, in
+fixture order. While it works, it prints a progress line to stderr for each PDB and set:
+`verify-remap: <fixture>/<PDB>: <set>: OMAP <seconds> s, clean <seconds> s`.
