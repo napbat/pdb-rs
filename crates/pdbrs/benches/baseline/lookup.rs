@@ -135,7 +135,7 @@ fn procedures(locator: &SymbolLocator, limit: usize) -> Outcome<Vec<(Option<Rva>
 
 /// Return up to [`MAX_NAMES`] names: the names of procedures and of the public symbols at
 /// their starts, as the `locate` example selects them.
-fn sample_names(locator: &SymbolLocator) -> Outcome<Vec<Vec<u8>>> {
+pub(crate) fn sample_names(locator: &SymbolLocator) -> Outcome<Vec<Vec<u8>>> {
     let mut names = BTreeSet::new();
     let all: Vec<_> = locator.procedures().collect::<Result<_, _>>()?;
     let stride = all.len().div_ceil(MAX_NAMES.div_ceil(2)).max(1);

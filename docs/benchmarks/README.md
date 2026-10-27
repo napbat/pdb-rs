@@ -102,8 +102,10 @@ its times are not comparable.
 | `native/symbol-by-name` | native | `SymbolLocator::find_name` for up to 1000 names of procedures and of the public symbols at their starts. | Matches |
 | `native/symbol-by-address` | native | `SymbolLocator::public_at` for the start and the middle byte of up to 2000 procedures. | Addresses with a public symbol |
 | `native/line-lookup` | native | `SymbolLocator::locate` for the same addresses: module, procedure, inline frames and line. | Addresses with a line |
+| `native/editor-find-name` | native | `publics_mut()?.find` and `globals_mut()?.find` for the names of `native/symbol-by-name`. The model decode happens before the timed runs (#48). | Names with a record in each index |
 | `native/edit-named-stream` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `named_streams_mut()?.insert(b"srcsrv", ...)`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |
 | `native/edit-rename-public` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `publics_mut`, `find` and `get_mut` rename the first public symbol with a unique name, plan, `to_vec`. | Output bytes |
+| `native/rebuilt-rename-public` | native | The edit of `native/edit-rename-public` on a rebuild of the fixture (`decode_all`, plan, `to_vec` before the timed runs). The streams of the rebuild are contiguous (#48). | Output bytes |
 | `native/edit-append-type` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `types_mut()?.push` of a field list and a structure, plan, `to_vec`. | Output bytes |
 | `native/edit-strip-private` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `plan(EditOptions::default().with_strip_private(true))`, `to_vec`. | Output bytes |
 | `native/rebuild` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `decode_all`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |

@@ -6,24 +6,25 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use pdbrs::Bytes;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::field_list::{
     DataMember, LLVM_FIELD_LIST_LIMIT, Member, encode_field_list,
 };
-use pdbrs::native::codeview::index::TypeIndex;
+use pdbrs::native::codeview::index::{SymbolHandle, TypeIndex};
 use pdbrs::native::codeview::numeric::{Integer, Numeric};
 use pdbrs::native::codeview::type_record::{
     Class, ClassKind, ClassOptions, MemberAttributes, TypeLeaf,
 };
 use pdbrs::native::container::Container;
+use pdbrs::native::locate::SymbolLocator;
 use pdbrs::native::msf::OldDirectoryPolicy;
 use pdbrs::native::msfz::MsfzWriteOptions;
 use pdbrs::native::symbols::indexed_name;
 use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
+use pdbrs::{Bytes, ErrorKind};
 
-use crate::Outcome;
 use crate::measure::Bench;
+use crate::{Outcome, lookup};
 
 /// The `T_INT4` primitive type.
 const T_INT4: TypeIndex = TypeIndex(0x74);
@@ -88,7 +89,28 @@ fn unique_public(pdb: &Pdb<&[u8]>) -> Outcome<Vec<u8>> {
 /// Rename the first public symbol with a unique name.
 pub(crate) fn rename_public(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
-    let pdb = Pdb::parse(&bytes)?;
+    measure_rename(&bytes, bench)
+}
+
+/// Rename the first public symbol with a unique name in a rebuild of the fixture.
+///
+/// The rebuild happens before the timed runs. Its streams are contiguous, so a slice source
+/// can lend them (#48).
+pub(crate) fn rebuilt_rename_public(path: &Path, bench: &mut Bench) -> Outcome {
+    let bytes = std::fs::read(path)?;
+    let rebuilt = {
+        let pdb = Pdb::parse(&bytes)?;
+        let mut editor = pdb.edit(IdentityPolicy::Preserve);
+        editor.decode_all()?;
+        editor.plan(EditOptions::default())?.to_vec()?
+    };
+    drop(bytes);
+    measure_rename(&rebuilt, bench)
+}
+
+/// Measure the rename of the first public symbol with a unique name in the PDB `bytes`.
+fn measure_rename(bytes: &[u8], bench: &mut Bench) -> Outcome {
+    let pdb = Pdb::parse(bytes)?;
     let old = unique_public(&pdb)?;
     let new = [old.as_slice(), RENAME_SUFFIX].concat();
     bench.measure(|| {
@@ -102,6 +124,36 @@ pub(crate) fn rename_public(path: &Path, bench: &mut Bench) -> Outcome {
         *name = new.clone().into();
         write(&editor, EditOptions::default())
     })
+}
+
+/// Find each sample name of `native/symbol-by-name` with [`PdbEditor::publics_mut`] and
+/// [`PdbEditor::globals_mut`].
+///
+/// The decode of the editor model happens before the timed runs. The count is the number of
+/// found records. A name of more than one record counts as one.
+pub(crate) fn editor_find_name(path: &Path, bench: &mut Bench) -> Outcome {
+    let bytes = std::fs::read(path)?;
+    let pdb = Pdb::parse(&bytes)?;
+    let names = lookup::sample_names(&SymbolLocator::new(&pdb)?)?;
+    let mut editor = pdb.edit(IdentityPolicy::Preserve);
+    editor.publics_mut()?;
+    bench.measure(|| {
+        let mut found = 0;
+        for name in &names {
+            found += u64::from(present(editor.publics_mut()?.find(name))?);
+            found += u64::from(present(editor.globals_mut()?.find(name))?);
+        }
+        Ok(found)
+    })
+}
+
+/// Return `true` if a find result has a record. A name of more than one record has records.
+fn present(result: pdbrs::Result<Option<SymbolHandle>>) -> Outcome<bool> {
+    match result {
+        Ok(handle) => Ok(handle.is_some()),
+        Err(error) if error.kind() == ErrorKind::InvalidReference => Ok(true),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Return a numeric leaf with an unsigned value.

@@ -64,7 +64,7 @@ impl Scenario {
 }
 
 /// The native scenarios. The output has them for each native fixture in this order.
-const NATIVE: [(&str, Run); 14] = [
+const NATIVE: [(&str, Run); 16] = [
     ("native/open", open),
     ("native/full-read", read),
     ("native/type-table", lookup::type_table),
@@ -74,8 +74,10 @@ const NATIVE: [(&str, Run); 14] = [
     ("native/symbol-by-name", lookup::symbol_by_name),
     ("native/symbol-by-address", lookup::symbol_by_address),
     ("native/line-lookup", lookup::line_lookup),
+    ("native/editor-find-name", edit::editor_find_name),
     ("native/edit-named-stream", edit::named_stream),
     ("native/edit-rename-public", edit::rename_public),
+    ("native/rebuilt-rename-public", edit::rebuilt_rename_public),
     ("native/edit-append-type", edit::append_type),
     ("native/edit-strip-private", edit::strip_private),
     ("native/rebuild", edit::rebuild),
