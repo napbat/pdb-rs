@@ -102,7 +102,7 @@ renames, embedded sources, type and ID removal, and address remapping.
 
 The root epic [#18](https://github.com/napbat/pdb-rs/issues/18) gives the roadmap.
 
-## Features of the crate
+## Cargo features
 
 - `std` (default): file access through `Pdb::open` and standard I/O error integration.
 - Without default features, the library uses `no_std + alloc`. Use `Pdb::parse` for a byte
