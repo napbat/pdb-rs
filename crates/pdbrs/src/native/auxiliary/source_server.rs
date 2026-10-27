@@ -241,6 +241,37 @@ impl<'a> SourceServer<'a> {
             rest: (!body.is_empty()).then_some(body),
         }
     }
+
+    /// Return the byte range of the first field of each line of the `source files` section:
+    /// the build path (#46). Blank lines have no range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
+    pub(crate) fn source_file_path_ranges(&self) -> Result<Vec<Range<usize>>> {
+        let mut ranges = Vec::new();
+        let Some(body) = self.sections[SourceServerSection::SourceFiles as usize].clone() else {
+            return Ok(ranges);
+        };
+        let mut offset = body.start;
+        while offset < body.end {
+            let rest = &self.bytes[offset..body.end];
+            let (line, next) = match rest.iter().position(|&byte| byte == b'\n') {
+                Some(at) => (&rest[..at], offset + at + 1),
+                None => (rest, body.end),
+            };
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if !is_blank(line) {
+                let length = split_once(line, b'*').0.len();
+                ranges
+                    .try_reserve(1)
+                    .map_err(|_| crate::native::output::no_memory())?;
+                ranges.push(offset..offset + length);
+            }
+            offset = next;
+        }
+        Ok(ranges)
+    }
 }
 
 /// Set the end of the body of `section` to `end`.

@@ -239,6 +239,11 @@ pub struct UnnamedStreams {
     pub(super) entries: Vec<(StreamId, Vec<u8>)>,
     /// The model stream ID of the next stream.
     pub(super) next: u32,
+    /// New bytes of source streams without a name in the copy-on-write
+    /// layout: the module type streams after
+    /// [`PdbEditor::remap_source_paths`](super::PdbEditor::remap_source_paths)
+    /// (#46). Each source stream keeps its stream ID.
+    pub(super) replaced: Vec<(StreamId, Vec<u8>)>,
 }
 
 impl UnnamedStreams {
@@ -247,6 +252,7 @@ impl UnnamedStreams {
         Self {
             entries: Vec::new(),
             next: first,
+            replaced: Vec::new(),
         }
     }
 

@@ -64,16 +64,34 @@ pub(super) fn check<S: ReadAt>(
     context: &Context<'_>,
     scope: Scope,
 ) -> Result<TypeStreams> {
-    let streams = check_streams(pdb, context)?;
+    let streams = check_streams(pdb, context, &OFFSETS)?;
     if scope == Scope::Records {
         check_records(pdb, context)?;
     }
     Ok(streams)
 }
 
-/// Return an error for a stream without a known role or a named stream
-/// without a decoder.
-fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeStreams> {
+/// The error contexts of [`check_streams`].
+pub(super) struct Messages {
+    /// The context for a named stream of an unknown kind.
+    pub(super) named: &'static str,
+    /// The context for a stream without a known role.
+    pub(super) unclaimed: &'static str,
+}
+
+/// The error contexts of an edit that changes offsets or indices.
+const OFFSETS: Messages = Messages {
+    named: "the edit changes offsets or indices, and a named stream of an unknown kind can refer to them",
+    unclaimed: "the edit changes offsets or indices, and a stream that no other stream names can refer to them",
+};
+
+/// Return an error with a context of `messages` for a stream without a
+/// known role or a named stream without a decoder.
+pub(super) fn check_streams<S: ReadAt>(
+    pdb: &Pdb<S>,
+    context: &Context<'_>,
+    messages: &Messages,
+) -> Result<TypeStreams> {
     let count = pdb.container().stream_count();
     let mut claimed = Vec::new();
     claimed
@@ -124,9 +142,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeS
         claim(Some(named.stream));
         match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::Other => {
-                return Err(opaque(
-                    "the edit changes offsets or indices, and a named stream of an unknown kind can refer to them",
-                ));
+                return Err(opaque(messages.named).with_stream(named.stream, 0));
             }
             NamedStreamKind::TmCache => {
                 let bytes = pdb.stream_bytes(named.stream)?;
@@ -146,10 +162,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeS
         // PDB. It holds no symbol offset and no stream ID.
         let bytes = pdb.stream_bytes(StreamId(id))?;
         if TypeMapStream::parse(&bytes, StreamId(id)).is_err() {
-            return Err(opaque(
-                "the edit changes offsets or indices, and a stream that no other stream names can refer to them",
-            )
-            .with_stream(StreamId(id), 0));
+            return Err(opaque(messages.unclaimed).with_stream(StreamId(id), 0));
         }
         type_maps.try_reserve(1).map_err(|_| no_memory())?;
         type_maps.push(StreamId(id));

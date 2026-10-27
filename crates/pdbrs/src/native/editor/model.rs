@@ -285,6 +285,10 @@ pub struct PdbEditor<'p, S = &'static [u8]> {
     pub(super) unnamed: Option<UnnamedStreams>,
     /// The rebuild state after [`PdbEditor::decode_all`].
     pub(super) rebuild: Option<Rebuild>,
+    /// `true` after [`PdbEditor::remap_source_paths`] changed a path: the
+    /// plan then rejects opaque data that can hold a path or a `/names`
+    /// offset (#46).
+    pub(super) paths_remapped: bool,
 }
 
 impl<S> core::fmt::Debug for PdbEditor<'_, S> {
@@ -331,6 +335,7 @@ impl<S: ReadAt> Pdb<S> {
             debug: None,
             unnamed: None,
             rebuild: None,
+            paths_remapped: false,
         }
     }
 }
@@ -368,6 +373,7 @@ impl PdbEditor<'static> {
             debug: Some(DebugStreamList::default()),
             unnamed: Some(UnnamedStreams::new(5)),
             rebuild: None,
+            paths_remapped: false,
         })
     }
 }

@@ -235,6 +235,42 @@ impl InfoBuilder {
         Ok(removed?.map(StreamId))
     }
 
+    /// Give the named stream `old` the name `new`, and remove `old` from the string buffer.
+    /// Return `false` if the map has no name `old`.
+    ///
+    /// A path remap (#46) uses this function, so that the stream keeps no old path. The other
+    /// names move in the string buffer and keep their buckets. The new name goes to the end of
+    /// the string buffer, as with [`InfoBuilder::set_named_stream`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`InfoBuilder::set_named_stream`] for the names.
+    pub(crate) fn rename_named_stream(&mut self, old: &[u8], new: &[u8]) -> Result<bool> {
+        let keys = self.keys();
+        let mut found = None;
+        for entry in self.table.entries() {
+            if keys.name(entry.key)? == old {
+                found = Some(entry.key);
+            }
+        }
+        let Some(key) = found else {
+            return Ok(false);
+        };
+        let Some(stream) = self.remove_named_stream(old)? else {
+            return Ok(false);
+        };
+        let start = usize::try_from(key).unwrap_or(usize::MAX);
+        let end = start.saturating_add(old.len()).saturating_add(1);
+        if end <= self.strings.len() {
+            self.strings.drain(start..end);
+            let removed = to_u32(end - start, "named-stream string buffer")?;
+            self.table
+                .map_keys(|other| if other > key { other - removed } else { other });
+        }
+        self.set_named_stream(new, stream)?;
+        Ok(true)
+    }
+
     /// Return `niMac`, the word after the named-stream hash table.
     #[must_use]
     pub const fn next_name_index(&self) -> u32 {

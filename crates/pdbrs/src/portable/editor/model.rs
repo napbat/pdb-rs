@@ -219,6 +219,16 @@ impl<S: ReadAt> PdbEditor<'_, S> {
         decoded(&mut self.documents, self.source, decode::documents)
     }
 
+    /// Return the documents of the model, or the decoded source documents. The model does not
+    /// change.
+    pub(super) fn read_documents(&self) -> Result<Cow<'_, Documents>> {
+        match (&self.documents, self.source) {
+            (Some(documents), _) => Ok(Cow::Borrowed(documents)),
+            (None, Some(pdb)) => decode::documents(pdb).map(Cow::Owned),
+            (None, None) => Ok(Cow::Owned(Documents::default())),
+        }
+    }
+
     /// Return the methods with sequence points for a change, by `MethodDef` row. Decode them
     /// from the source on the first call.
     ///

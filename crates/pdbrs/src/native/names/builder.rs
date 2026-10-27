@@ -117,6 +117,14 @@ impl StringTableBuilder {
         name_at(&self.strings, offset.0)
     }
 
+    /// Return the offset of each name in the buckets, in bucket order.
+    pub(crate) fn name_offsets(&self) -> impl Iterator<Item = NameOffset> + '_ {
+        self.buckets
+            .iter()
+            .filter(|&&offset| offset != 0)
+            .map(|&offset| NameOffset(offset))
+    }
+
     /// Return the offset of `name`, and add the name if the table does not have it.
     ///
     /// The empty name is a name too: as in `NMT::addNiForSz`, it gets its own NUL byte and
