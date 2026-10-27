@@ -154,7 +154,7 @@ fn an_invalid_new_path_leaves_the_model_unchanged() {
     rejected(&pdb, ErrorKind::InvalidFormat, b"");
     rejected(&pdb, ErrorKind::InvalidFormat, b"/_/\0synthetic.c");
     // `S_OBJNAME` with this path is longer than its `u16` length field allows.
-    rejected(&pdb, ErrorKind::LimitExceeded, &[b'p'; 0x1_0000]);
+    rejected(&pdb, ErrorKind::LimitExceeded, &vec![b'p'; 0x1_0000]);
     // A `*` makes another first field of the `srcsrv` line.
     rejected(&pdb, ErrorKind::InvalidFormat, b"/_/a*b.c");
 }
