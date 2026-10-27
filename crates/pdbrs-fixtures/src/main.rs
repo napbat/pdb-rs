@@ -17,10 +17,14 @@
 //! compares each result with the original through the consumer tools. The `verify-msfz`
 //! command writes and converts MSFZ files with pdbrs and checks them through the consumer
 //! tools. The `detect` command opens each fixture output with the format facade of pdbrs.
+//!
+//! The commands that read the fixture manifest do their work on `--jobs <n>` worker threads
+//! (see [`jobs`]) and print the results in fixture order.
 
 mod args;
 mod classify;
 mod environment;
+mod jobs;
 mod json;
 mod manifest;
 mod matrix;
@@ -35,8 +39,9 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::args::{Action, Options, USAGE};
+use crate::args::{Action, Check, Options, USAGE};
 use crate::classify::{Kind, classify, embedded_pdb_payload};
+use crate::jobs::Jobs;
 use crate::manifest::{Header, Output, Record, Status, relative_path};
 use crate::matrix::{FIXTURES, Fixture};
 use crate::plan::{Paths, Plan};
@@ -60,40 +65,14 @@ fn main() -> ExitCode {
         }
         Ok(Action::Build(options)) => exit_code(build(options)),
         Ok(Action::Tools) => exit_code(tools::run(&workspace_root())),
-        Ok(Action::VerifyPortable(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_portable(&workspace, &fixtures))
-        }
-        Ok(Action::VerifyRebuild(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_rebuild(&workspace, &fixtures))
-        }
-        Ok(Action::VerifyEdit(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_edit(&workspace, &fixtures))
-        }
-        Ok(Action::VerifyNativeBuild(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_native_build(&workspace, &fixtures))
-        }
-        Ok(Action::VerifyNativeEdit(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_native_edit(&workspace, &fixtures))
-        }
-        Ok(Action::VerifyMsfz(fixtures)) => {
-            let workspace = workspace_root();
-            let fixtures = fixtures.unwrap_or_else(|| workspace.join("target").join("fixtures"));
-            exit_code(verify::verify_msfz(&workspace, &fixtures))
-        }
-        Ok(Action::Detect(fixtures)) => {
-            let fixtures =
-                fixtures.unwrap_or_else(|| workspace_root().join("target").join("fixtures"));
-            exit_code(verify::detect(&fixtures))
+        Ok(Action::VerifyPortable(check)) => fixture_command(check, verify::verify_portable),
+        Ok(Action::VerifyRebuild(check)) => fixture_command(check, verify::verify_rebuild),
+        Ok(Action::VerifyEdit(check)) => fixture_command(check, verify::verify_edit),
+        Ok(Action::VerifyNativeBuild(check)) => fixture_command(check, verify::verify_native_build),
+        Ok(Action::VerifyNativeEdit(check)) => fixture_command(check, verify::verify_native_edit),
+        Ok(Action::VerifyMsfz(check)) => fixture_command(check, verify::verify_msfz),
+        Ok(Action::Detect(check)) => {
+            fixture_command(check, |_, fixtures, jobs| verify::detect(fixtures, jobs))
         }
         Err(error) => {
             eprintln!("error: {error}\n\n{USAGE}");
@@ -112,6 +91,20 @@ fn exit_code(result: Result<bool, String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Run a command that reads the fixture manifest with the workspace root, the fixture root
+/// and the worker budget.
+fn fixture_command(
+    check: Check,
+    command: fn(&Path, &Path, &Jobs) -> Result<bool, String>,
+) -> ExitCode {
+    let workspace = workspace_root();
+    let fixtures = check
+        .fixtures
+        .unwrap_or_else(|| workspace.join("target").join("fixtures"));
+    let jobs = Jobs::new(check.jobs.unwrap_or_else(Jobs::available));
+    exit_code(command(&workspace, &fixtures, &jobs))
 }
 
 /// The workspace root, two levels above the manifest directory of this crate.

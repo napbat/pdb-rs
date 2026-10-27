@@ -21,6 +21,7 @@
 mod expect;
 mod stack;
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -34,8 +35,10 @@ use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder, PdbEditor};
 
 use super::rebuild::{hex, yes};
 use super::{
-    Comparison, EMBEDDED_LIMIT, Input, Output, SHOWN_DIFFERENCES, comparisons, outputs, read,
+    Comparison, EMBEDDED_LIMIT, Input, Output, SHOWN_DIFFERENCES, comparisons, outputs,
+    print_in_order, read,
 };
+use crate::jobs::Jobs;
 use crate::tools::{self, verifier};
 
 /// The number of lines that the edit adds to each visible sequence point.
@@ -55,7 +58,7 @@ const ADDED_INFORMATION: &[u8] = b"pdbrs-edit";
 /// Edit and build each Portable PDB fixture and compare the results with the verifier.
 ///
 /// Return `false` if a check fails.
-pub fn verify_edit(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let assembly = tools::built_tool(workspace, verifier::NAME)?;
     let out = workspace.join("target").join("verify-edit");
     fs::create_dir_all(&out).map_err(|error| format!("cannot make {}: {error}", out.display()))?;
@@ -66,17 +69,9 @@ pub fn verify_edit(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
             "the fixture manifest has no portable-pdb or embedded-pdb-payload output".to_owned(),
         );
     }
-    let mut passed = true;
-    for comparison in &comparisons {
-        match check(&assembly, comparison, &outputs, &out) {
-            Ok(true) => {}
-            Ok(false) => passed = false,
-            Err(error) => {
-                println!("{}: error: {error}", comparison.fixture);
-                passed = false;
-            }
-        }
-    }
+    let passed = print_in_order(jobs, &comparisons, |comparison, log| {
+        check(&assembly, comparison, &outputs, &out, log)
+    });
     println!(
         "wrote the PDBs, the dumps and the traces to {}",
         out.display()
@@ -116,19 +111,21 @@ fn write_and_dump(assembly: &Path, out: &Path, name: &str, bytes: &[u8]) -> Resu
     Ok(text)
 }
 
-/// Print the differences of two line lists and return `true` if they are equal.
-fn same(name: &str, expected: &[String], actual: &[String]) -> bool {
+/// Write the differences of two line lists to `log` and return `true` if they are equal.
+fn same(log: &mut String, name: &str, expected: &[String], actual: &[String]) -> bool {
     let differences: Vec<usize> = (0..expected.len().max(actual.len()))
         .filter(|&index| expected.get(index) != actual.get(index))
         .collect();
-    println!(
+    let _ = writeln!(
+        log,
         "  {name}: {} lines, {} different lines",
         expected.len(),
         differences.len()
     );
     for &index in differences.iter().take(SHOWN_DIFFERENCES) {
         let none = String::from("<none>");
-        println!(
+        let _ = writeln!(
+            log,
             "    line {}:\n      expected: {}\n      actual:   {}",
             index + 1,
             expected.get(index).unwrap_or(&none),
@@ -138,12 +135,13 @@ fn same(name: &str, expected: &[String], actual: &[String]) -> bool {
     differences.is_empty()
 }
 
-/// Edit, build and check one Portable PDB.
+/// Edit, build and check one Portable PDB. Write the results to `log`.
 fn check(
     assembly: &Path,
     comparison: &Comparison,
     outputs: &[Output],
     out: &Path,
+    log: &mut String,
 ) -> Result<bool, String> {
     let fixture = &comparison.fixture;
     let (original, mut command) = match &comparison.input {
@@ -156,7 +154,7 @@ fn check(
     let theirs = dump(&mut command)?;
     let pdb = Pdb::parse(&original).map_err(pdbrs)?;
     let identity = IdentityPolicy::Explicit(pdb.identity());
-    println!("{fixture}:");
+    let _ = writeln!(log, "{fixture}:");
 
     let editor = pdb.edit().map_err(pdbrs)?;
     let unchanged = editor
@@ -164,7 +162,8 @@ fn check(
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let mut passed = unchanged == original;
-    println!(
+    let _ = writeln!(
+        log,
         "  edit without a change has the original bytes: {}",
         yes(passed)
     );
@@ -174,7 +173,8 @@ fn check(
         .plan(identity)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
-    println!(
+    let _ = writeln!(
+        log,
         "  builder with new heaps: {} bytes (original {} bytes)",
         built.len(),
         original.len()
@@ -182,6 +182,7 @@ fn check(
     let built_dump = write_and_dump(assembly, out, &format!("{fixture}.built"), &built)?;
     let original_lines = expect::decoded(&theirs);
     passed &= same(
+        log,
         "decoded dump of the built PDB",
         &original_lines,
         &expect::decoded(&built_dump),
@@ -199,7 +200,8 @@ fn check(
         .plan(IdentityPolicy::ContentDerived)
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
-    println!(
+    let _ = writeln!(
+        log,
         "  the same edit again gives the same bytes: {}",
         yes(repeated == edited)
     );
@@ -208,11 +210,13 @@ fn check(
     let expected = expect::edited(&original_lines, &edit_description())?;
     let actual = expect::decoded(&edited_dump);
     passed &= same(
+        log,
         "decoded dump of the edited PDB (without custom debug information)",
         &expect::without_custom(&expected),
         &expect::without_custom(&actual),
     );
     passed &= same(
+        log,
         "custom debug information of the edited PDB (sorted, without row IDs)",
         &expect::custom_blocks(&expected),
         &expect::custom_blocks(&actual),
@@ -237,7 +241,7 @@ fn check(
             moved: &moved,
             documents,
         };
-        passed &= stack::check(fixture, outputs, path, out, &pdbs)?;
+        passed &= stack::check(fixture, outputs, path, out, &pdbs, log)?;
     }
     Ok(passed)
 }

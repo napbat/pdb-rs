@@ -7,8 +7,8 @@ use pdbrs::native::container::Container;
 use pdbrs::native::msf::{Msf, MsfWriteOptions};
 
 use super::super::native::consumers::{
-    Run, StreamDifferences, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check,
-    pdbtool_compare, pdbutil_dump,
+    Run, StreamDifferences, dia2dump, normalize_pdbutil, pdbtool_check, pdbtool_compare,
+    pdbutil_dump,
 };
 use super::super::outputs;
 use super::{
@@ -167,7 +167,7 @@ impl Report {
 /// Return `false` if a check fails.
 pub(super) fn run(list: &[PdzFixture], tools: &Tools<'_>, work: &Path) -> bool {
     println!("== decode: {} PDZ fixtures", list.len());
-    let reports = parallel_map(list, |fixture| {
+    let reports = tools.jobs.map(list, |fixture| {
         let directory = work.join(&fixture.fixture).join(&fixture.source);
         check(fixture, tools, &directory)
     });
