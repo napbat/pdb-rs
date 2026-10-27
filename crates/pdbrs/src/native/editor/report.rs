@@ -42,6 +42,9 @@ pub enum RebuildReason {
     SymbolIndexes,
     /// A module changed, so the DBI module records or substreams changed.
     ModuleRecords,
+    /// A debug stream got a new slot, so the optional debug header of the DBI
+    /// stream changed.
+    DebugHeader,
     /// The strip of private symbols ([`EditOptions::with_strip_private`](super::EditOptions::with_strip_private)).
     Strip,
     /// The plan wrote all streams in a new layout
