@@ -225,18 +225,26 @@ fn lookups(
             }
         }
     }
-    if let Some(expected) = &expect.source_server {
+    for (stream, expected) in [
+        ("srcsrv", &expect.source_server),
+        ("sourcelink", &expect.source_link),
+    ] {
+        let Some(expected) = expected else {
+            continue;
+        };
         let pdb = format!("-p:{}", path.display());
-        let read = run(&tools.pdbstr, ["-r", pdb.as_str(), "-s:srcsrv"], None)?;
+        let name = format!("-s:{stream}");
+        let read = run(&tools.pdbstr, ["-r", pdb.as_str(), name.as_str()], None)?;
         let normalize = |text: &str| text.replace('\r', "").trim_end().to_owned();
         if normalize(&read.text) != normalize(expected) {
             problems.push(format!(
-                "pdbstr -r -s:srcsrv reads other text: {}",
+                "pdbstr -r -s:{stream} reads other text: {}",
                 crate::step::last_lines(&read.text, 2)
             ));
         }
     }
     symbol_lookups(tools, source, path, expect, findings)?;
+    procedure_lookups(tools, path, expect, findings)?;
     let problems = &mut findings.problems;
     for name in &expect.types {
         if !has_quoted(&pdbutil(tools, ["dump", "--types"], path)?.text, name) {
@@ -286,6 +294,49 @@ fn dia_symbol_count(text: &str, name: &str) -> usize {
                 .is_some_and(|rest| rest.trim() == name)
         })
         .count()
+}
+
+/// Return `true` if the `DIA2Dump -sym` output has a function (`SymTag` 5) with the name
+/// `name`.
+fn dia_has_function(text: &str, name: &str) -> bool {
+    let mut tag = "";
+    for line in text.lines().map(str::trim_start) {
+        if let Some(rest) = line.strip_prefix("SymTag:") {
+            tag = rest.trim();
+        } else if line
+            .strip_prefix("Name:")
+            .is_some_and(|rest| rest.trim() == name)
+            && tag == "0x5"
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Look up each renamed procedure with `DIA2Dump -sym`: a function with the new name, and
+/// no function with the old name.
+fn procedure_lookups(
+    tools: &Tools,
+    path: &Path,
+    expect: &Expectation,
+    findings: &mut Findings,
+) -> Result<(), String> {
+    for (old, new) in &expect.procedures_renamed {
+        let found = dia2dump(&tools.dia2dump, ["-sym", new.as_str()], path)?.text;
+        if !dia_has_function(&found, new) {
+            findings
+                .problems
+                .push(format!("DIA2Dump -sym finds no function {new}"));
+        }
+        let found = dia2dump(&tools.dia2dump, ["-sym", old.as_str()], path)?.text;
+        if dia_has_function(&found, old) {
+            findings
+                .problems
+                .push(format!("DIA2Dump -sym still finds the function {old}"));
+        }
+    }
+    Ok(())
 }
 
 /// Look up the added, renamed and removed public and global names.
@@ -367,6 +418,13 @@ fn symbol_lookups(
                     problems.push(format!(
                         "DIA2Dump -sym finds {after} symbols {name}, {before} in the source"
                     ));
+                }
+            }
+        }
+        if !public {
+            for name in &expect.globals_renamed {
+                if llvm.as_ref().is_some_and(|text| has_quoted(text, name)) {
+                    problems.push(format!("llvm-pdbutil {section} still has {name}"));
                 }
             }
         }

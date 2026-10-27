@@ -199,7 +199,7 @@ fn fixture(
 }
 
 /// Return the stream names, or `none`.
-fn list(streams: &BTreeSet<String>) -> String {
+pub(super) fn list(streams: &BTreeSet<String>) -> String {
     if streams.is_empty() {
         return "none".to_owned();
     }
@@ -426,7 +426,7 @@ fn remove_custom(lines: &mut Vec<String>) -> Result<(), String> {
 
 /// Return the names of the streams whose bytes are different in the source and the output,
 /// or that only one of them has. The stream headers come from the verifier dumps.
-fn changed_streams(
+pub(super) fn changed_streams(
     source: &[u8],
     source_dump: &str,
     output: &[u8],

@@ -115,6 +115,8 @@ pub(crate) struct Expectation {
     pub named_absent: Vec<String>,
     /// The `srcsrv` stream that `pdbstr -r` must read.
     pub source_server: Option<String>,
+    /// The `sourcelink` stream that `pdbstr -r` must read.
+    pub source_link: Option<String>,
     /// The public symbols that must be present.
     pub publics: Vec<String>,
     /// The public symbols that must be absent.
@@ -123,6 +125,11 @@ pub(crate) struct Expectation {
     pub globals: Vec<String>,
     /// The global symbols that must be absent.
     pub globals_absent: Vec<String>,
+    /// The old names of renamed global symbols: `llvm-pdbutil --globals` must not list them.
+    pub globals_renamed: Vec<String>,
+    /// The old and the new name of each renamed procedure: `DIA2Dump -sym` must find a
+    /// function with the new name and none with the old name.
+    pub procedures_renamed: Vec<(String, String)>,
     /// The type names that must be present.
     pub types: Vec<String>,
     /// The `LF_STRING_ID` strings that must be present.

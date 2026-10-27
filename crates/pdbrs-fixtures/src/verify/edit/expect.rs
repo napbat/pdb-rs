@@ -31,7 +31,7 @@ pub(super) struct Edit {
 }
 
 /// Return the coded `HasCustomDebugInformation` value of a parent token in hexadecimal text.
-fn coded(token: &str) -> Option<u32> {
+pub(super) fn coded(token: &str) -> Option<u32> {
     let token = u32::from_str_radix(token.strip_prefix("0x")?, 16).ok()?;
     CodedIndex::HasCustomDebugInformation.encode(MetadataToken::from_raw(token))
 }
@@ -39,7 +39,7 @@ fn coded(token: &str) -> Option<u32> {
 /// Give the `cdi` field of each `source` line the row ID after the added custom debug
 /// information. The table is sorted by the coded parent, and the added row comes after the
 /// rows with the same parent.
-fn shift_sources(lines: &mut [String], parent: u32) -> Result<(), String> {
+pub(super) fn shift_sources(lines: &mut [String], parent: u32) -> Result<(), String> {
     let parent = CodedIndex::HasCustomDebugInformation
         .encode(MetadataToken::from_raw(parent))
         .ok_or_else(|| "the added parent is not a coded parent".to_owned())?;
