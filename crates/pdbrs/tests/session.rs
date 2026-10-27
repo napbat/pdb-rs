@@ -185,16 +185,26 @@ fn the_cache_limit_rejects_a_structure_above_the_limit() {
 
     let exact = open(dbi_size);
     assert!(exact.debug_info().expect("DBI fits").is_some());
-    assert_eq!(
-        exact.symbol_records().unwrap_err().kind(),
-        ErrorKind::LimitExceeded
-    );
-    // The stored DBI stream stays available after the error.
+    // A slice source lends the symbol record stream, so its cell holds no
+    // stream bytes and fits (#48).
+    assert!(exact.symbol_records().expect("lent records").is_some());
+    // The stored DBI stream stays available.
     assert!(exact.debug_info().expect("DBI stays").is_some());
     assert_eq!(
         exact.type_offsets().unwrap_err().kind(),
         ErrorKind::LimitExceeded
     );
+
+    // A source that cannot lend bytes gives a copy, which counts.
+    let source = Counting::new(&bytes);
+    let options = ReadOptions::default().with_max_cached_bytes(dbi_size);
+    let copied = Pdb::with_options(&source, options).expect("PDB");
+    assert!(copied.debug_info().expect("DBI fits").is_some());
+    assert_eq!(
+        copied.symbol_records().unwrap_err().kind(),
+        ErrorKind::LimitExceeded
+    );
+    assert!(copied.debug_info().expect("DBI stays").is_some());
 }
 
 #[cfg(feature = "std")]
