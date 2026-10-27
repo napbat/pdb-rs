@@ -412,6 +412,28 @@ fn the_section_map_follows_the_new_section_order() {
 }
 
 #[test]
+fn the_absolute_entry_has_frame_0_also_after_an_lld_section_map() {
+    // `lld-link` writes the number of the entry as the frame of the absolute entry. DIA then
+    // finds no address in the last section, which is `.text` in the new image.
+    let mut lld = section_map(&synthetic(|_| {})).expect("section map");
+    let count = u16::try_from(lld.entries.len()).expect("count");
+    lld.entries.last_mut().expect("absolute entry").frame = count;
+    let source = synthetic(|editor| {
+        editor
+            .debug_info_mut()
+            .expect("DBI")
+            .set_section_map(Some(lld.clone()));
+    });
+    assert_eq!(section_map(&source), Some(lld));
+    let (output, _) =
+        clean(&source, &remap(&new_sections(), &RANGES), RemovedCode::Fail).expect("clean output");
+    let map = section_map(&output).expect("section map");
+    let frames: Vec<u16> = map.entries.iter().map(|entry| entry.frame).collect();
+    assert_eq!(frames, [1, 2, 0]);
+    assert_eq!(map.logical_count, 3);
+}
+
+#[test]
 fn records_move_and_sort_again() {
     let source = synthetic(|editor| {
         with_records(

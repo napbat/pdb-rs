@@ -327,8 +327,8 @@ fn segment_flags(characteristics: u32) -> SegmentFlags {
 /// Return the section map of `sections`: one entry for each section and a last entry for
 /// the absolute symbols.
 ///
-/// Microsoft `link.exe` writes frame 0 in the last entry, LLVM `lld-link` writes the
-/// number of the entry. The last entry follows the style of the `source` map. The logical
+/// The last entry has frame 0, as Microsoft `link.exe` writes it. LLVM `lld-link` writes the
+/// number of the entry, but then DIA finds no address in the last section. The logical
 /// count is the number of entries if the source does so, else the source value.
 fn derive_section_map(sections: &[SectionHeader], source: &SectionMap) -> Result<SectionMap> {
     let count = u16::try_from(sections.len()).map_err(|_| {
@@ -355,16 +355,13 @@ fn derive_section_map(sections: &[SectionHeader], source: &SectionMap) -> Result
             length: header.virtual_size,
         });
     }
-    let lld_style = source.entries.last().is_some_and(|entry| {
-        entry.flags.contains(SegmentFlags::IS_ABSOLUTE_ADDRESS) && entry.frame != 0
-    });
     entries.push(SectionMapEntry {
         flags: SegmentFlags(
             SegmentFlags::IS_ABSOLUTE_ADDRESS.0 | SegmentFlags::ADDRESS_IS_32_BIT.0,
         ),
         overlay: 0,
         group: 0,
-        frame: if lld_style { absolute_frame } else { 0 },
+        frame: 0,
         section_name: 0xffff,
         class_name: 0xffff,
         offset: 0,
