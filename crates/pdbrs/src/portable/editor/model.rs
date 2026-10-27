@@ -5,7 +5,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use super::collections::{CustomDebugInformations, Documents, ImportScopes, LocalScopes};
-use super::resolve::{Base, Model, Resolved, resolve};
+use super::resolve::{Base, Model, Resolved, ScopeRows, resolve};
 use super::{Methods, decode};
 use crate::PortableLocation;
 use crate::io::ReadAt;
@@ -37,8 +37,7 @@ pub struct EditOptions {}
 ///
 /// # Plan
 ///
-/// [`PdbEditor::plan`] resolves the handles and makes a [`PdbWritePlan`]. It reads a table
-/// that no `*_mut` call decoded from the source, so the output does not depend on the calls.
+/// [`PdbEditor::plan`] resolves the handles and makes a [`PdbWritePlan`].
 ///
 /// 1. It starts the heaps with the source heaps, or with empty heaps without a source. It
 ///    splits each document name into parts as Roslyn does and encodes the names and the
@@ -52,23 +51,41 @@ pub struct EditOptions {}
 ///    computes the index widths from the final heap sizes and row counts.
 /// 5. It compares each output stream with the source stream for the report.
 ///
+/// # Copy-on-write
+///
+/// The plan does not decode a table that no `*_mut` call decoded (#49). It copies the raw
+/// rows of the source table, so steps 1 to 4 do not apply to that table. The heap offsets of
+/// the raw rows stay valid, because the heaps start with the source heaps. The plan encodes
+/// the raw rows with the index widths of the output, so a table that refers to a heap or a
+/// table that grows past a width limit gets the wider index.
+///
+/// The plan decodes a table that no `*_mut` call decoded in two cases:
+///
+/// - the `MethodDebugInformation` table, if the source has this table and
+///   [`external`](Self::external) gives another `MethodDef` row count;
+/// - the custom debug information, if a change of the local scopes gives a source local
+///   scope, local variable or local constant a new row ID.
+///
+/// [`PdbEditor::decode_all`] decodes all tables, so the plan encodes all records again.
+///
 /// # Guarantees of an edit
 ///
 /// - The heaps of the output start with the bytes of the source heaps. Each source heap entry
 ///   keeps its offset, and a value that the source has gets its source offset.
 /// - Documents and import scopes keep their row IDs. New documents and import scopes come
 ///   after them.
-/// - Without a change, each record keeps its row. For a Portable PDB that
-///   `System.Reflection.Metadata` wrote, the output then has the same bytes as the source.
+/// - A table that no `*_mut` call decoded keeps its source rows. Without a change, each
+///   decoded record keeps its row. For a Portable PDB that `System.Reflection.Metadata` wrote,
+///   the output then has the same bytes as the source, also after `decode_all`.
 /// - Custom debug information of an unknown kind keeps its bytes. If a change gives a source
 ///   local scope, local variable or local constant a new row ID, such a value can contain the
 ///   old row ID. [`PdbEditor::plan`] then fails before output. Remove the unknown values or
 ///   add the new records after the source records of the same method to keep the rows.
 ///
 /// The editor does not keep the source unchanged in other ways: for example, a document name
-/// or an imports blob that the editor encodes again can have other bytes if the source
-/// producer used another encoding. The plan then adds the new blob, and the source blob stays
-/// in the heap.
+/// or an imports blob that the editor decodes and encodes again can have other bytes if the
+/// source producer used another encoding. The plan then adds the new blob, and the source
+/// blob stays in the heap.
 pub struct PdbEditor<'p, S = &'static [u8]> {
     source: Option<&'p Pdb<S>>,
     policy: IdentityPolicy,
@@ -168,20 +185,6 @@ fn decoded<'s, S: ReadAt, T: Default>(
         *slot = Some(source.map_or_else(|| Ok(T::default()), decode)?);
     }
     Ok(slot.get_or_insert_with(T::default))
-}
-
-/// Return the table of `slot`, or the table that `decode` reads from `source` if `slot` is
-/// empty.
-fn view<'s, S: ReadAt, T: Clone + Default>(
-    slot: Option<&'s T>,
-    source: Option<&Pdb<S>>,
-    decode: fn(&Pdb<S>) -> Result<T>,
-) -> Result<Cow<'s, T>> {
-    Ok(match (slot, source) {
-        (Some(table), _) => Cow::Borrowed(table),
-        (None, Some(pdb)) => Cow::Owned(decode(pdb)?),
-        (None, None) => Cow::Owned(T::default()),
-    })
 }
 
 impl<S: ReadAt> PdbEditor<'_, S> {
@@ -307,7 +310,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///
     /// # Errors
     ///
-    /// - The errors of the source reads, if a table is not decoded yet.
+    /// - The errors of the source reads.
     /// - [`ErrorKind::InvalidReference`] for a handle or an ID without a record, a sequence
     ///   point document that the editor does not have, or a custom debug information parent
     ///   that is not a row of a `HasCustomDebugInformation` table.
@@ -322,52 +325,81 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     pub fn plan(&self, options: EditOptions) -> Result<PdbWritePlan> {
         let EditOptions {} = options;
         let source = self.source;
-        let documents = view(self.documents.as_ref(), source, decode::documents)?;
-        let methods = view(self.methods.as_ref(), source, decode::methods)?;
-        let scopes = view(self.local_scopes.as_ref(), source, decode::local_scopes)?;
-        let import_scopes = view(self.import_scopes.as_ref(), source, decode::import_scopes)?;
-        let state_machines = view(
-            self.state_machine_methods.as_ref(),
-            source,
-            decode::state_machine_methods,
-        )?;
-        let custom = view(
-            self.custom.as_ref(),
-            source,
-            decode::custom_debug_information,
-        )?;
+        let methods = match (&self.methods, source) {
+            (Some(methods), _) => Some(Cow::Borrowed(methods)),
+            (None, Some(pdb)) if self.methods_move(pdb) => Some(Cow::Owned(decode::methods(pdb)?)),
+            (None, _) => None,
+        };
         let model = Model {
             version: &self.version,
             entry_point: self.entry_point,
             external: self.external,
-            documents: &documents,
-            methods: &methods,
-            scopes: &scopes,
-            import_scopes: &import_scopes,
-            state_machines: &state_machines,
-            custom: &custom,
+            documents: self.documents.as_ref(),
+            methods: methods.as_deref(),
+            scopes: self.local_scopes.as_ref(),
+            import_scopes: self.import_scopes.as_ref(),
+            state_machines: self.state_machine_methods.as_deref(),
         };
-        let base = source.map(Base::read).transpose()?;
-        let resolved = resolve(&model, base)?;
-        if source.is_some() {
-            check_opaque(&scopes, &custom, &resolved)?;
+        let raw = source
+            .map(|pdb| decode::raw_rows(pdb, &model))
+            .transpose()?
+            .unwrap_or_default();
+        let base = source
+            .map(|pdb| Base::read(pdb, model.scopes.is_some()))
+            .transpose()?;
+        let mut resolved = resolve(&model, base, raw)?;
+        let moved = model
+            .scopes
+            .is_some_and(|scopes| moved(scopes, &resolved.scopes));
+        let custom = match (&self.custom, source) {
+            (Some(custom), _) => Cow::Borrowed(custom),
+            (None, Some(pdb)) if moved => Cow::Owned(decode::custom_debug_information(pdb)?),
+            (None, Some(pdb)) => {
+                // Copy-on-write: the source rows keep their parents.
+                resolved.parts.tables.custom_debug_information = decode::table(pdb)?;
+                return finish(resolved, self.policy, source);
+            }
+            (None, None) => Cow::Owned(CustomDebugInformations::default()),
+        };
+        if moved {
+            check_opaque(&custom)?;
         }
-        let mut plan = resolved.parts.plan(self.policy)?;
-        if let Some(pdb) = source {
-            plan.compare(pdb)?;
+        if let (None, Some(pdb)) = (model.scopes, source) {
+            resolved.scopes = ScopeRows::from_source(&decode::scope_runs(pdb)?);
         }
-        Ok(plan)
+        resolved.add_custom(&custom)?;
+        finish(resolved, self.policy, source)
+    }
+
+    /// Return `true` if the `MethodDebugInformation` rows of `pdb` do not fit the external
+    /// `MethodDef` count: the table has a row for each `MethodDef` row.
+    fn methods_move(&self, pdb: &Pdb<S>) -> bool {
+        let rows = pdb.tables().row_count(TableId::METHOD_DEBUG_INFORMATION);
+        rows > 0 && rows != self.external.get(TableId::METHOD_DEF)
     }
 }
 
+/// Plan the parts of `resolved` and compare the output with `source`.
+fn finish<S: ReadAt>(
+    resolved: Resolved,
+    policy: IdentityPolicy,
+    source: Option<&Pdb<S>>,
+) -> Result<PdbWritePlan> {
+    let mut plan = resolved.parts.plan(policy)?;
+    if let Some(pdb) = source {
+        plan.compare(pdb)?;
+    }
+    Ok(plan)
+}
+
 /// Return `true` if a source local scope, local variable or local constant gets a new row ID.
-fn moved(scopes: &LocalScopes, resolved: &Resolved) -> bool {
+fn moved(scopes: &LocalScopes, rows: &ScopeRows) -> bool {
     (0..)
         .zip(&scopes.source)
         .zip(&scopes.records)
         .any(|((index, runs), scope): ((u32, _), _)| {
             let position = usize::try_from(index).unwrap_or(usize::MAX);
-            if resolved.scope_rows.get(position) != Some(&(index + 1)) {
+            if rows.rows.get(position) != Some(&(index + 1)) {
                 return true;
             }
             let lengths = [scope.variables.len(), scope.constants.len()];
@@ -377,22 +409,15 @@ fn moved(scopes: &LocalScopes, resolved: &Resolved) -> bool {
                 .any(|(list, (run, len))| {
                     run.count > 0
                         && (u32::try_from(len).is_ok_and(|len| len < run.count)
-                            || resolved.list_rows[position][list] != run.start)
+                            || rows.lists[position][list] != run.start)
                 })
         })
         || scopes.records.len() < scopes.source.len()
 }
 
-/// Fail if a source row moves and a custom debug information value of an unknown kind
-/// exists.
-fn check_opaque(
-    scopes: &LocalScopes,
-    custom: &CustomDebugInformations,
-    resolved: &Resolved,
-) -> Result<()> {
-    if !moved(scopes, resolved) {
-        return Ok(());
-    }
+/// Fail if a custom debug information value of an unknown kind exists. The caller checks
+/// that a source row moves.
+fn check_opaque(custom: &CustomDebugInformations) -> Result<()> {
     for (handle, information) in custom.iter() {
         let opaque = !matches!(
             CustomDebugValue::parse(information.kind, &information.value),

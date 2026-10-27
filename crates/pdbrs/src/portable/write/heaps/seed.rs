@@ -55,7 +55,8 @@ pub(in crate::portable::write) fn walk_entries(
 }
 
 impl PrefixedHeap {
-    /// Make a heap with the bytes of an existing heap.
+    /// Make a heap with the bytes of an existing heap. The heap makes its value index on the
+    /// first addition (see [`index_entries`]).
     fn from_bytes(stream: MetadataStream, bytes: Vec<u8>) -> Result<Self> {
         if bytes.is_empty() {
             return Ok(Self::new(stream));
@@ -68,24 +69,40 @@ impl PrefixedHeap {
                 "heap does not start with an empty entry",
             ));
         }
-        let mut index = BTreeMap::new();
         let mut starts = Vec::new();
-        walk_entries(&bytes, stream, |offset, value| {
+        walk_entries(&bytes, stream, |offset, _| {
             if offset != 0 {
                 starts.push(offset);
-            }
-            if !value.is_empty() && !index.contains_key(value) {
-                index.insert(value.to_vec(), offset);
             }
             Ok(())
         })?;
         Ok(Self {
             stream,
             bytes,
-            index,
+            index: None,
             starts,
         })
     }
+}
+
+/// Return the offset of the first entry with each value of a `#Blob` or `#US` heap that
+/// [`PrefixedHeap::from_bytes`] accepted.
+///
+/// # Errors
+///
+/// The errors of [`walk_entries`].
+pub(super) fn index_entries(
+    bytes: &[u8],
+    stream: MetadataStream,
+) -> Result<BTreeMap<Vec<u8>, u32>> {
+    let mut index = BTreeMap::new();
+    walk_entries(bytes, stream, |offset, value| {
+        if !value.is_empty() && !index.contains_key(value) {
+            index.insert(value.to_vec(), offset);
+        }
+        Ok(())
+    })?;
+    Ok(index)
 }
 
 impl BlobHeap {

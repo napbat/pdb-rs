@@ -210,7 +210,9 @@ impl StringHeap {
 struct PrefixedHeap {
     stream: MetadataStream,
     bytes: Vec<u8>,
-    index: BTreeMap<Vec<u8>, u32>,
+    /// The offset of each value, or `None` until the first addition to a heap with existing
+    /// entries (see `seed.rs`). A heap without additions thus needs no copy of its values.
+    index: Option<BTreeMap<Vec<u8>, u32>>,
     /// The start of each entry after the first, in ascending order.
     starts: Vec<u32>,
 }
@@ -221,7 +223,7 @@ impl PrefixedHeap {
         Self {
             stream,
             bytes: Vec::from([0]),
-            index: BTreeMap::new(),
+            index: Some(BTreeMap::new()),
             starts: Vec::new(),
         }
     }
@@ -231,7 +233,11 @@ impl PrefixedHeap {
         if value.is_empty() {
             return Ok(0);
         }
-        if let Some(&offset) = self.index.get(value) {
+        if self.index.is_none() {
+            self.index = Some(seed::index_entries(&self.bytes, self.stream)?);
+        }
+        let index = self.index.get_or_insert_default();
+        if let Some(&offset) = index.get(value) {
             return Ok(offset);
         }
         let length = u32::try_from(value.len())
@@ -253,7 +259,7 @@ impl PrefixedHeap {
             .map_err(|_| limit(self.stream, "heap allocation failed"))?;
         append(&mut self.bytes, prefix.as_bytes(), self.stream)?;
         append(&mut self.bytes, value, self.stream)?;
-        self.index.insert(key, offset);
+        index.insert(key, offset);
         self.starts.push(offset);
         Ok(offset)
     }

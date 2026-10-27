@@ -97,10 +97,12 @@ pub(crate) fn all() -> Vec<Scenario> {
             });
         }
     }
-    let other: [(&str, Fixture, Run); 6] = [
+    let other: [(&str, Fixture, Run); 8] = [
         ("portable/read", PORTABLE, portable::read),
         ("portable/rebuild", PORTABLE, portable::rebuild),
         ("portable/edit", PORTABLE, portable::edit),
+        ("portable/edit-document", PORTABLE, portable::edit_document),
+        ("portable/edit-method", PORTABLE, portable::edit_method),
         ("msfz/open", MSFZ, open),
         ("msfz/full-read", MSFZ, read),
         ("msfz/write-default", NATIVE_LARGE, edit::msfz_write),
