@@ -37,6 +37,9 @@ pub const MAX_CHUNK_SIZE: u32 = 1 << 30;
 /// The smallest file size with [`MsfzWriteOptions::with_pad_16k`] (16 KiB).
 pub const PAD_16K_SIZE: u64 = 16 << 10;
 
+/// The default value of [`MsfzWriteOptions::max_kept_chunk_bytes`] (256 MiB).
+const DEFAULT_MAX_KEPT_CHUNK_BYTES: usize = 256 << 20;
+
 /// The alignment of the stream directory and of the Chunk Table in the file.
 const TABLE_ALIGNMENT: u64 = 16;
 
@@ -74,7 +77,8 @@ impl Codec {
 ///
 /// The options match those of `pdbtool pdz-encode`: the maximum chunk size, one stream for each
 /// chunk, stream directory compression and padding to 16 KiB. The chunk codec selects zstd or
-/// raw DEFLATE chunks.
+/// raw DEFLATE chunks. [`MsfzWriteOptions::with_max_kept_chunk_bytes`] sets the memory that the
+/// plan uses to keep compressed chunks. It does not change the output.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MsfzWriteOptions {
     max_chunk_size: u32,
@@ -83,6 +87,7 @@ pub struct MsfzWriteOptions {
     directory_codec: Option<Codec>,
     pad_16k: bool,
     limits: MsfzLimits,
+    max_kept_chunk_bytes: usize,
 }
 
 impl MsfzWriteOptions {
@@ -180,12 +185,35 @@ impl MsfzWriteOptions {
         self.limits = limits;
         self
     }
+
+    /// Return the maximum number of compressed chunk bytes that the plan keeps.
+    #[must_use]
+    pub const fn max_kept_chunk_bytes(self) -> usize {
+        self.max_kept_chunk_bytes
+    }
+
+    /// Set the maximum number of compressed chunk bytes that the plan keeps for
+    /// [`MsfzWritePlan::write_to`]. The default is 256 MiB.
+    ///
+    /// The plan compresses each chunk to get its size. It keeps the compressed chunks in Chunk
+    /// Table order, and it stops at the first chunk that does not fit in this limit.
+    /// [`MsfzWritePlan::write_to`] writes the kept chunks. It reads and compresses the other
+    /// chunks again. Thus the limit changes the memory and the time of a write, but not the
+    /// output bytes. A value of 0 keeps no chunk.
+    ///
+    /// The plan holds at most this number of bytes for the kept chunks. If an allocation for
+    /// them fails, the plan keeps no more chunks.
+    #[must_use]
+    pub const fn with_max_kept_chunk_bytes(mut self, bytes: usize) -> Self {
+        self.max_kept_chunk_bytes = bytes;
+        self
+    }
 }
 
 impl Default for MsfzWriteOptions {
     /// Return the defaults of `pdbtool pdz-encode`: 1 MiB chunks, streams that share chunks,
     /// zstd chunks, a stored stream directory and no padding. The limits are the default
-    /// [`MsfzLimits`].
+    /// [`MsfzLimits`]. The plan keeps up to 256 MiB of compressed chunks.
     fn default() -> Self {
         Self {
             max_chunk_size: DEFAULT_MAX_CHUNK_SIZE,
@@ -194,6 +222,7 @@ impl Default for MsfzWriteOptions {
             directory_codec: None,
             pad_16k: false,
             limits: MsfzLimits::default(),
+            max_kept_chunk_bytes: DEFAULT_MAX_KEPT_CHUNK_BYTES,
         }
     }
 }
@@ -229,13 +258,18 @@ impl Default for MsfzWriteOptions {
 ///
 /// The same streams and [`MsfzWriteOptions`] thus give the same bytes.
 ///
-/// # Cost
+/// # Cost and memory
 ///
 /// The header holds the offsets of the directory and the Chunk Table, and these depend on the
 /// compressed chunk sizes. The writer writes in file order, so planning reads all stream
-/// bytes and compresses each chunk to get its size. [`MsfzWritePlan::write_to`] reads and
-/// compresses each chunk again. The memory is one chunk, its compressed bytes, the stream
-/// directory and the Chunk Table.
+/// bytes and compresses each chunk to get its size. The plan keeps the compressed chunks in
+/// Chunk Table order up to [`MsfzWriteOptions::max_kept_chunk_bytes`] (256 MiB by default).
+/// It stops at the first chunk that does not fit. [`MsfzWritePlan::write_to`] writes the kept
+/// chunks, and it reads and compresses only the other chunks again.
+///
+/// The plan holds the kept chunks (at most [`MsfzWriteOptions::max_kept_chunk_bytes`] bytes),
+/// the stream directory and the Chunk Table metadata. While it plans or writes, the writer also
+/// holds one chunk buffer and the compressed bytes of that chunk.
 ///
 /// # Limits
 ///
@@ -256,8 +290,8 @@ impl Default for MsfzWriteOptions {
 pub struct MsfzWritePlan<'a> {
     options: MsfzWriteOptions,
     layout: Layout,
-    /// The stored size of each chunk, in Chunk Table order.
-    stored_sizes: Vec<u32>,
+    /// The stored chunk sizes and the kept chunks.
+    chunks: emit::Compressed,
     /// The stream directory as the file stores it.
     directory: Vec<u8>,
     /// The size of the decompressed stream directory.
@@ -289,8 +323,9 @@ impl<'a> MsfzWritePlan<'a> {
             .ok()
             .filter(|&size| size <= limits.max_directory_bytes())
             .ok_or_else(directory_too_large)?;
-        let stored_sizes = emit::measure(&layout, source, &options)?;
-        let chunk_bytes = stored_sizes
+        let chunks = emit::measure(&layout, source, &options)?;
+        let chunk_bytes = chunks
+            .sizes
             .iter()
             .try_fold(0_u64, |sum, &size| sum.checked_add(u64::from(size)))
             .ok_or_else(file_too_large)?;
@@ -313,7 +348,7 @@ impl<'a> MsfzWritePlan<'a> {
         Ok(Self {
             options,
             layout,
-            stored_sizes,
+            chunks,
             directory,
             directory_size,
             directory_offset,
@@ -368,13 +403,14 @@ impl<'a> MsfzWritePlan<'a> {
 
     /// Write the container to `output` in file order.
     ///
-    /// The function reads and compresses one chunk at a time.
+    /// The function writes the chunks that the plan keeps. It reads and compresses the other
+    /// chunks one at a time.
     ///
     /// # Errors
     ///
     /// - An error from the source if a stream read fails.
-    /// - [`ErrorKind::InvalidFormat`] if a chunk compresses to another size than in the plan.
-    ///   This happens if the source changed after planning.
+    /// - [`ErrorKind::InvalidFormat`] if a chunk that the plan did not keep compresses to
+    ///   another size than in the plan. This happens if the source changed after planning.
     /// - [`ErrorKind::Io`] if `output` fails. The error offset is the file offset of the write.
     /// - [`ErrorKind::LimitExceeded`] if a buffer allocation fails.
     ///
