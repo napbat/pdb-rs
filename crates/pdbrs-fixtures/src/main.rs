@@ -16,7 +16,9 @@
 //! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs editor and
 //! compares each result with the original through the consumer tools. The `verify-msfz`
 //! command writes and converts MSFZ files with pdbrs and checks them through the consumer
-//! tools. The `detect` command opens each fixture output with the format facade of pdbrs.
+//! tools. The `verify-remap` command remaps the addresses of the native PDB fixtures with
+//! the pdbrs editor and checks the OMAP output through `DIA2Dump` and `pdbtool`. The `detect`
+//! command opens each fixture output with the format facade of pdbrs.
 //!
 //! The commands that read the fixture manifest do their work on `--jobs <n>` worker threads
 //! (see [`jobs`]) and print the results in fixture order.
@@ -71,6 +73,7 @@ fn main() -> ExitCode {
         Ok(Action::VerifyNativeBuild(check)) => fixture_command(check, verify::verify_native_build),
         Ok(Action::VerifyNativeEdit(check)) => fixture_command(check, verify::verify_native_edit),
         Ok(Action::VerifyMsfz(check)) => fixture_command(check, verify::verify_msfz),
+        Ok(Action::VerifyRemap(check)) => fixture_command(check, verify::verify_remap),
         Ok(Action::Detect(check)) => {
             fixture_command(check, |_, fixtures, jobs| verify::detect(fixtures, jobs))
         }

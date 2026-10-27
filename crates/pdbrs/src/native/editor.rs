@@ -12,6 +12,7 @@ pub(super) mod options;
 pub(super) mod plan;
 mod rebuild;
 mod record;
+mod remap;
 pub(super) mod report;
 mod source;
 mod streams;

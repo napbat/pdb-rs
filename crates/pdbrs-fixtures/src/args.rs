@@ -13,6 +13,7 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- verify-native-build [--fixtures <dir>] [--jobs <n>]
        cargo run -p pdbrs-fixtures -- verify-native-edit [--fixtures <dir>] [--jobs <n>]
        cargo run -p pdbrs-fixtures -- verify-msfz [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-remap [--fixtures <dir>] [--jobs <n>]
        cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>] [--jobs <n>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
@@ -59,6 +60,10 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
                  with pdbtool compare and the native example. Write the results to
                  target/verify-msfz/.
 
+  verify-remap   Remap the addresses of each native PDB fixture with the pdbrs editor
+                 (OMAP output) for five range sets, write the results to target/verify-remap/
+                 and check them with DIA2Dump, pdbtool check and the plan report.
+
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
                  with the manifest. The CLI metadata of each image must be rejected.
 
@@ -99,6 +104,9 @@ pub enum Action {
     /// Write MSFZ files from the native PDB fixtures, convert the PDZ fixtures to MSF 7.0 and
     /// check both through the consumer tools.
     VerifyMsfz(Check),
+    /// Remap the addresses of each native PDB fixture and check the OMAP output through the
+    /// consumer tools.
+    VerifyRemap(Check),
 }
 
 /// The options of a command that reads the fixture manifest.
@@ -142,6 +150,7 @@ where
         ("verify-native-build", Action::VerifyNativeBuild),
         ("verify-native-edit", Action::VerifyNativeEdit),
         ("verify-msfz", Action::VerifyMsfz),
+        ("verify-remap", Action::VerifyRemap),
     ] {
         if arguments.next_if(|argument| argument == command).is_some() {
             return check(command, &mut arguments).map(action);
@@ -286,6 +295,7 @@ mod tests {
             Ok(Action::VerifyNativeEdit(default()))
         );
         assert_eq!(run(&["verify-msfz"]), Ok(Action::VerifyMsfz(default())));
+        assert_eq!(run(&["verify-remap"]), Ok(Action::VerifyRemap(default())));
         assert_eq!(
             run(&["detect", "--fixtures", "D:/f"]),
             Ok(Action::Detect(fixtures("D:/f")))
@@ -314,6 +324,7 @@ mod tests {
             ("verify-native-build", Action::VerifyNativeBuild),
             ("verify-native-edit", Action::VerifyNativeEdit),
             ("verify-msfz", Action::VerifyMsfz),
+            ("verify-remap", Action::VerifyRemap),
         ] {
             assert_eq!(run(&[command, "--jobs", "1"]), Ok(action(with(1))));
             assert_eq!(run(&[command, "--jobs", "12"]), Ok(action(with(12))));

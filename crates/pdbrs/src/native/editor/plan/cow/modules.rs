@@ -427,8 +427,10 @@ pub(in super::super) fn plan_dbi<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()
     }
     let reason = if work.editor.dbi.is_some() {
         StreamChange::Edited
-    } else if needs_dbi(work) {
+    } else if !work.updates.records.is_empty() || work.updates.files {
         StreamChange::Rebuilt(RebuildReason::ModuleRecords)
+    } else if !work.updates.debug.is_empty() {
+        StreamChange::Rebuilt(RebuildReason::DebugHeader)
     } else {
         StreamChange::Rebuilt(RebuildReason::Identity)
     };

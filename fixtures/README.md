@@ -440,8 +440,8 @@ Otherwise DIA2Dump reads the file as an executable. `llvm-pdbutil` does not read
 ## Worker threads
 
 The commands `detect`, `verify-portable`, `verify-rebuild`, `verify-edit`,
-`verify-native-build`, `verify-native-edit` and `verify-msfz` do their work on worker threads
-(#45). The option `--jobs <n>` sets the number of workers:
+`verify-native-build`, `verify-native-edit`, `verify-msfz` and `verify-remap` do their work on
+worker threads (#45). The option `--jobs <n>` sets the number of workers:
 
 ```sh
 cargo run -p pdbrs-fixtures --release -- verify-native-build --jobs 8
@@ -978,3 +978,54 @@ Two `DIA2Dump` results are explained and do not make the command fail:
 
 A different output writes `<name>.original.txt`, `<name>.written.txt` and `<name>.diff` next to
 the output file.
+
+## Remap check
+
+The `verify-remap` command checks the OMAP output of the address remap of pdbrs (#43):
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-remap [--fixtures <dir>] [--jobs <n>]
+```
+
+The command skips `hlsl-dxc-debug`, as `verify-native-build` does. For each other
+`native-pdb` output, it reads the procedures with `SymbolLocator::procedures`. It keeps the
+procedures that are inside one code section (`IMAGE_SCN_CNT_CODE` or `IMAGE_SCN_MEM_EXECUTE`)
+and that do not overlap. The procedures and the gaps between them cut each code section into
+pieces. The command makes five range sets:
+
+| Set | New image |
+| --- | --- |
+| `identity` | Each section maps to itself |
+| `section-shift` | Each code section moves by the same amount, to an RVA after the end of the image. The other sections stay |
+| `reorder` | The pieces of each code section come in reverse order |
+| `split` | Each procedure of 2 or more bytes splits into 2 ranges, at an offset that changes from procedure to procedure. The second parts move to the end of the section |
+| `removal` | The procedures that no other record refers to have no range: no `S_PROCREF` or `S_LPROCREF` record of the global index names them, and they have no `S_SEPCODE` chunk |
+
+OMAP cannot map RVA 0, so a range at RVA 0 starts 1 byte later (the HLSL and .NET fixtures
+have a section at RVA 0). In the `reorder` set of the HLSL fixtures, the procedure moves to
+RVA 0. Its first byte thus has no mapping, and the set line counts it as a removed procedure.
+
+For each set, the command remaps the PDB with `PdbEditor::remap_addresses` and
+`RemapMode::Omap` (`IdentityPolicy::IncrementAge`). It writes the output to
+`target/verify-remap/<fixture>/<PDB file stem>/<set>.pdb` and does these checks:
+
+1. `PlanReport::changed` lists the Info stream, the DBI stream and each of the 4 OMAP output
+   streams (slots 3, 4, 5 and 10) with new bytes. `PlanReport::dropped` is empty.
+2. The pdbrs reader finds the address tables of `ImageRemap::address_tables`.
+3. The same ranges, added in reverse order, give the same bytes.
+4. `pdbtool check` shows 0 PDBs with errors.
+5. DIA2Dump on the output gives each procedure, public symbol, data symbol and line the new
+   RVA that the ranges give for its source RVA, or RVA 0 without a range:
+   - `DIA2Dump -p`, `-g` and `-s` must print the lines of the source PDB, with each RVA
+     replaced by the new RVA. The section and the offset do not change.
+   - For each start RVA of a line in `DIA2Dump -l` of the source, with a range,
+     `DIA2Dump -l <new RVA> 1` on the output must print the answer of `-l <RVA> 1` on the
+     source, with the new RVAs.
+
+Each set line gives the counts of the DIA2Dump lines that the check compared. The command
+exits with a failure for each problem and for each missing tool. These results are explained:
+
+- `DIA2Dump -g` fails on `msvc-x64-fastlink` (`DumpAllGlobals() returned no symbols`). The
+  command prints a note and does not compare `-g` for that PDB.
+- In a PDB without type merging (`link /DEBUG:LAZY`, feature `NOTM`), DIA prints a procedure
+  without a range with an empty name. The command counts these lines as explained.
