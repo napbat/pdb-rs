@@ -23,7 +23,7 @@ use pdbrs::native::symbols::{HashTable, indexed_name};
 use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
 
 /// The `T_INT4` primitive type.
-const T_INT4: TypeIndex = TypeIndex(0x74);
+pub(crate) const T_INT4: TypeIndex = TypeIndex(0x74);
 
 /// The suffix that the rename edit appends to a name. The record gets longer, so the offsets
 /// of the later records move.
@@ -238,17 +238,17 @@ fn named(
 }
 
 /// The symbol record stream and the indexes of a PDB.
-struct Indexes<'p> {
+pub(crate) struct Indexes<'p> {
     /// The symbol record stream.
-    records: &'p [u8],
+    pub records: &'p [u8],
     /// The global index.
-    globals: Option<&'p pdbrs::native::symbols::GlobalSymbolIndex>,
+    pub globals: Option<&'p pdbrs::native::symbols::GlobalSymbolIndex>,
     /// The public index.
-    publics: Option<&'p pdbrs::native::symbols::PublicSymbolIndex>,
+    pub publics: Option<&'p pdbrs::native::symbols::PublicSymbolIndex>,
 }
 
 /// Read the symbol record stream and the indexes.
-fn indexes<'p>(pdb: &'p Pdb<&[u8]>) -> pdbrs::Result<Indexes<'p>> {
+pub(crate) fn indexes<'p>(pdb: &'p Pdb<&[u8]>) -> pdbrs::Result<Indexes<'p>> {
     if pdb.debug_info()?.is_none() {
         return Err(
             pdbrs::Error::new(pdbrs::ErrorKind::MissingStream, None).with_context("PDB has no DBI")
@@ -266,7 +266,7 @@ fn indexes<'p>(pdb: &'p Pdb<&[u8]>) -> pdbrs::Result<Indexes<'p>> {
 ///
 /// A short name of letters, digits and `_` comes before other names, so that the output
 /// stays readable.
-fn first_unique<'r>(
+pub(crate) fn first_unique<'r>(
     records: &'r [u8],
     table: HashTable<'_>,
     select: impl Fn(pdbrs::native::codeview::SymbolKind) -> bool,
@@ -329,6 +329,32 @@ fn add_symbols(
     Ok(())
 }
 
+/// Return the first public symbol with a unique name (see [`first_unique`]).
+pub(crate) fn first_public<'p>(
+    indexes: &Indexes<'p>,
+) -> pdbrs::Result<Option<(&'p [u8], SymbolData<'p>)>> {
+    match indexes.publics {
+        Some(publics) => first_unique(indexes.records, publics.hash_table(), |_| true),
+        None => Ok(None),
+    }
+}
+
+/// Return the first global data, constant or UDT symbol with a unique name (see
+/// [`first_unique`]): the global symbol of the rename edit.
+pub(crate) fn first_rename_global<'p>(
+    indexes: &Indexes<'p>,
+) -> pdbrs::Result<Option<(&'p [u8], SymbolData<'p>)>> {
+    match indexes.globals {
+        Some(globals) => first_unique(indexes.records, globals.hash_table(), |kind| {
+            matches!(
+                kind,
+                S_GDATA32 | S_LDATA32 | S_GTHREAD32 | S_LTHREAD32 | S_CONSTANT | S_UDT
+            )
+        }),
+        None => Ok(None),
+    }
+}
+
 /// Rename the first unique public symbol and the first unique global data, constant or UDT
 /// symbol.
 fn rename_symbols(
@@ -338,10 +364,7 @@ fn rename_symbols(
     notes: &mut Vec<String>,
 ) -> pdbrs::Result<()> {
     let indexes = indexes(pdb)?;
-    let public = match indexes.publics {
-        Some(publics) => first_unique(indexes.records, publics.hash_table(), |_| true)?,
-        None => None,
-    };
+    let public = first_public(&indexes)?;
     if let Some((name, _)) = public {
         let new = [name, RENAME_SUFFIX.as_bytes()].concat();
         let mut publics = editor.publics_mut()?;
@@ -352,15 +375,7 @@ fn rename_symbols(
     } else {
         notes.push("no public symbol to rename".into());
     }
-    let global = match indexes.globals {
-        Some(globals) => first_unique(indexes.records, globals.hash_table(), |kind| {
-            matches!(
-                kind,
-                S_GDATA32 | S_LDATA32 | S_GTHREAD32 | S_LTHREAD32 | S_CONSTANT | S_UDT
-            )
-        })?,
-        None => None,
-    };
+    let global = first_rename_global(&indexes)?;
     if let Some((name, _)) = global {
         let new = [name, RENAME_SUFFIX.as_bytes()].concat();
         let mut globals = editor.globals_mut()?;
@@ -375,7 +390,7 @@ fn rename_symbols(
 }
 
 /// Return the error for a name that the editor does not find.
-fn absent() -> pdbrs::Error {
+pub(crate) fn absent() -> pdbrs::Error {
     pdbrs::Error::new(pdbrs::ErrorKind::InvalidReference, None)
         .with_context("the editor has no symbol record with the name")
 }
@@ -393,7 +408,7 @@ fn rename(record: Option<&mut SymbolRecord>, new: &[u8]) -> pdbrs::Result<()> {
 }
 
 /// Return the text of a name.
-fn lossy(name: &[u8]) -> String {
+pub(crate) fn lossy(name: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
 

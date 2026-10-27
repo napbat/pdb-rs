@@ -151,7 +151,7 @@ pub(crate) fn check(
     if let Some((_, guid, age)) = edited.expect.identity
         && edited.identity != (Identity::Modern { guid, age })
     {
-        problems.push("PdbEditPlan::identity differs from the new identity".to_owned());
+        problems.push("PdbWritePlan::identity differs from the new identity".to_owned());
     }
     lookups(tools, source, path, &edited.expect, &mut findings)?;
     Ok(findings)
