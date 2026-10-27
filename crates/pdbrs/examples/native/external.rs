@@ -2,17 +2,12 @@
 
 use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
-use pdbrs::native::dbi::Dbi;
 
 use crate::{Outcome, Report};
 
 /// Count the external dependencies. The example does not open the external files.
-pub(crate) fn external_dependencies(
-    pdb: &Pdb<impl ReadAt>,
-    dbi: &Dbi,
-    report: &mut Report,
-) -> Outcome {
-    let dependencies = pdb.external_dependencies(dbi)?;
+pub(crate) fn external_dependencies(pdb: &Pdb<impl ReadAt>, report: &mut Report) -> Outcome {
+    let dependencies = pdb.external_dependencies()?;
     if dependencies.mini_pdb && dependencies.fastlink_objects.is_empty() {
         report.inconsistency("FASTLINK PDB without S_FASTLINK records".to_owned());
     }

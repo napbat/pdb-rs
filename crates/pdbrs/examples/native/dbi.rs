@@ -56,7 +56,7 @@ pub(crate) fn section_header_bytes(
         if slot == DebugStream::SectionHeader.index() {
             headers = Some(original.clone());
         }
-        let Some(encoded) = encode_debug_stream(pdb, dbi, slot)? else {
+        let Some(encoded) = encode_debug_stream(pdb, slot)? else {
             report.undecoded(format!("optional debug stream slot {slot}"));
             continue;
         };
@@ -68,7 +68,7 @@ pub(crate) fn section_header_bytes(
 /// Decode the optional debug stream in `slot` and encode it again.
 ///
 /// Return `None` for a slot after the slots that [`DebugStream`] names.
-fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, slot: usize) -> Outcome<Option<Vec<u8>>> {
+fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, slot: usize) -> Outcome<Option<Vec<u8>>> {
     let missing = || "optional debug stream is missing";
     let kinds = [
         DebugStream::Fpo,
@@ -87,20 +87,19 @@ fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, slot: usize) -> Outcom
         return Ok(None);
     };
     let bytes = match kind {
-        DebugStream::Fpo => pdb.fpo(dbi)?.ok_or_else(missing)?.to_bytes()?,
-        DebugStream::NewFpo => pdb.frame_data(dbi)?.ok_or_else(missing)?.to_bytes()?,
-        DebugStream::Exception => pdb.exception_data(dbi)?.ok_or_else(missing)?.to_bytes()?,
-        DebugStream::Fixup => pdb.fixups(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Fpo => pdb.fpo()?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::NewFpo => pdb.frame_data()?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Exception => pdb.exception_data()?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::Fixup => pdb.fixups()?.ok_or_else(missing)?.to_bytes()?,
         DebugStream::OmapToSource | DebugStream::OmapFromSource => {
-            pdb.omap(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
+            pdb.omap(kind)?.ok_or_else(missing)?.to_bytes()?
         }
-        DebugStream::SectionHeader | DebugStream::OriginalSectionHeader => pdb
-            .section_headers(dbi, kind)?
-            .ok_or_else(missing)?
-            .to_bytes()?,
-        DebugStream::TokenRidMap => pdb.token_rid_map(dbi)?.ok_or_else(missing)?.to_bytes()?,
+        DebugStream::SectionHeader | DebugStream::OriginalSectionHeader => {
+            pdb.section_headers(kind)?.ok_or_else(missing)?.to_bytes()?
+        }
+        DebugStream::TokenRidMap => pdb.token_rid_map()?.ok_or_else(missing)?.to_bytes()?,
         DebugStream::Xdata | DebugStream::Pdata => {
-            pdb.debug_blob(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
+            pdb.debug_blob(kind)?.ok_or_else(missing)?.to_bytes()?
         }
         _ => return Ok(None),
     };
@@ -110,16 +109,15 @@ fn encode_debug_stream(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, slot: usize) -> Outcom
 /// Decode the FPO and new-FPO streams, and resolve each frame program in `/names`.
 pub(crate) fn frame_data(
     pdb: &Pdb<impl ReadAt>,
-    dbi: &Dbi,
     context: &Context<'_>,
     report: &mut Report,
 ) -> Outcome {
     let mut starts = Vec::new();
-    if let Some(fpo) = pdb.fpo(dbi)? {
+    if let Some(fpo) = pdb.fpo()? {
         starts.extend(fpo.iter().map(|record| record.start));
         report.add("FPO records", fpo.len());
     }
-    if let Some(frames) = pdb.frame_data(dbi)? {
+    if let Some(frames) = pdb.frame_data()? {
         for frame in &frames {
             context.names.get(NameOffset(frame.program))?;
             starts.push(frame.start);

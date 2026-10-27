@@ -84,7 +84,7 @@ fn synthetic_program_reads_back() {
     assert_eq!(dbi.header().age, 1);
     let module = dbi.modules().next().expect("one module").expect("module");
     let stream = pdb
-        .module_stream(&module)
+        .module(module.index)
         .expect("module stream")
         .expect("module stream present");
     let names: Vec<Vec<u8>> = stream
@@ -108,10 +108,10 @@ fn synthetic_program_reads_back() {
         .filter(|subsection| matches!(subsection.data, LineSubsection::Lines(_)))
         .count();
     assert_eq!(blocks, 2);
-    let globals = pdb.global_symbols(&dbi).expect("GSI").expect("GSI present");
-    assert_eq!(globals.hash_table().records().count(), 4);
-    let publics = pdb.public_symbols(&dbi).expect("PSI").expect("PSI present");
-    assert_eq!(publics.hash_table().lookup(b"main").count(), 1);
+    let globals = pdb.globals().expect("GSI").expect("GSI present");
+    assert_eq!(globals.index().hash_table().records().count(), 4);
+    let publics = pdb.publics().expect("PSI").expect("PSI present");
+    assert_eq!(publics.index().hash_table().lookup(b"main").count(), 1);
 }
 
 #[test]

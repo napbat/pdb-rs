@@ -36,6 +36,7 @@ mod gsi;
 mod psi;
 mod records;
 mod table;
+mod view;
 
 pub use gsi::GlobalSymbolIndex;
 pub use psi::{
@@ -45,6 +46,7 @@ pub use psi::{
 pub use records::{SymbolRecordStream, SymbolRecordWriter};
 pub use table::write::{HashEntry, indexed_name};
 pub use table::{Bucket, Buckets, HashHeader, HashRecord, HashRecords, HashTable};
+pub use view::{Globals, IndexedSymbols, Publics};
 
 /// The byte offset of a record in the symbol record stream.
 ///

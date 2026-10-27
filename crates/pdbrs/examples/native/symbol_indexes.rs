@@ -32,8 +32,8 @@ pub(crate) fn symbol_indexes(
         Producer::Microsoft
     };
     let (mut encoded, mut different) = (0, 0);
-    if let (Some(id), Some(globals)) = (header.global_stream, decoded(pdb.global_symbols(dbi))?) {
-        let table = globals.hash_table();
+    if let (Some(id), Some(globals)) = (header.global_stream, decoded(pdb.globals())?) {
+        let table = globals.index().hash_table();
         let entries = entries(table, symbol_records, report)?;
         let mut bytes = Vec::new();
         GlobalSymbolIndex::encode_parts(
@@ -46,7 +46,8 @@ pub(crate) fn symbol_indexes(
         encoded += 1;
         different += usize::from(bytes != pdb.stream_bytes(id)?);
     }
-    if let (Some(id), Some(publics)) = (header.public_stream, decoded(pdb.public_symbols(dbi))?) {
+    if let (Some(id), Some(publics)) = (header.public_stream, decoded(pdb.publics())?) {
+        let publics = publics.index();
         let table = publics.hash_table();
         let entries = entries(table, symbol_records, report)?;
         let fields = publics.header();

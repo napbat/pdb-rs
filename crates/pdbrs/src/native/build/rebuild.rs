@@ -138,6 +138,15 @@ fn push<T>(list: &mut Vec<T>, value: T) -> Result<()> {
     Ok(())
 }
 
+/// Copy `bytes` with a checked allocation.
+fn copy_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(bytes.len())
+        .map_err(|_| no_memory())?;
+    copy.extend_from_slice(bytes);
+    Ok(copy)
+}
+
 impl<S: ReadAt> Pdb<S> {
     /// Read all streams of the PDB for a semantic rebuild.
     ///
@@ -180,7 +189,7 @@ impl<S: ReadAt> Pdb<S> {
             if let Some(id) = module.stream {
                 claim(id)?;
             }
-            let stream = self.module_stream(&module)?;
+            let stream = self.load_module(&module)?;
             if let Some(stream) = &stream {
                 self.module_types(stream, &mut module_types, &mut claim)?;
             }
@@ -190,7 +199,7 @@ impl<S: ReadAt> Pdb<S> {
         let symbols = match header.symbol_stream {
             Some(id) => {
                 claim(id)?;
-                self.stream_bytes(id)?
+                copy_bytes(self.symbol_records()?.unwrap_or_default())?
             }
             None => Vec::new(),
         };
@@ -200,8 +209,8 @@ impl<S: ReadAt> Pdb<S> {
         {
             claim(id)?;
         }
-        let globals = self.global_symbols(&dbi)?;
-        let publics = self.public_symbols(&dbi)?;
+        let globals = self.globals()?.map(|globals| globals.index().clone());
+        let publics = self.publics()?.map(|publics| publics.index().clone());
         let mut thunk_targets = Vec::new();
         let mut section_starts = Vec::new();
         if let Some(publics) = &publics {
@@ -212,7 +221,7 @@ impl<S: ReadAt> Pdb<S> {
                 push(&mut section_starts, start)?;
             }
         }
-        let debug = self.debug_streams(&dbi, &mut claim)?;
+        let debug = self.debug_streams(dbi, &mut claim)?;
         let mut names_bytes = None;
         let mut named = Vec::new();
         let mut type_maps = Vec::new();
@@ -252,7 +261,7 @@ impl<S: ReadAt> Pdb<S> {
             names: names_bytes,
             tpi: (tpi, tpi_hash),
             ipi,
-            dbi,
+            dbi: dbi.clone(),
             modules,
             symbols,
             globals,
@@ -297,26 +306,23 @@ impl<S: ReadAt> Pdb<S> {
                     .with_context("optional debug header slot has no known stream kind")
             })?;
             let bytes = match kind {
-                DebugStream::Fpo => self.fpo(dbi)?.ok_or_else(missing)?.to_bytes()?,
-                DebugStream::NewFpo => self.frame_data(dbi)?.ok_or_else(missing)?.to_bytes()?,
-                DebugStream::Exception => {
-                    self.exception_data(dbi)?.ok_or_else(missing)?.to_bytes()?
-                }
-                DebugStream::Fixup => self.fixups(dbi)?.ok_or_else(missing)?.to_bytes()?,
+                DebugStream::Fpo => self.fpo()?.ok_or_else(missing)?.to_bytes()?,
+                DebugStream::NewFpo => self.frame_data()?.ok_or_else(missing)?.to_bytes()?,
+                DebugStream::Exception => self.exception_data()?.ok_or_else(missing)?.to_bytes()?,
+                DebugStream::Fixup => self.fixups()?.ok_or_else(missing)?.to_bytes()?,
                 DebugStream::OmapToSource | DebugStream::OmapFromSource => {
-                    self.omap(dbi, kind)?.ok_or_else(missing)?.to_bytes()?
+                    self.omap(kind)?.ok_or_else(missing)?.to_bytes()?
                 }
                 DebugStream::SectionHeader | DebugStream::OriginalSectionHeader => self
-                    .section_headers(dbi, kind)?
+                    .section_headers(kind)?
                     .ok_or_else(missing)?
                     .to_bytes()?,
                 DebugStream::TokenRidMap => {
-                    self.token_rid_map(dbi)?.ok_or_else(missing)?.to_bytes()?
+                    self.token_rid_map()?.ok_or_else(missing)?.to_bytes()?
                 }
-                DebugStream::Xdata | DebugStream::Pdata => self
-                    .debug_blob(dbi, kind)?
-                    .ok_or_else(missing)?
-                    .to_bytes()?,
+                DebugStream::Xdata | DebugStream::Pdata => {
+                    self.debug_blob(kind)?.ok_or_else(missing)?.to_bytes()?
+                }
             };
             push(&mut streams, (kind, bytes))?;
         }

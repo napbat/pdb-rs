@@ -26,10 +26,7 @@ pub fn pdb(data: &[u8]) {
     let Some(pdb) = ok(Pdb::with_options(data, options)) else {
         return;
     };
-    let names_bytes = ok(pdb.named_stream_bytes(b"/names")).flatten();
-    let names = names_bytes
-        .as_deref()
-        .and_then(|bytes| ok(StringTable::parse(bytes)));
+    let names = ok(pdb.names()).flatten();
     if let Some(names) = &names {
         info::walk_names(names);
     }
@@ -48,6 +45,8 @@ pub fn pdb(data: &[u8]) {
     }
     let tpi = ok(pdb.types()).flatten();
     let ipi = ok(pdb.ids()).flatten();
+    let _ = ok(pdb.type_offsets());
+    let _ = ok(pdb.id_offsets());
     let tpi_end = tpi
         .as_ref()
         .map_or(TypeIndex(0x1000), |tpi| TypeIndex(tpi.header().index_end));
@@ -62,7 +61,7 @@ pub fn pdb(data: &[u8]) {
     let Some(dbi) = ok(pdb.debug_info()).flatten() else {
         return;
     };
-    debug_info(&pdb, &dbi, names.as_ref());
+    debug_info(&pdb, dbi, names.as_ref());
 }
 
 /// Load a hash stream, if the header names one.
@@ -76,12 +75,12 @@ fn debug_info<S: ReadAt>(pdb: &Pdb<S>, dbi: &Dbi, names: Option<&StringTable<'_>
         .debug_stream(pdbrs::native::dbi::DebugStream::SectionHeader)
         .and_then(|id| ok(pdb.stream_bytes(id)));
     dbi::walk_dbi(dbi, headers.as_deref());
-    if let Some(fpo) = ok(pdb.fpo(dbi)).flatten() {
+    if let Some(fpo) = ok(pdb.fpo()).flatten() {
         for record in &fpo {
             let _ = record.start;
         }
     }
-    if let Some(frames) = ok(pdb.frame_data(dbi)).flatten() {
+    if let Some(frames) = ok(pdb.frame_data()).flatten() {
         for frame in &frames {
             if let Some(names) = names {
                 let _ = names.get(NameOffset(frame.program));
@@ -92,21 +91,21 @@ fn debug_info<S: ReadAt>(pdb: &Pdb<S>, dbi: &Dbi, names: Option<&StringTable<'_>
         let Some(module) = ok(module) else {
             break;
         };
-        if let Some(Some(stream)) = ok(pdb.module_stream(&module)) {
+        if let Some(Some(stream)) = ok(pdb.module(module.index)) {
             dbi::walk_module(&stream);
         }
     }
     let Some(id) = dbi.header().symbol_stream else {
         return;
     };
-    let Some(records) = ok(pdb.stream_bytes(id)) else {
+    let Some(Some(records)) = ok(pdb.symbol_records()) else {
         return;
     };
-    let offsets = symbols::walk_records(&records, id);
-    if let Some(Some(globals)) = ok(pdb.global_symbols(dbi)) {
-        symbols::walk_globals(&globals, &records, offsets.as_ref());
+    let offsets = symbols::walk_records(records, id);
+    if let Some(Some(globals)) = ok(pdb.globals()) {
+        symbols::walk_globals(globals.index(), records, offsets.as_ref());
     }
-    if let Some(Some(publics)) = ok(pdb.public_symbols(dbi)) {
-        symbols::walk_publics(&publics, &records, offsets.as_ref());
+    if let Some(Some(publics)) = ok(pdb.publics()) {
+        symbols::walk_publics(publics.index(), records, offsets.as_ref());
     }
 }

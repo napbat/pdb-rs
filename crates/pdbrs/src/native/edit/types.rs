@@ -58,7 +58,7 @@ fn too_large(context: &'static str) -> Error {
 /// the index ends.
 pub(super) fn plan<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     types: &AddedRecords,
     ids: &AddedRecords,
     changes: &mut Changes,

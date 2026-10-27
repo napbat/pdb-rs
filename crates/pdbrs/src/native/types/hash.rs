@@ -211,31 +211,7 @@ impl<'a> TypeHashes<'a> {
 
     /// Make sure that the pairs are sorted and inside the records.
     fn check_index_offsets(&self, header: &TypeHeader, start: u32) -> Result<()> {
-        let mut previous: Option<IndexOffset> = None;
-        let mut offset = start;
-        for pair in self.index_offsets() {
-            if !(header.index_begin..header.index_end).contains(&pair.index)
-                || pair.offset >= header.record_bytes
-            {
-                return Err(error(
-                    ErrorKind::InvalidReference,
-                    "type index offset pair is outside the records",
-                    self.stream,
-                    offset,
-                ));
-            }
-            if previous.is_some_and(|last| last.index >= pair.index || last.offset >= pair.offset) {
-                return Err(error(
-                    ErrorKind::InvalidFormat,
-                    "type index offset pairs are not sorted",
-                    self.stream,
-                    offset,
-                ));
-            }
-            previous = Some(pair);
-            offset = offset.wrapping_add(8);
-        }
-        Ok(())
+        check_index_offsets(header, self.index_offsets(), self.stream, start)
     }
 
     /// Check the buffers against the records of `types`.
@@ -354,6 +330,48 @@ impl<'a> TypeHashes<'a> {
         })?;
         types.record_at(offset, index)
     }
+}
+
+/// Make sure that the index offset `pairs` of `header` are sorted and inside the records.
+///
+/// `start` is the offset of the first pair in the hash `stream`, for the error location.
+pub(super) fn check_index_offsets(
+    header: &TypeHeader,
+    pairs: impl IntoIterator<Item = IndexOffset>,
+    stream: StreamId,
+    start: u32,
+) -> Result<()> {
+    let mut previous: Option<IndexOffset> = None;
+    let mut offset = start;
+    for pair in pairs {
+        if !(header.index_begin..header.index_end).contains(&pair.index)
+            || pair.offset >= header.record_bytes
+        {
+            return Err(error(
+                ErrorKind::InvalidReference,
+                "type index offset pair is outside the records",
+                stream,
+                offset,
+            ));
+        }
+        if previous.is_some_and(|last| last.index >= pair.index || last.offset >= pair.offset) {
+            return Err(error(
+                ErrorKind::InvalidFormat,
+                "type index offset pairs are not sorted",
+                stream,
+                offset,
+            ));
+        }
+        previous = Some(pair);
+        offset = offset.wrapping_add(8);
+    }
+    Ok(())
+}
+
+/// Return the index offset pairs of an index offset buffer. A partial pair at the end is
+/// ignored.
+pub(super) fn index_offset_pairs(bytes: &[u8]) -> IndexOffsets<'_> {
+    IndexOffsets(bytes.as_chunks::<PAIR_SIZE>().0.iter())
 }
 
 /// Make sure that the non-empty buffers cover `bytes` without gaps or overlaps.

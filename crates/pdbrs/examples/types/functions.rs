@@ -56,7 +56,7 @@ pub fn procedures(
     };
     let mut count = 0;
     for module in dbi.modules() {
-        let Some(stream) = pdb.module_stream(&module?)? else {
+        let Some(stream) = pdb.module(module?.index)? else {
             continue;
         };
         for record in stream.symbols() {

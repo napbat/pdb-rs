@@ -9,7 +9,8 @@
 //! [`TypeStream`] validates the header and frames the records on demand.
 //! [`TypeTable`] finds records by index, and [`ForwardRefs`] resolves
 //! forward references to their definitions. [`TypeHashes`] decodes the
-//! hash stream and checks it against the records. Use
+//! hash stream and checks it against the records. [`TypeOffsets`] holds only
+//! the header and the index offset pairs. Use
 //! [`crate::native::codeview::type_record::TypeLeaf`] to decode a TPI record.
 
 use alloc::vec::Vec;
@@ -24,6 +25,7 @@ use crate::{Error, ErrorKind, Result};
 mod forward;
 mod hash;
 mod lookup;
+mod offsets;
 mod size;
 mod validate;
 mod write;
@@ -31,6 +33,7 @@ mod write;
 pub use forward::ForwardRefs;
 pub use hash::{HashAdjuster, HashValues, IndexOffset, IndexOffsets, TypeHashes, type_record_hash};
 pub use lookup::{FieldMembers, TypeTable};
+pub use offsets::TypeOffsets;
 pub use size::type_size;
 pub use validate::{ReferenceLimits, ReferenceSummary, validate_type_references};
 pub use write::{
@@ -395,6 +398,14 @@ fn hash_buffer(fields: &mut Fields<'_>) -> Result<HashBuffer> {
 
 /// Read and validate the header at the start of `bytes`.
 fn parse_header(bytes: &[u8]) -> Result<TypeHeader> {
+    parse_header_prefix(bytes, bytes.len())
+}
+
+/// Read and validate the header at the start of `bytes`, the first bytes of a type stream of
+/// `stream_len` bytes.
+///
+/// `bytes` needs only the header. The checks are the checks of [`TypeStream::parse`].
+pub(crate) fn parse_header_prefix(bytes: &[u8], stream_len: usize) -> Result<TypeHeader> {
     let mut fields = Fields::new(
         bytes,
         ErrorKind::UnexpectedEof,
@@ -424,7 +435,7 @@ fn parse_header(bytes: &[u8]) -> Result<TypeHeader> {
         hash_adjustments: hash_buffer(&mut fields)?,
     };
     validate_indices(&header)?;
-    validate_length(&header, fields.rest().len())?;
+    validate_length(&header, stream_len.saturating_sub(HEADER_SIZE))?;
     validate_hash(&header)?;
     Ok(header)
 }

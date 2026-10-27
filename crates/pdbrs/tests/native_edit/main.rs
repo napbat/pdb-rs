@@ -109,10 +109,13 @@ fn symbols(bytes: &[u8]) -> Symbols {
     let pdb = Pdb::parse(bytes).expect("PDB");
     let dbi = pdb.debug_info().expect("DBI").expect("DBI present");
     let id = dbi.header().symbol_stream.expect("symbol record stream");
-    let records = pdb.stream_bytes(id).expect("symbol records");
-    let offsets = RecordOffsets::frame(&records, id).expect("records frame");
-    let globals = pdb.global_symbols(&dbi).expect("GSI").expect("GSI present");
-    let publics = pdb.public_symbols(&dbi).expect("PSI").expect("PSI present");
+    let records = pdb
+        .symbol_records()
+        .expect("symbol records")
+        .expect("present");
+    let offsets = RecordOffsets::frame(records, id).expect("records frame");
+    let globals = pdb.globals().expect("GSI").expect("GSI present").index();
+    let publics = pdb.publics().expect("PSI").expect("PSI present").index();
     globals
         .hash_table()
         .check_records(&offsets)
@@ -120,7 +123,7 @@ fn symbols(bytes: &[u8]) -> Symbols {
     publics.check_records(&offsets).expect("public offsets");
     publics
         .check_address_order(|offset| {
-            let symbol = Symbol::decode(offset.record(&records)?)?;
+            let symbol = Symbol::decode(offset.record(records)?)?;
             match symbol.data() {
                 SymbolData::Public(public) => Ok((public.address.section, public.address.offset)),
                 _ => Err(pdbrs::Error::new(ErrorKind::InvalidFormat, None)),
@@ -128,8 +131,8 @@ fn symbols(bytes: &[u8]) -> Symbols {
         })
         .expect("address order");
     Symbols {
-        globals: names(&records, globals.hash_table()),
-        publics: names(&records, publics.hash_table()),
+        globals: names(records, globals.hash_table()),
+        publics: names(records, publics.hash_table()),
     }
 }
 

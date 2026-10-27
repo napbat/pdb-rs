@@ -223,28 +223,26 @@ fn named(
 }
 
 /// The symbol record stream and the indexes of a PDB.
-struct Indexes {
+struct Indexes<'p> {
     /// The symbol record stream.
-    records: Vec<u8>,
-    /// The global index stream bytes.
-    globals: Option<pdbrs::native::symbols::GlobalSymbolIndex>,
-    /// The public index stream bytes.
-    publics: Option<pdbrs::native::symbols::PublicSymbolIndex>,
+    records: &'p [u8],
+    /// The global index.
+    globals: Option<&'p pdbrs::native::symbols::GlobalSymbolIndex>,
+    /// The public index.
+    publics: Option<&'p pdbrs::native::symbols::PublicSymbolIndex>,
 }
 
 /// Read the symbol record stream and the indexes.
-fn indexes(pdb: &Pdb<&[u8]>) -> pdbrs::Result<Indexes> {
-    let dbi = pdb.debug_info()?.ok_or_else(|| {
-        pdbrs::Error::new(pdbrs::ErrorKind::MissingStream, None).with_context("PDB has no DBI")
-    })?;
-    let records = match dbi.header().symbol_stream {
-        Some(id) => pdb.stream_bytes(id)?,
-        None => Vec::new(),
-    };
+fn indexes<'p>(pdb: &'p Pdb<&[u8]>) -> pdbrs::Result<Indexes<'p>> {
+    if pdb.debug_info()?.is_none() {
+        return Err(
+            pdbrs::Error::new(pdbrs::ErrorKind::MissingStream, None).with_context("PDB has no DBI")
+        );
+    }
     Ok(Indexes {
-        records,
-        globals: pdb.global_symbols(&dbi)?,
-        publics: pdb.public_symbols(&dbi)?,
+        records: pdb.symbol_records()?.unwrap_or_default(),
+        globals: pdb.globals()?.map(|globals| globals.index()),
+        publics: pdb.publics()?.map(|publics| publics.index()),
     })
 }
 
@@ -292,9 +290,9 @@ fn add_symbols(
         offset: 0,
     };
     let mut flags = pdbrs::native::codeview::symbol::PublicFlags(0);
-    if let Some(publics) = &indexes.publics
+    if let Some(publics) = indexes.publics
         && let Some((_, SymbolData::Public(public))) =
-            first_unique(&indexes.records, publics.hash_table(), |_| true)?
+            first_unique(indexes.records, publics.hash_table(), |_| true)?
     {
         address = public.address;
         flags = public.flags;
@@ -323,8 +321,8 @@ fn rename_symbols(
     notes: &mut Vec<String>,
 ) -> pdbrs::Result<()> {
     let indexes = indexes(pdb)?;
-    let public = match &indexes.publics {
-        Some(publics) => first_unique(&indexes.records, publics.hash_table(), |_| true)?,
+    let public = match indexes.publics {
+        Some(publics) => first_unique(indexes.records, publics.hash_table(), |_| true)?,
         None => None,
     };
     if let Some((name, _)) = public {
@@ -335,8 +333,8 @@ fn rename_symbols(
     } else {
         notes.push("no public symbol to rename".into());
     }
-    let global = match &indexes.globals {
-        Some(globals) => first_unique(&indexes.records, globals.hash_table(), |kind| {
+    let global = match indexes.globals {
+        Some(globals) => first_unique(indexes.records, globals.hash_table(), |kind| {
             matches!(
                 kind,
                 S_GDATA32 | S_LDATA32 | S_GTHREAD32 | S_LTHREAD32 | S_CONSTANT | S_UDT

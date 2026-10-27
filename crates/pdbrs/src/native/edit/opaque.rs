@@ -61,7 +61,7 @@ pub(super) struct TypeStreams {
 /// Return the type maps without an owner and the module type streams.
 pub(super) fn check<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     scope: Scope,
 ) -> Result<TypeStreams> {
     let streams = check_streams(pdb, context)?;
@@ -73,7 +73,7 @@ pub(super) fn check<S: ReadAt>(
 
 /// Return an error for a stream without a known role or a named stream
 /// without a decoder.
-fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStreams> {
+fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeStreams> {
     let count = pdb.container().stream_count();
     let mut claimed = Vec::new();
     claimed
@@ -95,7 +95,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStrea
         claim(ipi.header().hash_stream);
         claim(ipi.header().hash_aux_stream);
     }
-    let dbi = &context.dbi;
+    let dbi = context.dbi;
     let header = dbi.header();
     claim(header.global_stream);
     claim(header.public_stream);
@@ -104,7 +104,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStrea
     for module in dbi.modules() {
         let module = module?;
         claim(module.stream);
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let Some(stream) = pdb.load_module(&module)? else {
             continue;
         };
         if let Some(reference) = ModuleTypeReference::find(stream.symbol_data())? {
@@ -162,15 +162,15 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<TypeStrea
 
 /// Return an error for a symbol record of an unknown kind, a C13 subsection
 /// of an unknown kind or C11 line data.
-fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
+fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<()> {
     let unknown_symbol = || {
         opaque(
             "the edit moves symbol records, and a symbol record of an unknown kind can refer to them",
         )
     };
     if let Some(id) = context.dbi.header().symbol_stream {
-        let bytes = pdb.stream_bytes(id)?;
-        for record in Records::new(&bytes) {
+        let bytes = pdb.symbol_records()?.unwrap_or_default();
+        for record in Records::new(bytes) {
             let record = record?;
             if matches!(Symbol::decode(record)?.data(), SymbolData::Unsupported(_)) {
                 return Err(unknown_symbol().with_stream(id, u64::from(record.offset)));
@@ -179,7 +179,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context) -> Result<()> {
     }
     for module in context.dbi.modules() {
         let module = module?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let Some(stream) = pdb.load_module(&module)? else {
             continue;
         };
         let id = stream.stream().0;

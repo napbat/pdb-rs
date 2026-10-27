@@ -130,14 +130,14 @@ fn find(records: &[u8], table: HashTable<'_>, name: &[u8]) -> Result<SymbolOffse
 }
 
 /// The source indexes of the symbol record stream.
-struct Indexes {
+struct Indexes<'p> {
     /// The global index and its stream.
-    globals: Option<(StreamId, GlobalSymbolIndex)>,
+    globals: Option<(StreamId, &'p GlobalSymbolIndex)>,
     /// The public index and its stream.
-    publics: Option<(StreamId, PublicSymbolIndex)>,
+    publics: Option<(StreamId, &'p PublicSymbolIndex)>,
 }
 
-impl Indexes {
+impl Indexes<'_> {
     /// Return the hash table of `index`.
     fn table(&self, index: SymbolIndex) -> Result<HashTable<'_>> {
         match index {
@@ -158,7 +158,7 @@ impl Indexes {
 /// Find the record of each rename. Return the new name by source offset.
 fn resolve<'r>(
     records: &[u8],
-    indexes: &Indexes,
+    indexes: &Indexes<'_>,
     renames: &'r [Rename],
 ) -> Result<BTreeMap<u32, (SymbolIndex, &'r [u8])>> {
     let mut targets = BTreeMap::new();
@@ -239,7 +239,7 @@ fn entries(
 /// Apply the symbol edits.
 pub(super) fn plan<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     added: &[AddedSymbol],
     renames: &[Rename],
     ends: Ends,
@@ -249,13 +249,19 @@ pub(super) fn plan<S: ReadAt>(
     let stream = header
         .symbol_stream
         .ok_or_else(|| missing("PDB has no symbol record stream"))?;
-    let records = pdb.stream_bytes(stream)?;
+    let records = pdb
+        .symbol_records()?
+        .ok_or_else(|| missing("PDB has no symbol record stream"))?;
     let indexes = Indexes {
-        globals: header.global_stream.zip(pdb.global_symbols(&context.dbi)?),
-        publics: header.public_stream.zip(pdb.public_symbols(&context.dbi)?),
+        globals: header
+            .global_stream
+            .zip(pdb.globals()?.map(|globals| globals.index())),
+        publics: header
+            .public_stream
+            .zip(pdb.publics()?.map(|publics| publics.index())),
     };
-    let targets = resolve(&records, &indexes, renames)?;
-    let (mut out, map) = rewrite(&records, &targets)?;
+    let targets = resolve(records, &indexes, renames)?;
+    let (mut out, map) = rewrite(records, &targets)?;
     if map.moved() {
         opaque::check(pdb, context, Scope::Records)?;
     }
@@ -350,13 +356,13 @@ pub(super) fn plan<S: ReadAt>(
 /// whose references change.
 fn move_global_refs<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     map: &OffsetMap,
     changes: &mut Changes,
 ) -> Result<()> {
     for module in context.dbi.modules() {
         let module = module?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let Some(stream) = pdb.load_module(&module)? else {
             continue;
         };
         let mut moved = Vec::new();

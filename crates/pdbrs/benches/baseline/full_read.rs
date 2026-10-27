@@ -22,7 +22,6 @@ use pdbrs::native::dbi::Dbi;
 use pdbrs::native::injected_source::{SourceHeaderBlock, content_stream_name};
 use pdbrs::native::lines::{LineSubsection, ModuleLines};
 use pdbrs::native::msf::StreamId;
-use pdbrs::native::names::StringTable;
 use pdbrs::native::types::{TypeHashes, TypeStream};
 use pdbrs::{ErrorKind, Result as PdbResult};
 
@@ -46,9 +45,7 @@ fn supported<T>(result: PdbResult<T>) -> Outcome<Option<T>> {
 /// Decode `pdb` and return the number of decoded records and streams.
 pub(crate) fn full_read(pdb: &Pdb<impl ReadAt>) -> Outcome<u64> {
     let mut count = 0;
-    let names_bytes = pdb.named_stream_bytes(b"/names")?;
-    if let Some(bytes) = &names_bytes {
-        let names = StringTable::parse(bytes)?;
+    if let Some(names) = pdb.names()? {
         count += u64::try_from(names.entries().count())?;
     }
     count += named_streams(pdb)?;
@@ -57,9 +54,9 @@ pub(crate) fn full_read(pdb: &Pdb<impl ReadAt>) -> Outcome<u64> {
     count += type_records(pdb, &tpi, false)?;
     count += type_records(pdb, &ipi, true)?;
     let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
-    count += debug_info_tables(pdb, &dbi)?;
-    count += modules(pdb, &dbi)?;
-    count += shared_symbols(pdb, &dbi)?;
+    count += debug_info_tables(pdb, dbi)?;
+    count += modules(pdb, dbi)?;
+    count += shared_symbols(pdb)?;
     Ok(count)
 }
 
@@ -125,10 +122,9 @@ fn injected_sources(pdb: &Pdb<impl ReadAt>, bytes: &[u8], id: StreamId) -> Outco
     let Some(Some(block)) = supported(SourceHeaderBlock::parse(bytes, id))? else {
         return Ok(0);
     };
-    let Some(names_bytes) = pdb.named_stream_bytes(b"/names")? else {
+    let Some(names) = pdb.names()? else {
         return Err("injected sources without /names".into());
     };
-    let names = StringTable::parse(&names_bytes)?;
     let mut count = 0;
     for entry in block.entries() {
         let virtual_name = names.get(entry.value.virtual_file_name_offset)?;
@@ -184,13 +180,13 @@ fn debug_info_tables(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
         count += u64::try_from(ec.entries().count())?;
     }
     count += u64::try_from(dbi.type_server_map()?.len())?;
-    if let Some(fpo) = pdb.fpo(dbi)? {
+    if let Some(fpo) = pdb.fpo()? {
         count += u64::try_from(fpo.len())?;
     }
-    if let Some(frames) = pdb.frame_data(dbi)? {
+    if let Some(frames) = pdb.frame_data()? {
         count += u64::try_from(frames.len())?;
     }
-    if let Some(tables) = pdb.address_tables(dbi)? {
+    if let Some(tables) = pdb.address_tables()? {
         count += u64::try_from(tables.map().sections().len())?;
     }
     Ok(count)
@@ -201,7 +197,7 @@ fn modules(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
     let mut count = 0;
     for module in dbi.modules() {
         let module = module?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let Some(stream) = pdb.module(module.index)? else {
             continue;
         };
         let base = ModuleSymbolOffset(u32::try_from(stream.symbol_offset())?);
@@ -239,25 +235,24 @@ fn modules(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
 }
 
 /// Decode the symbol record stream and the records of the global and public indexes.
-fn shared_symbols(pdb: &Pdb<impl ReadAt>, dbi: &Dbi) -> Outcome<u64> {
-    let Some(id) = dbi.header().symbol_stream else {
+fn shared_symbols(pdb: &Pdb<impl ReadAt>) -> Outcome<u64> {
+    let Some(bytes) = pdb.symbol_records()? else {
         return Ok(0);
     };
-    let bytes = pdb.stream_bytes(id)?;
     let mut count = 0;
-    for record in Records::new(&bytes) {
+    for record in Records::new(bytes) {
         std::hint::black_box(Symbol::decode(record?)?);
         count += 1;
     }
-    if let Some(globals) = supported(pdb.global_symbols(dbi))?.flatten() {
-        for entry in globals.hash_table().records() {
-            std::hint::black_box(Symbol::decode(entry.symbol.record(&bytes)?)?);
+    if let Some(globals) = supported(pdb.globals())?.flatten() {
+        for symbol in globals.symbols() {
+            std::hint::black_box(symbol?);
             count += 1;
         }
     }
-    if let Some(publics) = supported(pdb.public_symbols(dbi))?.flatten() {
-        for entry in publics.hash_table().records() {
-            std::hint::black_box(Symbol::decode(entry.symbol.record(&bytes)?)?);
+    if let Some(publics) = supported(pdb.publics())?.flatten() {
+        for symbol in publics.symbols() {
+            std::hint::black_box(symbol?);
             count += 1;
         }
     }

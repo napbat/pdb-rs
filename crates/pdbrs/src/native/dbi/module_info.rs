@@ -252,6 +252,11 @@ pub struct Modules<'a> {
 }
 
 impl<'a> Modules<'a> {
+    /// Return the position of the next record in the module info substream.
+    pub(crate) const fn position(&self) -> usize {
+        self.position
+    }
+
     /// Decode the record at the current position.
     fn read(&self) -> Result<(Module<'a>, usize)> {
         let start = self.position;

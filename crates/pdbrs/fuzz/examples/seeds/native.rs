@@ -89,7 +89,7 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
     }
     named_streams(&pdb, &names_bytes, corpus)?;
     if let Some(dbi) = pdb.debug_info()? {
-        debug_info(&pdb, &dbi, &mut kinds, corpus)?;
+        debug_info(&pdb, dbi, &mut kinds, corpus)?;
     }
     Ok(())
 }
@@ -213,7 +213,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
         let sizes = [module.symbol_bytes, module.c11_bytes, module.c13_bytes];
         let prefix: Vec<u8> = sizes.iter().flat_map(|size| size.to_le_bytes()).collect();
         corpus.add_parts("native_module", &prefix, &[], &bytes)?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let Some(stream) = pdb.module(module.index)? else {
             continue;
         };
         corpus.add("native_symbols", stream.symbol_data())?;

@@ -143,8 +143,7 @@ fn notm() -> Vec<u8> {
 
 /// Return the type record streams of the modules of `pdb`, by module.
 fn module_type_streams(pdb: &Pdb<&[u8]>) -> Vec<(u32, ModuleTypeSource)> {
-    let dbi = pdb.debug_info().expect("DBI").expect("DBI stream");
-    pdb.external_dependencies(&dbi)
+    pdb.external_dependencies()
         .expect("dependencies")
         .module_types
         .iter()
@@ -260,8 +259,7 @@ fn precompiled() -> Vec<u8> {
 fn precompiled_types_of_lazy_pdbs_are_external_dependencies() {
     let bytes = precompiled();
     let pdb = Pdb::parse(bytes.as_slice()).expect("PDB");
-    let dbi = pdb.debug_info().expect("DBI").expect("DBI stream");
-    let dependencies = pdb.external_dependencies(&dbi).expect("dependencies");
+    let dependencies = pdb.external_dependencies().expect("dependencies");
     let objects: Vec<_> = dependencies
         .object_precompiled_types
         .iter()

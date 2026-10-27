@@ -209,6 +209,18 @@ impl Dbi {
         }
     }
 
+    /// Return an iterator over the module info records from the record at `position` in the
+    /// module info substream. The first record gets the module index `index`.
+    ///
+    /// Get `position` from [`Modules::position`] of the same stream.
+    pub(crate) fn modules_at(&self, position: usize, index: u32) -> Modules<'_> {
+        Modules {
+            position,
+            index,
+            ..self.modules()
+        }
+    }
+
     /// Return an iterator over all slots of the optional debug header.
     ///
     /// The iterator also returns slots after the slots that [`DebugStream`] names.

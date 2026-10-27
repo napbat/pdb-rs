@@ -10,7 +10,7 @@ use pdbrs::native::codeview::id_record::{IdRecord, IdTable};
 use pdbrs::native::codeview::index::TypeIndex;
 use pdbrs::native::codeview::symbol::{ModuleTypeReference, ModuleTypeSource};
 use pdbrs::native::codeview::type_record::TypeLeaf;
-use pdbrs::native::dbi::{Dbi, ModuleStream};
+use pdbrs::native::dbi::ModuleStream;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::types::{ForwardRefs, TypeStream, TypeTable, type_size};
 
@@ -60,18 +60,13 @@ fn read(pdb: &Pdb<impl ReadAt>, id: StreamId, report: &mut Report) -> Outcome<Ty
 /// A module that uses the records of another module (`fRefTM`) gets the records of that module.
 pub(crate) fn streams(
     pdb: &Pdb<impl ReadAt>,
-    dbi: &Dbi,
     stream: &ModuleStream,
     report: &mut Report,
 ) -> Outcome<Option<ModuleTypeStreams>> {
     let mut source = source(stream)?;
     if let Some(ModuleTypeSource::OtherModule { module }) = source {
-        let owner = dbi
-            .modules()
-            .nth(usize::try_from(module.0)?)
-            .ok_or("S_MOD_TYPEREF names a missing module")??;
         let owner = pdb
-            .module_stream(&owner)?
+            .module(module)?
             .ok_or("S_MOD_TYPEREF names a module without a stream")?;
         source = self::source(&owner)?;
         report.add("modules with the type records of another module", 1);
