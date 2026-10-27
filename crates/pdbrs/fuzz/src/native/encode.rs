@@ -34,9 +34,9 @@ fn single_record(bytes: &[u8]) -> Record<'_> {
 }
 
 /// Return the members of a field list, or `None` if a member does not decode.
-fn members<'a>(
-    list: &pdbrs::native::codeview::field_list::FieldList<'a>,
-) -> Option<Vec<Member<'a>>> {
+fn members<'b>(
+    list: &'b pdbrs::native::codeview::field_list::FieldList<'_>,
+) -> Option<Vec<Member<'b>>> {
     list.members().collect::<pdbrs::Result<_>>().ok()
 }
 
@@ -94,7 +94,7 @@ fn field_list<'a>(members: impl Iterator<Item = pdbrs::Result<Member<'a>>>) {
         for member in list.members() {
             let member = member.expect("an encoded member decodes");
             if !matches!(member, Member::Continuation(_)) {
-                again.push(member);
+                again.push(member.into_owned());
             }
         }
     }

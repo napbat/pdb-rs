@@ -193,7 +193,9 @@ fn walk_table(table: &HashTable<'_>, records: &[u8], offsets: Option<&RecordOffs
             assert!(!checked, "a checked index names a record");
             continue;
         };
-        if let Some(name) = ok(Symbol::decode(record)).and_then(|symbol| symbol.name()) {
+        if let Some(symbol) = ok(Symbol::decode(record))
+            && let Some(name) = symbol.name()
+        {
             let _ = table.lookup(name).count();
         }
     }

@@ -5,9 +5,7 @@ use pdbrs::native::Producer;
 use pdbrs::native::auxiliary::{
     LinkInfo, SourceLink, SourceServer, TmCache, TmCacheBuilder, TypeMapStream, UdtSourceLineUndone,
 };
-use pdbrs::native::dbi::{
-    Dbi, DbiBuilder, ModuleStream, ModuleStreamParts, OwnedModule, Substream,
-};
+use pdbrs::native::dbi::{Dbi, DbiBuilder, ModuleStream, ModuleStreamParts, Substream};
 use pdbrs::native::debug_stream::{
     FixupStream, FunctionEntryStream, OmapStream, RvaVaBlob, TokenRidMap,
 };
@@ -79,7 +77,7 @@ pub fn module(data: &[u8]) {
     let Some(dbi) = module_dbi(sizes) else {
         return;
     };
-    let Some(Ok(module)) = dbi.modules().next() else {
+    let Some(Ok((_, module))) = dbi.modules().next() else {
         return;
     };
     let Some(stream) = ok(ModuleStream::parse(input.rest().to_vec(), &module)) else {
@@ -99,7 +97,8 @@ pub fn module(data: &[u8]) {
         .modules()
         .next()
         .expect("a module record decodes")
-        .expect("a module record decodes");
+        .expect("a module record decodes")
+        .1;
     let again =
         ModuleStream::parse(encoded, &again_module).expect("an encoded module stream parses");
     assert_eq!(again.symbol_data(), stream.symbol_data());
@@ -117,10 +116,10 @@ pub fn module(data: &[u8]) {
     };
     let refs: Vec<_> = refs.iter().collect();
     let mut parts = ModuleStreamParts::default();
-    parts.symbols = Some(stream.symbol_data());
-    parts.c11 = stream.c11_data();
-    parts.c13 = &c13;
-    parts.global_refs = &refs;
+    parts.symbols = Some(stream.symbol_data().into());
+    parts.c11 = stream.c11_data().into();
+    parts.c13 = c13.as_slice().into();
+    parts.global_refs = refs.into();
     let mut rebuilt = Vec::new();
     let region_sizes = parts
         .encode(&mut rebuilt)
@@ -135,7 +134,8 @@ pub fn module(data: &[u8]) {
         .modules()
         .next()
         .expect("a module record decodes")
-        .expect("a module record decodes");
+        .expect("a module record decodes")
+        .1;
     let rebuilt =
         ModuleStream::parse(rebuilt, &rebuilt_module).expect("a rebuilt module stream parses");
     let again = ModuleLines::parse(&rebuilt).expect("encoded line data decodes");
@@ -198,7 +198,7 @@ pub fn names(data: &[u8]) {
         .expect("a string table model encodes");
     let again = StringTable::parse(&rebuilt).expect("an encoded string table parses");
     for entry in table.entries() {
-        assert_eq!(again.get(entry.offset).ok(), Some(entry.name));
+        assert_eq!(again.get(entry.offset).ok(), Some(entry.name.as_bytes()));
     }
 }
 
@@ -237,11 +237,16 @@ pub fn dbi(data: &[u8]) {
             );
         }
     }
-    for module in dbi.modules() {
-        let Some(module) = ok(module) else {
+    let mut modules = dbi.modules();
+    loop {
+        let start = modules.position();
+        let Some(module) = modules.next() else {
             break;
         };
-        let owned = OwnedModule::from_module(&module).expect("a decoded module record has a model");
+        let Some((_, module)) = ok(module) else {
+            break;
+        };
+        let owned = module.clone().into_owned();
         let mut out = Vec::new();
         owned
             .encode(&mut out)
@@ -251,8 +256,6 @@ pub fn dbi(data: &[u8]) {
             .encode(&mut direct)
             .expect("a decoded module record encodes");
         assert_eq!(out, direct);
-        let start = usize::try_from(module.offset).unwrap_or(usize::MAX)
-            - dbi.substream_offset(Substream::ModuleInfo);
         let stored = dbi
             .substream(Substream::ModuleInfo)
             .get(start..start + out.len());

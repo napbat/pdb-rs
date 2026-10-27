@@ -131,7 +131,7 @@ fn named_streams(pdb: &Pdb<&[u8]>, names: &[u8], corpus: &mut Corpus) -> Outcome
     let table = StringTable::parse(names).ok();
     for named in pdb.info().named_streams() {
         let bytes = pdb.stream_bytes(named.stream)?;
-        let selector: u8 = match NamedStreamKind::classify(named.name) {
+        let selector: u8 = match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::LinkInfo => 0,
             NamedStreamKind::TmCache => {
                 if let Ok(cache) = pdbrs::native::auxiliary::TmCache::parse(&bytes, named.stream) {
@@ -150,7 +150,7 @@ fn named_streams(pdb: &Pdb<&[u8]>, names: &[u8], corpus: &mut Corpus) -> Outcome
             _ => 8,
         };
         if selector == 8 {
-            corpus.add_parts("native_named", &[8], &[], named.name)?;
+            corpus.add_parts("native_named", &[8], &[], &named.name)?;
         } else {
             corpus.add_parts("native_named", &[selector], &[], &bytes)?;
         }
@@ -205,7 +205,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
         }
     }
     for module in dbi.modules() {
-        let module = module?;
+        let (_, module) = module?;
         let Some(id) = module.stream else {
             continue;
         };
@@ -224,7 +224,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
                     "native_lines",
                     &subsection.kind.0.to_le_bytes(),
                     &[],
-                    subsection.data,
+                    &subsection.data,
                 )?;
             }
         }
@@ -241,7 +241,7 @@ fn debug_info(pdb: &Pdb<&[u8]>, dbi: &Dbi, kinds: &mut Kinds, corpus: &mut Corpu
                 && let Ok(Some(attribute)) = oem.attribute()
                 && kinds.take(4, u32::from(attribute.name.first().copied().unwrap_or(0)))
             {
-                attribute_seeds(oem.data, &attribute, corpus)?;
+                attribute_seeds(&oem.data, &attribute, corpus)?;
             }
         }
     }
@@ -256,9 +256,9 @@ fn attribute_seeds(
 ) -> Outcome {
     use pdbrs::native::codeview::symbol::{ASYNC_METHOD_INFO_ATTRIBUTE, MD2_ATTRIBUTE};
     if attribute.name == MD2_ATTRIBUTE {
-        corpus.add_parts("custom_debug_info", &[0x80], &[], attribute.value)?;
+        corpus.add_parts("custom_debug_info", &[0x80], &[], &attribute.value)?;
     } else if attribute.name == ASYNC_METHOD_INFO_ATTRIBUTE {
-        corpus.add_parts("custom_debug_info", &[0x81], &[], attribute.value)?;
+        corpus.add_parts("custom_debug_info", &[0x81], &[], &attribute.value)?;
     }
     corpus.add_parts("custom_debug_info", &[0x82], &[], data)
 }

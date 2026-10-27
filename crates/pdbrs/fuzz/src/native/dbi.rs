@@ -76,11 +76,11 @@ pub(crate) fn walk_dbi(dbi: &Dbi, headers: Option<&[u8]>) {
     }
     if let Some(Some(map)) = ok(dbi.section_map()) {
         assert_eq!(map.iter().count(), map.len());
-        let _ = map.logical_count();
+        let _ = map.logical_count;
     }
     if let Some(Some(sources)) = ok(dbi.source_info()) {
-        for module in sources.modules().take(MAX_ITEMS) {
-            for name in module.file_names().take(MAX_ITEMS) {
+        for module in sources.modules.iter().take(MAX_ITEMS) {
+            for name in sources.file_names(module).take(MAX_ITEMS) {
                 let _ = name;
             }
         }
@@ -130,7 +130,7 @@ pub fn module(data: &[u8]) {
     let Some(dbi) = module_dbi(sizes) else {
         return;
     };
-    let Some(Ok(module)) = dbi.modules().next() else {
+    let Some(Ok((_, module))) = dbi.modules().next() else {
         return;
     };
     if let Some(stream) = ok(ModuleStream::parse(input.rest().to_vec(), &module)) {
@@ -145,7 +145,7 @@ pub(crate) fn walk_module(stream: &ModuleStream) {
         let Some(subsection) = ok(subsection) else {
             break;
         };
-        line_subsection(subsection.kind, subsection.data);
+        line_subsection(subsection.kind, &subsection.data);
     }
     if let Some(lines) = ok(ModuleLines::parse(stream)) {
         let _ = lines.check();
@@ -201,7 +201,7 @@ pub(crate) fn line_subsection(kind: SubsectionKind, data: &[u8]) {
         LineSubsection::FileChecksums(table) => {
             assert_eq!(table.iter().count(), table.len());
             for entry in table {
-                assert_eq!(table.get(entry.offset), Some(entry));
+                assert_eq!(table.get(entry.offset).as_ref(), Some(&entry));
                 assert_eq!(entry.checksum.len(), entry.kind.size());
             }
         }

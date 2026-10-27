@@ -609,7 +609,7 @@ pub fn native_pdb() -> Outcome<Vec<u8>> {
     pdb.ids()?.ok_or("synthetic PDB has no IPI")?;
     let dbi = pdb.debug_info()?.ok_or("synthetic PDB has no DBI")?;
     for module in dbi.modules() {
-        pdb.module_stream(&module?)?;
+        pdb.module_stream(&module?.1)?;
     }
     for (what, result) in [
         ("GSI", pdb.global_symbols(&dbi).map(|_| ())),

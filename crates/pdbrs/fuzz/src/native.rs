@@ -38,7 +38,7 @@ pub fn pdb(data: &[u8]) {
             continue;
         };
         named::named(
-            named.name,
+            &named.name,
             &bytes,
             named.stream,
             names.as_ref(),
@@ -89,7 +89,7 @@ fn debug_info<S: ReadAt>(pdb: &Pdb<S>, dbi: &Dbi, names: Option<&StringTable<'_>
         }
     }
     for module in dbi.modules() {
-        let Some(module) = ok(module) else {
+        let Some((_, module)) = ok(module) else {
             break;
         };
         if let Some(Some(stream)) = ok(pdb.module_stream(&module)) {
