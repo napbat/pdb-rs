@@ -2,6 +2,8 @@
 //! plan copies each stream that no change touches (see
 //! [`PdbEditor`](crate::native::PdbEditor#layouts)).
 
+use core::cell::Cell;
+
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -18,7 +20,7 @@ use crate::native::editor::{EditOptions, PdbEditor};
 use crate::native::info::InfoBuilder;
 use crate::native::msf::{MsfWriteOptions, StreamId};
 use crate::native::output::no_memory;
-use crate::native::types::{TypeStream, TypeTable};
+use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable, parse_header_prefix};
 use crate::native::{IdentityPolicy, Pdb, Producer};
 use crate::{Error, ErrorKind, Result};
 
@@ -231,6 +233,8 @@ pub(super) struct Work<'e, S> {
     pub(super) id_end: Option<IdIndex>,
     /// The module records and debug header slots that the DBI stream gets.
     pub(super) updates: modules::Updates,
+    /// The producer of the source TPI stream, after the first read.
+    producer: Cell<Option<Producer>>,
 }
 
 impl<'e, S: ReadAt> Work<'e, S> {
@@ -260,11 +264,33 @@ impl<'e, S: ReadAt> Work<'e, S> {
     }
 
     /// Return the producer of the source TPI stream, from its header.
+    ///
+    /// The function reads only the header, once: a named stream change then
+    /// reads no other part of the TPI stream and no hash stream.
     pub(super) fn producer(&self) -> Result<Producer> {
-        Ok(self
-            .pdb
-            .type_offsets()?
-            .map_or(Producer::Microsoft, |offsets| offsets.header().producer()))
+        if let Some(producer) = self.producer.get() {
+            return Ok(producer);
+        }
+        let container = self.pdb.container();
+        let stream = if TPI_STREAM.0 < container.stream_count() {
+            container.stream(TPI_STREAM)?
+        } else {
+            None
+        };
+        let producer = match stream {
+            None => Producer::Microsoft,
+            Some(stream) => {
+                let length = usize::try_from(ReadAt::len(&stream)?).unwrap_or(usize::MAX);
+                let mut head = [0; HEADER_SIZE];
+                let head = &mut head[..length.min(HEADER_SIZE)];
+                stream.read_exact_at(0, head)?;
+                parse_header_prefix(head, length)
+                    .map_err(|error| error.with_stream(TPI_STREAM, 0))?
+                    .producer()
+            }
+        };
+        self.producer.set(Some(producer));
+        Ok(producer)
     }
 
     /// Return the new DBI stream values, made from the source if needed.
@@ -336,6 +362,7 @@ pub(super) fn plan<'e, S: ReadAt>(
         type_end: None,
         id_end: None,
         updates: modules::Updates::default(),
+        producer: Cell::new(None),
     };
     if let Some(unnamed) = &editor.unnamed {
         for (id, bytes) in &unnamed.entries {
