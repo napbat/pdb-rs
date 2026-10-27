@@ -147,7 +147,7 @@ impl SymbolEntry<'_> {
         match self {
             Self::Decoded(symbol) => writer.push_symbol(symbol),
             Self::Fields(kind, data) => match resolve_target(data, resolver)? {
-                Some(resolved) => writer.push(*kind, &resolved),
+                Some(positioned) => writer.push(*kind, &positioned),
                 None => writer.push(*kind, data),
             },
             Self::Deferred(encode) => {
