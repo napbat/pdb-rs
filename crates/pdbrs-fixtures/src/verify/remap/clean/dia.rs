@@ -27,7 +27,7 @@
 //! RVA of the source address; for the clean output, the RVA in the section headers of the
 //! set.
 //!
-//! [`classes`] gives the explained differences, and [`query`] runs the address queries.
+//! [`classes`] gives the explained differences, and [`mod@query`] runs the address queries.
 
 mod classes;
 mod properties;
