@@ -11,7 +11,9 @@ mod resolve;
 
 use alloc::collections::BTreeMap;
 
-pub use collections::{CustomDebugInformations, Documents, ImportScopes, LocalScopes};
+pub use collections::{
+    CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes,
+};
 
 use crate::portable::debug::MethodDebugInformation;
 use crate::portable::metadata::MethodDefId;

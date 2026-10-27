@@ -134,32 +134,71 @@ pub(super) struct SourceRun {
     pub(super) count: u32,
 }
 
-/// The local scopes of an editor, with their variables and constants.
-///
-/// The plan sorts the scopes by method, start offset and length (longest first), and gives
-/// each scope its row ID. A [`LocalScopeHandle`] names a scope before the plan.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LocalScopes {
-    pub(super) records: Vec<LocalScope<'static>>,
-    /// The variable run and the constant run of each source scope, in source row order.
-    pub(super) source: Vec<[SourceRun; 2]>,
-    /// The `VariableList` and `ConstantList` value of each scope if the table has no rows:
-    /// 1 (Roslyn) or 0 (the F# compiler).
-    pub(super) empty_lists: [u32; 2],
+/// The value of the `VariableList` or `ConstantList` column of each local scope if the
+/// `LocalVariable` or `LocalConstant` table has no rows. Both values give empty runs.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum EmptyListForm {
+    /// The column holds 1, the first row, as Roslyn and `System.Reflection.Metadata` write it.
+    #[default]
+    First,
+    /// The column holds 0 (nil), as the F# compiler writes it.
+    Nil,
 }
 
-impl Default for LocalScopes {
-    /// Return an empty collection with the conventions of Roslyn.
-    fn default() -> Self {
-        Self {
-            records: Vec::new(),
-            source: Vec::new(),
-            empty_lists: [1, 1],
+impl EmptyListForm {
+    /// Return the form of a list column value of the first scope of an empty table.
+    pub(super) const fn from_value(value: u32) -> Self {
+        if value == 0 { Self::Nil } else { Self::First }
+    }
+
+    /// Return the column value of the form.
+    pub(super) const fn value(self) -> u32 {
+        match self {
+            Self::First => 1,
+            Self::Nil => 0,
         }
     }
 }
 
+/// The local scopes of an editor, with their variables and constants.
+///
+/// The plan sorts the scopes by method, start offset and length (longest first), and gives
+/// each scope its row ID. A [`LocalScopeHandle`] names a scope before the plan.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LocalScopes {
+    pub(super) records: Vec<LocalScope<'static>>,
+    /// The variable run and the constant run of each source scope, in source row order.
+    pub(super) source: Vec<[SourceRun; 2]>,
+    /// The form of the `VariableList` and the `ConstantList` column for an empty table.
+    pub(super) empty_lists: [EmptyListForm; 2],
+}
+
 impl LocalScopes {
+    /// Return the form of the `VariableList` column if the `LocalVariable` table has no rows.
+    /// An editor of a source takes it from the source.
+    #[must_use]
+    pub const fn variable_list_form(&self) -> EmptyListForm {
+        self.empty_lists[0]
+    }
+
+    /// Set the form of the `VariableList` column for an empty `LocalVariable` table.
+    pub const fn set_variable_list_form(&mut self, form: EmptyListForm) {
+        self.empty_lists[0] = form;
+    }
+
+    /// Return the form of the `ConstantList` column if the `LocalConstant` table has no rows.
+    /// An editor of a source takes it from the source.
+    #[must_use]
+    pub const fn constant_list_form(&self) -> EmptyListForm {
+        self.empty_lists[1]
+    }
+
+    /// Set the form of the `ConstantList` column for an empty `LocalConstant` table.
+    pub const fn set_constant_list_form(&mut self, form: EmptyListForm) {
+        self.empty_lists[1] = form;
+    }
+
     /// Add a scope after the other scopes and return its handle.
     ///
     /// # Errors

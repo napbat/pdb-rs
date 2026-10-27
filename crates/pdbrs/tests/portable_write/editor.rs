@@ -2,8 +2,10 @@
 
 use pdbrs::portable::custom::CustomDebugParent;
 use pdbrs::portable::debug::{LocalVariableHandle, ValidateOptions};
+use pdbrs::portable::editor::EmptyListForm;
 use pdbrs::portable::metadata::{
-    DocumentId, IlOffset, LocalScopeId, MetadataStream, MethodDebugInformationId, MethodDefId,
+    DocumentId, IlOffset, LocalScopeId, LocalScopeRow, MetadataStream, MethodDebugInformationId,
+    MethodDefId,
 };
 use pdbrs::portable::{
     EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor, RebuildReason, StreamChange,
@@ -301,4 +303,31 @@ fn the_reader_gives_the_handle_of_a_local_variable_parent() {
     let held = scopes.get(handle.scope).unwrap();
     assert_eq!(held.variables[0].name, b"inner");
     assert_eq!(held.start_offset, IlOffset(2));
+}
+
+#[test]
+fn the_list_form_of_an_empty_table_is_kept() {
+    let mut build = PdbEditor::new(external(1), IdentityPolicy::ContentDerived);
+    let scopes = build.local_scopes_mut().unwrap();
+    assert_eq!(scopes.variable_list_form(), EmptyListForm::First);
+    assert_eq!(scopes.constant_list_form(), EmptyListForm::First);
+    let mut root = scope(1, 0, 10);
+    root.variables.push(variable(b"a", 0));
+    scopes.push(root).unwrap();
+    scopes.set_variable_list_form(EmptyListForm::Nil);
+    scopes.set_constant_list_form(EmptyListForm::Nil);
+    let bytes = write(&build);
+    let pdb = open(&bytes);
+    let (_, row) = pdb.rows::<LocalScopeRow>().next().unwrap().unwrap();
+    // The variable table has a row, so the form applies only to the constant list.
+    assert_eq!(row.variable_list.0, 1);
+    assert_eq!(row.constant_list.0, 0);
+    let (_, scope) = pdb.local_scopes().next().unwrap().unwrap();
+    assert!(scope.constants.is_empty());
+
+    let mut edit = pdb.edit(IdentityPolicy::ContentDerived);
+    let scopes = edit.local_scopes_mut().unwrap();
+    assert_eq!(scopes.variable_list_form(), EmptyListForm::First);
+    assert_eq!(scopes.constant_list_form(), EmptyListForm::Nil);
+    assert_eq!(write(&edit), bytes);
 }

@@ -633,6 +633,7 @@ The names of these items use one vocabulary (rule 13 of #40):
 | `InjectedSource::reserved` | Not known (`pvReserved1` of `SrcHeaderOut`) | The 8 reserved bytes of a `/src/headerblock` entry, raw. | The same bytes. `SourceHeaderBlockBuilder::add_file` writes zeros. |
 | `LinkInfo::trailing` | Not known (bytes after the `/LinkInfo` record) | The stream bytes after the record, raw. | The same bytes. `LinkInfo::new` sets no bytes. |
 | `SourceServer::trailing()` | Source indexing tools (bytes after the `SRCSRV: end` line) | The stream bytes after the end marker line, raw. | The same bytes. |
+| `portable::editor::EmptyListForm` (`LocalScopes::variable_list_form`, `constant_list_form`) | Roslyn (1) and the F# compiler (0 for an empty `LocalConstant` table) | `Pdb::edit` takes the `VariableList` and `ConstantList` value of the first scope of an empty table. | The same value in each scope while the table has no rows. `PdbEditor::new` uses `First` (1). |
 
 ## Modern MSF invariants
 

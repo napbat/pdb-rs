@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use super::Methods;
 use super::collections::{
-    CustomDebugInformations, Documents, ImportScopes, LocalScopes, SourceRun,
+    CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes, SourceRun,
 };
 use crate::PortableLocation;
 use crate::io::ReadAt;
@@ -51,17 +51,17 @@ pub(super) fn local_scopes<S: ReadAt>(pdb: &Pdb<S>) -> Result<LocalScopes> {
         let (id, scope) = scope?;
         let runs = pdb.scope_runs(id)?;
         if id == LocalScopeId(1) {
-            // Keep the list value of an empty table: Roslyn writes 1, the F# compiler writes 0.
-            let list = |table, value: u32| {
+            // Keep the list form of an empty table: Roslyn writes 1, the F# compiler writes 0.
+            let form = |table, value: u32| {
                 if tables.row_count(table) == 0 {
-                    value
+                    EmptyListForm::from_value(value)
                 } else {
-                    1
+                    EmptyListForm::First
                 }
             };
             scopes.empty_lists = [
-                list(TableId::LOCAL_VARIABLE, runs.row.variable_list.0),
-                list(TableId::LOCAL_CONSTANT, runs.row.constant_list.0),
+                form(TableId::LOCAL_VARIABLE, runs.row.variable_list.0),
+                form(TableId::LOCAL_CONSTANT, runs.row.constant_list.0),
             ];
         }
         let run = |range: core::ops::Range<u32>| SourceRun {

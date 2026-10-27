@@ -5,8 +5,8 @@
 //! the verifier (`System.Reflection.Metadata`):
 //!
 //! 1. A plan of the editor without a change has the original bytes.
-//! 2. A new `PdbEditor` with a copy of all records writes new heaps. The decoded sections of
-//!    its verifier dump are the same as those of the original.
+//! 2. A new `PdbEditor` with a copy of all records and of the empty list forms writes new
+//!    heaps. The decoded sections of its verifier dump are the same as those of the original.
 //! 3. An edit renames document 1, moves each visible sequence point 1000 lines down, adds the
 //!    local constant `pdbrsAdded` (`i4=42`) to the last local scope and adds a custom debug
 //!    information value of an unknown kind to `MethodDef` 1. The decoded sections of its
@@ -304,8 +304,15 @@ fn copy<S: ReadAt>(pdb: &Pdb<S>, identity: IdentityPolicy) -> pdbrs::Result<PdbE
         documents.push(document?.1)?;
     }
     // A source handle index is the source row - 1, so the parents of the custom debug
-    // information stay valid.
+    // information stay valid. Keep the list forms of empty tables of the source producer.
+    let source_scopes = source.local_scopes_mut()?;
+    let (variable_list, constant_list) = (
+        source_scopes.variable_list_form(),
+        source_scopes.constant_list_form(),
+    );
     let scopes = editor.local_scopes_mut()?;
+    scopes.set_variable_list_form(variable_list);
+    scopes.set_constant_list_form(constant_list);
     for scope in pdb.local_scopes() {
         scopes.push(scope?.1)?;
     }

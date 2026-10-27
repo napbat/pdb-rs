@@ -533,8 +533,7 @@ For each input, the command checks these items:
 1. `Pdb::edit` and `PdbEditor::plan` without a change give the original bytes.
 2. A new `PdbEditor` (`PdbEditor::new`) with the same records writes new heaps. The decoded
    lines of its verifier dump (all lines after the `row` lines) are the same as those of the
-   original. The new editor writes 1 for the list column of an empty table (Roslyn), also for
-   the F# fixture, which writes 0.
+   original.
 3. An edit renames document 1 (suffix `.edited`), moves each visible sequence point 1000 lines
    down, adds the local constant `pdbrsAdded` (`i4=42`) to the last local scope and adds a
    custom debug information value of the unknown kind `70646272-7365-4564-6974-2d636865636b`

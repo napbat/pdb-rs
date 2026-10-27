@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use super::Methods;
-use super::collections::{CustomDebugInformations, Documents, ImportScopes, LocalScopes};
+use super::collections::{
+    CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes,
+};
 use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
@@ -319,7 +321,7 @@ fn scopes(scopes: &LocalScopes, heaps: &mut Heaps, tables: &mut DebugTables) -> 
     let any_constants = records.iter().any(|scope| !scope.constants.is_empty());
     let mut scope_rows = vec![0; records.len()];
     let mut list_rows = vec![[0; 2]; records.len()];
-    let [empty_variables, empty_constants] = scopes.empty_lists;
+    let [empty_variables, empty_constants] = scopes.empty_lists.map(EmptyListForm::value);
     for (position, &index) in order.iter().enumerate() {
         scope_rows[index] = row_id(position);
         let scope = &records[index];
