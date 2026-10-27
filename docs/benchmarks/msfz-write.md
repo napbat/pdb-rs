@@ -10,8 +10,8 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 
 ## Method
 
-- Before: `main` at `a2162d8`. After: branch `msfz-single-compression`. Both are release
-  builds with the same toolchain as [baseline.md](baseline.md), on the same machine.
+- Before: `main` at `a2162d8`. After: commit `b4154eb`. Both are release builds with the same
+  toolchain as [baseline.md](baseline.md), on the same machine.
 - Bench: `cargo bench -p pdbrs --bench baseline -- --filter msfz/write-default --runs 10`. The
   row `msfz/write-default` writes `msvc-x64-large` with the default options (1 warm-up run and
   10 timed runs in one child process).
@@ -23,9 +23,9 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 - Order: 7 rounds. Each round ran the before build and the after build one after the other. The
   order changed in each round (before first in rounds 1, 3, 5 and 7). The tables give the median
   of the 7 rounds.
-- Load: other agents built and tested in other worktrees at the same time. The processor load
-  at the start of a round was from 2 % to 91 %, with 1 to 26 `rustc`, `cargo` and `link`
-  processes.
+- Load: other processes loaded the machine during the measurement, because other builds and
+  tests ran at the same time. The processor load at the start of a round was from 2 % to 91 %,
+  with 1 to 26 `rustc`, `cargo` and `link` processes.
 
 ## Results
 

@@ -109,7 +109,7 @@ The generator splits each PDB into the inputs of the targets: streams, records, 
 blobs and values. It caps the seeds of one PDB to 48 for each target.
 
 A fixture path argument adds the `.pdb` and `.mpdb` files below it in the same way. The
-recorded runs used the local fixtures of `target/fixtures/` in the primary checkout (58 files,
+recorded runs used the local fixtures of `target/fixtures/` in the main checkout (58 files,
 with the native fixture variants of #27). The fixtures and the corpora are local inputs: do not
 commit them. The compiler PDBs (`obj/compile.pdb`) have no DBI stream, so the generator prints
 "skipped" for them after it adds their other streams.
@@ -119,7 +119,7 @@ commit them. The compiler PDBs (`obj/compile.pdb`) have no DBI stream, so the ge
 Run the commands in `crates/pdbrs/fuzz/` with the nightly toolchain.
 
 ```sh
-cargo +nightly run --release --example seeds -- C:/Users/dev/Documents/Git/napbat/pdbrs/target/fixtures
+cargo +nightly run --release --example seeds -- ../../../target/fixtures
 cargo +nightly fuzz build
 cargo +nightly fuzz run <target> -- -max_total_time=900 -rss_limit_mb=2048 -timeout=10 -print_final_stats=1
 ```
@@ -158,7 +158,7 @@ input to `artifacts/<target>/crash-<hash>` and exits with code 101.
 
 ## Recorded runs
 
-Date: 2026-10-26. Branch `fuzzing`, based on `main` 8b77fb2. The table gives the sum of the
+Date: 2026-10-26. Commit 0dd06bc, based on `main` 8b77fb2. The table gives the sum of the
 runs without a finding. `cov` and `corpus` are from the last run of the target.
 
 | Target | Time (s) | Executions | cov | corpus | Peak RSS (MiB) |
@@ -204,32 +204,32 @@ runs without a finding. `cov` and `corpus` are from the last run of the target.
 | `msfz_chunks` | 901 | 43,043 | 1835 | 561 | 837 |
 | `msfz_convert` | 901 | 7,836 | 4787 | 592 | 921 |
 
-The MSFZ targets ran on branch `msfz-reader` (#37) on 2026-10-26, with seeds from the
-synthetic inputs and the 52 PDZ fixtures of the native fixtures of `main` 8dc001c (`msfz`: 56
-seeds, `msfz_chunks`: 631 seeds). The `msfz` row is the run after the fix of finding 4. The
+The MSFZ targets ran on commit 82f6a36 (#37) on 2026-10-26, with seeds from the synthetic
+inputs and the 52 PDZ fixtures of the native fixtures of `main` 8dc001c (`msfz`: 56 seeds,
+`msfz_chunks`: 631 seeds). The `msfz` row is the run after the fix of finding 4. The
 `msfz_chunks` run used the library before that fix, which does not change its inputs.
 
-The `msfz_convert` target ran on branch `msfz-writer` (#38, based on `main` ceff177) on
-2026-10-26, with 419 seeds from the synthetic inputs and the fixtures of the primary checkout
+The `msfz_convert` target ran on commit 193301c (#38, based on `main` ceff177) on
+2026-10-26, with 419 seeds from the synthetic inputs and the fixtures of the main checkout
 (the MSF 7.0 PDBs and the 63 PDZ files). Most seeds are whole PDB files, and libFuzzer took the
 limit of 1 MiB for new inputs. Each run compresses every chunk three times, so the target runs
 about 8 inputs each second.
 
-After the merge of `main` 64a0a2d into `msfz-writer`, the target ran once over its whole
+After the merge of `main` 64a0a2d (merge commit cb738a3), the target ran once over its whole
 corpus (`-runs=0`, 755 inputs) without a finding.
 
-The 12 encoder targets ran on the branch with `main` aa552a7 (2026-10-26). Their seeds are
-the seeds of the reader targets with the same input layout.
+The 12 encoder targets ran on commit c7c473b, which contains `main` aa552a7 (2026-10-26).
+Their seeds are the seeds of the reader targets with the same input layout.
 
 No run reported a sanitizer error, a timeout or memory use above the limit.
 
-After the merge of `main` 1f8fd09 into `fuzzing`, each reader target ran once over its whole
-corpus (`-runs=0`) without a finding. These replays are not new fuzzing time. After the last
+After the merge of `main` 1f8fd09 (merge commit 8023891), each reader target ran once over its
+whole corpus (`-runs=0`) without a finding. These replays are not new fuzzing time. After the last
 build, each crash input in `artifacts/` runs without a finding.
 
-The `native_editor` target ran on branch `redesign-s6-editor` (#42) on 2026-10-27, with 1512
-seeds from the synthetic PDB and 188 native fixture PDBs of the worktree. Two runs took
-901 s together, with 23,703 executions, no finding and a peak RSS of 920 MiB. The corpus grew
+The `native_editor` target ran on commit bfaec6f (#42) on 2026-10-27, with 1512 seeds from the
+synthetic PDB and 188 native fixture PDBs. Two runs took 901 s together, with 23,703
+executions, no finding and a peak RSS of 920 MiB. The corpus grew
 to 2077 inputs. Between the two runs, each of the 1504 fixture seeds ran once without a cut to
 1 MiB. 1059 of them gave a plan and passed all checks. 24 seeds of `hlsl-dxc-debug` do not
 parse, and the other seeds ended with a plan error. A plan error is a valid result: for
@@ -240,7 +240,7 @@ inputs above 1 MiB, so this time is not a timeout of the target.
 
 ### Corpus replay after #42
 
-Date: 2026-10-27. Branch `redesign-s8-cleanup` (#42 stage 8, based on `main` bfaec6f). The
+Date: 2026-10-27. Commit d1d3fdd (#42); its library is the library of `main` bfaec6f. The
 `seeds` example wrote the corpora again from the synthetic inputs and the 203 fixture files of
 `target/fixtures/`. Then each of the 41 targets ran once over its seed corpus with this command,
 8 targets at the same time:

@@ -11,9 +11,9 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 
 ## Method
 
-- Before: branch `portable-cow-49` at `074c364` (`main` at `d1d3fdd` with the two new bench
-  rows). After: the same branch at `13fd082`. Both are release builds with the
-  same toolchain as [baseline.md](baseline.md), on the same machine.
+- Before: commit `074c364` (`main` at `d1d3fdd` with the two new bench rows). After: commit
+  `13fd082`. Both are release builds with the same toolchain as [baseline.md](baseline.md), on
+  the same machine.
 - Bench: `cargo bench -p pdbrs --bench baseline -- --filter portable/ --runs 10`. The rows
   `portable/edit-document` (the name of document 1 gets the suffix `.edited`) and
   `portable/edit-method` (the lines of the first method with sequence points + 1000) are new
@@ -69,8 +69,9 @@ set does not change.
 
 - An edit of one document or of one method now takes 0.3 to 0.6 of the time, and its peak live
   heap is 0.46 to 0.69 of the value before.
-- An edit of one method still decodes all methods (rule 1 of #49 decodes a table on the first
-  change), and adds each sequence point blob to `#Blob` again.
+- An edit of one method still decodes all methods, because the editor decodes a whole table on
+  the first change of the table (#49). The edit also adds each sequence point blob to `#Blob`
+  again.
 - An edit that adds a value to `#Blob` still makes the value index of the source heap: a copy of
   each distinct entry. This is the largest remaining cost of these edits on the iOS input.
 - The allocation counts do not depend on the load. For the iOS input, the edit of one document

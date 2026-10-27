@@ -13,7 +13,7 @@ Caution: other processes change the times. Record the baseline on a quiet machin
 
 1. Merge the bench into `main`. Use a commit before the first change of #42.
 2. Make sure that the fixtures exist (`cargo run -p pdbrs-fixtures`).
-3. Stop builds, tests, agents and other loads on the machine.
+3. Stop builds, tests and other processes that load the machine.
 4. Connect the machine to mains power, and use the same power plan for later comparisons.
 5. Run this command from the workspace root:
 
