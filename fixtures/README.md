@@ -453,8 +453,9 @@ cargo run -p pdbrs-fixtures --release -- verify-native-build --jobs 8
   thread. Use it to find a defect that occurs only in parallel runs.
 
 All levels of work in one command share the same `<n>` workers. For example,
-`verify-native-build` runs the fixtures, the four consumer runs of one fixture and the DIA
-queries of one fixture on the same workers. At most `<n>` threads do work at the same time.
+`verify-native-build` runs these items on the same workers: the fixtures, the four consumer
+checks of one fixture, the runs of one tool on the original and the rebuilt PDB, and the DIA
+queries of one fixture. At most `<n>` threads do work at the same time.
 
 Each work item writes only to the paths of its own fixture (and of its PDB file stem or option
 set), so two workers never write the same file. A worker does not print. The command prints the

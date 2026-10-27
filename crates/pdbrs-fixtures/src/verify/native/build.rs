@@ -327,13 +327,17 @@ fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path, jobs:
             jobs.join(
                 || {
                     available(&consumers.pdbutil)
-                        .and_then(|tool| both(tool, original, path, pdbutil_dump))
+                        .and_then(|tool| both(tool, original, path, pdbutil_dump, jobs))
                 },
                 || {
                     available(&consumers.dia2dump).and_then(|tool| {
-                        both(tool, original, path, |tool, pdb| {
-                            dia2dump(tool, ["-all"], pdb)
-                        })
+                        both(
+                            tool,
+                            original,
+                            path,
+                            |tool, pdb| dia2dump(tool, ["-all"], pdb),
+                            jobs,
+                        )
                     })
                 },
             )
@@ -365,7 +369,7 @@ fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path, jobs:
             .as_deref()
             .map(|image| match (&sample, available(&consumers.symbolizer)) {
                 (Ok(sample), Ok(tool)) => {
-                    compare_frames(tool, image, original, path, sample, directory)
+                    compare_frames(tool, image, original, path, sample, directory, jobs)
                 }
                 (Err(error), _) => Err(error.clone()),
                 (_, Err(error)) => Err(error),
@@ -415,14 +419,16 @@ fn rebuild(original: &Path, directory: &Path, file_name: &str) -> Result<Rebuilt
     })
 }
 
-/// Run a tool on the original and the rebuilt PDB.
+/// Run a tool on the original and the rebuilt PDB, on two workers if a worker is free.
 fn both(
     tool: &Path,
     original: &Path,
     rebuilt: &Path,
-    run: impl Fn(&Path, &Path) -> Result<Run, String>,
+    run: impl Fn(&Path, &Path) -> Result<Run, String> + Sync,
+    jobs: &Jobs,
 ) -> Result<[Run; 2], String> {
-    Ok([run(tool, original)?, run(tool, rebuilt)?])
+    let (first, second) = jobs.join(|| run(tool, original), || run(tool, rebuilt));
+    Ok([first?, second?])
 }
 
 /// Compare the dumps of the original and the rebuilt PDB. Write both dumps and the
@@ -483,9 +489,13 @@ fn query(
             Query::Address(option, rva) => (*option, format!("0x{rva:x}")),
             Query::Type(name) => ("-type", (*name).to_owned()),
         };
-        let runs = both(tool, original, rebuilt, |tool, pdb| {
-            dia2dump(tool, [option, argument.as_str()], pdb)
-        })?;
+        let runs = both(
+            tool,
+            original,
+            rebuilt,
+            |tool, pdb| dia2dump(tool, [option, argument.as_str()], pdb),
+            jobs,
+        )?;
         Ok::<_, String>((runs[0] != runs[1]).then(|| {
             format!(
                 "== {option} {argument}\n-- original (exit {:?})\n{}-- rebuilt (exit {:?})\n{}",
@@ -518,19 +528,17 @@ fn compare_frames(
     rebuilt: &Path,
     sample: &Sample,
     directory: &Path,
+    jobs: &Jobs,
 ) -> Result<Symbolized, String> {
-    let frames = [
-        ("symbolize-original", original),
-        ("symbolize-rebuilt", rebuilt),
-    ]
-    .map(|(name, pdb)| {
+    let frames = |name: &str, pdb: &Path| {
         let patched = symbolize::prepare(image, pdb, &directory.join(name))?;
         symbolize::symbolize(tool, &patched, &sample.rvas)
-    });
-    let [original, rebuilt]: [Frames; 2] = {
-        let [first, second] = frames;
-        [first?, second?]
     };
+    let (original, rebuilt) = jobs.join(
+        || frames("symbolize-original", original),
+        || frames("symbolize-rebuilt", rebuilt),
+    );
+    let [original, rebuilt]: [Frames; 2] = [original?, rebuilt?];
     let mut differences = String::new();
     for ((rva, left), right) in sample
         .rvas
