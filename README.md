@@ -12,8 +12,8 @@ The library supports `std` and `no_std + alloc`.
 | --- | --- |
 | Native PDB reading (MSF 7.0) | Typed decoders for every modern record kind, numeric leaf, C13 subsection and stream version that has a layout definition, with reference validation. Reads all 61 readable native fixture PDBs of MSVC, MASM, Clang/LLD, flang, rustc, .NET and fxc (page sizes 512 to 32768, a PDB with two free page map intervals, `NOTM` PDBs of `link /DEBUG:LAZY`, C++ AMP and ARM64EC) and the 92 PDZ files of the fixtures. The [native coverage](docs/design/native-coverage.md) document gives the state of each kind and version. Kinds without a local producer or a layout definition stay open there as `external-input` ([#29](https://github.com/napbat/pdbrs/issues/29) to [#32](https://github.com/napbat/pdbrs/issues/32)). |
 | Native MSF 7.0 container writing | Exact copies, stream-preserving repacks and new layouts with page sizes from 512 to 32768 ([#15](https://github.com/napbat/pdbrs/issues/15)). The writer rejects 65536-byte pages because DIA, LLVM and `link.exe` reject them; the reader accepts them. |
-| Native PDB writing, building and editing | An encoder for each decoded record and stream, and one editor, `native::PdbEditor`, for new PDBs ([#33](https://github.com/napbat/pdbrs/issues/33)), copy-on-write edits of named streams, symbols, modules, types, IDs and the identity, strips ([#34](https://github.com/napbat/pdbrs/issues/34)) and rebuilds (`PdbEditor::decode_all`), with one plan and a report of each stream ([#42](https://github.com/napbat/pdbrs/issues/42)). `llvm-pdbutil`, DIA2Dump, `pdbtool` and `llvm-symbolizer` agree with the rebuilt and edited fixtures. |
-| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writes exact copies, new layouts ([#26](https://github.com/napbat/pdbrs/issues/26)), and builds and edits through one editor, `portable::PdbEditor`, with public-field records and a plan report ([#42](https://github.com/napbat/pdbrs/issues/42)). |
+| Native PDB writing, building and editing | An encoder for each decoded record and stream, and one editor, `native::PdbEditor`, for new PDBs ([#33](https://github.com/napbat/pdbrs/issues/33)), copy-on-write edits of named streams, symbols, modules, types, IDs and the identity, strips ([#34](https://github.com/napbat/pdbrs/issues/34)) and rebuilds (`PdbEditor::decode_all`), with one plan and a report of each stream ([#42](https://github.com/napbat/pdbrs/issues/42)). Editing tasks: Source Link, `srcsrv`, named stream removal and symbol renames ([#41](https://github.com/napbat/pdbrs/issues/41)). `llvm-pdbutil`, DIA2Dump, `pdbtool` and `llvm-symbolizer` agree with the rebuilt and edited fixtures. |
+| Portable PDB | Reads the metadata root, the heaps, the `#Pdb` stream, the `#~` tables and all eight debug tables. Decodes, encodes and validates document names, sequence points, local scopes, local constants, imports and state machine methods ([#23](https://github.com/napbat/pdbrs/issues/23)) and custom debug information ([#24](https://github.com/napbat/pdbrs/issues/24)). Results match `System.Reflection.Metadata` for the four standalone fixtures and the embedded fixture ([#22](https://github.com/napbat/pdbrs/issues/22)). Writes exact copies, new layouts ([#26](https://github.com/napbat/pdbrs/issues/26)), and builds and edits through one editor, `portable::PdbEditor`, with public-field records and a plan report ([#42](https://github.com/napbat/pdbrs/issues/42)). Editing tasks: Source Link and embedded sources ([#41](https://github.com/napbat/pdbrs/issues/41)). |
 | Native PDB in MSFZ (PDZ files) | Reading: `pdbrs::probe` gives `ContainerKind::NativeMsfz`, and `native::Pdb` reads the streams through `native::container::Container`, so every typed accessor, and the editor (`Pdb::edit`, also with `decode_all`; MSF 7.0 output) work on PDZ files. Stored, zstd and raw DEFLATE chunks, compressed stream directories and fragments across chunks ([#37](https://github.com/napbat/pdbrs/issues/37)). Writing: `msfz::MsfzBuilder` and `Container::to_msfz` write zstd or raw DEFLATE chunks with the options of `pdbtool pdz-encode`, and `Container::to_msf` converts MSFZ to MSF 7.0. The output is deterministic and keeps stream IDs, nil and empty streams and stream bytes ([#38](https://github.com/napbat/pdbrs/issues/38)). |
 | Legacy native PDB (Small MSF 2.00) | Signature identification only ([#16](https://github.com/napbat/pdbrs/issues/16)). |
 
@@ -73,6 +73,51 @@ The library keeps names as bytes (`pdbrs::Bytes`). It does not decode text or de
 Record kinds without a decoder stay available as raw bytes. A decoded record borrows the PDB
 bytes; `into_owned` gives a copy that owns its bytes.
 
+## Cookbook: common edits
+
+The editors have one function for each common edit (#41). Each function checks all its inputs
+before it changes the model, so an error leaves the editor unchanged. Plan and write as for
+any other edit. The [`edit` example](crates/pdbrs/examples/edit.rs) runs each recipe.
+
+```rust
+use pdbrs::native::{EditOptions, IdentityPolicy, Pdb};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pdb = Pdb::open("app.pdb")?;
+    // A rename changes the symbols: give the image the new identity.
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    editor.set_source_link(br#"{"documents":{"C:\\src\\*":"https://example.com/src/*"}}"#.to_vec())?;
+    editor.set_source_server(std::fs::read("srcsrv.txt")?)?; // the `srcsrv` stream
+    editor.remove_named_stream(b"/LinkInfo")?;
+    // The function sees each name once. A C++ function has a decorated public name and an
+    // undecorated procedure name; the procedure and its `S_PROCREF` get the same new name.
+    editor.rename_symbols(|name| (name == b"helper").then(|| b"helper_v2".to_vec()))?;
+    let plan = editor.plan(EditOptions::default())?;
+    plan.write_file("app.edited.pdb")?;
+    println!("write into the image: {:?}", plan.identity()?);
+    Ok(())
+}
+```
+
+```rust
+use pdbrs::portable::embedded::EmbeddedFormat;
+use pdbrs::portable::metadata::DocumentId;
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pdb = Pdb::open("app.pdb")?;
+    let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+    editor.set_source_link(br#"{"documents":{"C:\\src\\*":"https://example.com/src/*"}}"#.to_vec())?;
+    // Embed the file of the build: a debugger compares it with the document hash.
+    editor.embed_source(DocumentId(1), &std::fs::read("Program.cs")?, EmbeddedFormat::Deflate)?;
+    editor.plan(EditOptions::default())?.write_file("app.edited.pdb")?;
+    Ok(())
+}
+```
+
+Use `IdentityPolicy::Preserve` for a change that does not change the symbols, for example
+only a Source Link or a `srcsrv` change: the image then keeps its match.
+
 ## Features
 
 - `std` (default): file access through `Pdb::open` and standard I/O error integration.
@@ -88,6 +133,10 @@ cargo run -p pdbrs --example native -- path/to/file.pdb
 # Rebuild a native PDB from its decoded records, or build a small PDB from scratch.
 cargo run -p pdbrs --example native_rebuild -- input.pdb output.pdb
 cargo run -p pdbrs --example native_synthetic -- output.pdb
+
+# Apply the editing tasks (Source Link, srcsrv, named streams, renames, embedded sources).
+cargo run -p pdbrs --example edit -- native input.pdb output.pdb
+cargo run -p pdbrs --example edit -- portable input.pdb output.pdb
 
 # Print the UDT layouts and enum values of a native PDB in a C-like form, one type,
 # or the signatures of the procedures and function IDs.
