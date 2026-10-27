@@ -18,6 +18,9 @@
 //!
 //! `verify-msfz` (see [`msfz`]) writes MSFZ files from the native PDBs with the pdbrs writer,
 //! converts the PDZ fixtures to MSF 7.0, and checks both through the consumer tools.
+//!
+//! `verify-remap` (see [`remap`]) remaps the addresses of each native PDB with the pdbrs
+//! editor and checks the OMAP output through the consumer tools.
 
 mod dump;
 mod edit;
@@ -25,12 +28,14 @@ mod msfz;
 mod native;
 mod native_edit;
 mod rebuild;
+mod remap;
 
 pub use edit::verify_edit;
 pub use msfz::verify_msfz;
 pub use native::build::verify_native_build;
 pub use native_edit::verify_native_edit;
 pub use rebuild::verify_rebuild;
+pub use remap::verify_remap;
 
 use std::fmt::Write as _;
 use std::fs;
