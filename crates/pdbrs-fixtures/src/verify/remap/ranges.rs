@@ -16,8 +16,10 @@
 //! - Procedure removal: the removable procedures ([`Procedure::removable`]) have no range.
 //!   The other pieces stay.
 //!
-//! OMAP cannot map RVA 0 (decision 1 of #43). A range that starts at RVA 0 thus starts 1 byte
-//! later. The HLSL and the .NET fixtures have a section at RVA 0.
+//! OMAP cannot map RVA 0 (decision 1 of #43). A range that starts at the old or the new RVA 0
+//! thus starts 1 byte later. The HLSL and the .NET fixtures have a section at RVA 0. In the
+//! reorder set of the HLSL fixtures, the procedure moves to RVA 0, so its first byte has no
+//! mapping.
 
 use pdbrs::native::section::SectionHeader;
 

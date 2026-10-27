@@ -969,7 +969,8 @@ pieces. The command makes five range sets:
 | `removal` | The procedures that no other record refers to have no range: no `S_PROCREF` or `S_LPROCREF` record of the global index names them, and they have no `S_SEPCODE` chunk |
 
 OMAP cannot map RVA 0, so a range at RVA 0 starts 1 byte later (the HLSL and .NET fixtures
-have a section at RVA 0).
+have a section at RVA 0). In the `reorder` set of the HLSL fixtures, the procedure moves to
+RVA 0. Its first byte thus has no mapping, and the set line counts it as a removed procedure.
 
 For each set, the command remaps the PDB with `PdbEditor::remap_addresses` and
 `RemapMode::Omap` (`IdentityPolicy::IncrementAge`). It writes the output to
