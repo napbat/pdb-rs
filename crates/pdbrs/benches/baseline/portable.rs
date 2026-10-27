@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use pdbrs::portable::debug::{SequencePoints, ValidateOptions};
+use pdbrs::portable::debug::{MethodDebugInformation, SequencePoints, ValidateOptions};
 use pdbrs::portable::metadata::{
     CustomDebugInformationRow, DocumentId, DocumentRow, ImportScopeRow, LocalConstantRow,
     LocalScopeRow, LocalVariableRow, MethodDebugInformationRow, StateMachineMethodRow, TableRow,
 };
-use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
 
 use crate::Outcome;
 use crate::measure::Bench;
@@ -132,6 +132,41 @@ pub(crate) fn rebuild(path: &Path, bench: &mut Bench) -> Outcome {
     })
 }
 
+/// Add [`LINE_SHIFT`] to the lines of the sequence points of `method`. Return `false` if the
+/// method has no sequence points.
+fn shift_lines(method: &mut MethodDebugInformation<'static>) -> pdbrs::Result<bool> {
+    let Some(decoded) = method.decode()? else {
+        return Ok(false);
+    };
+    let signature = decoded.local_signature();
+    let form = decoded.local_signature_form();
+    let mut points = decoded.collect::<pdbrs::Result<Vec<_>>>()?;
+    for point in &mut points {
+        if let Some(span) = &mut point.span {
+            span.start_line += LINE_SHIFT;
+            span.end_line += LINE_SHIFT;
+        }
+    }
+    *method = SequencePoints::encode_parts(signature, form, &points)?;
+    Ok(true)
+}
+
+/// Append [`RENAME_SUFFIX`] to the name of document 1.
+fn rename_document(editor: &mut PdbEditor<'_, &[u8]>) -> pdbrs::Result<()> {
+    if let Some(document) = editor.documents_mut()?.get_mut(DocumentId(1)) {
+        let mut name = std::mem::take(&mut document.name).into_vec();
+        name.extend_from_slice(RENAME_SUFFIX);
+        document.name = name.into();
+    }
+    Ok(())
+}
+
+/// Plan and write the edit with the default options. Return the output size.
+fn write(editor: &PdbEditor<'_, &[u8]>) -> Outcome<u64> {
+    let output = editor.plan(EditOptions::default())?.to_vec()?;
+    Ok(u64::try_from(output.len())?)
+}
+
 /// Shift the lines of all sequence points, rename document 1 and write the PDB with the
 /// content-derived ID.
 pub(crate) fn edit(path: &Path, bench: &mut Bench) -> Outcome {
@@ -140,26 +175,36 @@ pub(crate) fn edit(path: &Path, bench: &mut Bench) -> Outcome {
     bench.measure(|| {
         let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
         for method in editor.methods_mut()?.values_mut() {
-            let Some(decoded) = method.decode()? else {
-                continue;
-            };
-            let signature = decoded.local_signature();
-            let form = decoded.local_signature_form();
-            let mut points = decoded.collect::<pdbrs::Result<Vec<_>>>()?;
-            for point in &mut points {
-                if let Some(span) = &mut point.span {
-                    span.start_line += LINE_SHIFT;
-                    span.end_line += LINE_SHIFT;
-                }
+            shift_lines(method)?;
+        }
+        rename_document(&mut editor)?;
+        write(&editor)
+    })
+}
+
+/// Rename document 1 and write the PDB with the content-derived ID (#49).
+pub(crate) fn edit_document(path: &Path, bench: &mut Bench) -> Outcome {
+    let bytes = std::fs::read(path)?;
+    let pdb = Pdb::parse(&bytes)?;
+    bench.measure(|| {
+        let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+        rename_document(&mut editor)?;
+        write(&editor)
+    })
+}
+
+/// Shift the lines of the first method with sequence points and write the PDB with the
+/// content-derived ID (#49).
+pub(crate) fn edit_method(path: &Path, bench: &mut Bench) -> Outcome {
+    let bytes = std::fs::read(path)?;
+    let pdb = Pdb::parse(&bytes)?;
+    bench.measure(|| {
+        let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+        for method in editor.methods_mut()?.values_mut() {
+            if shift_lines(method)? {
+                break;
             }
-            *method = SequencePoints::encode_parts(signature, form, &points)?;
         }
-        if let Some(document) = editor.documents_mut()?.get_mut(DocumentId(1)) {
-            let mut name = std::mem::take(&mut document.name).into_vec();
-            name.extend_from_slice(RENAME_SUFFIX);
-            document.name = name.into();
-        }
-        let output = editor.plan(EditOptions::default())?.to_vec()?;
-        Ok(u64::try_from(output.len())?)
+        write(&editor)
     })
 }
