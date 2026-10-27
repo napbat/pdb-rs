@@ -17,6 +17,9 @@
 //! 3. The read count of a named stream change on `msvc-x64-large` (see [`read_count`]).
 //! 4. A summary line of the section.
 //!
+//! Then the command prints the section `task cases:` of #41: each editing task on each PDB,
+//! with the same checks and a summary line (see [`tasks`]).
+//!
 //! The command prints each explained class of differences. It fails for each problem without
 //! an explanation, for each rejected edit and for each missing tool.
 
@@ -26,6 +29,7 @@ mod edits;
 mod read_count;
 mod scope_trees;
 mod stripped;
+mod tasks;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -268,7 +272,8 @@ pub fn verify_native_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Res
         list.len()
     );
     let new_problems = new_section(&tools, &list, &work, jobs);
-    Ok(problems == 0 && new_problems == 0)
+    let task_problems = tasks::run(&tools, &list, &work, jobs);
+    Ok(problems == 0 && new_problems == 0 && task_problems == 0)
 }
 
 /// Run the new section: the new edit cases, the scope tree step and the read count. Print a

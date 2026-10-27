@@ -17,6 +17,7 @@ pub(super) mod report;
 mod source;
 mod streams;
 mod symbols;
+mod tasks;
 mod tree;
 mod types;
 

@@ -14,6 +14,7 @@ use crate::native::codeview::id_record::IdTable;
 use crate::native::codeview::index::{
     IdIndex, ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset, TypeIndex,
 };
+use crate::native::codeview::symbol::ModuleSymbolTarget;
 use crate::native::codeview::symbol::validate::{
     ModuleRecord, ValidationContext, validate_module_symbols, validate_shared_symbols,
 };
@@ -253,6 +254,11 @@ impl ModuleTargets for Targets<'_> {
             .get(index)?
             .as_ref()
             .map(|regions| &regions.map)
+    }
+
+    fn name(&self, target: ModuleSymbolTarget) -> Option<&[u8]> {
+        let module = shared::target_module(target)?;
+        self.modules.get(module.0 as usize)?.target_name(target)
     }
 }
 

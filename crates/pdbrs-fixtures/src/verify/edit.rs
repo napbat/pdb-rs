@@ -17,12 +17,15 @@
 //!    gives the same trace, and the line-moved PDB gives each line number plus 1000.
 //! 5. After these steps, the section `new edit cases:` applies one field change or one removal
 //!    in each case of [`cases`] and checks the output with the verifier and the plan report.
+//! 6. The section `task cases:` applies the editing tasks of #41 (see [`tasks`]) with the same
+//!    checks.
 //!
 //! The command writes the PDBs, the dumps and the traces to `target/verify-edit/`.
 
 mod cases;
 mod expect;
 mod stack;
+mod tasks;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -79,11 +82,12 @@ pub fn verify_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<boo
         check(&assembly, comparison, &outputs, &out, log)
     });
     let new_cases = cases::run(jobs, &assembly, &comparisons, &out);
+    let task_cases = tasks::run(jobs, &assembly, workspace, &comparisons, &out);
     println!(
         "wrote the PDBs, the dumps and the traces to {}",
         out.display()
     );
-    Ok(passed && new_cases)
+    Ok(passed && new_cases && task_cases)
 }
 
 /// Format a pdbrs error.

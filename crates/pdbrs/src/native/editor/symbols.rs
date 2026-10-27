@@ -271,8 +271,10 @@ macro_rules! shared_view {
             ///
             /// A record with a new name goes into the hash bucket of its new
             /// name. The plan rejects a new name of a reference record such as
-            /// `S_PROCREF` with [`ErrorKind::UnsupportedEdit`]: the module
-            /// record holds the same name.
+            /// `S_PROCREF` with [`ErrorKind::UnsupportedEdit`], unless the
+            /// module record that it names has the same new name:
+            /// [`PdbEditor::rename_symbols`](super::PdbEditor::rename_symbols)
+            /// renames both.
             pub fn get_mut(&mut self, handle: SymbolHandle) -> Option<&mut SymbolRecord> {
                 self.model
                     .records

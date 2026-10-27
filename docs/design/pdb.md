@@ -261,6 +261,7 @@ Each rebuild has the original bytes and the original content-derived ID, and its
 It runs each standalone fixture program with a built PDB and with a PDB whose sequence points move 1000 lines (see `fixtures/README.md`).
 Its section `new edit cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
 For each case, the verifier dump shows the expected change, and the streams with other bytes are exactly the streams that `PlanReport` does not give as copied.
+Its section `task cases:` runs the editing tasks `set_source_link` and `embed_source` (#41) with the same checks; the verifier decodes each embedded source and checks it against the SHA-256 hash of its document.
 
 ## Implemented MSF writing
 
@@ -380,13 +381,30 @@ The plan rejects these edits before it writes a byte. A planning error writes no
 - An edit that moves a symbol record, and a strip, if opaque data can refer to the changed offsets or indices: a stream that no other stream names and that does not decode as a type map,
   a named stream of an unknown kind, and for moved records also a symbol record or a C13 subsection of an unknown kind. The error names the stream and the index space (`Error::index_space`).
   A type map without an owner holds type indices only, so it does not block an edit. The strip removes it. Stream 61 of the `msvc-x64-incremental` fixture is such a type map: `/TMCache` does not name it.
-- A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a new name of a reference record such as `S_PROCREF`, a symbol edit of an opaque module, a forward type or ID reference,
-  a strip together with another decoded part, and the removal of a record that a reference record names (`InvalidReference`).
+- A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a new name of a reference record such as `S_PROCREF` whose module record does not get the same name,
+  a symbol edit of an opaque module, a forward type or ID reference, a strip together with another decoded part,
+  and the removal of a record that a reference record names (`InvalidReference`).
 
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
 Use `IncrementAge` or `Replace` for a semantic change, and write the returned identity to the image.
 
-`verify-native-edit` runs the 366 edits of #34 on the 61 native fixtures, and then the field changes and removals of #42, a scope tree step and a read count (see `fixtures/README.md`).
+The editing tasks ([#41](https://github.com/napbat/pdbrs/issues/41)) are functions of `PdbEditor` over the same model. They have no plan path of their own.
+Each task checks all its inputs before it changes the model, so an error leaves the model unchanged. The plan rules above apply to their changes.
+
+| Task | Model change | Checks |
+| --- | --- | --- |
+| `set_source_link(json)` | the `sourcelink` named stream | UTF-8 text with the shape of a JSON object (`SourceLink::parse`) |
+| `set_source_server(text)` | the `srcsrv` named stream | `SourceServer::parse` |
+| `remove_named_stream(name)` | the named stream and its Info entry; the plan writes a nil stream | the rules of `NamedStreams::remove` |
+| `rename_symbols(f)` | the named records of the symbol record stream (not `S_DATAREF` and `S_ANNOTATIONREF`) and the procedures of the modules | no NUL byte; each record encodes; each renamed procedure reference names a procedure with the same new name |
+
+`rename_symbols` calls the function once for each distinct name, in byte order. It does not undecorate names, so a C++ function needs a new name for its decorated public name and its undecorated procedure name.
+A procedure reference and its procedure have the same name, so they get the same new name; the plan accepts a new name of a reference record only in that case.
+The task decodes only the modules with a renamed procedure, and it does not change IPI records (`LF_FUNC_ID`, `LF_MFUNC_ID`): one function ID names the inlinee of many modules.
+A rename moves records, so the opaque check of the plan applies.
+
+`verify-native-edit` runs the 366 edits of #34 on the 61 native fixtures, then the field changes and removals of #42, a scope tree step and a read count,
+and then each task of #41 with `pdbstr -r` for `srcsrv` and `sourcelink` and DIA2Dump lookups of the renamed symbols (see `fixtures/README.md`).
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-native-edit
@@ -832,6 +850,22 @@ GitHub issue [#19](https://github.com/napbat/pdbrs/issues/19) tracks this work.
 Status: exact copies and stream-preserving repacks are implemented for MSF 7.0 (see [MSF writing](#implemented-msf-writing)).
 Exact copies, new layouts, semantic builds and semantic edits are implemented for Portable PDBs (see [Portable PDB writing](#implemented-portable-pdb-writing)).
 Native semantic builds and edits are implemented (see [Implemented native building](#implemented-native-building) and [Implemented native editing](#implemented-native-editing)).
+
+Semantic builds and edits of both backends go through one editor model ([#42](https://github.com/napbat/pdbrs/issues/42)): `native::PdbEditor` and `portable::PdbEditor`.
+An editor decodes a part only on its first `*_mut` access, and each accessor is atomic.
+The plan derives the dependent structures, rejects an edit that opaque data can break, writes nothing on an error,
+and reports each stream as copied or changed, so a normalization is never silent.
+
+The editing tasks ([#41](https://github.com/napbat/pdbrs/issues/41)) are functions over this model, not separate write paths, so they keep the guarantee of a semantic edit:
+
+| Backend | Tasks |
+| --- | --- |
+| Native | `set_source_link`, `set_source_server`, `remove_named_stream`, `rename_symbols` (see [Implemented native editing](#implemented-native-editing)) |
+| Portable | `set_source_link` (the Source Link custom debug information of the module), `embed_source` (the embedded source custom debug information of a document, raw or DEFLATE) |
+
+Each task checks all its inputs before it changes the model, so an error leaves the model unchanged.
+A portable task replaces the value of the one record of its kind for the parent, or adds a record; a parent with two such records is an error.
+`embed_source` does not compare the source with the document hash: a debugger compares them, so embed the file of the build or change `Document::hash` too.
 
 Keep these operations explicit. Do not silently fall back from preservation to normalization.
 An exact copy is a copy operation, not proof that the source is a valid PDB.

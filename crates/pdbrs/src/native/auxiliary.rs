@@ -17,6 +17,7 @@ mod udt_source_line_undone;
 
 pub use link_info::{LINK_INFO_VERSION_ONE, LINK_INFO_VERSION_TWO, LinkInfo};
 pub use source_link::SourceLink;
+pub(crate) use source_link::json_object;
 pub use source_server::{
     SourceServer, SourceServerFields, SourceServerFile, SourceServerFiles, SourceServerSection,
     SourceServerVariable, SourceServerVariables,
