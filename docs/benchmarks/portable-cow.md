@@ -12,7 +12,7 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 ## Method
 
 - Before: branch `portable-cow-49` at `074c364` (`main` at `d1d3fdd` with the two new bench
-  rows). After: the copy-on-write commit of the same branch. Both are release builds with the
+  rows). After: the same branch at `13fd082`. Both are release builds with the
   same toolchain as [baseline.md](baseline.md), on the same machine.
 - Bench: `cargo bench -p pdbrs --bench baseline -- --filter portable/ --runs 10`. The rows
   `portable/edit-document` (the name of document 1 gets the suffix `.edited`) and
