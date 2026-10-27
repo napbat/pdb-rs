@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use super::inlinee::{MERGED_IDS, inlinee_names};
 use super::range::{RangeIndex, Span};
-use super::scope::optional_rva;
+use super::scope::{optional_pdb_rva, optional_rva};
 use super::{
     LineKey, MAX_SCOPE_DEPTH, ModuleData, ProcedureKey, SeparatedChunk, SymbolLocator, push,
 };
@@ -13,10 +13,9 @@ use crate::native::Pdb;
 use crate::native::address::{AddressMap, SectionOffset};
 use crate::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, Symbol, SymbolData};
-use crate::native::dbi::{DebugStream, Module};
+use crate::native::dbi::Module;
 use crate::native::info::Feature;
 use crate::native::lines::{LineSubsection, ModuleLines};
-use crate::native::section::SectionHeaders;
 use crate::native::symbols::PublicSymbolIndex;
 use crate::{Error, ErrorKind, Result};
 
@@ -68,15 +67,14 @@ impl SymbolLocator {
     ///   the line subsections and the address translation.
     pub fn new<S: ReadAt>(pdb: &Pdb<S>) -> Result<Self> {
         let dbi = pdb.debug_info()?.ok_or_else(|| missing("DBI"))?;
-        let headers_stream = dbi
-            .debug_stream(DebugStream::SectionHeader)
+        let tables = pdb
+            .address_tables()?
             .ok_or_else(|| missing("section header"))?;
-        let section_headers = pdb.stream_bytes(headers_stream)?;
         let strings = pdb
             .names()?
             .map(|table| copy(table.strings()))
             .transpose()?;
-        let map = AddressMap::new(SectionHeaders::parse(&section_headers)?, dbi);
+        let map = tables.map();
         let no_type_merge = pdb.info().has_feature(Feature::NO_TYPE_MERGE);
         let mut lists = Lists {
             no_type_merge,
@@ -97,7 +95,7 @@ impl SymbolLocator {
                     section: contribution.section,
                     offset,
                 };
-                if let Some(start) = optional_rva(&map, address)? {
+                if let Some(start) = optional_pdb_rva(&map, address)? {
                     let span = span(start.0, size, contribution.module);
                     push(&mut contributions, span, LIMIT)?;
                 }
@@ -117,8 +115,7 @@ impl SymbolLocator {
             lines: RangeIndex::new(lists.lines)?,
             contributions: RangeIndex::new(contributions)?,
             publics: RangeIndex::new(publics)?,
-            dbi: dbi.clone(),
-            section_headers,
+            tables,
             strings,
             modules: lists.modules,
             inlinees,
@@ -183,7 +180,7 @@ impl Lists {
                         section: header.segment,
                         offset: header.code_offset,
                     };
-                    let Some(start) = optional_rva(map, address)? else {
+                    let Some(start) = optional_pdb_rva(map, address)? else {
                         continue;
                     };
                     let header_offset = usize::try_from(framed.offset)
@@ -274,7 +271,7 @@ impl Lists {
                 }
                 _ => continue,
             };
-            if let Some(start) = optional_rva(map, address)? {
+            if let Some(start) = optional_pdb_rva(map, address)? {
                 let key = ProcedureKey {
                     module: index,
                     offset: scoped.offset,
@@ -287,7 +284,7 @@ impl Lists {
         for (parent, chunk) in &data.separated {
             let procedure = starts.iter().find(|(address, _)| address == parent);
             if let (Some(&(_, offset)), Some(start)) =
-                (procedure, optional_rva(map, chunk.address)?)
+                (procedure, optional_pdb_rva(map, chunk.address)?)
             {
                 let key = ProcedureKey {
                     module: index,

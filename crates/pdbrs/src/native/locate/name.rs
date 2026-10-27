@@ -85,7 +85,7 @@ impl SymbolLocator {
             }
         }
         if let Some(index) = &self.public_index {
-            let map = self.address_map()?;
+            let map = self.address_map();
             for candidate in index.hash_table().lookup(name) {
                 let offset = candidate.symbol;
                 let public = self.public(offset)?;
@@ -117,7 +117,7 @@ impl SymbolLocator {
         let Some(span) = self.publics.preceding(rva.0) else {
             return Ok(None);
         };
-        let map = self.address_map()?;
+        let map = self.address_map();
         let offset = span.value;
         let public = self.public(offset)?;
         let same_section = match map.section_offset(rva) {

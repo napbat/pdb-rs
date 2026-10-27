@@ -3,10 +3,10 @@
 //! [`SymbolLocator::new`] loads the streams that the queries need and makes
 //! these indexes:
 //!
-//! - The procedures, managed procedures and thunks of all modules, by RVA.
-//! - The `DEBUG_S_LINES` code contributions of all modules, by RVA.
-//! - The DBI section contributions, by RVA.
-//! - The public symbols, by RVA.
+//! - The procedures, managed procedures and thunks of all modules, by PDB RVA.
+//! - The `DEBUG_S_LINES` code contributions of all modules, by PDB RVA.
+//! - The DBI section contributions, by PDB RVA.
+//! - The public symbols, by image RVA.
 //! - The file checksum entries and the inlinee start lines of each module.
 //! - The qualified names of all inlinees of `S_INLINESITE` records.
 //!
@@ -41,7 +41,12 @@
 //! # Limits
 //!
 //! The locator translates addresses through the OMAP tables of an image
-//! that a tool rewrote. An address without an OMAP mapping has no location.
+//! that a tool rewrote. As DIA does, it translates the image RVA of a query
+//! to the PDB RVA (the RVA in the original image) and finds the records at
+//! that address. A PDB RVA is the image RVA of a PDB without OMAP. An
+//! address without an OMAP mapping has no location. The RVAs of the result
+//! are image RVAs.
+//!
 //! The locator indexes only the records before a record that this crate
 //! cannot decode, for example a constant with an unknown numeric leaf.
 //! [`SymbolLocator::incomplete_modules`] lists the modules with such a
@@ -51,14 +56,13 @@
 
 use alloc::vec::Vec;
 
-use super::address::{AddressMap, Rva, SectionOffset};
+use super::address::{AddressMap, AddressTables, PdbRva, Rva, SectionOffset, Translation};
 use super::codeview::SymbolKind;
 use super::codeview::index::{
     ChecksumOffset, IdIndex, ModuleIndex, ModuleSymbolOffset, NameOffset,
 };
 use super::codeview::symbol::Public;
-use super::dbi::{Dbi, ModuleStream};
-use super::section::SectionHeaders;
+use super::dbi::ModuleStream;
 use super::symbols::{GlobalSymbolIndex, PublicSymbolIndex, SymbolOffset};
 use crate::{Error, ErrorKind, Result};
 
@@ -85,10 +89,8 @@ pub const MAX_SCOPE_DEPTH: usize = 256;
 /// The value owns the loaded streams. It does not borrow the [`Pdb`](super::Pdb).
 #[derive(Clone, Debug)]
 pub struct SymbolLocator {
-    /// The DBI stream.
-    dbi: Dbi,
-    /// The section header stream.
-    section_headers: Vec<u8>,
+    /// The section headers and the OMAP tables.
+    tables: AddressTables,
     /// The string buffer of the `/names` stream, or `None` without `/names`.
     strings: Option<Vec<u8>>,
     /// The modules in DBI order.
@@ -349,7 +351,7 @@ impl SymbolLocator {
     ///
     /// Returns the errors of [`AddressMap::rva`] for other addresses.
     pub fn rva(&self, address: SectionOffset) -> Result<Option<Rva>> {
-        scope::optional_rva(&self.address_map()?, address)
+        scope::optional_rva(&self.address_map(), address)
     }
 
     /// Return the indexed procedures and thunks in RVA order.
@@ -363,12 +365,19 @@ impl SymbolLocator {
         }
     }
 
-    /// Return the address map of the image sections.
-    fn address_map(&self) -> Result<AddressMap<'_>> {
-        Ok(AddressMap::new(
-            SectionHeaders::parse(&self.section_headers)?,
-            &self.dbi,
-        ))
+    /// Return the address map of the image sections and the OMAP tables.
+    fn address_map(&self) -> AddressMap<'_> {
+        self.tables.map()
+    }
+
+    /// Return the image RVA of the PDB RVA `pdb`. An address without an OMAP
+    /// mapping keeps its PDB RVA.
+    fn image_rva(&self, pdb: u32) -> Result<Rva> {
+        Ok(self
+            .address_map()
+            .pdb_rva_to_rva(PdbRva(pdb))?
+            .mapped()
+            .unwrap_or(Rva(pdb)))
     }
 
     /// Find the source location of an RVA.
@@ -387,11 +396,13 @@ impl SymbolLocator {
     /// - The errors of the address translation, and the decoding errors of
     ///   the module records and line subsections.
     pub fn locate(&self, rva: Rva) -> Result<Option<Location<'_>>> {
-        match self.address_map()?.section_offset(rva) {
-            Ok(address) => address
-                .mapped()
-                .map(|address| self.locate_at(rva, address))
-                .transpose(),
+        let map = self.address_map();
+        let pdb = match map.rva_to_pdb_rva(rva)? {
+            Translation::Mapped(pdb) => pdb,
+            Translation::Unmapped(_) => return Ok(None),
+        };
+        match map.pdb_section_offset(pdb) {
+            Ok(address) => self.locate_at(rva, Rva(pdb.0), address).map(Some),
             Err(error) if error.kind() == ErrorKind::InvalidReference => Ok(None),
             Err(error) => Err(error),
         }
@@ -405,7 +416,7 @@ impl SymbolLocator {
     ///
     /// Returns the errors of [`SymbolLocator::locate`].
     pub fn locate_section_offset(&self, address: SectionOffset) -> Result<Option<Location<'_>>> {
-        match self.address_map()?.rva(address) {
+        match self.address_map().rva(address) {
             Ok(rva) => match rva.mapped() {
                 Some(rva) => self.locate(rva),
                 None => Ok(None),
@@ -417,6 +428,11 @@ impl SymbolLocator {
 
     /// Build the location of an RVA in an image section.
     ///
+    /// `pdb` is the PDB RVA of `rva`: the address in the original image of
+    /// a PDB with OMAP, else `rva`. The indexes hold PDB RVAs, so the
+    /// lookups use `pdb`, as DIA translates an image RVA through OMAP before
+    /// it looks for symbols.
+    ///
     /// With identical code folding, more than one procedure can start at the
     /// RVA. Prefer the procedures of the module of the section contribution,
     /// and of these the last one in module and record order. DIA
@@ -425,18 +441,18 @@ impl SymbolLocator {
     ///
     /// An address in a separated code chunk and in no procedure gives the
     /// procedure of the chunk, with the same preference.
-    fn locate_at(&self, rva: Rva, address: SectionOffset) -> Result<Location<'_>> {
-        let contribution = self.contributions.find(rva.0).map(|span| span.value);
+    fn locate_at(&self, rva: Rva, pdb: Rva, address: SectionOffset) -> Result<Location<'_>> {
+        let contribution = self.contributions.find(pdb.0).map(|span| span.value);
         let prefer = |key: &ProcedureKey| Some(key.module) == contribution;
         let procedure = self
             .procedures
-            .find_last_preferred(rva.0, prefer)
-            .or_else(|| self.separated.find_last_preferred(rva.0, prefer))
+            .find_last_preferred(pdb.0, prefer)
+            .or_else(|| self.separated.find_last_preferred(pdb.0, prefer))
             .map(|span| self.procedure_info(span.value))
             .transpose()?;
         let module_index = contribution.or(procedure.map(|procedure| procedure.module));
         let preferred = procedure.map_or(module_index, |procedure| Some(procedure.module));
-        let line = self.line_at(rva, preferred)?;
+        let line = self.line_at(pdb, preferred)?;
         let mut location = Location {
             rva,
             address,
@@ -447,19 +463,20 @@ impl SymbolLocator {
             line,
         };
         if let Some(procedure) = procedure {
-            self.add_scopes(&mut location, &procedure)?;
+            self.add_scopes(&mut location, &procedure, pdb)?;
         }
         Ok(location)
     }
 
-    /// Return the `DEBUG_S_LINES` line at an RVA.
+    /// Return the `DEBUG_S_LINES` line at the PDB RVA `pdb`.
     ///
     /// With identical code folding, more than one subsection can start at
     /// the RVA. Prefer the subsections of the module `preferred`, and of
     /// these the first one in module and stream order. DIA
     /// (`findLinesByRVA`) gives the same line for the folded code of the
-    /// fixtures of #27.
-    fn line_at(&self, rva: Rva, preferred: Option<ModuleIndex>) -> Result<Option<SourceLine<'_>>> {
+    /// fixtures of #27. The start of the line is an image RVA.
+    fn line_at(&self, pdb: Rva, preferred: Option<ModuleIndex>) -> Result<Option<SourceLine<'_>>> {
+        let rva = pdb;
         let Some(span) = self
             .lines
             .find_first_preferred(rva.0, |key| Some(key.module) == preferred)
@@ -490,7 +507,7 @@ impl SymbolLocator {
             end_line: found.entry.line_start + u32::from(found.entry.end_delta),
             column,
             end_column,
-            start: Rva(span.start + found.entry.offset),
+            start: self.image_rva(span.start + found.entry.offset)?,
             length: Some(found.length),
             is_statement: found.entry.is_statement,
         }))

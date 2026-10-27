@@ -6,7 +6,7 @@ use super::{
     BlockInfo, InlineFrame, InlineRange, InlineRanges, Location, ModuleData, ProcedureInfo,
     ProcedureKey, SourceLine, SymbolLocator, internal, push,
 };
-use crate::native::address::{AddressMap, Rva, SectionOffset};
+use crate::native::address::{AddressMap, PdbRva, Rva, SectionOffset};
 use crate::native::codeview::Records;
 use crate::native::codeview::index::{IdIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{Symbol, SymbolData, separated_chunks};
@@ -69,8 +69,8 @@ enum ScopeKind<'a> {
         /// The line ranges.
         ranges: Vec<InlineRange>,
     },
-    /// A block with an RVA.
-    Block(BlockInfo<'a>),
+    /// A block with an RVA, and the PDB RVA of its first byte.
+    Block(BlockInfo<'a>, u32),
     /// Another scope, for example a block without an RVA.
     Other,
 }
@@ -99,7 +99,7 @@ impl SymbolLocator {
                 .and_then(Bytes::as_borrowed)
                 .unwrap_or_default(),
             address,
-            start: optional_rva(&self.address_map()?, address)?,
+            start: optional_rva(&self.address_map(), address)?,
             length,
         })
     }
@@ -143,14 +143,29 @@ impl SymbolLocator {
     ///   not known.
     /// - The errors of the address translation.
     pub fn code_chunks(&self, procedure: &ProcedureInfo<'_>) -> Result<Vec<CodeChunk>> {
+        self.chunks(procedure, false)
+    }
+
+    /// Return the code chunks of a procedure with the image RVA of each
+    /// chunk start, or with the PDB RVA if `pdb` is `true`.
+    ///
+    /// The two RVAs differ only in a PDB with OMAP.
+    fn chunks(&self, procedure: &ProcedureInfo<'_>, pdb: bool) -> Result<Vec<CodeChunk>> {
         const LIMIT: &str = "code chunk list cannot be allocated";
         let module = self.module_data(procedure.module)?;
-        let map = self.address_map()?;
+        let map = self.address_map();
+        let start = |address: SectionOffset| {
+            if pdb {
+                optional_pdb_rva(&map, address)
+            } else {
+                optional_rva(&map, address)
+            }
+        };
         let mut chunks = Vec::new();
         let main = CodeChunk {
             offset: None,
             address: procedure.address,
-            start: procedure.start,
+            start: start(procedure.address)?,
             length: procedure.length,
         };
         push(&mut chunks, main, LIMIT)?;
@@ -158,7 +173,7 @@ impl SymbolLocator {
             let separated = CodeChunk {
                 offset: Some(chunk.offset),
                 address: chunk.address,
-                start: optional_rva(&map, chunk.address)?,
+                start: start(chunk.address)?,
                 length: chunk.length,
             };
             push(&mut chunks, separated, LIMIT)?;
@@ -177,7 +192,7 @@ impl SymbolLocator {
             }
             _ => return Ok(scopes),
         };
-        let map = self.address_map()?;
+        let map = self.address_map();
         let mut records = Records::new(data);
         // The first record is the procedure itself.
         records.next();
@@ -201,14 +216,20 @@ impl SymbolLocator {
                     inlinee: site.inlinee,
                     ranges: inline_ranges(module, site.inlinee, &site.annotations)?,
                 },
-                SymbolData::Block(block) => match optional_rva(&map, block.address)? {
-                    Some(start) => ScopeKind::Block(BlockInfo {
-                        offset,
-                        name: block.name.as_borrowed().unwrap_or_default(),
-                        start,
-                        length: block.code_length,
-                    }),
-                    None => ScopeKind::Other,
+                SymbolData::Block(block) => match (
+                    optional_rva(&map, block.address)?,
+                    optional_pdb_rva(&map, block.address)?,
+                ) {
+                    (Some(start), Some(pdb_start)) => ScopeKind::Block(
+                        BlockInfo {
+                            offset,
+                            name: block.name.as_borrowed().unwrap_or_default(),
+                            start,
+                            length: block.code_length,
+                        },
+                        pdb_start.0,
+                    ),
+                    _ => ScopeKind::Other,
                 },
                 _ => ScopeKind::Other,
             };
@@ -227,27 +248,32 @@ impl SymbolLocator {
     }
 
     /// Add the innermost block and the inline call chain to `location`.
+    ///
+    /// `pdb` is the PDB RVA of the location. The scopes and the code chunks
+    /// match it in the address space of the PDB, so an address in a part of
+    /// a procedure that a rewriter moved finds its scopes, as DIA does.
     pub(super) fn add_scopes<'s>(
         &'s self,
         location: &mut Location<'s>,
         procedure: &ProcedureInfo<'s>,
+        pdb: Rva,
     ) -> Result<()> {
-        let rva = location.rva;
         let scopes = self.scopes(procedure)?;
         location.block = scopes.iter().rev().find_map(|scope| match scope.kind {
-            ScopeKind::Block(block)
-                if block.start <= rva
-                    && u64::from(rva.0) - u64::from(block.start.0) < u64::from(block.length) =>
+            ScopeKind::Block(block, start)
+                if start <= pdb.0
+                    && u64::from(pdb.0) - u64::from(start) < u64::from(block.length) =>
             {
                 Some(block)
             }
             _ => None,
         });
-        let chunks = self.code_chunks(procedure)?;
-        // The range that holds the address, with its RVA and length.
+        let chunks = self.chunks(procedure, true)?;
+        let map = self.address_map();
+        // The range that holds the address, with its PDB RVA and length.
         let holding = |range: &InlineRange| {
             let (start, length) = range.rva_range(&chunks)?;
-            (rva.0.checked_sub(start.0)? < length).then_some((*range, start, length))
+            (pdb.0.checked_sub(start.0)? < length).then_some((*range, start, length))
         };
         let innermost = scopes.iter().rposition(|scope| match &scope.kind {
             ScopeKind::Site { ranges, .. } => ranges.iter().any(|range| holding(range).is_some()),
@@ -261,7 +287,14 @@ impl SymbolLocator {
                 let found = ranges.iter().find_map(holding);
                 let (name, qualified_name) = self.inlinee_name(procedure.module, *inlinee)?;
                 let line = found
-                    .map(|(range, start, length)| self.range_line(module, start, length, &range))
+                    .map(|(range, start, length)| {
+                        // Report the image RVA of the range start, as for the other RVAs.
+                        let start = map
+                            .pdb_rva_to_rva(PdbRva(start.0))?
+                            .mapped()
+                            .unwrap_or(start);
+                        self.range_line(module, start, length, &range)
+                    })
                     .transpose()?;
                 let frame = InlineFrame {
                     offset: scope.offset,
@@ -377,6 +410,25 @@ pub(super) fn module_symbol(module: &ModuleData, offset: ModuleSymbolOffset) -> 
 pub(super) fn optional_rva(map: &AddressMap<'_>, address: SectionOffset) -> Result<Option<Rva>> {
     match map.rva(address) {
         Ok(rva) => Ok(rva.mapped()),
+        Err(_) if address.section == 0 || usize::from(address.section) > map.sections().len() => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Translate an address to its PDB RVA: the RVA in the original image of a
+/// PDB with OMAP, else the image RVA.
+///
+/// Section 0 and section numbers past the last header give `None`, as in
+/// [`optional_rva`]. The value is an [`Rva`] for the range indexes of the
+/// locator, which hold PDB RVAs.
+pub(super) fn optional_pdb_rva(
+    map: &AddressMap<'_>,
+    address: SectionOffset,
+) -> Result<Option<Rva>> {
+    match map.pdb_rva(address) {
+        Ok(rva) => Ok(Some(Rva(rva.0))),
         Err(_) if address.section == 0 || usize::from(address.section) > map.sections().len() => {
             Ok(None)
         }
