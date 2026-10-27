@@ -11,10 +11,10 @@ use super::super::{checks, missing};
 use super::{Bytes, Work, push};
 use crate::io::ReadAt;
 use crate::native::codeview::index::{ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset};
-use crate::native::codeview::symbol::ModuleTypeReference;
 use crate::native::codeview::symbol::validate::{
     ValidationContext, validate_module_symbols, validate_shared_symbols,
 };
+use crate::native::codeview::symbol::{ModuleSymbolTarget, ModuleTypeReference};
 use crate::native::dbi::{Module, SourceInfo};
 use crate::native::editor::ModuleSlot;
 use crate::native::editor::module::{ModuleContents, SYMBOL_BASE};
@@ -62,6 +62,14 @@ impl ModuleTargets for Encoded<'_> {
             .find(|(contents, _)| contents.index() == module && contents.source().is_some())
             .and_then(|(_, regions)| regions.as_ref())
             .map(|regions| &regions.map)
+    }
+
+    fn name(&self, target: ModuleSymbolTarget) -> Option<&[u8]> {
+        let module = shared::target_module(target)?;
+        self.modules
+            .iter()
+            .find(|(contents, _)| contents.index() == module)
+            .and_then(|(contents, _)| contents.target_name(target))
     }
 }
 

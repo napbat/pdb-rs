@@ -3,8 +3,8 @@
 //! The tests cover the heap builders, index widths that change during a build (heaps, local
 //! tables, external tables and coded indexes), the plan checks, the PDB ID policies, the
 //! checksum, determinism, the `MPDB` output, exact copies, the rebuild of an existing
-//! Portable PDB, builds and edits with `PdbEditor`, the plan report and the editor with
-//! unknown custom debug information.
+//! Portable PDB, builds and edits with `PdbEditor`, the plan report, the editor with
+//! unknown custom debug information and the editing tasks of #41.
 
 mod build;
 #[path = "../portable_metadata/builder.rs"]
@@ -17,6 +17,7 @@ mod files;
 mod heaps;
 mod identity;
 mod rebuild;
+mod tasks;
 mod widths;
 
 use pdbrs::Error;

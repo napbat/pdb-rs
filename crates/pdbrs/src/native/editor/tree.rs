@@ -259,6 +259,43 @@ pub(super) fn walk_mut(
     Ok(())
 }
 
+/// Return the first record of `nodes` in pre-order that `test` accepts.
+pub(super) fn find<'n>(
+    nodes: &'n [ModuleSymbol],
+    test: &impl Fn(&SymbolRecord) -> bool,
+) -> Option<&'n SymbolRecord> {
+    for node in nodes {
+        match node {
+            ModuleSymbol::Record(record) if test(record) => return Some(record),
+            ModuleSymbol::Record(_) => {}
+            ModuleSymbol::Scope(scope) => {
+                if test(&scope.opener) {
+                    return Some(&scope.opener);
+                }
+                if let Some(found) = find(&scope.children, test) {
+                    return Some(found);
+                }
+                if test(&scope.closer) {
+                    return Some(&scope.closer);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Return `true` if `data` is a procedure: a native procedure of any
+/// architecture, or a managed procedure.
+pub(super) const fn is_procedure(data: &SymbolData<'_>) -> bool {
+    matches!(
+        data,
+        SymbolData::Procedure(_)
+            | SymbolData::MipsProcedure(_)
+            | SymbolData::Ia64Procedure(_)
+            | SymbolData::ManagedProcedure(_)
+    )
+}
+
 /// Find the scope of a procedure with the name `name` in `nodes`, at any
 /// depth.
 pub(super) fn find_procedure<'n>(
@@ -267,14 +304,7 @@ pub(super) fn find_procedure<'n>(
 ) -> Option<&'n mut Scope> {
     for node in nodes {
         if let ModuleSymbol::Scope(scope) = node {
-            let procedure = matches!(
-                scope.opener.data(),
-                SymbolData::Procedure(_)
-                    | SymbolData::MipsProcedure(_)
-                    | SymbolData::Ia64Procedure(_)
-                    | SymbolData::ManagedProcedure(_)
-            );
-            if procedure && scope.opener.name() == Some(name) {
+            if is_procedure(scope.opener.data()) && scope.opener.name() == Some(name) {
                 return Some(&mut **scope);
             }
             if let Some(found) = find_procedure(&mut scope.children, name) {
