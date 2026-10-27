@@ -71,6 +71,24 @@ impl ReadAt for Changing<'_> {
     }
 }
 
+/// A source with the bytes of a slice that counts the bytes that it gives.
+struct Counting<'a> {
+    data: &'a [u8],
+    read: &'a Cell<usize>,
+}
+
+impl ReadAt for Counting<'_> {
+    fn len(&self) -> Result<u64> {
+        ReadAt::len(self.data)
+    }
+
+    fn read_exact_at(&self, offset: u64, buffer: &mut [u8]) -> Result<()> {
+        self.data.read_exact_at(offset, buffer)?;
+        self.read.set(self.read.get() + buffer.len());
+        Ok(())
+    }
+}
+
 /// Return `length` bytes that compress a little.
 fn bytes(length: usize, seed: u8) -> Vec<u8> {
     (0..length)
@@ -374,6 +392,7 @@ fn the_defaults_match_pdz_encode() {
     assert_eq!(options.directory_codec(), None);
     assert!(!options.pad_16k());
     assert_eq!(options.limits(), MsfzLimits::default());
+    assert_eq!(options.max_kept_chunk_bytes(), 256 << 20);
 }
 
 #[test]
@@ -437,11 +456,14 @@ fn limits_of_the_options_are_enforced() {
 
 #[test]
 fn large_streams_need_no_large_buffers() {
-    // A 40 MiB stream with 4 KiB chunks: the writer keeps one 4 KiB chunk in memory.
+    // A 40 MiB stream with 4 KiB chunks: the writer keeps one 4 KiB chunk in memory. A limit
+    // of 0 keeps no compressed chunks in the plan.
     let mut builder = MsfzBuilder::new();
     builder.push(Pattern(0)).unwrap();
     builder.push(Pattern(40 << 20)).unwrap();
-    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    let options = MsfzWriteOptions::default()
+        .with_max_chunk_size(MIN_CHUNK_SIZE)
+        .with_max_kept_chunk_bytes(0);
     let plan = builder.plan(options).unwrap();
     assert_eq!(plan.chunk_count(), 10_240);
     assert_eq!(plan.fragment_count(), 10_240);
@@ -498,11 +520,68 @@ fn a_changed_source_stops_the_write() {
             len: 50_000,
         })
         .unwrap();
-    let plan = builder.plan(MsfzWriteOptions::default()).unwrap();
+    // The write reads and compresses a chunk again only if the plan does not keep it.
+    let options = MsfzWriteOptions::default().with_max_kept_chunk_bytes(0);
+    let plan = builder.plan(options).unwrap();
     changed.set(true);
     let error = plan.to_vec().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.offset(), Some(80));
+}
+
+#[test]
+fn the_plan_keeps_compressed_chunks_up_to_the_limit() {
+    // 8 chunks of 4 KiB or less; most chunk boundaries are in a stream.
+    let streams = sample_streams();
+    let total: usize = streams.iter().flatten().map(Vec::len).sum();
+    let read = Cell::new(0);
+    let mut source = MsfzBuilder::new();
+    for stream in &streams {
+        match stream {
+            Some(data) => source.push(Counting { data, read: &read }),
+            None => source.push_nil(),
+        }
+        .unwrap();
+    }
+    let options = MsfzWriteOptions::default().with_max_chunk_size(MIN_CHUNK_SIZE);
+    // Plan with the limit `max`, write, and return the output and the bytes that the write read.
+    let write_with = |max: usize| {
+        let plan = source.plan(options.with_max_kept_chunk_bytes(max)).unwrap();
+        read.set(0);
+        let bytes = plan.to_vec().unwrap();
+        (bytes, read.get())
+    };
+
+    let (expected, reread) = write_with(0);
+    assert_eq!(reread, total);
+    check_streams(&expected, &streams);
+    let chunks = header(&expected).chunks;
+    assert_eq!(chunks.len(), 8);
+    let stored = |count: usize| -> usize {
+        chunks[..count]
+            .iter()
+            .map(|entry| usize::try_from(entry.stored).unwrap())
+            .sum()
+    };
+    let size = |count: usize| -> usize {
+        chunks[..count]
+            .iter()
+            .map(|entry| usize::try_from(entry.size).unwrap())
+            .sum()
+    };
+    for count in 1..=chunks.len() {
+        // A limit of exactly the first `count` chunks keeps them.
+        let (bytes, reread) = write_with(stored(count));
+        assert_eq!(bytes, expected, "{count}");
+        assert_eq!(reread, total - size(count), "{count}");
+        // With one byte less, the plan stops before chunk `count - 1` and keeps no later chunk.
+        let (bytes, reread) = write_with(stored(count) - 1);
+        assert_eq!(bytes, expected, "{count}");
+        assert_eq!(reread, total - size(count - 1), "{count}");
+    }
+    let (bytes, reread) = write_with(MsfzWriteOptions::default().max_kept_chunk_bytes());
+    assert_eq!(bytes, expected);
+    assert_eq!(reread, 0);
 }
 
 #[cfg(feature = "std")]
@@ -576,7 +655,9 @@ mod file {
                 len: 50_000,
             })
             .unwrap();
-        let plan = builder.plan(MsfzWriteOptions::default()).unwrap();
+        // With kept chunks, the write does not read the source again.
+        let options = MsfzWriteOptions::default().with_max_kept_chunk_bytes(0);
+        let plan = builder.plan(options).unwrap();
         changed.set(true);
         let error = plan.write_file(&path).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidFormat);

@@ -65,8 +65,9 @@ pub fn options(selector: u8) -> (msfz::MsfzWriteOptions, OldDirectoryPolicy) {
 ///
 /// # Panics
 ///
-/// Panics if a plan does not write, a second write gives other bytes, an output does not
-/// read, a stream changes, or the MSF 7.0 output has allocated pages without a reference.
+/// Panics if a plan does not write, a second write or a plan with a smaller kept chunk limit
+/// gives other bytes, an output does not read, a stream changes, or the MSF 7.0 output has
+/// allocated pages without a reference.
 pub fn round_trip(data: &[u8]) {
     let Some((&selector, data)) = data.split_first() else {
         return;
@@ -97,6 +98,18 @@ pub fn round_trip(data: &[u8]) {
             .expect("a planned MSFZ container writes again"),
         bytes,
         "a second write gives other bytes"
+    );
+    // This plan keeps about half of the compressed chunks, so the write compresses the rest again.
+    let half = options.with_max_kept_chunk_bytes(bytes.len() / 2);
+    let again = source
+        .to_msfz(half, policy)
+        .expect("a smaller kept chunk limit plans");
+    assert_eq!(
+        again
+            .to_vec()
+            .expect("a plan with a smaller kept chunk limit writes"),
+        bytes,
+        "the kept chunk limit changes the output"
     );
     let written = Container::with_limits(
         bytes.as_slice(),

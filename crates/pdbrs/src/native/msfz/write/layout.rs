@@ -32,7 +32,7 @@ pub(super) struct Span {
 
 impl Span {
     /// Return the end of the span in the virtual byte array.
-    fn end(self) -> u64 {
+    pub(super) fn end(self) -> u64 {
         // `Layout::new` checks that the sum of all sizes fits in `u64`.
         self.start + self.size
     }
