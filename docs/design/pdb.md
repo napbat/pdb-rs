@@ -328,7 +328,7 @@ Its output differs only in block numbers, block counts and the stream 0 size.
 
 - The model: the collections of `native::editor` hold `'static` records. `named_streams_mut`, `publics_mut`, `globals_mut`, `module_mut`, `add_module`, `types_mut`, `ids_mut`,
   `names_mut`, `debug_info_mut`, `debug_streams_mut` and `unnamed_streams_mut` decode their part on the first call. Each accessor is atomic: an error leaves the model unchanged.
-- Index spaces only grow. `TypeList::push` and `IdList::push` return the final `TypeIndex` and `IdIndex`. `UnnamedStreams::push` returns a `StreamId`.
+- Index spaces only grow in the model. `TypeList::push` and `IdList::push` return the model `TypeIndex` and `IdIndex`; without a removal, it is the final index. `UnnamedStreams::push` returns a `StreamId`.
   `PublicSymbols::push`, `GlobalSymbols::push` and `ModuleContents::push` return a `SymbolHandle` or a `ModuleSymbolHandle`: the plan computes the offsets.
 - The plan rejects a TPI or IPI record that refers to itself or to a later record of its space (`UnsupportedEdit`, `Error::index_space`). Add the records in reference order.
 - Module symbols form a scope tree (`ModuleSymbol`, `Scope`). `ModuleContents::push` adds records in stream order: an opener starts a scope and a closer ends it.
@@ -373,6 +373,12 @@ Without `decode_all`, the plan writes the copy-on-write layout. `EditOptions::de
   writes the DBI module record sizes, and writes the new targets into the reference records of the symbol record stream (`Remapped(ModuleSymbolOffset)`).
   A module whose records do not form a tree stays opaque: its symbol edits fail with `UnsupportedEdit`, and its lines stay editable.
 - Types and IDs: appended records keep the source header, the hash values, the index offsets and the adjusters of the hash stream. A changed source record makes the plan encode all records and the hash stream again with the source header options.
+- Removal of types and IDs ([#47](https://github.com/napbat/pdbrs/issues/47)): `TypeList::remove` and `IdList::remove` make a record a tombstone, in both layouts.
+  The plan gives the records that are not removed the next output index, in order, and writes the TPI and IPI streams and their hash streams again; a hash adjuster of a removed record goes away.
+  It writes the output index into each reference of the symbol record stream, of the module streams (symbol records and C13 subsections), of the type maps and of `/UDTSRCLINEUNDONE`.
+  An index keeps its width, so no offset moves, and a copied stream becomes a patched stream (`Remapped(TypeIndex)` or `Remapped(IdIndex)`).
+  `PdbWritePlan::type_index` and `id_index` give the output index of a model index: a record that `push` added after a removal has a model index as its handle.
+  Caution: the plan cannot see references in other files. An object file that uses a type-server PDB, a precompiled-header object (`/Yc`) and the object files of a `/DEBUG:FASTLINK` PDB keep the old indices.
 - Identity: the caller gives an `IdentityPolicy` to `Pdb::edit`. The Info and DBI ages stay consistent. `PdbWritePlan::identity` returns the values for the image; without a DBI change, it reads the DBI age only when the caller asks.
 - Strip: `EditOptions::with_strip_private(true)` writes the streams that `link /PDBSTRIPPED` (MSVC 14.51) writes: no types or IDs, only `S_PUB32` and `S_LPROCREF` records, local procedures without types in the module streams, no source files, lines or EC names, zero section contribution CRCs and the DBI stripped flag.
   The strip is a plan mode, not a change of the model.
@@ -385,6 +391,11 @@ The plan rejects these edits before it writes a byte. A planning error writes no
 - A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream, a new name of a reference record such as `S_PROCREF` whose module record does not get the same name,
   a symbol edit of an opaque module, a forward type or ID reference, a strip together with another decoded part,
   and the removal of a record that a reference record names (`InvalidReference`).
+- A removal of type or ID records that another record refers to (`InvalidReference`; `Error::record` names a TPI or IPI record, `Error::stream_location` another record).
+- A removal of type or ID records in a PDB without a DBI stream (a type server), with the feature `MINI` (`/DEBUG:FASTLINK`) or `NOTM` (`/DEBUG:LAZY`, `S_MOD_TYPEREF`), or with type servers in the DBI stream.
+  The same for data that can hold an index without a decoder: a record or a C13 subsection of an unknown kind, a named stream of an unknown kind, a stream without an owner that is not a type map,
+  a type map of an object file (version 2: only the object file tells TPI and IPI indices apart), an XFG hash subsection (object file type scope), a managed symbol whose token field can be a type index and an `S_DISCARDED` record with data.
+  A type map of a type server (version 1) gets the output indices. This changes the rule above for a type map without an owner.
 
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.
 Use `IncrementAge` or `Replace` for a semantic change, and write the returned identity to the image.

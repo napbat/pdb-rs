@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use crate::io::ReadAt;
 use crate::native::container::Stream;
+use crate::native::output::no_memory;
 use crate::{Error, ErrorKind, Result};
 
 /// The size of the value of a patch.
@@ -36,6 +37,47 @@ impl Patch {
     const fn end(self) -> u64 {
         self.offset + PATCH_SIZE
     }
+}
+
+/// Return the patches that change `old` into `new`, or `None` if two
+/// patches would overlap (#47).
+///
+/// Each patch starts at the first changed byte after the previous patch,
+/// or at the last 4 bytes of the stream, and takes its value from `new`.
+/// A change of fixed-width fields gives one patch for each changed field.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::InvalidFormat`] if the lengths differ, and
+/// [`ErrorKind::LimitExceeded`] if an allocation fails.
+pub(super) fn patches_between(old: &[u8], new: &[u8]) -> Result<Option<Vec<Patch>>> {
+    if old.len() != new.len() {
+        return Err(Error::new(ErrorKind::InvalidFormat, None)
+            .with_context("a stream with new values does not keep its size"));
+    }
+    let size = size_of::<u32>();
+    let mut patches = Vec::new();
+    let mut end = 0;
+    let mut position = 0;
+    while position < old.len() {
+        if old[position] == new[position] {
+            position += 1;
+            continue;
+        }
+        let Some(start) = old.len().checked_sub(size).map(|last| position.min(last)) else {
+            return Ok(None);
+        };
+        if start < end {
+            return Ok(None);
+        }
+        let mut value = [0; 4];
+        value.copy_from_slice(&new[start..start + size]);
+        patches.try_reserve(1).map_err(|_| no_memory())?;
+        patches.push(Patch::new(start, u32::from_le_bytes(value)));
+        end = start + size;
+        position = end;
+    }
+    Ok(Some(patches))
 }
 
 /// The bytes under the patches.

@@ -191,6 +191,8 @@ enum Location {
     Space(IndexSpace),
     /// The record and the address of a rejected clean remap.
     Address(RemapAddress),
+    /// A record of a rejected native edit: its index space and its index.
+    Record(IndexSpace, u32),
 }
 
 /// An error with an optional physical byte offset.
@@ -346,6 +348,28 @@ impl Error {
         }
     }
 
+    /// Attach the record that a rejected native edit names: its index space
+    /// and its index in the editor model.
+    ///
+    /// For example, the plan gives the TPI or IPI record that refers to a
+    /// removed record (#47). This location replaces an index space of
+    /// [`Error::with_index_space`].
+    #[must_use]
+    pub const fn with_record(mut self, space: IndexSpace, index: u32) -> Self {
+        self.location = Some(Location::Record(space, index));
+        self
+    }
+
+    /// Return the index space and the model index of the record that a
+    /// rejected native edit names, if known.
+    #[must_use]
+    pub const fn record(&self) -> Option<(IndexSpace, u32)> {
+        match self.location {
+            Some(Location::Record(space, index)) => Some((space, index)),
+            _ => None,
+        }
+    }
+
     /// Return the static structure or operation description, if known.
     #[must_use]
     pub const fn context(&self) -> Option<&'static str> {
@@ -394,6 +418,12 @@ impl fmt::Display for Error {
                 " for the record {:?} at the PDB RVA {:#x}",
                 address.item, address.address.0
             )?,
+            Some(Location::Record(space, index)) => {
+                write!(
+                    formatter,
+                    " at the record {index:#x} of the index space {space:?}"
+                )?;
+            }
             None => {}
         }
         if let Some(source) = &self.source {

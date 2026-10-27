@@ -164,7 +164,44 @@ pub(super) enum Names {
 /// In both layouts, type indices, ID indices and `/names` offsets keep their
 /// values: the index spaces only grow (rule 5 of #42). Only
 /// [`PdbEditor::remap_source_paths`] builds `/names` again (#46): it writes
-/// the new offsets into every decoded field.
+/// the new offsets into every decoded field. A removal of type or ID records
+/// is the other exception: see below.
+///
+/// # Removal of type and ID records
+///
+/// Caution: the plan cannot see references in other files. An object file
+/// that uses a type-server PDB, a precompiled-header object (`/Yc`) and the
+/// object files of a `/DEBUG:FASTLINK` PDB keep the old indices. Remove
+/// records only from a PDB that no other file refers to by index.
+///
+/// [`TypeList::remove`](super::TypeList::remove) and
+/// [`IdList::remove`](super::IdList::remove) make a record a tombstone (#47).
+/// In the model, the other records keep their indices, and a record that
+/// [`TypeList::push`](super::TypeList::push) adds gets the next index. After
+/// a removal, this index is a handle. The plan compacts each index space
+/// with a removed record:
+///
+/// - The records that are not removed keep their order and get the next
+///   output index. [`PdbWritePlan::type_index`](crate::native::PdbWritePlan::type_index)
+///   and [`PdbWritePlan::id_index`](crate::native::PdbWritePlan::id_index)
+///   give the output index of a model index.
+/// - The plan writes the TPI and IPI records with the output indices and
+///   builds their hash streams again: hash values, index offsets and hash
+///   adjusters. A hash adjuster of a removed record goes away.
+/// - The plan writes the output index into each reference of the symbol
+///   record stream, of the module streams (symbol records and the C13
+///   subsections), of the type map streams and of `/UDTSRCLINEUNDONE`. An
+///   index field keeps its width, so no offset moves.
+/// - A reference to a removed record fails the plan with
+///   [`ErrorKind::InvalidReference`]. For a TPI or IPI record that refers,
+///   [`Error::record`] gives its space and its model index. For another
+///   record, [`Error::stream_location`] gives the output stream and the
+///   offset of the record.
+/// - The plan refuses the compaction with [`ErrorKind::UnsupportedEdit`] for
+///   a PDB without a DBI stream (a type server), a `/DEBUG:FASTLINK` PDB
+///   (feature `MINI`), a PDB without type merging (feature `NOTM`,
+///   `S_MOD_TYPEREF`), a PDB whose modules use type servers, and for data
+///   that can hold an index without a decoder (see below).
 ///
 /// # Dependencies
 ///
@@ -175,7 +212,7 @@ pub(super) enum Names {
 /// | Named streams | the Info named-stream map |
 /// | Public and global records | the symbol record stream, the global and public indexes, the global references of the modules |
 /// | Module symbols or lines | the module stream (scope links and offsets from the tree), the DBI module record sizes, the DBI source info if the files change, the targets of the reference records of the symbol record stream |
-/// | Types or IDs | the TPI or IPI stream and its hash stream |
+/// | Types or IDs | the TPI or IPI stream and its hash stream; after a removal, also each stream with a reference to a moved index |
 /// | `/names` | the string table and its hash table |
 /// | Identity, features | the Info stream and the DBI age |
 ///
@@ -200,6 +237,16 @@ pub(super) enum Names {
 ///   does not block an edit. A module type stream belongs to the module
 ///   whose `S_MOD_TYPEREF` record names it. The error names the stream and
 ///   the index space ([`Error::index_space`]).
+/// - A removal of type or ID records, if the output has data that can hold
+///   an index without a decoder: a TPI or IPI record, a symbol record or a
+///   C13 subsection of an unknown kind, a named stream of an unknown kind, a
+///   present stream that no other stream names and that does not decode as a
+///   type map stream, a type map of an object file (version 2: only the
+///   object file tells TPI and IPI indices apart), an XFG hash subsection
+///   (its indices are in the type scope of an object file), a managed symbol
+///   whose token field can be a type index, and an `S_DISCARDED` record with
+///   data.
+///   A type map of a type server (version 1) gets the output indices.
 /// - A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream in the
 ///   copy-on-write layout: other records refer to their contents.
 ///   [`PdbEditor::remap_source_paths`] changes the `/src/` streams together

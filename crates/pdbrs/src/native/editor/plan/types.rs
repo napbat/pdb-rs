@@ -13,6 +13,8 @@
 
 use alloc::vec::Vec;
 
+use super::compact::map::{IndexMaps, SpaceMap};
+use super::compact::tables::{CompactRecord, compact};
 use crate::native::Producer;
 use crate::native::codeview::Records;
 use crate::native::editor::types::{ListRecord, RecordList};
@@ -142,6 +144,53 @@ pub(super) fn write_cow<T: ListRecord>(
         stream: TypeStream::parse(written.stream)?,
         hash: written.hash_stream,
     }))
+}
+
+/// Plan a stream of the copy-on-write layout with output indices (#47).
+///
+/// `own` is the map of the space of `list`. The plan writes all records
+/// again with the header options of the source and computes all hash values
+/// again.
+pub(super) fn write_compacted<T: CompactRecord>(
+    list: &RecordList<T>,
+    own: Option<&SpaceMap>,
+    maps: &IndexMaps,
+) -> Result<PlannedTypes> {
+    let source = list.source.as_ref().ok_or_else(|| {
+        Error::new(ErrorKind::InvalidFormat, None)
+            .with_context("type list of the copy-on-write layout has no source stream")
+    })?;
+    let compacted = compact(list, own, maps)?;
+    let options = TypeStreamOptions::from_header(source.header(), &compacted.adjusters);
+    let written = encode_type_stream(&compacted.records, &options)?;
+    Ok(PlannedTypes {
+        stream: TypeStream::parse(written.stream)?,
+        hash: written.hash_stream,
+    })
+}
+
+/// Write a stream of the new layout with output indices, and its hash
+/// stream (#47).
+pub(super) fn write_new_compacted<T: CompactRecord>(
+    list: &RecordList<T>,
+    own: Option<&SpaceMap>,
+    maps: &IndexMaps,
+    options: NewTypeOptions,
+    hash_stream: Option<StreamId>,
+) -> Result<PlannedTypes> {
+    let compacted = compact(list, own, maps)?;
+    let stream_options = TypeStreamOptions::default()
+        .with_index_begin(crate::native::codeview::index::FIRST_RECORD_INDEX)
+        .with_hash_bucket_count(options.hash_buckets)
+        .with_hash_stream(hash_stream)
+        .with_hash_aux_stream(None)
+        .with_producer(options.producer)
+        .with_adjusters(&compacted.adjusters);
+    let written = encode_type_stream(&compacted.records, &stream_options)?;
+    Ok(PlannedTypes {
+        stream: TypeStream::parse(written.stream)?,
+        hash: written.hash_stream,
+    })
 }
 
 /// Append the records `added` to `source` and build the hash stream.

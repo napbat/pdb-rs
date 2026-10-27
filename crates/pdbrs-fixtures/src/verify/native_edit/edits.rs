@@ -20,7 +20,7 @@ use pdbrs::native::codeview::type_record::{
 };
 use pdbrs::native::editor::SymbolRecord;
 use pdbrs::native::symbols::{HashTable, indexed_name};
-use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
+use pdbrs::native::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor, PdbWritePlan};
 
 /// The `T_INT4` primitive type.
 pub(crate) const T_INT4: TypeIndex = TypeIndex(0x74);
@@ -206,23 +206,38 @@ pub(crate) fn plan(
     expect: Expectation,
     notes: Vec<String>,
 ) -> Result<Outcome, String> {
+    plan_with(editor, options, expect, notes, |_| Ok(())).map(|(outcome, _)| outcome)
+}
+
+/// Plan and write the edited PDB of `editor`, and give the plan to `inspect` before the write.
+///
+/// A plan error gives [`Outcome::Rejected`] and no value of `inspect`.
+pub(crate) fn plan_with<T>(
+    editor: &PdbEditor<'_, &[u8]>,
+    options: EditOptions,
+    expect: Expectation,
+    notes: Vec<String>,
+    inspect: impl FnOnce(&PdbWritePlan<'_, &[u8]>) -> Result<T, String>,
+) -> Result<(Outcome, Option<T>), String> {
     let plan = match editor.plan(options) {
         Ok(plan) => plan,
-        Err(error) => return Ok(Outcome::Rejected(error)),
+        Err(error) => return Ok((Outcome::Rejected(error), None)),
     };
+    let inspected = inspect(&plan)?;
     let bytes = plan
         .to_vec()
         .map_err(|error| format!("cannot write the edited PDB: {error}"))?;
     let identity = plan
         .identity()
         .map_err(|error| format!("cannot read the identity of the plan: {error}"))?;
-    Ok(Outcome::Edited(Box::new(Edited {
+    let edited = Edited {
         bytes,
         changed: plan.report().changed().map(|id| id.0).collect(),
         identity,
         expect,
         notes,
-    })))
+    };
+    Ok((Outcome::Edited(Box::new(edited)), Some(inspected)))
 }
 
 /// Add or replace `srcsrv`, `sourcelink` and a raw stream, and remove `/LinkInfo`.

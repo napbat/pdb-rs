@@ -7,8 +7,9 @@ use core::cell::Cell;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use super::compact::map::IndexMaps;
 use super::patch::{Base, Patch, Patched};
-use super::types::write_cow;
+use super::types::{write_compacted, write_cow};
 use super::{Assembly, Planned, checks, missing, same_bytes};
 use crate::io::ReadAt;
 use crate::native::auxiliary::{LinkInfo, NamedStreamKind, SourceLink, SourceServer};
@@ -23,7 +24,7 @@ use crate::native::info::InfoBuilder;
 use crate::native::msf::{MsfWriteOptions, StreamId};
 use crate::native::output::no_memory;
 use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable, parse_header_prefix};
-use crate::native::{IdentityPolicy, Pdb, Producer};
+use crate::native::{IdentityPolicy, IndexSpace, Pdb, Producer};
 use crate::{Error, ErrorKind, Result};
 
 mod modules;
@@ -369,6 +370,7 @@ impl<'e, S: ReadAt> Work<'e, S> {
 pub(super) fn plan<'e, S: ReadAt>(
     editor: &'e PdbEditor<'_, S>,
     options: EditOptions,
+    maps: &IndexMaps,
 ) -> Result<(Assembly<'e, S>, MsfWriteOptions, Identity)> {
     let pdb = editor.cow_source()?;
     let msf = options
@@ -420,7 +422,7 @@ pub(super) fn plan<'e, S: ReadAt>(
         info = Some(builder);
     }
     plan_named(&mut work, &mut info)?;
-    plan_types(&mut work)?;
+    plan_types(&mut work, maps)?;
     modules::plan(&mut work)?;
     plan_names(&mut work)?;
     let identity = plan_identity(&mut work, &mut info)?;
@@ -529,14 +531,17 @@ fn plan_named<S: ReadAt>(work: &mut Work<'_, S>, info: &mut Option<InfoBuilder>)
 }
 
 /// Plan the TPI and IPI streams.
-fn plan_types<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()> {
+fn plan_types<S: ReadAt>(work: &mut Work<'_, S>, maps: &IndexMaps) -> Result<()> {
+    if !maps.is_identity() {
+        return compact_types(work, maps);
+    }
     let pdb = work.pdb;
     if let Some(types) = &work.editor.types
         && let Some(planned) = write_cow(&types.list, |id| pdb.stream_bytes(id))?
     {
         checks::check_types(&TypeTable::new(&planned.stream)?)?;
         work.type_end = Some(TypeIndex(planned.index_end()));
-        store(work, planned, TPI_STREAM)?;
+        store(work, planned, TPI_STREAM, StreamChange::Edited)?;
     }
     if let Some(ids) = &work.editor.ids
         && let Some(planned) = write_cow(&ids.list, |id| pdb.stream_bytes(id))?
@@ -544,9 +549,60 @@ fn plan_types<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()> {
         IdTable::new(&planned.stream)?.check(work.type_end()?)?;
         checks::check_id_order(ids.iter())?;
         work.id_end = Some(IdIndex(planned.index_end()));
-        store(work, planned, IPI_STREAM)?;
+        store(work, planned, IPI_STREAM, StreamChange::Edited)?;
     }
     Ok(())
+}
+
+/// Plan the TPI and IPI streams of a compaction (#47).
+///
+/// [`Work::type_end`] and [`Work::id_end`] give the model ends: the checks of
+/// the module symbols run on model indices, before the compaction pass.
+fn compact_types<S: ReadAt>(work: &mut Work<'_, S>, maps: &IndexMaps) -> Result<()> {
+    let pdb = work.pdb;
+    let editor = work.editor;
+    if let Some(types) = &editor.types {
+        work.type_end = Some(TypeIndex(types.list.end()?));
+        let planned = if maps.types.is_some() {
+            Some(write_compacted(&types.list, maps.types.as_ref(), maps)?)
+        } else {
+            write_cow(&types.list, |id| pdb.stream_bytes(id))?
+        };
+        if let Some(planned) = planned {
+            checks::check_types(&TypeTable::new(&planned.stream)?)?;
+            store(work, planned, TPI_STREAM, StreamChange::Edited)?;
+        }
+    }
+    let type_model_end = work.type_end()?;
+    let type_output_end = maps
+        .types
+        .as_ref()
+        .map_or(type_model_end, |map| TypeIndex(map.output_end()));
+    let decoded;
+    let ids = match &editor.ids {
+        Some(ids) => &ids.list,
+        None if pdb.ids()?.is_some() => {
+            decoded = crate::native::editor::source::id_list(pdb)?;
+            &decoded
+        }
+        None => return Ok(()),
+    };
+    work.id_end = Some(IdIndex(ids.end()?));
+    let planned = write_compacted(ids, maps.ids.as_ref(), maps)?;
+    IdTable::new(&planned.stream)?.check(type_output_end)?;
+    let mut edited = maps.ids.is_some();
+    if let Some(list) = &editor.ids {
+        checks::check_id_order(list.iter())?;
+        for entry in &list.list.entries {
+            edited |= !list.list.unchanged(entry)?;
+        }
+    }
+    let change = if edited {
+        StreamChange::Edited
+    } else {
+        StreamChange::Remapped(IndexSpace::TypeIndex)
+    };
+    store(work, planned, IPI_STREAM, change)
 }
 
 /// Give a planned type stream and its hash stream to the changes.
@@ -554,6 +610,7 @@ fn store<S>(
     work: &mut Work<'_, S>,
     planned: super::types::PlannedTypes,
     id: StreamId,
+    change: StreamChange,
 ) -> Result<()> {
     if let (Some(hash), Some(stream)) = (planned.hash, planned.stream.header().hash_stream) {
         work.changes.set(
@@ -562,11 +619,8 @@ fn store<S>(
             StreamChange::Rebuilt(RebuildReason::TypeHashes),
         )?;
     }
-    work.changes.set(
-        id,
-        Bytes::Owned(planned.stream.into_bytes()),
-        StreamChange::Edited,
-    )
+    work.changes
+        .set(id, Bytes::Owned(planned.stream.into_bytes()), change)
 }
 
 /// Plan the `/names` stream.

@@ -955,6 +955,53 @@ ignores the ASCII case and the separator kind. The case writes
 
 The last line of the section gives the counts. The command fails for a problem in the section.
 
+After the summary line of that section, the command prints the section `type removal cases:`
+(#47). It runs two cases on each PDB. Each case removes records that nothing refers to and
+plans with `IdentityPolicy::IncrementAge` and `EditOptions::default()`:
+
+| Case | Removed records | Method |
+| --- | --- | --- |
+| `remove-types` | The TPI records that pdbrs decodes and that are not UDTs (`LF_CLASS`, `LF_STRUCTURE`, `LF_INTERFACE`, `LF_UNION`, `LF_ENUM` and their `2` variants) or modifiers of UDTs | `TypeList::remove` |
+| `remove-ids` | The `LF_UDT_SRC_LINE` and `LF_UDT_MOD_SRC_LINE` records of the IPI stream | `IdList::remove` |
+
+DIA lists the UDTs, and it lists a modifier of a UDT as a UDT, so `remove-types` keeps them.
+A debugger finds a UDT source line record through the IPI hash, and no index refers to it.
+
+The references are an over-approximation:
+
+- Type references: the indices of `TypeLeaf::for_each_reference` of each TPI record, the type
+  fields of the IPI records, each hexadecimal value of at least `0x1000` in the IPI and symbol
+  sections of `llvm-pdbutil dump --types --ids --symbols --globals` (not the record header
+  indices), the types of the HLSL data symbols (`llvm-pdbutil` does not print them), the values
+  of the XFG hash, token map and cross-scope export subsections, the type map streams of
+  `/TMCache` and `/UDTSRCLINEUNDONE`.
+- ID references: the ID fields of the IPI records (`LF_FUNC_ID` scope, `LF_STRING_ID`
+  substring list, `LF_SUBSTR_LIST`, `LF_BUILDINFO` arguments, `LF_UDT_SRC_LINE` source file),
+  each value of the dump that is not in a type field, the inlinee lines, the token maps, the
+  cross-scope exports and imports, and the ID maps of the type map streams.
+
+Each case writes `target/verify-native-edit/<fixture>/<PDB file stem>/<case>.pdb`. A PDB
+without a candidate gives a `note:` line. A plan error `UnsupportedEdit` gives a
+`refused (<error>)` line and is not a problem. Each output gets checks 1 to 3 above and two
+comparisons:
+
+- The `llvm-pdbutil dump --types --ids --symbols --globals` output must be equal to the dump of
+  the source PDB after this mapping:
+  - In the TPI section (`remove-types`) or the IPI section (`remove-ids`), remove the block
+    of each removed record, and change the record count and the width of the index columns.
+  - Change each index of the compacted space to `PdbWritePlan::type_index` or
+    `PdbWritePlan::id_index`. The type fields are each value in the TPI section, the type
+    fields of `LF_FUNC_ID`, `LF_MFUNC_ID`, `LF_UDT_SRC_LINE` and `LF_UDT_MOD_SRC_LINE`, and the
+    `type` fields of the symbols. The ID fields are the other values of the IPI section (not
+    the text of a string), and the `type` of an `_ID` procedure, `inlinee`, `BuildId` and the
+    callee, caller and inlinee lists of the symbols.
+
+  For a difference, the command writes the mapped source dump and the output dump to
+  `<case>.source.txt` and `<case>.output.txt` next to the output PDB.
+- The masked `DIA2Dump -all` output must be equal to the output for the source PDB.
+
+The last line of the section gives the counts. The command fails for a problem in the section.
+
 ## MSFZ writer check
 
 The `verify-msfz` command checks the MSFZ writer and the conversions of pdbrs (#38):
