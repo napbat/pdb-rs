@@ -7,9 +7,7 @@ use std::fmt::Write as _;
 
 use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
-use pdbrs::portable::custom::{
-    CustomDebugInformation, CustomDebugValue, LambdaClosure, LocalSlot, Utf8Bytes,
-};
+use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugValue, LambdaClosure, LocalSlot};
 use pdbrs::portable::embedded::{EmbeddedSource, SourceCheck};
 
 use super::{Dump, quote};
@@ -116,19 +114,19 @@ fn details(
         }
         CustomDebugValue::TupleElementNames(names) => {
             for name in names {
-                out.line(format_args!("cdi-tuple-name id={id} name={}", text(name)));
+                out.line(format_args!("cdi-tuple-name id={id} name={}", text(&name)));
             }
         }
         CustomDebugValue::DefaultNamespace(value) | CustomDebugValue::SourceLink(value) => {
-            out.line(format_args!("cdi-text id={id} text={}", text(*value)));
+            out.line(format_args!("cdi-text id={id} text={}", text(value)));
         }
         CustomDebugValue::EmbeddedSource(source) => embedded_source(id, source, out)?,
         CustomDebugValue::CompilationMetadataReferences(references) => {
             for reference in references {
                 out.line(format_args!(
                     "cdi-reference id={id} file={} aliases={} flags={:#04x} time-stamp={:#010x} file-size={:#010x} mvid={}",
-                    text(reference.file_name),
-                    text(reference.aliases),
+                    text(&reference.file_name),
+                    text(&reference.aliases),
                     reference.flags,
                     reference.time_stamp,
                     reference.file_size,
@@ -140,8 +138,8 @@ fn details(
             for option in options {
                 out.line(format_args!(
                     "cdi-option id={id} name={} value={}",
-                    text(option.name),
-                    text(option.value)
+                    text(&option.name),
+                    text(&option.value)
                 ));
             }
         }
@@ -240,8 +238,8 @@ fn embedded_source(id: u32, source: &EmbeddedSource<'_>, out: &mut Dump) -> pdbr
 }
 
 /// Quote text bytes.
-fn text(value: Utf8Bytes<'_>) -> String {
-    quote(value.as_bytes())
+fn text(value: &[u8]) -> String {
+    quote(value)
 }
 
 /// Return bytes as lowercase hexadecimal.
