@@ -58,6 +58,9 @@ pub(super) struct Entry<T> {
     pub(super) source: Option<u32>,
     /// `true` if the caller had mutable access to the record.
     pub(super) touched: bool,
+    /// `true` if the caller removed the record. The model keeps the value,
+    /// so that the plan can name it (#47).
+    pub(super) removed: bool,
 }
 
 /// The records of a TPI or IPI stream in index order.
@@ -99,6 +102,7 @@ impl<T: ListRecord> RecordList<T> {
                 value: T::decode_record(record)?,
                 source: Some(record.offset),
                 touched: false,
+                removed: false,
             });
         }
         Ok(Self {
@@ -121,12 +125,39 @@ impl<T: ListRecord> RecordList<T> {
             })
     }
 
-    /// Return the position of the record with `index`.
+    /// Return the position of the record with `index`, removed records
+    /// included.
     fn position(&self, index: u32) -> Option<usize> {
         index
             .checked_sub(self.begin)
             .and_then(|position| usize::try_from(position).ok())
             .filter(|&position| position < self.entries.len())
+    }
+
+    /// Return the position of the record with `index` if it is not removed.
+    fn live_position(&self, index: u32) -> Option<usize> {
+        self.position(index)
+            .filter(|&position| !self.entries[position].removed)
+    }
+
+    /// Return `true` if a record of the list is removed.
+    pub(super) fn has_removals(&self) -> bool {
+        self.entries.iter().any(|entry| entry.removed)
+    }
+
+    /// Return the number of records that are not removed.
+    pub(super) fn live_count(&self) -> usize {
+        self.entries.iter().filter(|entry| !entry.removed).count()
+    }
+
+    /// Remove the record with `index`: the record becomes a tombstone.
+    pub(super) fn remove(&mut self, index: u32) -> Result<()> {
+        let position = self.live_position(index).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidReference, None)
+                .with_context("the list has no record with this index, or it is removed")
+        })?;
+        self.entries[position].removed = true;
+        Ok(())
     }
 
     /// Append a record and return its index.
@@ -145,29 +176,37 @@ impl<T: ListRecord> RecordList<T> {
             value,
             source: None,
             touched: false,
+            removed: false,
         });
         Ok(index)
     }
 
-    /// Return the record with `index`.
+    /// Return the record with `index`, or `None` if it is removed.
     pub(super) fn get(&self, index: u32) -> Option<&T> {
-        self.position(index)
+        self.live_position(index)
             .map(|position| &self.entries[position].value)
     }
 
-    /// Return the record with `index` for a change.
+    /// Return the record with `index` for a change, or `None` if it is
+    /// removed.
     pub(super) fn get_mut(&mut self, index: u32) -> Option<&mut T> {
-        let position = self.position(index)?;
+        let position = self.live_position(index)?;
         let entry = &mut self.entries[position];
         entry.touched = true;
         Some(&mut entry.value)
     }
 
+    /// Return the record with `index`, also a removed record.
+    pub(super) fn model_value(&self, index: u32) -> Option<&T> {
+        self.position(index)
+            .map(|position| &self.entries[position].value)
+    }
+
     /// Add a hash adjuster for the record with `index`.
     pub(super) fn add_adjuster(&mut self, index: u32, name_offset: NameOffset) -> Result<()> {
-        if self.position(index).is_none() {
+        if self.live_position(index).is_none() {
             return Err(Error::new(ErrorKind::InvalidReference, None)
-                .with_context("hash adjuster index has no record"));
+                .with_context("hash adjuster index has no record or names a removed record"));
         }
         self.adjusters.try_reserve(1).map_err(|_| no_memory())?;
         self.adjusters.push(HashAdjuster { name_offset, index });
@@ -229,12 +268,20 @@ macro_rules! record_list {
                 Self { list }
             }
 
-            #[doc = concat!("Append ", $what, " and return its index.")]
+            #[doc = concat!("Append ", $what, " and return its index in the model.")]
             ///
-            /// The index is the next index after the last record. The index
-            /// space only grows (rule 5 of #42). The record can refer only to
-            /// earlier records: the plan rejects a forward reference with
-            /// [`ErrorKind::UnsupportedEdit`] (decision 7 of #42).
+            /// The index is the next index after the last record, removed
+            /// records included: in the model, the index space only grows
+            /// (rule 5 of #42). While the list has no removed record, the
+            /// index is also the index in the output. After a removal, the
+            /// index is a handle: other records refer to the new record with
+            /// it, and the plan gives the output index (#47, see
+            /// [`PdbWritePlan::type_index`](crate::native::PdbWritePlan::type_index)
+            /// and [`PdbWritePlan::id_index`](crate::native::PdbWritePlan::id_index)).
+            ///
+            /// The record can refer only to earlier records: the plan rejects
+            /// a forward reference with [`ErrorKind::UnsupportedEdit`]
+            /// (decision 7 of #42).
             ///
             /// # Errors
             ///
@@ -246,13 +293,41 @@ macro_rules! record_list {
                 self.list.push(record.into_owned()).map($index)
             }
 
-            #[doc = concat!("Return ", $what, " with `index`.")]
+            #[doc = concat!("Remove ", $what, " with `index` (#47).")]
+            ///
+            /// Caution: the plan cannot see references in other files. An
+            /// object file that uses a type-server PDB, a precompiled-header
+            /// object (`/Yc`) and the object files of a `/DEBUG:FASTLINK` PDB
+            /// keep the old indices. Remove records only from a PDB that no
+            /// other file refers to by index.
+            ///
+            /// The record becomes a tombstone: the other records keep their
+            /// indices in the model, and [`Self::get`] gives `None` for it.
+            /// The plan gives each record that is not removed the next output
+            /// index, in index order, and writes the output index into each
+            /// reference of each stream that it decodes. A reference to a
+            /// removed record fails the plan with
+            /// [`ErrorKind::InvalidReference`]. This function does not look
+            /// for references, because other streams hold them and later
+            /// changes can add or remove them. See
+            /// [`PdbEditor`](crate::native::PdbEditor#removal-of-type-and-id-records)
+            /// for the streams and the PDBs that the plan refuses.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`ErrorKind::InvalidReference`] if the list has no
+            /// record with `index`, or if the record is already removed.
+            pub fn remove(&mut self, index: $index) -> Result<()> {
+                self.list.remove(index.0)
+            }
+
+            #[doc = concat!("Return ", $what, " with `index`, or `None` if it is removed.")]
             #[must_use]
             pub fn get(&self, index: $index) -> Option<&$record<'static>> {
                 self.list.get(index.0)
             }
 
-            #[doc = concat!("Return ", $what, " with `index` for a change.")]
+            #[doc = concat!("Return ", $what, " with `index` for a change, or `None` if it is removed.")]
             ///
             /// The plan encodes a changed source record and writes the stream
             /// and its hash stream again.
@@ -260,26 +335,29 @@ macro_rules! record_list {
                 self.list.get_mut(index.0)
             }
 
-            /// Return the records with their indices, in index order.
+            /// Return the records that are not removed, with their indices in
+            /// the model, in index order.
             pub fn iter(&self) -> impl Iterator<Item = ($index, &$record<'static>)> + '_ {
                 (self.list.begin..)
                     .zip(&self.list.entries)
+                    .filter(|(_, entry)| !entry.removed)
                     .map(|(index, entry)| ($index(index), &entry.value))
             }
 
-            /// Return the number of records.
+            /// Return the number of records that are not removed.
             #[must_use]
             pub fn len(&self) -> usize {
-                self.list.entries.len()
+                self.list.live_count()
             }
 
-            /// Return `true` if the list has no records.
+            /// Return `true` if the list has no records that are not removed.
             #[must_use]
             pub fn is_empty(&self) -> bool {
-                self.list.entries.is_empty()
+                self.len() == 0
             }
 
-            /// Return the index after the last record.
+            /// Return the index after the last record of the model, removed
+            /// records included. The next [`Self::push`] gives this index.
             ///
             /// # Errors
             ///
@@ -296,7 +374,7 @@ macro_rules! record_list {
             /// # Errors
             ///
             /// - [`ErrorKind::InvalidReference`] if the list has no record
-            ///   with `index`.
+            ///   with `index`, or if the record is removed.
             /// - [`ErrorKind::LimitExceeded`] if an allocation fails.
             pub fn add_hash_adjuster(&mut self, index: $index, name_offset: NameOffset) -> Result<()> {
                 self.list.add_adjuster(index.0, name_offset)

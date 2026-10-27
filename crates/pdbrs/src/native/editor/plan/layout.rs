@@ -3,14 +3,14 @@
 
 use alloc::vec::Vec;
 
+use super::compact::map::IndexMaps;
 use super::modules::{self, EncodedModule, OffsetMap};
 use super::shared::{self, ModuleTargets};
-use super::types::{NewTypeOptions, PlannedTypes, write_new};
+use super::types::{NewTypeOptions, PlannedTypes, write_new, write_new_compacted};
 use super::{Assembly, Planned, checks, missing, same_bytes};
 use crate::io::ReadAt;
 use crate::native::auxiliary::{NamedStreamKind, TmCache, TmCacheBuilder};
-use crate::native::codeview::LeafKind;
-use crate::native::codeview::id_record::IdTable;
+use crate::native::codeview::id_record::{IdRecord, IdTable};
 use crate::native::codeview::index::{
     IdIndex, ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset, TypeIndex,
 };
@@ -23,7 +23,7 @@ use crate::native::editor::module::{GlobalRef, ModuleContents, SYMBOL_BASE};
 use crate::native::editor::named::Content;
 use crate::native::editor::report::RebuildReason;
 use crate::native::editor::streams::DebugContent;
-use crate::native::editor::{EditOptions, ModuleSlot, Names, PdbEditor, StreamChange};
+use crate::native::editor::{EditOptions, IdList, ModuleSlot, Names, PdbEditor, StreamChange};
 use crate::native::info::InfoBuilder;
 use crate::native::msf::{MsfWriteOptions, StreamId};
 use crate::native::output::no_memory;
@@ -282,6 +282,7 @@ fn identity<S>(
 pub(super) fn plan<'e, S: ReadAt>(
     editor: &'e PdbEditor<'_, S>,
     options: EditOptions,
+    maps: &IndexMaps,
 ) -> Result<(Assembly<'e, S>, MsfWriteOptions, Identity)> {
     let resolved = resolve(editor, options);
     let parts = parts(editor)?;
@@ -295,12 +296,34 @@ pub(super) fn plan<'e, S: ReadAt>(
         .ids
         .as_ref()
         .ok_or_else(|| missing("the new layout has no IPI records"))?;
-    let tpi = write_new(&types.list, resolved.types, ids.tpi_hash)?;
+    let tpi = if maps.types.is_some() {
+        write_new_compacted(
+            &types.list,
+            maps.types.as_ref(),
+            maps,
+            resolved.types,
+            ids.tpi_hash,
+        )?
+    } else {
+        write_new(&types.list, resolved.types, ids.tpi_hash)?
+    };
     checks::check_types(&crate::native::types::TypeTable::new(&tpi.stream)?)?;
-    let ipi = write_new(&id_list.list, resolved.types, ids.ipi_hash)?;
+    let ipi = if maps.is_identity() {
+        write_new(&id_list.list, resolved.types, ids.ipi_hash)?
+    } else {
+        write_new_compacted(
+            &id_list.list,
+            maps.ids.as_ref(),
+            maps,
+            resolved.types,
+            ids.ipi_hash,
+        )?
+    };
     IdTable::new(&ipi.stream)?.check(TypeIndex(tpi.index_end()))?;
     checks::check_id_order(id_list.iter())?;
-    let encoded = encode_symbols(editor, &parts, &ids, &tpi, &ipi, &resolved, &info)?;
+    // The symbol checks run on model indices, before the compaction pass.
+    let ends = (types.end()?, id_list);
+    let encoded = encode_symbols(editor, &parts, &ids, ends, &resolved, &info)?;
     let dbi = dbi_stream(editor, &parts, &ids, encoded.records, dbi_age)?;
     let mut assembly = Assembly::new();
     push_streams(
@@ -337,18 +360,20 @@ struct EncodedSymbols {
 }
 
 /// Encode the module streams, the symbol record stream and the indexes.
+///
+/// `ends` gives the model end of the TPI records and the model IPI records:
+/// the checks of the symbols use model indices.
 fn encode_symbols<S>(
     editor: &PdbEditor<'_, S>,
     parts: &Parts<'_>,
     ids: &StreamIds,
-    tpi: &PlannedTypes,
-    ipi: &PlannedTypes,
+    ends: (TypeIndex, &IdList),
     resolved: &Resolved,
     info: &InfoBuilder,
 ) -> Result<EncodedSymbols> {
-    let id_table = IdTable::new(&ipi.stream)?;
-    let id_kind = |id: IdIndex| id_table.record(id).map(|record| LeafKind(record.kind));
-    let base = ValidationContext::new(TypeIndex(tpi.index_end()), IdIndex(ipi.index_end()))
+    let (type_end, id_list) = ends;
+    let id_kind = |id: IdIndex| id_list.list.model_value(id.0).map(IdRecord::kind);
+    let base = ValidationContext::new(type_end, id_list.end()?)
         .with_id_kinds(&id_kind)
         .with_module_count(parts.modules.len());
     let map = |id| map_stream(&ids.unnamed, id);

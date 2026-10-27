@@ -5,13 +5,16 @@ use alloc::vec::Vec;
 use super::report::{PlanReport, StreamChange, StreamReport};
 use super::{EditOptions, PdbEditor};
 use crate::io::{ReadAt, Write};
+use crate::native::codeview::index::{IdIndex, TypeIndex};
 use crate::native::container::Stream;
 use crate::native::msf::{MsfBuilder, MsfWriteOptions, MsfWritePlan, StreamId};
 use crate::native::output::no_memory;
 use crate::native::{Identity, Pdb};
 use crate::{Error, ErrorKind, Result};
+use compact::map::{IndexMaps, SpaceMap, resolve_id, resolve_type};
 
 mod checks;
+mod compact;
 mod cow;
 mod layout;
 mod modules;
@@ -188,6 +191,10 @@ pub struct PdbWritePlan<'e, S = &'static [u8]> {
     file_size: u64,
     /// The report.
     report: PlanReport,
+    /// The output indices of the TPI space, if it compacts (#47).
+    types: Option<SpaceMap>,
+    /// The output indices of the IPI space, if it compacts (#47).
+    ids: Option<SpaceMap>,
 }
 
 impl<S> core::fmt::Debug for PdbWritePlan<'_, S> {
@@ -237,6 +244,37 @@ impl<S: ReadAt> PdbWritePlan<'_, S> {
     #[must_use]
     pub const fn report(&self) -> &PlanReport {
         &self.report
+    }
+
+    /// Return the output index of the type index `index` of the editor
+    /// model (#47).
+    ///
+    /// A type index below `0x1000` stays. If the model removes no type
+    /// record, each type index stays. Else each type record that is not
+    /// removed gets the next output index, in model order. The index that
+    /// [`TypeList::push`](super::TypeList::push) gives after a removal is a
+    /// handle that this function resolves.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidReference`] if the model removes the
+    /// record, or if the index is at or after the end of the model records.
+    pub fn type_index(&self, index: TypeIndex) -> Result<TypeIndex> {
+        resolve_type(self.types.as_ref(), index)
+    }
+
+    /// Return the output index of the ID index `index` of the editor model
+    /// (#47).
+    ///
+    /// The rules of [`PdbWritePlan::type_index`] apply to the IPI space and
+    /// [`IdList::push`](super::IdList::push).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidReference`] if the model removes the
+    /// record, or if the index is at or after the end of the model records.
+    pub fn id_index(&self, index: IdIndex) -> Result<IdIndex> {
+        resolve_id(self.ids.as_ref(), index)
     }
 
     /// Return the number of streams, including nil streams.
@@ -303,6 +341,7 @@ fn freeze<'e, S: ReadAt>(
     assembly: Assembly<'e, S>,
     options: MsfWriteOptions,
     identity: PlanIdentity<'e, S>,
+    maps: IndexMaps,
 ) -> Result<PdbWritePlan<'e, S>> {
     let Assembly {
         streams: list,
@@ -329,6 +368,8 @@ fn freeze<'e, S: ReadAt>(
         stream_count,
         file_size,
         report: PlanReport::new(reports),
+        types: maps.types,
+        ids: maps.ids,
     })
 }
 
@@ -356,16 +397,23 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///   change needs.
     /// - The errors of the stream readers and of [`MsfBuilder::plan`].
     pub fn plan(&self, options: EditOptions) -> Result<PdbWritePlan<'_, S>> {
+        let maps = compact::maps(self)?;
         if self.is_new_layout() {
             if options.strip_private() {
                 return Err(unsupported(
                     "a strip needs a source and cannot follow decode_all",
                 ));
             }
-            let (assembly, msf, identity) = layout::plan(self, options)?;
-            return freeze(assembly, msf, PlanIdentity::Known(identity));
+            let (mut assembly, msf, identity) = layout::plan(self, options, &maps)?;
+            if !maps.is_identity() {
+                compact::rewrite(&mut assembly, &maps)?;
+            }
+            return freeze(assembly, msf, PlanIdentity::Known(identity), maps);
         }
-        let (assembly, msf, identity) = cow::plan(self, options)?;
+        let (mut assembly, msf, identity) = cow::plan(self, options, &maps)?;
+        if !maps.is_identity() {
+            compact::rewrite(&mut assembly, &maps)?;
+        }
         let identity = match identity {
             cow::Identity::Known(identity) => PlanIdentity::Known(identity),
             cow::Identity::SourceAge { guid, info_age } => PlanIdentity::SourceAge {
@@ -374,6 +422,6 @@ impl<S: ReadAt> PdbEditor<'_, S> {
                 pdb: self.cow_source()?,
             },
         };
-        freeze(assembly, msf, identity)
+        freeze(assembly, msf, identity, maps)
     }
 }

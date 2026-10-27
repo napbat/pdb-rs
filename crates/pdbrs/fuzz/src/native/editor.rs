@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use pdbrs::Bytes;
 use pdbrs::io::ReadAt;
 use pdbrs::native::address::SectionOffset;
-use pdbrs::native::codeview::index::{FIRST_RECORD_INDEX, ModuleIndex, TypeIndex};
+use pdbrs::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
     Data, Public, PublicFlags, S_GDATA32, S_LDATA32, S_UDT, SymbolData, UserDefinedType,
 };
@@ -23,7 +23,7 @@ use crate::input::Input;
 use crate::ok;
 
 /// The number of operations that an edit byte selects.
-const OPERATIONS: u8 = 15;
+const OPERATIONS: u8 = 17;
 
 /// The names of new named streams, besides names from the input.
 ///
@@ -102,10 +102,12 @@ fn apply<S: ReadAt>(editor: &mut PdbEditor<'_, S>, run: &mut Run, input: &mut In
         11 => remove_module_symbol(editor, input),
         12 => change_line(editor, input),
         13 => ok(editor.decode_all()),
-        _ => {
+        14 => {
             run.options = run.options.with_strip_private(!run.options.strip_private());
             Some(())
         }
+        15 => remove_type(editor, input),
+        _ => remove_id(editor, input),
     };
 }
 
@@ -259,6 +261,26 @@ fn push_type<S: ReadAt>(editor: &mut PdbEditor<'_, S>, input: &mut Input<'_>) ->
     let leaf = TypeLeaf::ArgumentList(ok(ArgumentList::parse(indices))?);
     ok(types.push(leaf))?;
     Some(())
+}
+
+/// Return a record index below `end` that the input selects, or `None` for an empty list.
+fn record_index(end: u32, input: &mut Input<'_>) -> Option<u32> {
+    let count = end.checked_sub(FIRST_RECORD_INDEX).filter(|&count| count > 0)?;
+    Some(FIRST_RECORD_INDEX + u32::from(input.u16()) % count)
+}
+
+/// Remove a type record (#47). The plan rejects a removal of a referenced record.
+fn remove_type<S: ReadAt>(editor: &mut PdbEditor<'_, S>, input: &mut Input<'_>) -> Option<()> {
+    let types = ok(editor.types_mut())?;
+    let index = record_index(ok(types.end())?.0, input)?;
+    ok(types.remove(TypeIndex(index)))
+}
+
+/// Remove an ID record (#47). The plan rejects a removal of a referenced record.
+fn remove_id<S: ReadAt>(editor: &mut PdbEditor<'_, S>, input: &mut Input<'_>) -> Option<()> {
+    let ids = ok(editor.ids_mut())?;
+    let index = record_index(ok(ids.end())?.0, input)?;
+    ok(ids.remove(IdIndex(index)))
 }
 
 /// Return a module that the input selects.

@@ -1,5 +1,6 @@
 //! Tests of the verification additions of `native::PdbEditor` (stage 6c of
-//! #42) and of its editing tasks (#41):
+//! #42), of its editing tasks (#41) and of the removal of type and ID
+//! records (#47):
 //!
 //! - `read_count.rs`: the reads of a named stream change and its output.
 //! - `patched.rs`: the reads of a patched stream and its output (#48).
@@ -9,6 +10,7 @@
 //! - `determinism.rs`: the output depends only on the final model.
 //! - `views.rs`: borrowed and copied stream views (#48).
 //! - `tasks.rs`: the editing tasks and their rejected inputs.
+//! - `removal.rs`: the removal of type and ID records with index compaction.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic`
 //! example. `layout.rs` parses the MSF stream directory without the reader
@@ -24,6 +26,7 @@ mod opaque;
 mod patched;
 mod read_count;
 mod rejected;
+mod removal;
 mod tasks;
 mod views;
 
