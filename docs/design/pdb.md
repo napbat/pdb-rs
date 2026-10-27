@@ -393,7 +393,7 @@ The plan rejects these edits before it writes a byte. A planning error writes no
 - A removal of type or ID records that another record refers to (`InvalidReference`; `Error::record` names a TPI or IPI record, `Error::stream_location` another record).
 - A removal of type or ID records in a PDB without a DBI stream (a type server), with the feature `MINI` (`/DEBUG:FASTLINK`) or `NOTM` (`/DEBUG:LAZY`, `S_MOD_TYPEREF`), or with type servers in the DBI stream.
   The same for data that can hold an index without a decoder: a record or a C13 subsection of an unknown kind, a named stream of an unknown kind, a stream without an owner that is not a type map,
-  a type map of an object file (version 2: only the object file tells TPI and IPI indices apart), a managed symbol whose token field can be a type index and an `S_DISCARDED` record with data.
+  a type map of an object file (version 2: only the object file tells TPI and IPI indices apart), an XFG hash subsection (object file type scope), a managed symbol whose token field can be a type index and an `S_DISCARDED` record with data.
   A type map of a type server (version 1) gets the output indices. This changes the rule above for a type map without an owner.
 
 Caution: `IdentityPolicy::Preserve` after a semantic change keeps the match with the old image, so a debugger can misidentify the changed symbols.

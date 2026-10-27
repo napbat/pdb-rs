@@ -84,6 +84,9 @@ fn hash_streams<S: ReadAt>(
         return Ok([None, None]);
     };
     let length = usize::try_from(planned.len()?).unwrap_or(usize::MAX);
+    if length == 0 {
+        return Ok([None, None]);
+    }
     let mut head = [0; HEADER_SIZE];
     let head = &mut head[..length.min(HEADER_SIZE)];
     planned.read_exact_at(0, head)?;

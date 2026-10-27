@@ -233,8 +233,10 @@ pub(super) enum Names {
 ///   C13 subsection of an unknown kind, a named stream of an unknown kind, a
 ///   present stream that no other stream names and that does not decode as a
 ///   type map stream, a type map of an object file (version 2: only the
-///   object file tells TPI and IPI indices apart), a managed symbol whose
-///   token field can be a type index, and an `S_DISCARDED` record with data.
+///   object file tells TPI and IPI indices apart), an XFG hash subsection
+///   (its indices are in the type scope of an object file), a managed symbol
+///   whose token field can be a type index, and an `S_DISCARDED` record with
+///   data.
 ///   A type map of a type server (version 1) gets the output indices.
 /// - A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream in the
 ///   copy-on-write layout: other records refer to their contents.
