@@ -1,4 +1,4 @@
-//! The `Document` table: name blobs, languages, hash algorithms and the typed row.
+//! The `Document` table: name blobs, languages, hash algorithms and the document record.
 //!
 //! A document name blob is `separator part+`. The separator is one UTF-8 character, or byte 0
 //! for no separator. Each part is a compressed `#Blob` offset of UTF-8 text. The name is the
@@ -322,99 +322,52 @@ impl<'a> Iterator for SplitDocumentName<'a> {
 
 impl FusedIterator for SplitDocumentName<'_> {}
 
-/// A typed row of the `Document` table with its heap values.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Document {
-    id: DocumentId,
-    row: DocumentRow,
-    name: Vec<u8>,
-    hash_algorithm: Option<[u8; 16]>,
-    hash: Vec<u8>,
-    language: Option<[u8; 16]>,
+/// A source document.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct Document<'a> {
+    /// The name, for example a path: the parts of the name blob joined with the separator.
+    /// The bytes are UTF-8 in valid metadata. The plan of an editor splits the name into
+    /// parts as Roslyn does.
+    pub name: Bytes<'a>,
+    /// The GUID bytes of the hash algorithm, or `None` for the nil GUID index.
+    /// [`HashAlgorithm::from_guid`] gives a defined algorithm.
+    pub hash_algorithm: Option<[u8; 16]>,
+    /// The hash of the document content, or an empty value.
+    pub hash: Bytes<'a>,
+    /// The GUID bytes of the source language, or `None` for the nil GUID index.
+    /// [`Language::from_guid`] gives a defined language.
+    pub language: Option<[u8; 16]>,
 }
 
-impl Document {
-    /// Return the row ID.
-    #[must_use]
-    pub const fn id(&self) -> DocumentId {
-        self.id
-    }
-
-    /// Return the raw row.
-    #[must_use]
-    pub const fn row(&self) -> &DocumentRow {
-        &self.row
-    }
-
-    /// Return the name: the parts joined with the separator. The bytes are UTF-8 in valid
-    /// metadata.
-    #[must_use]
-    pub fn name(&self) -> &[u8] {
-        &self.name
-    }
-
-    /// Return the GUID bytes of the hash algorithm, or `None` for the nil GUID index.
-    #[must_use]
-    pub const fn hash_algorithm_guid(&self) -> Option<&[u8; 16]> {
-        self.hash_algorithm.as_ref()
-    }
-
-    /// Return the hash algorithm, or `None` for nil or a GUID that the specification does not
-    /// define.
-    #[must_use]
-    pub fn hash_algorithm(&self) -> Option<HashAlgorithm> {
-        self.hash_algorithm
-            .as_ref()
-            .and_then(HashAlgorithm::from_guid)
-    }
-
-    /// Return the hash of the document content.
-    #[must_use]
-    pub fn hash(&self) -> &[u8] {
-        &self.hash
-    }
-
-    /// Return the GUID bytes of the language, or `None` for the nil GUID index.
-    #[must_use]
-    pub const fn language_guid(&self) -> Option<&[u8; 16]> {
-        self.language.as_ref()
-    }
-
-    /// Return the language, or `None` for nil or a GUID that the specification does not
-    /// define.
-    #[must_use]
-    pub fn language(&self) -> Option<Language> {
-        self.language.as_ref().and_then(Language::from_guid)
-    }
-}
+into_owned!(struct Document { name, hash; hash_algorithm, language });
 
 impl<S: ReadAt> Pdb<S> {
-    /// Read a `Document` row with its name, hash and GUIDs.
+    /// Read a document with its name, hash and GUIDs.
     ///
     /// # Errors
     ///
     /// - The errors of [`Pdb::row`] and of the heap accessors.
     /// - The errors of [`Pdb::document_name`].
-    pub fn document(&self, id: DocumentId) -> Result<Document> {
+    pub fn document(&self, id: DocumentId) -> Result<Document<'static>> {
         let row: DocumentRow = self.row(id)?;
         let name = self
             .document_name(row.name)
             .map_err(|error| in_blob(error, TableId::DOCUMENT, id.0, "Name", row.name))?;
         Ok(Document {
-            id,
-            row,
-            name,
+            name: name.into(),
             hash_algorithm: self.guid(row.hash_algorithm)?,
-            hash: self.blob(row.hash)?,
+            hash: self.blob(row.hash)?.into(),
             language: self.guid(row.language)?,
         })
     }
 
-    /// Read all `Document` rows in row order.
+    /// Read all documents in row order, each with its row ID.
     #[must_use]
-    pub fn documents(&self) -> TypedRows<'_, S, Document> {
+    pub fn documents(&self) -> TypedRows<'_, S, (DocumentId, Document<'static>)> {
         each_row(self, TableId::DOCUMENT, |pdb, row| {
-            pdb.document(DocumentId(row))
+            let id = DocumentId(row);
+            pdb.document(id).map(|document| (id, document))
         })
     }
 
@@ -453,13 +406,17 @@ impl<S: ReadAt> Pdb<S> {
 }
 
 /// Return an error for a document hash with the wrong size for its algorithm.
-pub(super) fn check_hash(document: &Document) -> Result<()> {
-    match document.hash_algorithm() {
+pub(super) fn check_hash(id: DocumentId, document: &Document<'_>) -> Result<()> {
+    let algorithm = document
+        .hash_algorithm
+        .as_ref()
+        .and_then(HashAlgorithm::from_guid);
+    match algorithm {
         Some(algorithm) if algorithm.hash_len() != document.hash.len() => Err(row_error(
             ErrorKind::InvalidFormat,
             "document hash size does not match its hash algorithm",
             TableId::DOCUMENT,
-            document.id.0,
+            id.0,
             Some("Hash"),
         )),
         _ => Ok(()),

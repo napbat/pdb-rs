@@ -4,7 +4,7 @@
 use pdbrs::ErrorKind;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
-    EncodedSequencePoints, HIDDEN_LINE, LocalSignatureForm, SequencePoint, SequencePoints,
+    HIDDEN_LINE, LocalSignatureForm, MethodDebugInformation, SequencePoint, SequencePoints,
     SourceSpan,
 };
 use pdbrs::portable::metadata::{DocumentId, IlOffset, MethodDebugInformationId, StandAloneSigId};
@@ -43,7 +43,10 @@ fn decode(blob: &[u8], document: u32) -> pdbrs::Result<Vec<SequencePoint>> {
 }
 
 /// Encode with the `LocalSignature` row form of the specification.
-fn encode(signature: u32, points: &[SequencePoint]) -> pdbrs::Result<EncodedSequencePoints> {
+fn encode(
+    signature: u32,
+    points: &[SequencePoint],
+) -> pdbrs::Result<MethodDebugInformation<'static>> {
     SequencePoints::encode_parts(StandAloneSigId(signature), LocalSignatureForm::Row, points)
 }
 
@@ -85,16 +88,16 @@ fn the_encoder_writes_the_roslyn_form() {
     let single = decode(&SINGLE, 1).unwrap();
     let encoded = encode(1, &single).unwrap();
     assert_eq!(encoded.document, DocumentId(1));
-    assert_eq!(encoded.blob, SINGLE);
+    assert_eq!(encoded.sequence_points, SINGLE);
 
     let multi = decode(&MULTI, 0).unwrap();
     let encoded = encode(0, &multi).unwrap();
     assert_eq!(encoded.document, DocumentId(0));
-    assert_eq!(encoded.blob, MULTI);
+    assert_eq!(encoded.sequence_points, MULTI);
 
     let empty = encode(3, &[]).unwrap();
     assert_eq!(empty.document, DocumentId(0));
-    assert_eq!(empty.blob, []);
+    assert!(empty.sequence_points.is_empty());
 }
 
 #[test]
@@ -111,7 +114,7 @@ fn large_values_and_deltas_round_trip() {
     let points = &points[..3];
     let encoded = encode(2, points).unwrap();
     assert_eq!(encoded.document, DocumentId(0));
-    assert_eq!(decode(&encoded.blob, 0).unwrap(), points);
+    assert_eq!(decode(&encoded.sequence_points, 0).unwrap(), points);
 }
 
 #[test]
@@ -195,11 +198,11 @@ fn the_fsharp_token_form_of_the_local_signature_round_trips() {
     assert_eq!(form, LocalSignatureForm::Token);
     let points: Vec<_> = decoded.collect::<Result<_, _>>().unwrap();
     let encoded = SequencePoints::encode_parts(StandAloneSigId(4), form, &points).unwrap();
-    assert_eq!(encoded.blob, blob);
+    assert_eq!(encoded.sequence_points, blob);
     // The row form writes the row; a nil row is 0 in both forms.
-    assert_eq!(encode(4, &points).unwrap().blob[0], 0x04);
+    assert_eq!(encode(4, &points).unwrap().sequence_points[0], 0x04);
     let nil = SequencePoints::encode_parts(StandAloneSigId(0), LocalSignatureForm::Token, &points);
-    assert_eq!(nil.unwrap().blob[0], 0x00);
+    assert_eq!(nil.unwrap().sequence_points[0], 0x00);
 }
 
 #[test]
@@ -214,7 +217,7 @@ fn a_nil_local_signature_token_has_the_row_form() {
     assert_eq!(form, LocalSignatureForm::Row);
     let points: Vec<_> = decoded.collect::<Result<_, _>>().unwrap();
     let encoded = SequencePoints::encode_parts(StandAloneSigId(0), form, &points).unwrap();
-    let again = SequencePoints::parse(&encoded.blob, encoded.document).unwrap();
+    let again = SequencePoints::parse(&encoded.sequence_points, encoded.document).unwrap();
     assert_eq!(again.local_signature_form(), form);
     assert_eq!(again.collect::<Result<Vec<_>, _>>().unwrap(), points);
 }
@@ -264,9 +267,9 @@ fn the_typed_row_reads_the_blob() {
     let method = pdb
         .method_debug_information(MethodDebugInformationId(2))
         .unwrap();
-    assert_eq!(method.document(), DocumentId(0));
+    assert_eq!(method.document, DocumentId(0));
     let points: Vec<_> = method
-        .sequence_points()
+        .decode()
         .unwrap()
         .unwrap()
         .collect::<Result<_, _>>()
@@ -275,6 +278,6 @@ fn the_typed_row_reads_the_blob() {
     let none = pdb
         .method_debug_information(MethodDebugInformationId(3))
         .unwrap();
-    assert!(none.sequence_points().unwrap().is_none());
+    assert!(none.decode().unwrap().is_none());
     assert_eq!(pdb.method_debug_informations().len(), 4);
 }

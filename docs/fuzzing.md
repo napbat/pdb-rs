@@ -41,7 +41,7 @@ to the same value. It does not check that other readers accept the output.
 | `mpdb` | payload | `decode_embedded` and `encode_embedded` round trips |
 | `embedded_source` | blob | `EmbeddedSource::parse`, `decode` and `encode` round trips in both formats |
 | `portable_rebuild` | Portable PDB | `io::copy_exact`, `to_parts`, `PdbParts::plan`, `to_embedded`, `Pdb::edit` round trips |
-| `portable_build` | builder commands | `PdbBuilder` with typed records: `plan`, `to_vec`, read back documents and sequence points |
+| `portable_build` | editor commands | `PdbEditor::new` with records: `plan`, `to_vec`, read back documents and sequence points |
 | `native_type_encode` | as `native_types` | `TypeLeaf::encode`, `encode_field_list`, `encode_type_stream`, `TypeHashes::check` of the output |
 | `native_id_encode` | as `native_ids` | `IdRecord::encode`, `encode_type_stream` |
 | `native_leaf_encode` | as `native_leaf` | `TypeLeaf`, `IdRecord`, `Symbol` and `Numeric` encoders on one record |
@@ -85,7 +85,7 @@ It builds these inputs with the public API of `pdbrs`:
 - A synthetic native PDB with streams 0 to 12: Info with a named stream map, TPI with a hash
   stream, DBI with two modules and each substream, IPI, `/names`, GSI, PSI, symbol records,
   one module stream with a procedure and C13 lines, section headers and `sourcelink`.
-- A synthetic Portable PDB from `PdbBuilder`: two documents with embedded sources, methods
+- A synthetic Portable PDB from `PdbEditor::new`: two documents with embedded sources, methods
   with sequence points, scopes, variables, constants, import scopes, a state machine method and
   one value of each custom debug information kind.
 - Small inputs: MSF containers, builder commands, FPO and frame data records, compressed

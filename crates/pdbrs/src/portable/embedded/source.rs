@@ -15,7 +15,8 @@ use crate::portable::Pdb;
 use crate::portable::custom::CustomDebugKind;
 use crate::portable::debug::{Document, HashAlgorithm};
 use crate::portable::metadata::{
-    BlobOffset, CustomDebugInformationId, CustomDebugInformationRow, MetadataStream, TableId,
+    BlobOffset, CustomDebugInformationId, CustomDebugInformationRow, DocumentId, MetadataStream,
+    TableId,
 };
 use crate::{Error, ErrorKind, Result};
 
@@ -79,15 +80,19 @@ impl DocumentSource {
     }
 }
 
-impl Document {
+impl Document<'_> {
     /// Check `source` against the hash of the document.
     ///
     /// Only SHA-256 is computed. For other hash algorithms and for a document without a
     /// defined hash algorithm, the function returns [`SourceCheck::NotVerified`].
     #[must_use]
     pub fn verify_source(&self, source: &[u8]) -> SourceCheck {
-        match self.hash_algorithm() {
-            Some(HashAlgorithm::Sha256) if self.hash() == sha256(source) => SourceCheck::Verified,
+        let algorithm = self
+            .hash_algorithm
+            .as_ref()
+            .and_then(HashAlgorithm::from_guid);
+        match algorithm {
+            Some(HashAlgorithm::Sha256) if self.hash == sha256(source) => SourceCheck::Verified,
             Some(HashAlgorithm::Sha256) => SourceCheck::Mismatch,
             _ => SourceCheck::NotVerified,
         }
@@ -104,7 +109,7 @@ const fn value_location(id: CustomDebugInformationId) -> PortableLocation {
 }
 
 impl<S: ReadAt> Pdb<S> {
-    /// Find the embedded-source row of `document`.
+    /// Find the embedded-source row of the document `document`.
     ///
     /// Return the row ID and the `#Blob` offset of its value, or `None` if the document has
     /// no embedded source.
@@ -116,9 +121,9 @@ impl<S: ReadAt> Pdb<S> {
     ///   `document`. The location is the second row.
     pub fn embedded_source_row(
         &self,
-        document: &Document,
+        document: DocumentId,
     ) -> Result<Option<(CustomDebugInformationId, BlobOffset)>> {
-        let Some(token) = document.id().token() else {
+        let Some(token) = document.token() else {
             return Ok(None);
         };
         let mut found = None;
@@ -139,7 +144,8 @@ impl<S: ReadAt> Pdb<S> {
         Ok(found)
     }
 
-    /// Decode the embedded source of `document` and check it against the document hash.
+    /// Decode the embedded source of the document `id` and check it against the hash of
+    /// `document`, the record of the same row.
     ///
     /// `limit` is the largest decoded source size in bytes, for the raw and the DEFLATE form.
     /// The DEFLATE form checks the declared size against `limit` before it allocates.
@@ -156,10 +162,11 @@ impl<S: ReadAt> Pdb<S> {
     /// [`SourceCheck::Mismatch`].
     pub fn document_source(
         &self,
-        document: &Document,
+        id: DocumentId,
+        document: &Document<'_>,
         limit: usize,
     ) -> Result<Option<DocumentSource>> {
-        let Some((id, offset)) = self.embedded_source_row(document)? else {
+        let Some((id, offset)) = self.embedded_source_row(id)? else {
             return Ok(None);
         };
         let at = |error: Error| error.with_portable(value_location(id).with_heap_offset(offset.0));

@@ -7,8 +7,9 @@ use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::debug::document::check_hash;
-use crate::portable::debug::rows::row_error;
-use crate::portable::metadata::{MetadataStream, TableId};
+use crate::portable::debug::rows::{in_blob, row_error};
+use crate::portable::debug::{HashAlgorithm, SequencePoints};
+use crate::portable::metadata::{MetadataStream, MethodDebugInformationRow, TableId};
 use crate::{Error, ErrorKind, Result};
 
 /// Check the document names and hashes.
@@ -16,13 +17,18 @@ pub(super) fn documents<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
     let mut names = BTreeSet::new();
     let mut hashes = 0;
     for document in pdb.documents() {
-        let document = document?;
-        check_hash(&document)?;
-        if document.hash_algorithm().is_some() {
+        let (id, document) = document?;
+        check_hash(id, &document)?;
+        if document
+            .hash_algorithm
+            .as_ref()
+            .and_then(HashAlgorithm::from_guid)
+            .is_some()
+        {
             hashes += 1;
         }
-        let id = document.id().0;
-        if !names.insert(document.name().to_vec()) {
+        let id = id.0;
+        if !names.insert(document.name.to_vec()) {
             return Err(row_error(
                 ErrorKind::InvalidFormat,
                 "two documents have the same name",
@@ -76,34 +82,45 @@ pub(super) fn sequence_points<S: ReadAt>(
 ) -> Result<()> {
     let documents = pdb.tables().row_count(TableId::DOCUMENT);
     let mut points = 0_u64;
-    for method in pdb.method_debug_informations() {
-        let method = method?;
-        let Some(decoded) = method.sequence_points()? else {
-            if !method.document().is_nil() {
+    for row in pdb.rows::<MethodDebugInformationRow>() {
+        let (id, row) = row?;
+        let at = |error| {
+            in_blob(
+                error,
+                TableId::METHOD_DEBUG_INFORMATION,
+                id.0,
+                "SequencePoints",
+                row.sequence_points,
+            )
+        };
+        let blob = pdb.blob(row.sequence_points)?;
+        if blob.is_empty() {
+            if !row.document.is_nil() {
                 return Err(row_error(
                     ErrorKind::InvalidFormat,
                     "method without sequence points has a document",
                     TableId::METHOD_DEBUG_INFORMATION,
-                    method.id().0,
+                    id.0,
                     Some("Document"),
                 ));
             }
             continue;
-        };
+        }
+        let decoded = SequencePoints::parse(&blob, row.document).map_err(at)?;
         let signature = decoded.local_signature();
         if !signature.is_nil()
             && !signature
                 .token()
                 .is_some_and(|token| external_exists(pdb, token))
         {
-            return Err(method.blob_error(reference(
+            return Err(at(reference(
                 "sequence point LocalSignature row does not exist",
             )));
         }
         for point in decoded {
-            let point = point.map_err(|error| method.blob_error(error))?;
+            let point = point.map_err(at)?;
             if point.document.0 > documents {
-                return Err(method.blob_error(reference("sequence point document does not exist")));
+                return Err(at(reference("sequence point document does not exist")));
             }
             points += 1;
         }

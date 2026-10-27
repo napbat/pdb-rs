@@ -4,10 +4,11 @@ use alloc::vec::Vec;
 
 use super::identity::{self, ChecksumAlgorithm, CodeViewFields, PdbChecksum};
 use super::parts::PdbParts;
+use super::report::{PlanReport, RebuildReason, STREAMS, StreamChange};
 use super::{check, layout};
-use crate::io::Write;
+use crate::io::{ReadAt, Write};
 use crate::portable::embedded::encode_embedded;
-use crate::portable::{Identity, IdentityPolicy};
+use crate::portable::{Identity, IdentityPolicy, Pdb};
 use crate::{Error, ErrorKind, Result};
 
 /// Zero bytes for the PDB ID and the stream padding.
@@ -16,11 +17,10 @@ const ZEROS: [u8; 20] = [0; 20];
 /// The size of the PDB ID at the start of the `#Pdb` stream.
 const ID_LEN: usize = 20;
 
-/// The frozen layout and the encoded bytes of a Portable PDB.
+/// The frozen layout, the encoded bytes and the report of a Portable PDB.
 ///
-/// [`PdbParts::plan`], [`PdbBuilder::plan`](crate::portable::PdbBuilder::plan) and
-/// [`PdbEditor::plan`](crate::portable::PdbEditor::plan) make the plan. See
-/// [`crate::portable::write`] for the layout, the checks and the error contract.
+/// [`PdbParts::plan`] and [`PdbEditor::plan`](crate::portable::PdbEditor::plan) make the plan.
+/// See [`crate::portable::write`] for the layout, the checks and the error contract.
 pub struct PdbWritePlan {
     root: Vec<u8>,
     pdb: Vec<u8>,
@@ -28,6 +28,7 @@ pub struct PdbWritePlan {
     /// `#Strings`, `#US`, `#GUID` and `#Blob` without padding.
     heaps: [Vec<u8>; 4],
     identity: Identity,
+    report: PlanReport,
 }
 
 impl PdbParts {
@@ -72,6 +73,7 @@ impl PdbParts {
             tables,
             heaps,
             identity: Identity::from_bytes(ZEROS),
+            report: PlanReport::new([StreamChange::Added; 6]),
         };
         plan.identity = match id {
             IdentityPolicy::Explicit(identity) => identity,
@@ -85,6 +87,55 @@ impl PdbParts {
 }
 
 impl PdbWritePlan {
+    /// Return the bytes of a stream of the output, without padding.
+    fn stream(&self, index: usize) -> &[u8] {
+        match index {
+            0 => &self.pdb,
+            1 => &self.tables,
+            _ => &self.heaps[index - 2],
+        }
+    }
+
+    /// Compare each output stream with the stream of `source` and set the report.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Pdb::stream_bytes`].
+    pub(crate) fn compare<S: ReadAt>(&mut self, source: &Pdb<S>) -> Result<()> {
+        let mut changes = [StreamChange::Added; 6];
+        for (index, (change, name)) in changes.iter_mut().zip(STREAMS).enumerate() {
+            let Some(before) = source.stream_bytes(name)? else {
+                continue;
+            };
+            let after = self.stream(index);
+            // A source stream can end with up to 3 zero bytes of padding.
+            let same = |before: &[u8], after: &[u8]| {
+                before.starts_with(after)
+                    && before.len() - after.len() < 4
+                    && before[after.len()..].iter().all(|&byte| byte == 0)
+            };
+            *change = if same(&before, after) {
+                StreamChange::Copied
+            } else if index == 0
+                && before.len() >= ID_LEN
+                && after.len() >= ID_LEN
+                && same(&before[ID_LEN..], &after[ID_LEN..])
+            {
+                StreamChange::Rebuilt(RebuildReason::Identity)
+            } else {
+                StreamChange::Edited
+            };
+        }
+        self.report = PlanReport::new(changes);
+        Ok(())
+    }
+
+    /// Return the change of each stream, compared with the source of an editor.
+    #[must_use]
+    pub const fn report(&self) -> &PlanReport {
+        &self.report
+    }
+
     /// Return the output in pieces, in file order. If `zero_id` is `true`, the PDB ID is zero.
     fn pieces(&self, zero_id: bool) -> [&[u8]; 12] {
         let pad = |bytes: &[u8]| &ZEROS[..layout::padding(bytes.len())];

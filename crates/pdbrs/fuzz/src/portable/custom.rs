@@ -114,11 +114,11 @@ fn visit(value: &CustomDebugValue<'_>) {
 /// Round-trip the custom debug information of each row of a Portable PDB.
 pub(crate) fn walk_rows<S: ReadAt>(pdb: &Pdb<S>) {
     for row in pdb.custom_debug_informations().take(MAX_ITEMS) {
-        let Some(row) = ok(row) else {
+        let Some((id, row)) = ok(row) else {
             break;
         };
-        let _ = (row.id(), row.parent(), row.kind_index(), row.value_offset());
-        round_trip(row.kind(), row.value());
+        let _ = (id, row.parent);
+        round_trip(row.kind, &row.value);
         if let Some(value) = ok(row.decode()) {
             visit(&value);
         }

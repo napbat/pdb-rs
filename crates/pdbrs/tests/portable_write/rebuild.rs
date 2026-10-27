@@ -1,9 +1,10 @@
 //! Exact copies and the rebuild of an existing Portable PDB with `Pdb::to_parts`.
 
 use pdbrs::io::copy_exact;
-use pdbrs::portable::debug::Import;
+use pdbrs::portable::debug::{Imports, RawImport};
 use pdbrs::portable::metadata::{
-    CustomDebugInformationRow, DocumentId, ImportScopeId, LocalVariableRow, MethodDefId, TableId,
+    CustomDebugInformationRow, DocumentId, ImportScopeId, ImportScopeRow, LocalVariableRow,
+    MethodDefId, TableId,
 };
 use pdbrs::portable::{IdentityPolicy, Pdb};
 
@@ -119,7 +120,7 @@ fn duplicate_parts() -> Builder {
 fn rebuild_rewrites_document_names_and_imports_if_blob_offsets_change() {
     let bytes = duplicate_parts().build();
     let pdb = Pdb::parse(&bytes).unwrap();
-    assert_eq!(pdb.document(DocumentId(1)).unwrap().name(), b"x/x");
+    assert_eq!(pdb.document(DocumentId(1)).unwrap().name, b"x/x");
     let parts = pdb.to_parts().unwrap();
     // The duplicate "x" is gone, so the name and the imports move. The rebuild adds the
     // encoded name ("/", 1, 1) and imports (1, 1) with the new offset of "x".
@@ -131,10 +132,11 @@ fn rebuild_rewrites_document_names_and_imports_if_blob_offsets_change() {
         .unwrap();
     let rebuilt = open(&output);
     let document = rebuilt.document(DocumentId(1)).unwrap();
-    assert_eq!(document.name(), b"x/x");
-    let scope = rebuilt.import_scope(ImportScopeId(1)).unwrap();
-    let imports: Vec<Import> = scope.imports().map(Result::unwrap).collect();
-    let [Import::Namespace { namespace }] = imports[..] else {
+    assert_eq!(document.name, b"x/x");
+    let row: ImportScopeRow = rebuilt.row(ImportScopeId(1)).unwrap();
+    let blob = rebuilt.blob(row.imports).unwrap();
+    let imports: Vec<RawImport> = Imports::parse(&blob).map(Result::unwrap).collect();
+    let [RawImport::Namespace { namespace }] = imports[..] else {
         panic!("unexpected imports {imports:?}");
     };
     assert_eq!(namespace.0, 1);

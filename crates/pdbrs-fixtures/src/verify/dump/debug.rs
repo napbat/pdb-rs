@@ -9,8 +9,9 @@ use std::fmt::Write as _;
 use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::debug::{
-    ConstantValue, GeneralValue, Import, LocalConstantSignature, PrimitiveConstant,
+    ConstantValue, GeneralValue, Imports, LocalConstantSignature, PrimitiveConstant, RawImport,
 };
+use pdbrs::portable::metadata::{ImportScopeRow, LocalScopeRow};
 
 use super::{Dump, quote};
 
@@ -21,11 +22,10 @@ pub fn debug<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     scopes(pdb, out)?;
     imports(pdb, out)?;
     for method in pdb.state_machine_methods() {
-        let method = method?;
+        let (_, method) = method?;
         out.line(format_args!(
             "state-machine move-next={} kickoff={}",
-            method.move_next_method().0,
-            method.kickoff_method().0
+            method.move_next_method.0, method.kickoff_method.0
         ));
     }
     Ok(())
@@ -34,14 +34,14 @@ pub fn debug<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
 /// Print one `document` line for each document.
 fn documents<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for document in pdb.documents() {
-        let document = document?;
+        let (id, document) = document?;
         out.line(format_args!(
             "document id={} name={} language={} hash-algorithm={} hash={}",
-            document.id().0,
-            text(document.name()),
-            guid(document.language_guid()),
-            guid(document.hash_algorithm_guid()),
-            hex(document.hash())
+            id.0,
+            text(&document.name),
+            guid(document.language.as_ref()),
+            guid(document.hash_algorithm.as_ref()),
+            hex(&document.hash)
         ));
     }
     Ok(())
@@ -50,18 +50,16 @@ fn documents<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
 /// Print the sequence points of each method that has a sequence point blob.
 fn sequence_points<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for method in pdb.method_debug_informations() {
-        let method = method?;
-        let Some(decoded) = method.sequence_points()? else {
+        let (id, method) = method?;
+        let Some(decoded) = method.decode()? else {
             continue;
         };
         let signature = decoded.local_signature();
-        let points = decoded
-            .collect::<pdbrs::Result<Vec<_>>>()
-            .map_err(|error| method.blob_error(error))?;
-        let id = method.id().0;
+        let points = decoded.collect::<pdbrs::Result<Vec<_>>>()?;
+        let id = id.0;
         out.line(format_args!(
             "method-debug id={id} document={} local-signature={} points={}",
-            method.document().0,
+            method.document.0,
             signature.0,
             points.len()
         ));
@@ -85,34 +83,31 @@ fn sequence_points<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()>
 /// Print each local scope with its variables and constants.
 fn scopes<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for scope in pdb.local_scopes() {
-        let scope = scope?;
-        let id = scope.id().0;
+        let (scope_id, scope) = scope?;
+        let row: LocalScopeRow = pdb.row(scope_id)?;
+        let id = scope_id.0;
         out.line(format_args!(
             "scope id={id} method={} import-scope={} start={:#x} end={:#x} variables={} constants={}",
-            scope.method().0,
-            scope.import_scope().0,
-            scope.start_offset().0,
-            u64::from(scope.start_offset().0) + u64::from(scope.length()),
-            scope.variables().len(),
-            scope.constants().len()
+            scope.method.0,
+            scope.import_scope.0,
+            scope.start_offset.0,
+            u64::from(scope.start_offset.0) + u64::from(scope.length),
+            scope.variables.len(),
+            scope.constants.len()
         ));
-        for variable in scope.variables() {
-            let variable = pdb.local_variable(variable)?;
+        for (variable_id, variable) in (row.variable_list.0..).zip(&scope.variables) {
             out.line(format_args!(
-                "scope-variable scope={id} id={} index={} attributes={:#06x} name={}",
-                variable.id().0,
-                variable.index(),
-                variable.attributes(),
-                text(variable.name())
+                "scope-variable scope={id} id={variable_id} index={} attributes={:#06x} name={}",
+                variable.index,
+                variable.attributes,
+                text(&variable.name)
             ));
         }
-        for constant in scope.constants() {
-            let constant = pdb.local_constant(constant)?;
+        for (constant_id, constant) in (row.constant_list.0..).zip(&scope.constants) {
             out.line(format_args!(
-                "scope-constant scope={id} id={} name={} {}",
-                constant.id().0,
-                text(constant.name()),
-                signature(&constant.signature()?)
+                "scope-constant scope={id} id={constant_id} name={} {}",
+                text(&constant.name),
+                signature(&constant.decode()?)
             ));
         }
     }
@@ -203,16 +198,14 @@ fn primitive(value: PrimitiveConstant<'_>) -> String {
 
 /// Print each import scope with its imports.
 fn imports<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
-    for scope in pdb.import_scopes() {
-        let scope = scope?;
-        let id = scope.id().0;
-        let imports = scope
-            .imports()
-            .collect::<pdbrs::Result<Vec<Import>>>()
-            .map_err(|error| scope.blob_error(error))?;
+    for scope in pdb.rows::<ImportScopeRow>() {
+        let (id, scope) = scope?;
+        let id = id.0;
+        let imports =
+            Imports::parse(&pdb.blob(scope.imports)?).collect::<pdbrs::Result<Vec<RawImport>>>()?;
         out.line(format_args!(
             "import-scope id={id} parent={} imports={}",
-            scope.parent().0,
+            scope.parent.0,
             imports.len()
         ));
         for import in imports {

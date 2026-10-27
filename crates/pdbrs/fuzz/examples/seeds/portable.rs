@@ -3,6 +3,9 @@
 use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::CustomDebugKind;
 use pdbrs::portable::embedded::{EMBEDDED_PDB_SIGNATURE, decode_embedded, encode_embedded};
+use pdbrs::portable::metadata::{
+    DocumentRow, ImportScopeRow, LocalConstantRow, MethodDebugInformationRow,
+};
 
 use crate::{Corpus, Outcome};
 
@@ -44,41 +47,42 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
     }
     corpus.add("mpdb", &encode_embedded(bytes)?)?;
     for document in pdb.documents() {
-        let document = document?;
-        corpus.add_parts("portable_blobs", &[0], &[], &pdb.blob(document.row().name)?)?;
-        corpus.add_parts("portable_blobs", &[5], &[], document.name())?;
+        let (id, document) = document?;
+        let row: DocumentRow = pdb.row(id)?;
+        corpus.add_parts("portable_blobs", &[0], &[], &pdb.blob(row.name)?)?;
+        corpus.add_parts("portable_blobs", &[5], &[], &document.name)?;
     }
-    for method in pdb.method_debug_informations() {
-        let method = method?;
+    for row in pdb.rows::<MethodDebugInformationRow>() {
+        let (_, row) = row?;
         let mut prefix = vec![1];
-        prefix.extend_from_slice(&method.document().0.to_le_bytes());
+        prefix.extend_from_slice(&row.document.0.to_le_bytes());
         corpus.add_parts(
             "portable_blobs",
             &prefix,
             &[],
-            method.sequence_points_blob(),
+            &pdb.blob(row.sequence_points)?,
         )?;
     }
-    for constant in pdb.local_constants() {
-        corpus.add_parts("portable_blobs", &[2], &[], constant?.signature_blob())?;
+    for row in pdb.rows::<LocalConstantRow>() {
+        corpus.add_parts("portable_blobs", &[2], &[], &pdb.blob(row?.1.signature)?)?;
     }
-    for scope in pdb.import_scopes() {
-        corpus.add_parts("portable_blobs", &[3], &[], scope?.imports_blob())?;
+    for row in pdb.rows::<ImportScopeRow>() {
+        corpus.add_parts("portable_blobs", &[3], &[], &pdb.blob(row?.1.imports)?)?;
     }
     for row in pdb.custom_debug_informations() {
-        let row = row?;
+        let (_, row) = row?;
         let selector = KINDS
             .iter()
-            .position(|kind| *kind == row.kind())
+            .position(|kind| *kind == row.kind)
             .unwrap_or(KINDS.len());
         corpus.add_parts(
             "custom_debug_info",
             &[u8::try_from(selector)?],
             &[],
-            row.value(),
+            &row.value,
         )?;
-        if row.kind() == CustomDebugKind::EMBEDDED_SOURCE {
-            corpus.add("embedded_source", row.value())?;
+        if row.kind == CustomDebugKind::EMBEDDED_SOURCE {
+            corpus.add("embedded_source", &row.value)?;
         }
     }
     Ok(())
