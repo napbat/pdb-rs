@@ -64,14 +64,27 @@ fn shift_sources(lines: &mut [String], parent: u32) -> Result<(), String> {
 }
 
 /// Return the keyword of a line.
-fn keyword(line: &str) -> &str {
+pub(super) fn keyword(line: &str) -> &str {
     line.split(' ').next().unwrap_or("")
 }
 
 /// Return the value of the field `name` of a line.
-fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+pub(super) fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     line.split(' ')
         .find_map(|part| part.strip_prefix(name)?.strip_prefix('='))
+}
+
+/// Add `suffix` to the end of the quoted `name` field of a line.
+pub(super) fn renamed(line: &str, suffix: &str) -> Result<String, String> {
+    let start = line
+        .find(" name=\"")
+        .ok_or_else(|| format!("no name in `{line}`"))?
+        + " name=\"".len();
+    let end = start
+        + line[start..]
+            .find('"')
+            .ok_or_else(|| format!("no end of the name in `{line}`"))?;
+    Ok(format!("{}{suffix}{}", &line[..end], &line[end..]))
 }
 
 /// Return the lines of a dump that show decoded records.
@@ -116,7 +129,7 @@ pub(super) fn custom_blocks(lines: &[String]) -> Vec<String> {
 }
 
 /// Add `shift` to the `start-line` and `end-line` fields of a sequence point line.
-fn shift_lines(line: &str, shift: u32) -> Result<String, String> {
+pub(super) fn shift_lines(line: &str, shift: u32) -> Result<String, String> {
     let parts: Result<Vec<String>, String> = line
         .split(' ')
         .map(|part| {
@@ -139,20 +152,7 @@ pub(super) fn edited(lines: &[String], edit: &Edit) -> Result<Vec<String>, Strin
     let mut result = Vec::with_capacity(lines.len() + 4);
     for line in lines {
         if line.starts_with("document id=1 ") {
-            let start = line
-                .find(" name=\"")
-                .ok_or_else(|| format!("no name in `{line}`"))?
-                + " name=\"".len();
-            let end = start
-                + line[start..]
-                    .find('"')
-                    .ok_or_else(|| format!("no end of the name in `{line}`"))?;
-            result.push(format!(
-                "{}{}{}",
-                &line[..end],
-                edit.rename_suffix,
-                &line[end..]
-            ));
+            result.push(renamed(line, &edit.rename_suffix)?);
         } else if line.starts_with("sequence-point ") && line.contains(" start-line=") {
             result.push(shift_lines(line, edit.line_shift)?);
         } else {

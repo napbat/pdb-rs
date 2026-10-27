@@ -36,11 +36,12 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
 
   verify-edit    Edit and build each Portable PDB fixture with the pdbrs editor, compare
                  the verifier dumps with the expected change, and run each standalone fixture
-                 program with the built and the edited PDB. Write the results to
-                 target/verify-edit/.
+                 program with the built and the edited PDB. Then apply one field change or
+                 one removal in each new edit case and compare the changed streams with the
+                 plan report. Write the results to target/verify-edit/.
 
   verify-native-build
-                 Rebuild each native PDB fixture with the pdbrs builder, write it to
+                 Rebuild each native PDB fixture with the pdbrs editor, write it to
                  target/verify-native-build/ and compare the original and the rebuilt PDB
                  with pdbtool, llvm-pdbutil, DIA2Dump and llvm-symbolizer.
 
@@ -89,7 +90,7 @@ pub enum Action {
     VerifyRebuild(Check),
     /// Edit and build each Portable PDB fixture and compare the results with the verifier.
     VerifyEdit(Check),
-    /// Rebuild each native PDB fixture with the pdbrs builder and compare it with the
+    /// Rebuild each native PDB fixture with the pdbrs editor and compare it with the
     /// original through the consumer tools.
     VerifyNativeBuild(Check),
     /// Apply each native edit to each native PDB fixture and check the results through the

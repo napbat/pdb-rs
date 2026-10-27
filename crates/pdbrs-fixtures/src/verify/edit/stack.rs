@@ -20,7 +20,7 @@ const LINE: &str = ":line ";
 pub(super) struct Pdbs<'a> {
     /// The original PDB.
     pub(super) original: &'a [u8],
-    /// The PDB of the builder with new heaps.
+    /// The PDB of the new editor with new heaps.
     pub(super) built: &'a [u8],
     /// The PDB with the moved sequence points.
     pub(super) moved: &'a [u8],

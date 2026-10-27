@@ -15,9 +15,12 @@
 //! 4. For a standalone fixture, the program prints the `stack` mode trace with the original,
 //!    the built (step 2) and a line-moved PDB. The PDBs use the original PDB ID. The built PDB
 //!    gives the same trace, and the line-moved PDB gives each line number plus 1000.
+//! 5. After these steps, the section `new edit cases:` applies one field change or one removal
+//!    in each case of [`cases`] and checks the output with the verifier and the plan report.
 //!
 //! The command writes the PDBs, the dumps and the traces to `target/verify-edit/`.
 
+mod cases;
 mod expect;
 mod stack;
 
@@ -75,11 +78,12 @@ pub fn verify_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<boo
     let passed = print_in_order(jobs, &comparisons, |comparison, log| {
         check(&assembly, comparison, &outputs, &out, log)
     });
+    let new_cases = cases::run(jobs, &assembly, &comparisons, &out);
     println!(
         "wrote the PDBs, the dumps and the traces to {}",
         out.display()
     );
-    Ok(passed)
+    Ok(passed && new_cases)
 }
 
 /// Format a pdbrs error.
@@ -101,6 +105,19 @@ fn dump(command: &mut Command) -> Result<String, String> {
     }
     String::from_utf8(output.stdout)
         .map_err(|error| format!("the verifier output is not UTF-8: {error}"))
+}
+
+/// Read the source of a comparison and dump it with the verifier. Return the Portable PDB
+/// bytes (the decoded payload for an embedded PDB) and the dump.
+fn source(assembly: &Path, comparison: &Comparison) -> Result<(Vec<u8>, String), String> {
+    let (original, mut command) = match &comparison.input {
+        Input::Standalone(path) => (read(path)?, verifier::command(assembly, path)),
+        Input::Embedded { payload, image } => (
+            decode_embedded(&read(payload)?, EMBEDDED_LIMIT).map_err(pdbrs)?,
+            verifier::embedded_command(assembly, image),
+        ),
+    };
+    Ok((original, dump(&mut command)?))
 }
 
 /// Write `bytes` to `out`, dump the file with the verifier and write the dump.
@@ -147,14 +164,7 @@ fn check(
     log: &mut String,
 ) -> Result<bool, String> {
     let fixture = &comparison.fixture;
-    let (original, mut command) = match &comparison.input {
-        Input::Standalone(path) => (read(path)?, verifier::command(assembly, path)),
-        Input::Embedded { payload, image } => (
-            decode_embedded(&read(payload)?, EMBEDDED_LIMIT).map_err(pdbrs)?,
-            verifier::embedded_command(assembly, image),
-        ),
-    };
-    let theirs = dump(&mut command)?;
+    let (original, theirs) = source(assembly, comparison)?;
     let pdb = Pdb::parse(&original).map_err(pdbrs)?;
     let identity = IdentityPolicy::Explicit(pdb.identity());
     let _ = writeln!(log, "{fixture}:");

@@ -521,8 +521,7 @@ check fails.
 
 ### Edit check
 
-The `verify-edit` command checks the Portable PDB builder and editor of pdbrs with the same
-inputs:
+The `verify-edit` command checks the Portable PDB editor of pdbrs with the same inputs:
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>] [--jobs <n>]
@@ -547,8 +546,33 @@ For each input, the command checks these items:
    gives the original trace. The moved PDB gives each line number plus 1000 in the frames of
    the fixture documents; frames of other assemblies, for example `FSharp.Core`, do not change.
 
-The command writes the PDBs, the dumps and the traces to `target/verify-edit/`. It exits with a
-failure code if a check fails.
+After these items, the section `new edit cases:` applies one change in each case below (#42).
+Each case starts from `Pdb::edit` with `IdentityPolicy::ContentDerived` and changes the first
+record that applies. A case that does not apply gives a `note:` line and no output.
+
+| Case | Change |
+| --- | --- |
+| `sequence-point-line` | In method order, the first visible sequence point: start line + 1 and end line + 1. |
+| `document-name` | Document 1: the name gets the suffix `.edited`. |
+| `local-variable-name` | In row order, the first local variable: the name gets the suffix `.edited`. |
+| `remove-local-constant` | In row order, the first local constant: removed. |
+| `remove-custom-debug-information` | In row order, the first custom debug information value whose kind is not embedded source: removed. |
+
+For each case, the command checks these items:
+
+1. The decoded lines of the verifier dump are the expected change of the original lines: the
+   changed line, or the removed lines with the later row IDs, the constant count of the scope
+   and the `cdi` field of the `source` lines renumbered. For a removed custom debug information
+   value, the command compares the custom debug information lines as in item 3.
+2. The streams whose bytes are different from the original are exactly the streams that
+   `PlanReport` does not give as `StreamChange::Copied`. `pdbtool compare` does not read
+   Portable PDBs. Thus the command takes the stream headers (`stream` lines) from the verifier
+   dumps of the original and the output, and compares the bytes of each stream.
+3. The same edit again gives the same bytes.
+
+The command writes the PDBs, the dumps and the traces to `target/verify-edit/`. A case writes
+`<fixture>.<case>.pdb` and `<fixture>.<case>.srm.txt`. The command exits with a failure code if
+a check fails.
 
 ### Dump format
 
