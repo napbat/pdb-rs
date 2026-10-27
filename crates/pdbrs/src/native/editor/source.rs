@@ -76,7 +76,7 @@ pub(super) fn module<S: ReadAt>(pdb: &Pdb<S>, index: ModuleIndex) -> Result<Modu
 }
 
 /// Read the hash adjusters of a type stream.
-fn adjusters<S: ReadAt>(pdb: &Pdb<S>, stream: &TypeStream) -> Result<Vec<HashAdjuster>> {
+pub(super) fn adjusters<S: ReadAt>(pdb: &Pdb<S>, stream: &TypeStream) -> Result<Vec<HashAdjuster>> {
     let Some(id) = stream.header().hash_stream else {
         return Ok(Vec::new());
     };

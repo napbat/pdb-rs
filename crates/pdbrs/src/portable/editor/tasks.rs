@@ -1,8 +1,10 @@
-//! The editing tasks of #41 for Portable PDBs: functions over the model of the editor.
+//! The editing tasks of #41 and #46 for Portable PDBs: functions over the model of the editor.
 //!
 //! Each task checks all its inputs before it changes the model, so an error leaves the
-//! model unchanged. The tasks use only the public collections of the editor.
+//! model unchanged. The tasks use the public collections of the editor. The path remap also
+//! reads the documents without a change of the model.
 
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
 use super::model::PdbEditor;
@@ -124,6 +126,83 @@ impl<S: ReadAt> PdbEditor<'_, S> {
             CustomDebugKind::EMBEDDED_SOURCE,
             blob,
         )
+    }
+
+    /// Give the document names of the PDB new values with the function `remap`, and return
+    /// the number of names that get a new value.
+    ///
+    /// The task calls `remap` once for each distinct document name ([`Document::name`]), in
+    /// byte order. `remap` returns the new name, or `None` to keep the name. The task compares
+    /// names as bytes: two names that differ only in case are two names. Each document with
+    /// the name gets the new name. The sequence points, the Source Link record and the
+    /// embedded sources keep their bytes; use [`PdbEditor::set_source_link`] for new Source
+    /// Link patterns.
+    ///
+    /// The plan keeps the source heaps, so the name parts of the old names stay in the `#Blob`
+    /// heap as entries that no row uses. A function that keeps every name changes nothing.
+    ///
+    /// ```no_run
+    /// use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
+    ///
+    /// # #[cfg(feature = "std")]
+    /// # fn main() -> pdbrs::Result<()> {
+    /// let pdb = Pdb::open("app.pdb")?;
+    /// let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+    /// // Replace the build directory with `/_/`.
+    /// let changed = editor.remap_source_paths(|path| {
+    ///     path.strip_prefix(br"C:\build\".as_slice())
+    ///         .map(|rest| [b"/_/".as_slice(), rest].concat())
+    /// })?;
+    /// editor.plan(EditOptions::default())?.write_file("app.remapped.pdb")?;
+    /// # let _ = changed;
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "std"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// [`Document::name`]: crate::portable::debug::Document::name
+    ///
+    /// # Errors
+    ///
+    /// - [`ErrorKind::InvalidFormat`] if a new name is empty, contains a NUL byte or is not
+    ///   UTF-8 (a document name is UTF-8 text).
+    /// - The errors of [`PdbEditor::documents_mut`].
+    ///
+    /// On an error, the model does not change.
+    pub fn remap_source_paths<F>(&mut self, mut remap: F) -> Result<usize>
+    where
+        F: FnMut(&[u8]) -> Option<Vec<u8>>,
+    {
+        let mut names = BTreeSet::new();
+        for (_, document) in self.read_documents()?.iter() {
+            if !document.name.is_empty() {
+                names.insert(document.name.to_vec());
+            }
+        }
+        let mut map = BTreeMap::new();
+        for name in names {
+            let Some(new) = remap(&name) else {
+                continue;
+            };
+            if new.is_empty() || new.contains(&0) || core::str::from_utf8(&new).is_err() {
+                return Err(Error::new(ErrorKind::InvalidFormat, None).with_context(
+                    "a new document name is empty, contains a NUL byte or is not UTF-8",
+                ));
+            }
+            if new != name {
+                map.insert(name, new);
+            }
+        }
+        if map.is_empty() {
+            return Ok(0);
+        }
+        for (_, document) in self.documents_mut()?.iter_mut() {
+            if let Some(new) = map.get(document.name.as_bytes()) {
+                document.name = Bytes::from(new.clone());
+            }
+        }
+        Ok(map.len())
     }
 
     /// Give the one record of `kind` for `parent` the value `value`, or add a record.

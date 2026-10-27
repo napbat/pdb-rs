@@ -20,6 +20,9 @@
 //! Then the command prints the section `task cases:` of #41: each editing task on each PDB,
 //! with the same checks and a summary line (see [`tasks`]).
 //!
+//! The last section `remap cases:` of #46 remaps the source paths of each PDB and checks the
+//! output (see [`remap`]).
+//!
 //! The command prints each explained class of differences. It fails for each problem without
 //! an explanation, for each rejected edit and for each missing tool.
 
@@ -27,6 +30,7 @@ mod cases;
 mod checks;
 mod edits;
 mod read_count;
+mod remap;
 mod scope_trees;
 mod stripped;
 mod tasks;
@@ -273,7 +277,8 @@ pub fn verify_native_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Res
     );
     let new_problems = new_section(&tools, &list, &work, jobs);
     let task_problems = tasks::run(&tools, &list, &work, jobs);
-    Ok(problems == 0 && new_problems == 0 && task_problems == 0)
+    let remap_problems = remap::run(&tools, &list, fixtures, &work, jobs);
+    Ok(problems == 0 && new_problems == 0 && task_problems == 0 && remap_problems == 0)
 }
 
 /// Run the new section: the new edit cases, the scope tree step and the read count. Print a

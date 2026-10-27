@@ -20,7 +20,7 @@ use crate::{stream, synthetic};
 const MODULE: ModuleIndex = ModuleIndex(0);
 
 /// Return the synthetic PDB with the closer patch, and the module stream.
-fn opaque_module() -> (Vec<u8>, StreamId) {
+pub(crate) fn opaque_module() -> (Vec<u8>, StreamId) {
     let mut bytes = synthetic();
     let (id, at) = {
         let pdb = Pdb::parse(bytes.as_slice()).expect("source");

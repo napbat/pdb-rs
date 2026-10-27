@@ -301,7 +301,11 @@ impl<S: ReadAt> PdbEditor<'_, S> {
                 if !stream.c11_data().is_empty() {
                     return Err(unsupported("C11 line data is a legacy format (#16)"));
                 }
-                module_types(pdb, stream.symbol_data(), claims, unnamed)?;
+                let replaced = self
+                    .unnamed
+                    .as_ref()
+                    .map_or(&[][..], |unnamed| unnamed.replaced.as_slice());
+                module_types(pdb, stream.symbol_data(), replaced, claims, unnamed)?;
             }
             prepare_module(&mut module, unnamed)?;
             push(
@@ -465,10 +469,12 @@ fn debug_bytes<S: ReadAt>(pdb: &Pdb<S>, kind: DebugStream) -> Result<Vec<u8>> {
 }
 
 /// Read the streams that the `S_MOD_TYPEREF` record of a module names,
-/// decode their records and encode them again.
+/// decode their records and encode them again. A stream of `replaced` (the
+/// new bytes of a path remap, #46) replaces its source stream.
 fn module_types<S: ReadAt>(
     pdb: &Pdb<S>,
     symbols: &[u8],
+    replaced: &[(StreamId, Vec<u8>)],
     claims: &mut Claims,
     unnamed: &mut UnnamedStreams,
 ) -> Result<()> {
@@ -486,7 +492,10 @@ fn module_types<S: ReadAt>(
             continue;
         }
         claims.claim(id)?;
-        let bytes = pdb.stream_bytes(id)?;
+        let bytes = match replaced.iter().find(|(stream, _)| *stream == id) {
+            Some((_, bytes)) => bytes.clone(),
+            None => pdb.stream_bytes(id)?,
+        };
         let mut encoded = Vec::new();
         encoded
             .try_reserve_exact(bytes.len())

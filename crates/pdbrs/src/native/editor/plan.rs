@@ -17,6 +17,7 @@ mod layout;
 mod modules;
 mod opaque;
 mod patch;
+mod paths;
 mod shared;
 mod strip;
 mod types;
@@ -357,6 +358,9 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///   change needs.
     /// - The errors of the stream readers and of [`MsfBuilder::plan`].
     pub fn plan(&self, options: EditOptions) -> Result<PdbWritePlan<'_, S>> {
+        if self.paths_remapped {
+            paths::check_model(self)?;
+        }
         self.prepare_remap()?;
         let remap = self.remapped().map(|remapped| remapped.report.clone());
         if self.is_new_layout() {

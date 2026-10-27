@@ -584,6 +584,13 @@ custom debug information line for line, and the custom debug information values 
 The verifier decodes the Source Link text and each embedded source, and the `source` line of
 an embedded source must give `check=verified` (the SHA-256 hash of the document).
 
+After the task section, the section `remap cases:` (#46) runs `remap_source_paths` on each
+input with the build root of `verify-native-edit` (see "Native edit check") and
+`IdentityPolicy::ContentDerived`. It writes `<fixture>.remap-source-paths.pdb` and its verifier
+dump. A function that keeps every name must give the source bytes. The decoded dump of the
+output must be the source dump with the new name in each `document` line, line for line, so
+the sequence points do not change. The case also gets checks 2 and 3 above.
+
 The command writes the PDBs, the dumps and the traces to `target/verify-edit/`. A case writes
 `<fixture>.<case>.pdb` and `<fixture>.<case>.srm.txt`, and a task case writes
 `<fixture>.task-<case>.pdb` and `<fixture>.task-<case>.srm.txt`. The command exits with a
@@ -924,6 +931,28 @@ checks 1 to 3 above. For `rename-symbols`, `llvm-pdbutil --publics` and `--globa
 `DIA2Dump -p` must list the new names and not the old names, `DIA2Dump -sym` must find a
 function with the new procedure name and no function with the old name, and a read with pdbrs
 must find the new name in each renamed reference record and in the procedure that it names.
+The last line of the section gives the counts. The command fails for a problem in the section.
+
+After the summary line of the task section, the command prints the section `remap cases:`
+(#46). The build root is the `output_root` of the manifest without `target\fixtures`: the
+directory of the fixture sources and the build outputs. The case `remap-source-paths` runs
+`remap_source_paths` on each PDB with `IdentityPolicy::Preserve`. The function replaces the root
+with `/_/` if the root starts the path and a separator or the end follows; the comparison
+ignores the ASCII case and the separator kind. The case writes
+`target/verify-native-edit/<fixture>/<PDB file stem>/remap-source-paths.pdb` and checks:
+
+1. A function that keeps every path gives a plan without a changed stream.
+2. A byte search for the root (without case, `\` or `/`) over all streams of the output finds the
+   root only in the fields that the decision comment of #46 excludes: inside a command-line
+   string of `S_ENVBLOCK` or `LF_STRING_ID` (not at its start), inside the `/LinkInfo` command,
+   after ` at ` in a type, ID or symbol name (Clang names a lambda after its declaration place),
+   or in `sourcelink`. The section prints the count of each class.
+3. Checks 1 to 3 above, with the new `/src/files/` names in `llvm-pdbutil --named-streams`, the
+   old names absent, and the `srcsrv` text with the new paths through `pdbstr -r`.
+4. `DIA2Dump -l` of the output is `DIA2Dump -l` of the source with the function applied to
+   each file name: the lines of each procedure have the new file names and the same line
+   numbers.
+
 The last line of the section gives the counts. The command fails for a problem in the section.
 
 ## MSFZ writer check

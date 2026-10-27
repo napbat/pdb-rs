@@ -1,4 +1,5 @@
-//! The editing tasks of #41: `set_source_link` and `embed_source`.
+//! The editing tasks of #41 (`set_source_link`, `embed_source`) and the source path remap of
+//! #46 (`remap_source_paths`).
 
 use pdbrs::ErrorKind;
 use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugKind, CustomDebugParent};
@@ -138,4 +139,82 @@ fn a_task_with_invalid_input_leaves_the_model_unchanged() {
     rejected(&pdb, ErrorKind::InvalidReference, |editor| {
         editor.embed_source(DocumentId(3), SOURCE, EmbeddedFormat::Deflate)
     });
+}
+
+/// Replace the prefix `C:\src\` with `/_/`.
+fn remap(path: &[u8]) -> Option<Vec<u8>> {
+    path.strip_prefix(b"C:\\src\\".as_slice())
+        .map(|rest| [b"/_/".as_slice(), rest].concat())
+}
+
+/// Return the document names of `pdb` in row order.
+fn document_names(pdb: &Pdb<&[u8]>) -> Vec<Vec<u8>> {
+    pdb.documents()
+        .map(|document| document.unwrap().1.name.into_vec())
+        .collect()
+}
+
+/// Return the sequence point blob of each method of `pdb`.
+fn sequence_points(pdb: &Pdb<&[u8]>) -> Vec<Vec<u8>> {
+    pdb.method_debug_informations()
+        .map(|method| method.unwrap().1.sequence_points.into_vec())
+        .collect()
+}
+
+#[test]
+fn remap_source_paths_gives_documents_new_names() {
+    let source = write(&sample());
+    let pdb = open(&source);
+    let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+    let mut seen = Vec::new();
+    let changed = editor
+        .remap_source_paths(|path| {
+            seen.push(path.to_vec());
+            remap(path)
+        })
+        .unwrap();
+    assert_eq!(changed, 1);
+    // Each distinct name once, in byte order.
+    assert_eq!(
+        seen,
+        [b"/src/Other.cs".to_vec(), b"C:\\src\\Program.cs".to_vec()]
+    );
+    let edited = write(&editor);
+    let edited = open(&edited);
+    assert_eq!(
+        document_names(&edited),
+        [b"/_/Program.cs".to_vec(), b"/src/Other.cs".to_vec()]
+    );
+    assert_eq!(sequence_points(&edited), sequence_points(&pdb));
+}
+
+#[test]
+fn remap_source_paths_that_keeps_every_name_gives_the_source_bytes() {
+    let source = write(&sample());
+    let pdb = open(&source);
+    let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+    assert_eq!(editor.remap_source_paths(|_| None).unwrap(), 0);
+    let plan = editor
+        .plan(pdbrs::portable::EditOptions::default())
+        .unwrap();
+    assert!(
+        plan.report()
+            .streams()
+            .iter()
+            .all(|(_, change)| *change == StreamChange::Copied)
+    );
+    assert_eq!(plan.to_vec().unwrap(), source);
+}
+
+#[test]
+fn remap_source_paths_with_an_invalid_new_name_leaves_the_model_unchanged() {
+    let source = write(&sample());
+    let pdb = open(&source);
+    for new in [Vec::new(), b"/_/\0x.cs".to_vec(), vec![b'/', 0xFF]] {
+        rejected(&pdb, ErrorKind::InvalidFormat, |editor| {
+            editor
+                .remap_source_paths(|path| remap(path).map(|_| new.clone()))
+                .map(|_| ())
+        });
+    }
 }
