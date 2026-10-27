@@ -323,7 +323,7 @@ impl<'e, S: ReadAt> Work<'e, S> {
     /// Return the new DBI stream values, made from the source if needed.
     pub(super) fn dbi(&mut self, reason: StreamChange) -> Result<&mut DbiBuilder> {
         if self.dbi.is_none() {
-            let builder = match &self.editor.dbi {
+            let builder = match self.editor.plan_dbi() {
                 Some(values) => values.dbi.clone(),
                 None => DbiBuilder::from_dbi(self.source_dbi()?)?,
             };

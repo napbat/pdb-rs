@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use super::report::{PlanReport, StreamChange, StreamReport};
+use super::report::{PlanReport, RemapReport, StreamChange, StreamReport};
 use super::{EditOptions, PdbEditor};
 use crate::io::{ReadAt, Write};
 use crate::native::container::Stream;
@@ -303,6 +303,7 @@ fn freeze<'e, S: ReadAt>(
     assembly: Assembly<'e, S>,
     options: MsfWriteOptions,
     identity: PlanIdentity<'e, S>,
+    remap: Option<RemapReport>,
 ) -> Result<PdbWritePlan<'e, S>> {
     let Assembly {
         streams: list,
@@ -328,7 +329,7 @@ fn freeze<'e, S: ReadAt>(
         identity,
         stream_count,
         file_size,
-        report: PlanReport::new(reports),
+        report: PlanReport::new(reports, remap),
     })
 }
 
@@ -356,6 +357,8 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///   change needs.
     /// - The errors of the stream readers and of [`MsfBuilder::plan`].
     pub fn plan(&self, options: EditOptions) -> Result<PdbWritePlan<'_, S>> {
+        self.prepare_remap()?;
+        let remap = self.remapped().map(|remapped| remapped.report.clone());
         if self.is_new_layout() {
             if options.strip_private() {
                 return Err(unsupported(
@@ -363,7 +366,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
                 ));
             }
             let (assembly, msf, identity) = layout::plan(self, options)?;
-            return freeze(assembly, msf, PlanIdentity::Known(identity));
+            return freeze(assembly, msf, PlanIdentity::Known(identity), remap);
         }
         let (assembly, msf, identity) = cow::plan(self, options)?;
         let identity = match identity {
@@ -374,6 +377,6 @@ impl<S: ReadAt> PdbEditor<'_, S> {
                 pdb: self.cow_source()?,
             },
         };
-        freeze(assembly, msf, identity)
+        freeze(assembly, msf, identity, remap)
     }
 }

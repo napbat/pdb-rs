@@ -3,7 +3,7 @@
 use core::fmt;
 
 use crate::native::msf::StreamId;
-use crate::native::{IndexSpace, RemapRange};
+use crate::native::{IndexSpace, RemapAddress, RemapRange};
 use crate::portable::metadata::{MetadataStream, TableId};
 
 /// A result returned by this crate.
@@ -189,6 +189,8 @@ enum Location {
     Remap(RemapRange),
     /// The index space of a rejected native edit.
     Space(IndexSpace),
+    /// The record and the address of a rejected clean remap.
+    Address(RemapAddress),
 }
 
 /// An error with an optional physical byte offset.
@@ -328,6 +330,22 @@ impl Error {
         }
     }
 
+    /// Attach the record and the address of a clean remap that the plan rejects.
+    #[must_use]
+    pub const fn with_remap_address(mut self, address: RemapAddress) -> Self {
+        self.location = Some(Location::Address(address));
+        self
+    }
+
+    /// Return the record and the address of a clean remap that the plan rejects, if known.
+    #[must_use]
+    pub const fn remap_address(&self) -> Option<RemapAddress> {
+        match self.location {
+            Some(Location::Address(address)) => Some(address),
+            _ => None,
+        }
+    }
+
     /// Return the static structure or operation description, if known.
     #[must_use]
     pub const fn context(&self) -> Option<&'static str> {
@@ -371,6 +389,11 @@ impl fmt::Display for Error {
                 range.old.0, range.length, range.new.0
             )?,
             Some(Location::Space(space)) => write!(formatter, " in the index space {space:?}")?,
+            Some(Location::Address(address)) => write!(
+                formatter,
+                " for the record {:?} at the PDB RVA {:#x}",
+                address.item, address.address.0
+            )?,
             None => {}
         }
         if let Some(source) = &self.source {

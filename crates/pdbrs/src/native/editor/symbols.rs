@@ -7,6 +7,7 @@ use super::record::SymbolRecord;
 use crate::native::codeview::index::SymbolHandle;
 use crate::native::codeview::symbol::{Public, S_PUB32, Symbol, SymbolData};
 use crate::native::codeview::{Records, SymbolKind};
+use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
 use crate::native::symbols::{
     GlobalSymbolIndex, PublicSymbolIndex, SectionStart, SymbolOffset, ThunkTable,
@@ -57,10 +58,16 @@ impl Thunks {
 /// The source of the model of the symbol record stream.
 #[derive(Clone, Debug)]
 pub(super) struct SharedSource {
+    /// The symbol record stream.
+    pub(super) stream: StreamId,
     /// The source entries of the global index.
     pub(super) globals: Vec<IndexEntry>,
     /// The source entries of the public index.
     pub(super) publics: Vec<IndexEntry>,
+    /// The source thunk table of the public index.
+    pub(super) thunks: Thunks,
+    /// The source section starts of the public index.
+    pub(super) section_starts: Vec<SectionStart>,
     /// The number of source records.
     pub(super) count: usize,
 }
@@ -97,10 +104,11 @@ fn handle_of(offsets: &[u32], offset: SymbolOffset) -> Result<SymbolHandle> {
 }
 
 impl SharedSymbols {
-    /// Decode the records of a symbol record stream and the entries of its
-    /// indexes. Each source hash record keeps its bucket and its reference
-    /// count.
+    /// Decode the records of the symbol record stream `stream` and the
+    /// entries of its indexes. Each source hash record keeps its bucket and
+    /// its reference count.
     pub(super) fn decode(
+        stream: StreamId,
         records: &[u8],
         globals: Option<&GlobalSymbolIndex>,
         publics: Option<&PublicSymbolIndex>,
@@ -146,8 +154,11 @@ impl SharedSymbols {
             model.section_starts = publics.section_starts().collect();
         }
         model.source = Some(SharedSource {
+            stream,
             globals: model.globals.clone(),
             publics: model.publics.clone(),
+            thunks: model.thunks.clone(),
+            section_starts: model.section_starts.clone(),
             count: model.records.len(),
         });
         model.name_index = NameIndex::from_source(
@@ -182,7 +193,7 @@ impl SharedSymbols {
     }
 
     /// Remove a record and its index entries.
-    fn remove(&mut self, handle: SymbolHandle) -> Result<()> {
+    pub(super) fn remove(&mut self, handle: SymbolHandle) -> Result<()> {
         let slot = self
             .records
             .get_mut(handle.0 as usize)

@@ -426,6 +426,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
 
     /// Store the parts of `staged` and give the records their new names.
     fn apply(&mut self, staged: Staged) -> usize {
+        self.clear_remap_output();
         let Staged {
             names,
             shared,

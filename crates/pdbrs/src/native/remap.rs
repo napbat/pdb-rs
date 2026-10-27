@@ -12,13 +12,17 @@
 //!
 //! [`ImageRemap::address_tables`] makes the OMAP tables and the section header streams of
 //! the new image. [`AddressTables::map`] and DIA then translate each address exactly as the
-//! ranges say.
+//! ranges say. Clean output (`clean`) writes the new addresses into the records.
 
+pub(crate) mod clean;
 mod omap;
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 
-use super::address::{AddressTables, Rva};
+use super::address::{AddressTables, PdbRva, Rva};
+use super::codeview::SymbolKind;
+use super::debug_stream::RvaVaBlob;
 use super::section::{SectionHeaderStream, SectionHeaders};
 use crate::{Error, ErrorKind, Result};
 
@@ -93,6 +97,8 @@ pub struct ImageRemap {
     by_old: BTreeMap<u32, RemapRange>,
     /// The ranges by new RVA.
     by_new: BTreeMap<u32, RemapRange>,
+    /// The `.pdata` and `.xdata` streams of the new image, if the caller gave them.
+    unwind: Option<Box<(RvaVaBlob, RvaVaBlob)>>,
 }
 
 impl ImageRemap {
@@ -118,6 +124,7 @@ impl ImageRemap {
             sections,
             by_old: BTreeMap::new(),
             by_new: BTreeMap::new(),
+            unwind: None,
         }
     }
 
@@ -210,6 +217,25 @@ impl ImageRemap {
         self.by_old.values().copied()
     }
 
+    /// Give the `.pdata` and `.xdata` streams of the new image (decision 7 of #43).
+    ///
+    /// pdbrs does not decode the unwind information in `.xdata`, so it cannot rewrite the
+    /// two streams. Clean output ([`RemapMode::Clean`]) writes these streams into the
+    /// [`DebugStream::Pdata`](super::dbi::DebugStream::Pdata) and
+    /// [`DebugStream::Xdata`](super::dbi::DebugStream::Xdata) slots. OMAP output ignores
+    /// them and copies the source streams.
+    #[must_use]
+    pub fn with_unwind_streams(mut self, pdata: RvaVaBlob, xdata: RvaVaBlob) -> Self {
+        self.unwind = Some(Box::new((pdata, xdata)));
+        self
+    }
+
+    /// Return the `.pdata` and `.xdata` streams of the new image, if the caller gave them.
+    #[must_use]
+    pub fn unwind_streams(&self) -> Option<(&RvaVaBlob, &RvaVaBlob)> {
+        self.unwind.as_deref().map(|(pdata, xdata)| (pdata, xdata))
+    }
+
     /// Return the address tables of the new image for a source PDB with the address tables
     /// `source`.
     ///
@@ -256,11 +282,9 @@ pub enum RemapMode {
     /// Write the OMAP tables and the section headers of the new image, and keep the
     /// records. A consumer translates each address through OMAP, as DIA does.
     Omap,
-    /// Write the new address into each record. The output has no OMAP stream.
-    ///
-    /// The editor does not support this mode yet (#43, work order step 4):
-    /// [`PdbEditor::remap_addresses`](super::PdbEditor::remap_addresses) returns
-    /// [`ErrorKind::UnsupportedEdit`].
+    /// Write the new address into each record. The output has no OMAP stream and no
+    /// original section headers. The policy selects what the plan does with a record that
+    /// holds removed code.
     Clean(RemovedCode),
 }
 
@@ -275,6 +299,55 @@ pub enum RemovedCode {
     Fail,
     /// Remove each record that holds removed code, and the references to it.
     Drop,
+}
+
+/// The kind of a record that holds an address, for [`RemapAddress`] and the report of clean
+/// output.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum RemapItem {
+    /// A symbol record of a module stream or of the symbol record stream.
+    Symbol(SymbolKind),
+    /// A line block of a `DEBUG_S_LINES` subsection.
+    LineBlock,
+    /// A record of a `DEBUG_S_FRAMEDATA` subsection.
+    ModuleFrameData,
+    /// An RVA of a `DEBUG_S_COFF_SYMBOL_RVA` subsection.
+    CoffSymbolRva,
+    /// A DBI section contribution.
+    SectionContribution,
+    /// A record of the FPO stream.
+    Fpo,
+    /// A record of the new FPO stream.
+    NewFpo,
+    /// A record of the exception data stream.
+    ExceptionData,
+    /// A record of the fixup stream.
+    Fixup,
+    /// A thunk of the incremental thunk table of the public symbol index.
+    Thunk,
+}
+
+/// The record and the address of a clean remap that the plan rejects.
+///
+/// [`Error::remap_address`] gives it. The error also names the stream and the offset of a
+/// source record ([`Error::stream_location`]).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct RemapAddress {
+    /// The kind of the record.
+    pub item: RemapItem,
+    /// The address of the record in the address space of the PDB: the original image of a
+    /// PDB with OMAP.
+    pub address: PdbRva,
+}
+
+impl RemapAddress {
+    /// Make a value for the record `item` at `address`.
+    #[must_use]
+    pub const fn new(item: RemapItem, address: PdbRva) -> Self {
+        Self { item, address }
+    }
 }
 
 /// Return `true` if one section of `sections` holds all RVAs from `start` to `end`.

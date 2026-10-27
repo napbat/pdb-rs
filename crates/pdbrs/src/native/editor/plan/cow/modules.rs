@@ -20,7 +20,7 @@ use crate::native::dbi::{GlobalRefRegion, Module, SourceInfo, read_global_refs};
 use crate::native::editor::ModuleSlot;
 use crate::native::editor::module::{ModuleContents, SYMBOL_BASE};
 use crate::native::editor::report::{IndexSpace, RebuildReason, StreamChange};
-use crate::native::editor::streams::DebugContent;
+use crate::native::editor::streams::{DebugContent, kind_of};
 use crate::native::msf::StreamId;
 use crate::native::symbols::{GlobalSymbolIndex, PublicSymbolIndex, RecordOffsets, SymbolOffset};
 use crate::{Error, ErrorKind, Result};
@@ -35,6 +35,8 @@ pub(in super::super) struct Updates {
     files: bool,
     /// The new debug header slots.
     debug: Vec<(usize, StreamId)>,
+    /// The debug header slots whose source stream the plan removes.
+    removed_debug: Vec<usize>,
 }
 
 /// The decoded modules and their encoded regions.
@@ -84,11 +86,12 @@ fn source_stream(module: &ModuleContents) -> Option<StreamId> {
 
 /// Return `true` if the DBI stream must change for the modules or the
 /// debug streams.
-pub(in super::super) fn needs_dbi<S>(work: &Work<'_, S>) -> bool {
+pub(in super::super) fn needs_dbi<S: ReadAt>(work: &Work<'_, S>) -> bool {
     !work.updates.records.is_empty()
         || work.updates.files
         || !work.updates.debug.is_empty()
-        || work.editor.dbi.is_some()
+        || !work.updates.removed_debug.is_empty()
+        || work.editor.plan_dbi().is_some()
 }
 
 /// Run the opaque check of moved records.
@@ -110,7 +113,7 @@ fn encode_modules<'e, S: ReadAt>(work: &mut Work<'e, S>) -> Result<Encoded<'e>> 
     let mut encoded = Encoded {
         modules: Vec::new(),
     };
-    let Some(slots) = &work.editor.modules else {
+    let Some(slots) = work.editor.plan_modules() else {
         return Ok(encoded);
     };
     let count = slots.len();
@@ -177,7 +180,7 @@ fn plan_shared<S: ReadAt>(
         .iter()
         .filter_map(|(_, regions)| regions.as_ref())
         .any(|regions| regions.map.moved(regions.source_count));
-    let Some(model) = &work.editor.symbols else {
+    let Some(model) = work.editor.plan_symbols() else {
         if module_moved
             && let Some(stream) = work.source_dbi()?.header().symbol_stream
             && let Some(records) = pdb.symbol_records()?
@@ -228,13 +231,7 @@ fn plan_shared<S: ReadAt>(
         work.changes
             .set(id, Bytes::Owned(parsed.into_bytes()), rebuilt)?;
     }
-    if encoded.moved()
-        || shared::index_changed(
-            model,
-            &model.publics,
-            source.map(|source| &source.publics[..]),
-        )
-    {
+    if encoded.moved() || shared::publics_changed(model) {
         let id = header
             .public_stream
             .ok_or_else(|| missing("PDB has no public symbol index"))?;
@@ -262,8 +259,7 @@ fn move_global_refs<S: ReadAt>(work: &mut Work<'_, S>, shared: &EncodedShared) -
     let pdb = work.pdb;
     let decoded = |index: u32| {
         work.editor
-            .modules
-            .as_ref()
+            .plan_modules()
             .is_some_and(|slots| matches!(slots.get(index as usize), Some(ModuleSlot::Decoded(_))))
     };
     let mut changed = Vec::new();
@@ -397,12 +393,21 @@ fn source_refs(module: &ModuleContents) -> Result<Vec<SymbolOffset>> {
     Ok(refs)
 }
 
-/// Plan the optional debug streams.
+/// Plan the optional debug streams. A source slot whose kind the list does
+/// not have any more becomes a nil stream, and its DBI slot becomes empty.
 fn plan_debug<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()> {
-    let Some(list) = &work.editor.debug else {
+    let Some(list) = work.editor.plan_debug() else {
         return Ok(());
     };
     let slots: Vec<Option<StreamId>> = work.source_dbi()?.debug_streams().collect();
+    for (slot, id) in slots.iter().enumerate() {
+        if let (Some(id), Some(kind)) = (id, kind_of(slot))
+            && !list.contains(kind)
+        {
+            work.changes.remove(*id)?;
+            push(&mut work.updates.removed_debug, slot)?;
+        }
+    }
     for (kind, content) in &list.entries {
         let DebugContent::Bytes(bytes) = content else {
             continue;
@@ -425,11 +430,11 @@ pub(in super::super) fn plan_dbi<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()
     if work.dbi.is_none() && !needs_dbi(work) {
         return Ok(());
     }
-    let reason = if work.editor.dbi.is_some() {
+    let reason = if work.editor.plan_dbi().is_some() {
         StreamChange::Edited
     } else if !work.updates.records.is_empty() || work.updates.files {
         StreamChange::Rebuilt(RebuildReason::ModuleRecords)
-    } else if !work.updates.debug.is_empty() {
+    } else if !work.updates.debug.is_empty() || !work.updates.removed_debug.is_empty() {
         StreamChange::Rebuilt(RebuildReason::DebugHeader)
     } else {
         StreamChange::Rebuilt(RebuildReason::Identity)
@@ -458,10 +463,14 @@ pub(in super::super) fn plan_dbi<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()
         }
         builder.debug_streams[slot] = Some(id);
     }
+    for slot in updates.removed_debug {
+        if let Some(entry) = builder.debug_streams.get_mut(slot) {
+            *entry = None;
+        }
+    }
     let debug_slots = work
         .editor
-        .dbi
-        .as_ref()
+        .plan_dbi()
         .map_or(0, |values| values.debug_slots);
     let (builder, reason) = work.dbi.as_mut().ok_or_else(|| missing("DBI"))?;
     if builder.debug_streams.len() < debug_slots {
@@ -476,7 +485,7 @@ pub(in super::super) fn plan_dbi<S: ReadAt>(work: &mut Work<'_, S>) -> Result<()
 fn file_lists<S: ReadAt>(work: &Work<'_, S>) -> Result<Vec<Vec<Vec<u8>>>> {
     let dbi = work.source_dbi()?;
     let info = dbi.source_info()?;
-    let slots = work.editor.modules.as_deref().unwrap_or_default();
+    let slots = work.editor.plan_modules().unwrap_or_default();
     let mut lists = Vec::new();
     for (index, slot) in slots.iter().enumerate() {
         let mut list = Vec::new();

@@ -12,8 +12,11 @@ use crate::native::dbi::DebugStream;
 use crate::native::debug_stream::OmapStream;
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
+use crate::native::remap::clean::CleanMap;
 use crate::native::section::SectionHeaderStream;
 use crate::native::{ImageRemap, RemapMode};
+
+pub(super) mod clean;
 
 /// The debug streams that OMAP output writes, in slot order.
 const OMAP_STREAMS: [DebugStream; 4] = [
@@ -25,6 +28,13 @@ const OMAP_STREAMS: [DebugStream; 4] = [
 
 impl<S: ReadAt> PdbEditor<'_, S> {
     /// Remap the addresses of the PDB to the rewritten image of `remap`.
+    ///
+    /// The old RVAs of `remap` are RVAs of the image that the model describes.
+    /// If the model already has OMAP tables, the function composes them with
+    /// the ranges. Records that other edits add or change, before or after
+    /// the call, use the addresses of the source PDB, as the other records do.
+    ///
+    /// # OMAP output
     ///
     /// With [`RemapMode::Omap`], the function replaces 4 optional debug
     /// streams of the model (see [`PdbEditor::debug_streams_mut`]):
@@ -40,14 +50,37 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     /// Info stream (for the identity policy), the DBI stream and the 4 debug
     /// streams. [`AddressMap`](crate::native::address::AddressMap) and DIA
     /// translate each address exactly as the ranges say. An address without a
-    /// range has no mapping.
+    /// range has no mapping. The new tables map each address of the records
+    /// directly to the new image, so a second call describes a second rewrite
+    /// of the image.
     ///
-    /// The old RVAs of `remap` are RVAs of the image that the model describes.
-    /// If the model already has OMAP tables, the function composes them with
-    /// the ranges. The new tables then map each address of the records
-    /// directly to the new image. Thus a second call describes a second
-    /// rewrite of the image. Records that other edits add or change use the
-    /// addresses of the source PDB, as the other records do.
+    /// # Clean output
+    ///
+    /// With [`RemapMode::Clean`], the function keeps a copy of `remap` and the
+    /// policy. The plan writes the new address into each record that holds an
+    /// address (decision 4 of #43): the module symbols, the C13 line blocks,
+    /// frame data and COFF symbol RVAs, the symbol record stream with the
+    /// address map of the public index, the DBI section contributions and
+    /// section map, and the FPO, new FPO, exception data and fixup streams.
+    /// [`DebugStream::SectionHeader`] gets the section headers of the new
+    /// image. The output has no OMAP stream and no
+    /// [`DebugStream::OriginalSectionHeader`] stream.
+    ///
+    /// - A record that a range splits gets the split form of its kind, for
+    ///   example an `S_SEPCODE` scope for each part of a procedure after the
+    ///   first one, or a `DEBUG_S_LINES` subsection for each part of a line
+    ///   block. A kind without a split form, for example `S_BLOCK32` or an FPO
+    ///   record, makes the plan fail with [`ErrorKind::UnsupportedEdit`].
+    /// - A record that holds an old address without a range holds removed
+    ///   code. [`RemovedCode::Fail`] makes the plan fail;
+    ///   [`RemovedCode::Drop`] removes the record and the references to it.
+    /// - The error of a rejected record names the record and its address
+    ///   ([`Error::remap_address`](crate::Error::remap_address)).
+    /// - [`PlanReport::remap`](crate::native::PlanReport::remap) counts the
+    ///   removed records and the added parts.
+    ///
+    /// A second clean call describes a second rewrite: the plan applies the
+    /// maps in call order.
     ///
     /// Caution: the new image matches the output only after the caller writes
     /// [`PdbWritePlan::identity`](crate::native::PdbWritePlan::identity) into
@@ -73,7 +106,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///
     /// let pdb = Pdb::open("app.pdb")?;
     /// let mut edit = pdb.edit(IdentityPolicy::IncrementAge);
-    /// edit.remap_addresses(&remap, RemapMode::Omap)?;
+    /// edit.remap_addresses(&remap, RemapMode::Omap)?; // or RemapMode::Clean(RemovedCode::Fail)
     /// let plan = edit.plan(EditOptions::default())?;
     /// plan.write_file("app.rewritten.pdb")?;
     /// // Write the new identity into the RSDS debug entry of the new image.
@@ -89,11 +122,15 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     /// [`ErrorKind::UnsupportedEdit`]: crate::ErrorKind::UnsupportedEdit
     /// [`ErrorKind::MissingStream`]: crate::ErrorKind::MissingStream
     /// [`ErrorKind::LimitExceeded`]: crate::ErrorKind::LimitExceeded
+    /// [`RemovedCode::Fail`]: crate::native::RemovedCode::Fail
+    /// [`RemovedCode::Drop`]: crate::native::RemovedCode::Drop
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::UnsupportedEdit`] for [`RemapMode::Clean`]. The editor
-    ///   does not support clean output yet (#43, work order step 4).
+    /// - [`ErrorKind::UnsupportedEdit`] for OMAP output after a clean call,
+    ///   and for clean output of a model with a [`DebugStream::Xdata`] or
+    ///   [`DebugStream::Pdata`] stream if `remap` has no unwind streams
+    ///   ([`ImageRemap::with_unwind_streams`]).
     /// - [`ErrorKind::MissingStream`] if the model has no
     ///   [`DebugStream::SectionHeader`] stream, or OMAP without the original
     ///   section headers or without one of the two OMAP tables.
@@ -101,10 +138,44 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///   [`ImageRemap::MAX_OMAP_RECORDS`] records or an allocation fails.
     /// - The errors of [`PdbEditor::debug_streams_mut`], of the stream readers
     ///   and of the section header and OMAP decoders.
+    ///
+    /// The plan returns the errors of clean output for the records.
     pub fn remap_addresses(&mut self, remap: &ImageRemap, mode: RemapMode) -> Result<()> {
-        if let RemapMode::Clean(_) = mode {
+        match mode {
+            RemapMode::Omap => self.remap_omap(remap),
+            RemapMode::Clean(policy) => self.remap_clean(remap, policy),
+        }
+    }
+
+    /// Check the input of clean output and keep a copy of the map.
+    fn remap_clean(
+        &mut self,
+        remap: &ImageRemap,
+        policy: crate::native::RemovedCode,
+    ) -> Result<()> {
+        let pending = self.clean.as_ref();
+        let unwind_before = pending.is_some_and(clean::CleanRemap::has_unwind_streams);
+        if pending.is_none() {
+            CleanMap::new(remap, &self.model_address_tables()?)?;
+        }
+        let list = self.debug_streams_mut()?;
+        let unwind =
+            unwind_before || list.contains(DebugStream::Xdata) || list.contains(DebugStream::Pdata);
+        if unwind && remap.unwind_streams().is_none() {
             return Err(unsupported(
-                "the editor does not support clean remap output yet; use RemapMode::Omap",
+                "clean remap output needs the .pdata and .xdata streams of the new image; use ImageRemap::with_unwind_streams",
+            ));
+        }
+        self.clean
+            .get_or_insert_with(clean::CleanRemap::default)
+            .push(remap.clone(), policy)
+    }
+
+    /// Write the OMAP tables and the section headers of the new image.
+    fn remap_omap(&mut self, remap: &ImageRemap) -> Result<()> {
+        if self.clean.is_some() {
+            return Err(unsupported(
+                "OMAP remap output cannot follow clean remap output; use RemapMode::Clean",
             ));
         }
         let source = self.model_address_tables()?;

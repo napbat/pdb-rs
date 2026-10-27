@@ -190,6 +190,17 @@ impl DebugStreamList {
         Ok(())
     }
 
+    /// Remove the debug stream of `kind`, if the list has it.
+    ///
+    /// The plan removes the stream and empties its slot in the optional debug
+    /// header of the DBI stream. In the copy-on-write layout, the source
+    /// stream becomes a nil stream. Return `true` if the list had the stream.
+    pub fn remove(&mut self, kind: DebugStream) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|(slot, _)| *slot != kind);
+        self.entries.len() != before
+    }
+
     /// Return `true` if the list has a stream of `kind`.
     #[must_use]
     pub fn contains(&self, kind: DebugStream) -> bool {

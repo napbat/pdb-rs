@@ -19,15 +19,19 @@ use crate::{Bytes, Error, ErrorKind, Result};
 
 /// Decode the symbol record stream and its global and public indexes.
 pub(super) fn shared_symbols<S: ReadAt>(pdb: &Pdb<S>) -> Result<SharedSymbols> {
-    if pdb.debug_info()?.is_none() {
-        return Err(missing("PDB has no DBI stream"));
-    }
+    let stream = pdb
+        .debug_info()?
+        .ok_or_else(|| missing("PDB has no DBI stream"))?
+        .header()
+        .symbol_stream
+        .ok_or_else(|| missing("PDB has no symbol record stream"))?;
     let records = pdb
         .symbol_records()?
         .ok_or_else(|| missing("PDB has no symbol record stream"))?;
     let globals = pdb.globals()?;
     let publics = pdb.publics()?;
     SharedSymbols::decode(
+        stream,
         records,
         globals.as_ref().map(crate::native::symbols::Globals::index),
         publics.as_ref().map(crate::native::symbols::Publics::index),

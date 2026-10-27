@@ -4,6 +4,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::rebuild::Rebuild;
+use super::remap::clean::CleanRemap;
 use super::symbols::SharedSymbols;
 use super::types::RecordList;
 use super::{
@@ -133,6 +134,10 @@ pub(super) enum Names {
 /// - [`PdbEditor::remove_named_stream`]: a named stream and its Info entry.
 /// - [`PdbEditor::rename_symbols`]: public and global symbols, and module
 ///   procedures with their reference records.
+/// - [`PdbEditor::remap_addresses`]: the addresses of an image that a binary
+///   rewriter changed (#43), as OMAP tables or as new addresses in each
+///   record (clean output). The plan applies clean output, so records that
+///   other edits add or change use the addresses of the source PDB.
 ///
 /// # Layouts
 ///
@@ -285,6 +290,8 @@ pub struct PdbEditor<'p, S = &'static [u8]> {
     pub(super) unnamed: Option<UnnamedStreams>,
     /// The rebuild state after [`PdbEditor::decode_all`].
     pub(super) rebuild: Option<Rebuild>,
+    /// The clean remaps and the cache of their output (#43).
+    pub(super) clean: Option<CleanRemap>,
 }
 
 impl<S> core::fmt::Debug for PdbEditor<'_, S> {
@@ -331,6 +338,7 @@ impl<S: ReadAt> Pdb<S> {
             debug: None,
             unnamed: None,
             rebuild: None,
+            clean: None,
         }
     }
 }
@@ -368,6 +376,7 @@ impl PdbEditor<'static> {
             debug: Some(DebugStreamList::default()),
             unnamed: Some(UnnamedStreams::new(5)),
             rebuild: None,
+            clean: None,
         })
     }
 }
@@ -418,6 +427,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
 
     /// Decode the symbol record stream and its indexes, if not yet decoded.
     fn shared(&mut self) -> Result<&mut SharedSymbols> {
+        self.clear_remap_output();
         if self.symbols.is_none() {
             let decoded = source::shared_symbols(self.cow_source()?)?;
             self.symbols = Some(decoded);
@@ -456,6 +466,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
 
     /// Return the module list, with a slot for each source module.
     fn module_slots(&mut self) -> Result<&mut Vec<ModuleSlot>> {
+        self.clear_remap_output();
         if self.modules.is_none() {
             let slots = source::module_slots(self.cow_source()?)?;
             self.modules = Some(slots);
@@ -585,6 +596,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// - [`ErrorKind::MissingStream`] if the PDB has no DBI stream.
     /// - The errors of the DBI decoder.
     pub fn debug_info_mut(&mut self) -> Result<&mut DebugInfo> {
+        self.clear_remap_output();
         if self.dbi.is_none() {
             let dbi = self
                 .cow_source()?
@@ -601,6 +613,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     ///
     /// Returns the errors of [`PdbEditor::debug_info_mut`].
     pub fn debug_streams_mut(&mut self) -> Result<&mut DebugStreamList> {
+        self.clear_remap_output();
         if self.debug.is_none() {
             let dbi = self
                 .cow_source()?
@@ -675,5 +688,6 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
             || self.debug.is_some()
             || self.unnamed.is_some()
             || self.features.is_some()
+            || self.clean.is_some()
     }
 }

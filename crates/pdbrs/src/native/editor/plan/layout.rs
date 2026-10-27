@@ -138,7 +138,7 @@ struct Parts<'e> {
 
 /// Return the decoded modules of the model.
 fn parts<'e, S>(editor: &'e PdbEditor<'_, S>) -> Result<Parts<'e>> {
-    let slots = editor.modules.as_deref().unwrap_or_default();
+    let slots = editor.plan_modules().unwrap_or_default();
     let mut modules = Vec::new();
     modules
         .try_reserve_exact(slots.len())
@@ -180,7 +180,7 @@ fn assign<S>(
         modules.push(module.has_stream().then(|| counter.next()).transpose()?);
     }
     let mut debug = Vec::new();
-    for _ in editor.debug.iter().flat_map(|list| &list.entries) {
+    for _ in editor.plan_debug().iter().flat_map(|list| &list.entries) {
         debug.try_reserve(1).map_err(|_| no_memory())?;
         debug.push(counter.next()?);
     }
@@ -381,8 +381,7 @@ fn encode_symbols<S>(
             })
     };
     let model = editor
-        .symbols
-        .as_ref()
+        .plan_symbols()
         .ok_or_else(|| missing("the new layout has no symbol records"))?;
     let targets = Targets {
         modules: &parts.modules,
@@ -518,8 +517,7 @@ fn dbi_stream<S>(
     dbi_age: u32,
 ) -> Result<Vec<u8>> {
     let model = editor
-        .dbi
-        .as_ref()
+        .plan_dbi()
         .ok_or_else(|| missing("the new layout has no DBI values"))?;
     let mut header = model.dbi.header;
     header.age = dbi_age;
@@ -543,7 +541,7 @@ fn dbi_stream<S>(
                 |module| module.files().iter().map(crate::Bytes::as_bytes),
             ))?);
     }
-    let entries = editor.debug.as_ref().map_or(&[][..], |list| &list.entries);
+    let entries = editor.plan_debug().map_or(&[][..], |list| &list.entries);
     let slots = entries
         .iter()
         .map(|(kind, _)| kind.index() + 1)
@@ -689,7 +687,7 @@ fn push_streams<'e, S: ReadAt>(
         Planned::Owned(streams.symbols),
         sources.and_then(|sources| sources.symbols),
     )?;
-    let slots = editor.modules.as_deref().unwrap_or_default();
+    let slots = editor.plan_modules().unwrap_or_default();
     for (stream, slot) in streams.modules.into_iter().zip(slots) {
         let Some(stream) = stream else { continue };
         let source = match slot {
@@ -701,7 +699,7 @@ fn push_streams<'e, S: ReadAt>(
         };
         push(assembly, pdb, Planned::Owned(stream), source)?;
     }
-    for (kind, content) in editor.debug.iter().flat_map(|list| &list.entries) {
+    for (kind, content) in editor.plan_debug().iter().flat_map(|list| &list.entries) {
         let DebugContent::Bytes(bytes) = content else {
             return Err(missing(
                 "the new layout has a debug stream that is not decoded",
@@ -793,11 +791,19 @@ fn remap_cache(
     Ok(out)
 }
 
-/// Report the source streams that the model does not keep.
+/// Report the source streams that the model does not keep: the streams that
+/// no other stream names after [`PdbEditor::decode_all`], and the source debug
+/// streams whose kind the debug stream list does not have any more.
 fn report_dropped<S>(editor: &PdbEditor<'_, S>, assembly: &mut Assembly<'_, S>) -> Result<()> {
     if let Some(rebuild) = &editor.rebuild {
         for &stream in &rebuild.unclaimed {
             assembly.drop_source(stream)?;
+        }
+        let list = editor.plan_debug();
+        for &(kind, stream) in &rebuild.sources.debug {
+            if !list.is_some_and(|list| list.contains(kind)) {
+                assembly.drop_source(stream)?;
+            }
         }
     }
     Ok(())

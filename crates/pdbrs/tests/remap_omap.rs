@@ -12,11 +12,11 @@ use pdbrs::ErrorKind;
 use pdbrs::io::ReadAt;
 use pdbrs::native::address::{AddressTables, PdbRva, Rva, Translation, Unmapped};
 use pdbrs::native::dbi::DebugStream;
+use pdbrs::native::locate::SymbolLocator;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::section::{SectionHeader, SectionHeaderStream};
 use pdbrs::native::{
-    EditOptions, IdentityPolicy, ImageRemap, Pdb, PdbEditor, RebuildReason, RemapMode, RemovedCode,
-    StreamChange,
+    EditOptions, IdentityPolicy, ImageRemap, Pdb, PdbEditor, RebuildReason, RemapMode, StreamChange,
 };
 
 /// The 4 debug streams of OMAP output.
@@ -250,18 +250,59 @@ fn a_second_remap_composes_with_the_first() {
 }
 
 #[test]
-fn clean_output_is_not_supported_yet() {
+fn the_symbol_locator_translates_through_the_omap_tables() {
     let source = synthetic();
-    let pdb = Pdb::parse(&source[..]).expect("source");
-    let mut editor = pdb.edit(IdentityPolicy::Preserve);
-    for policy in [RemovedCode::Fail, RemovedCode::Drop] {
-        let error = editor
-            .remap_addresses(&remap(&RANGES), RemapMode::Clean(policy))
-            .expect_err("clean output is not supported");
-        assert_eq!(error.kind(), ErrorKind::UnsupportedEdit);
+    let (output, _) = omap_output(&source, &remap(&RANGES));
+    let pdb = Pdb::parse(&output[..]).expect("output");
+    let locator = SymbolLocator::new(&pdb).expect("locator of a PDB with OMAP");
+    for (rva, name) in [(0x3000, &b"main"[..]), (0x3031, &b"sum"[..])] {
+        let location = locator
+            .locate(Rva(rva))
+            .expect("locate")
+            .expect("a location");
+        assert_eq!(
+            location.procedure.map(|procedure| procedure.name),
+            Some(name)
+        );
     }
-    let plan = editor.plan(EditOptions::default()).expect("plan");
-    assert_eq!(plan.report().changed().count(), 0);
+    // The removed rest of `.text` has no new RVA, so no new RVA finds it.
+    assert!(
+        locator
+            .locate(Rva(0x3080))
+            .expect("locate")
+            .and_then(|location| location.procedure)
+            .is_none()
+    );
+}
+
+#[test]
+fn the_symbol_locator_finds_a_moved_part_of_a_procedure() {
+    let source = synthetic();
+    // `main` splits at 0x18: its second part moves after `sum`.
+    let ranges = [
+        (0x1020, 0x18, 0x3000),
+        (0x1000, 0x20, 0x3018),
+        (0x1038, 0x18, 0x3080),
+        (0x2000, 0x100, 0x2000),
+    ];
+    let (output, _) = omap_output(&source, &remap(&ranges));
+    let input = Pdb::parse(&source[..]).expect("source");
+    let expected = SymbolLocator::new(&input).expect("source locator");
+    let pdb = Pdb::parse(&output[..]).expect("output");
+    let locator = SymbolLocator::new(&pdb).expect("output locator");
+    for (old, new) in [(0x1038, 0x3080), (0x1040, 0x3088), (0x104f, 0x3097)] {
+        let source = expected.locate(Rva(old)).expect("locate").expect("source");
+        let location = locator.locate(Rva(new)).expect("locate").expect("output");
+        assert_eq!(
+            location.procedure.map(|procedure| procedure.name),
+            Some(&b"main"[..]),
+            "new RVA {new:#x}"
+        );
+        let line = |location: &pdbrs::native::locate::Location<'_>| {
+            location.line.map(|line| (line.file.to_vec(), line.line))
+        };
+        assert_eq!(line(&location), line(&source), "new RVA {new:#x}");
+    }
 }
 
 #[test]

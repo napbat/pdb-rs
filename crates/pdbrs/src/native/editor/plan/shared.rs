@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use super::modules::OffsetMap;
 use super::patch::Patch;
 use crate::native::Producer;
+use crate::native::address::SectionOffset;
 use crate::native::codeview::Records;
 use crate::native::codeview::index::{ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{ModuleSymbolTarget, ProcedureReference, Symbol, SymbolData};
@@ -303,6 +304,36 @@ pub(super) fn index_changed(
                     .is_some_and(|origin| origin.name().map(Bytes::as_bytes) != record.name())
             })
         })
+}
+
+/// Return `true` if the public index needs new bytes: its entries changed
+/// (see [`index_changed`]), a public record has a new address, or the thunk
+/// table or the section starts differ from the source.
+///
+/// The address map sorts the records by address, so a new address can
+/// change the order.
+pub(super) fn publics_changed(model: &SharedSymbols) -> bool {
+    let Some(source) = &model.source else {
+        return index_changed(model, &model.publics, None);
+    };
+    index_changed(model, &model.publics, Some(&source.publics))
+        || model.thunks != source.thunks
+        || model.section_starts != source.section_starts
+        || model.publics.iter().any(|entry| {
+            model.record(entry.symbol).is_some_and(|record| {
+                record.origin().is_some_and(|origin| {
+                    public_address(origin.data()) != public_address(record.data())
+                })
+            })
+        })
+}
+
+/// Return the address of an `S_PUB32` record.
+const fn public_address(data: &SymbolData<'_>) -> Option<SectionOffset> {
+    match data {
+        SymbolData::Public(public) => Some(public.address),
+        _ => None,
+    }
 }
 
 /// Return the new targets of the reference records of an undecoded symbol

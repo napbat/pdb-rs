@@ -23,18 +23,18 @@ use crate::{Error, ErrorKind, Result};
 
 /// A linear part of an address map: `length` addresses from `start` map to `target`.
 #[derive(Clone, Copy, Debug)]
-struct Segment {
+pub(super) struct Segment {
     /// The first address.
-    start: u32,
+    pub(super) start: u32,
     /// The number of addresses; at least 1.
-    length: u32,
+    pub(super) length: u32,
     /// The target of `start`; not 0.
-    target: u32,
+    pub(super) target: u32,
 }
 
 impl Segment {
     /// Return the address after the last address of the segment.
-    fn end(self) -> u64 {
+    pub(super) fn end(self) -> u64 {
         u64::from(self.start) + u64::from(self.length)
     }
 }
@@ -86,7 +86,7 @@ fn segments(items: impl ExactSizeIterator<Item = Segment>) -> Result<Vec<Segment
 /// A record maps the addresses up to the `rva` of the next record. The last record maps
 /// only its own `rva`. A record with the target 0 maps no address. An address whose target
 /// does not fit in 32 bits is not part of a segment.
-fn table_segments(table: &OmapStream) -> Result<Vec<Segment>> {
+pub(super) fn table_segments(table: &OmapStream) -> Result<Vec<Segment>> {
     let mut out = Vec::new();
     out.try_reserve_exact(table.len())
         .map_err(|_| allocation_failed())?;
@@ -113,7 +113,7 @@ fn table_segments(table: &OmapStream) -> Result<Vec<Segment>> {
 /// Both lists are in ascending order of `start`, and their segments do not overlap. The
 /// result has the same properties. An address of `first` whose target is in no segment of
 /// `second` is in no segment of the result.
-fn compose(first: &[Segment], second: &[Segment]) -> Result<Vec<Segment>> {
+pub(super) fn compose(first: &[Segment], second: &[Segment]) -> Result<Vec<Segment>> {
     let mut out = Vec::new();
     for &segment in first {
         let low = u64::from(segment.target);

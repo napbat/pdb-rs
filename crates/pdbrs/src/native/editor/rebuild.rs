@@ -165,6 +165,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
         if self.is_new_layout() {
             return Ok(());
         }
+        self.clear_remap_output();
         let pdb = self.cow_source()?;
         let mut claims = Claims {
             claimed: Vec::new(),
