@@ -10,6 +10,7 @@
 //! - `determinism.rs`: the output depends only on the final model.
 //! - `views.rs`: borrowed and copied stream views (#48).
 //! - `tasks.rs`: the editing tasks and their rejected inputs.
+//! - `paths.rs`: the source path remap (#46).
 //! - `removal.rs`: the removal of type and ID records with index compaction.
 //!
 //! The source PDB is the synthetic program of the `native_synthetic`
@@ -24,6 +25,7 @@ mod layout;
 mod names;
 mod opaque;
 mod patched;
+mod paths;
 mod read_count;
 mod rejected;
 mod removal;

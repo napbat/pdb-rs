@@ -9,6 +9,7 @@ pub(super) mod model;
 mod module;
 mod named;
 pub(super) mod options;
+mod paths;
 pub(super) mod plan;
 mod rebuild;
 mod record;

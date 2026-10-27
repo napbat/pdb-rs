@@ -20,10 +20,12 @@
 //! Then the command prints the section `task cases:` of #41: each editing task on each PDB,
 //! with the same checks and a summary line (see [`tasks`]).
 //!
-//! Then the command prints the section `type removal cases:` of #47: the removal of the
-//! unreferenced type records and UDT source line records of each PDB, with the same checks, a
-//! comparison of the mapped `llvm-pdbutil` dump and of the `DIA2Dump` output, and a summary
-//! line (see [`removal`]).
+//! The section `remap cases:` of #46 remaps the source paths of each PDB and checks the output
+//! (see [`remap`]).
+//!
+//! The last section `type removal cases:` of #47 removes the unreferenced type records and UDT
+//! source line records of each PDB, with the same checks, a comparison of the mapped
+//! `llvm-pdbutil` dump and of the `DIA2Dump` output, and a summary line (see [`removal`]).
 //!
 //! The command prints each explained class of differences. It fails for each problem without
 //! an explanation, for each rejected edit and for each missing tool.
@@ -32,6 +34,7 @@ mod cases;
 mod checks;
 mod edits;
 mod read_count;
+mod remap;
 mod removal;
 mod scope_trees;
 mod stripped;
@@ -279,8 +282,13 @@ pub fn verify_native_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Res
     );
     let new_problems = new_section(&tools, &list, &work, jobs);
     let task_problems = tasks::run(&tools, &list, &work, jobs);
+    let remap_problems = remap::run(&tools, &list, fixtures, &work, jobs);
     let removal_problems = removal::run_section(&tools, &list, &work, jobs);
-    Ok(problems == 0 && new_problems == 0 && task_problems == 0 && removal_problems == 0)
+    Ok(problems == 0
+        && new_problems == 0
+        && task_problems == 0
+        && remap_problems == 0
+        && removal_problems == 0)
 }
 
 /// Run the new section: the new edit cases, the scope tree step and the read count. Print a

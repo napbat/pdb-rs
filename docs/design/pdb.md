@@ -262,6 +262,7 @@ It runs each standalone fixture program with a built PDB and with a PDB whose se
 Its section `new edit cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
 For each case, the verifier dump shows the expected change, and the streams with other bytes are exactly the streams that `PlanReport` does not give as copied.
 Its section `task cases:` runs the editing tasks `set_source_link` and `embed_source` (#41) with the same checks; the verifier decodes each embedded source and checks it against the SHA-256 hash of its document.
+Its section `remap cases:` runs `remap_source_paths` (#46): the build root of the document names becomes `/_/`, the verifier reads the new names, and all other lines, also the sequence points, stay equal.
 
 ## Implemented MSF writing
 
@@ -408,14 +409,25 @@ Each task checks all its inputs before it changes the model, so an error leaves 
 | `set_source_server(text)` | the `srcsrv` named stream | `SourceServer::parse` |
 | `remove_named_stream(name)` | the named stream and its Info entry; the plan writes a nil stream | the rules of `NamedStreams::remove` |
 | `rename_symbols(f)` | the named records of the symbol record stream (not `S_DATAREF` and `S_ANNOTATIONREF`) and the procedures of the modules | no NUL byte; each record encodes; each renamed procedure reference names a procedure with the same new name |
+| `remap_source_paths(f)` | the path fields of [#46](https://github.com/napbat/pdbrs/issues/46) (below); `/names` and the EC names again if a name changes | not empty; no NUL byte; each record encodes; each `srcsrv` line keeps the new path as its first field; no two injected files with one virtual name |
 
 `rename_symbols` calls the function once for each distinct name, in byte order. It does not undecorate names, so a C++ function needs a new name for its decorated public name and its undecorated procedure name.
 A procedure reference and its procedure have the same name, so they get the same new name; the plan accepts a new name of a reference record only in that case.
 The task decodes only the modules with a renamed procedure, and it does not change IPI records (`LF_FUNC_ID`, `LF_MFUNC_ID`): one function ID names the inlinee of many modules.
 A rename moves records, so the opaque check of the plan applies.
 
+`remap_source_paths` ([#46](https://github.com/napbat/pdbrs/issues/46)) calls the function once for each distinct path, in byte order, and compares paths as bytes.
+It changes the `/names` strings of the path fields (C13 file checksums, cross-scope import module names, `S_FILESTATIC`, `LF_UDT_MOD_SRC_LINE`, injected-source names) and the `/names` strings that no field names,
+the DBI source file names, module and object file names, EC names and type server names and paths, `S_OBJNAME` and each string of `S_ENVBLOCK`,
+each `LF_STRING_ID` string of the IPI and of the module type streams of `S_MOD_TYPEREF`, the `/src/files/` stream names, the first field of the `srcsrv` source file lines and the `/LinkInfo` current directory.
+It gives each string whole to the function: a command line keeps the paths inside it. It does not change names of types and symbols, the `/LinkInfo` command, `sourcelink` and the contents of injected files.
+If a `/names` string changes, the task builds `/names` again without the old path and writes every `/names` offset again (`native/editor/paths/offsets.rs` walks them); the EC name table gets the same rule.
+After a change, the plan rejects data without a decoder that can hold a path or a `/names` offset with `UnsupportedEdit` and the stream.
+A function that keeps every path changes nothing, so the plan copies every stream.
+
 `verify-native-edit` runs the 366 edits of #34 on the 61 native fixtures, then the field changes and removals of #42, a scope tree step and a read count,
-and then each task of #41 with `pdbstr -r` for `srcsrv` and `sourcelink` and DIA2Dump lookups of the renamed symbols (see `fixtures/README.md`).
+then each task of #41 with `pdbstr -r` for `srcsrv` and `sourcelink` and DIA2Dump lookups of the renamed symbols,
+and then the path remap of #46 with a byte search for the old build root, `pdbtool check` and `DIA2Dump -l` (see `fixtures/README.md`).
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-native-edit
@@ -875,8 +887,8 @@ The editing tasks ([#41](https://github.com/napbat/pdbrs/issues/41)) are functio
 
 | Backend | Tasks |
 | --- | --- |
-| Native | `set_source_link`, `set_source_server`, `remove_named_stream`, `rename_symbols` (see [Implemented native editing](#implemented-native-editing)) |
-| Portable | `set_source_link` (the Source Link custom debug information of the module), `embed_source` (the embedded source custom debug information of a document, raw or DEFLATE) |
+| Native | `set_source_link`, `set_source_server`, `remove_named_stream`, `rename_symbols`, `remap_source_paths` (see [Implemented native editing](#implemented-native-editing)) |
+| Portable | `set_source_link` (the Source Link custom debug information of the module), `embed_source` (the embedded source custom debug information of a document, raw or DEFLATE), `remap_source_paths` (the document names, #46) |
 
 Each task checks all its inputs before it changes the model, so an error leaves the model unchanged.
 A portable task replaces the value of the one record of its kind for the parent, or adds a record; a parent with two such records is an error.

@@ -393,6 +393,9 @@ pub(super) fn plan<'e, S: ReadAt>(
         updates: modules::Updates::default(),
         producer: Cell::new(None),
     };
+    if editor.paths_remapped {
+        super::paths::check_source(&mut work)?;
+    }
     if let Some(unnamed) = &editor.unnamed {
         for (id, bytes) in &unnamed.entries {
             let added = work.changes.add(Some(Bytes::Borrowed(bytes)))?;
@@ -400,6 +403,10 @@ pub(super) fn plan<'e, S: ReadAt>(
                 return Err(Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("stream without a name has another stream ID than the plan"));
             }
+        }
+        for (id, bytes) in &unnamed.replaced {
+            work.changes
+                .set(*id, Bytes::Borrowed(bytes), StreamChange::Edited)?;
         }
     }
     let mut info = None;
@@ -471,8 +478,9 @@ fn check_contents(name: &[u8], bytes: &[u8], stream: StreamId) -> Result<()> {
     }
 }
 
-/// Apply the named stream changes: first the new names in model order, then
-/// the removals in source order.
+/// Apply the named stream changes: first the new bytes of source streams,
+/// then the new names of source streams, then the new streams in model
+/// order, then the removals in source order.
 fn plan_named<S: ReadAt>(work: &mut Work<'_, S>, info: &mut Option<InfoBuilder>) -> Result<()> {
     let Some(named) = &work.editor.named else {
         return Ok(());
@@ -482,6 +490,28 @@ fn plan_named<S: ReadAt>(work: &mut Work<'_, S>, info: &mut Option<InfoBuilder>)
             check_contents(&entry.name, bytes, stream)?;
             work.changes
                 .set(stream, Bytes::Borrowed(bytes), StreamChange::Edited)?;
+        }
+    }
+    for entry in &named.entries {
+        let Some(stream) = entry.source else {
+            continue;
+        };
+        if entry.content == NamedContent::Removed {
+            continue;
+        }
+        // A path remap (#46) gives a `/src/files/` stream a new name. The
+        // old name leaves the string buffer of the map.
+        let source_name = work
+            .pdb
+            .info()
+            .named_streams()
+            .find(|named| named.stream == stream)
+            .map(|named| named.name);
+        if let Some(source_name) = source_name
+            && source_name.as_bytes() != entry.name.as_bytes()
+            && !info_model(work, info)?.rename_named_stream(&source_name, &entry.name)?
+        {
+            return Err(missing("the Info stream has no named stream to rename"));
         }
     }
     for entry in &named.entries {

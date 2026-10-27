@@ -234,6 +234,16 @@ impl<V: Clone> OwnedHashTable<V> {
         Ok(Some(self.entries.remove(index).value))
     }
 
+    /// Give each key the value of `map`, in place. Each entry keeps its bucket.
+    ///
+    /// Use this function only if the hash of each new key is the hash of its old key, for
+    /// example if the key is the offset of a name and the name moves in its buffer.
+    pub(crate) fn map_keys(&mut self, mut map: impl FnMut(u32) -> u32) {
+        for entry in &mut self.entries {
+            entry.key = map(entry.key);
+        }
+    }
+
     /// Walk the probe sequence of `key`.
     fn find(&self, key: u32, keys: &impl HashTableKeys) -> Result<Slot> {
         let home = keys.hash(key)? % self.capacity;
