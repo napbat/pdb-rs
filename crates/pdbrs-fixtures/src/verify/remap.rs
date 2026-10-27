@@ -1,4 +1,4 @@
-//! The `verify-remap` command (#43, OMAP output).
+//! The `verify-remap` command (#43, OMAP output and clean output).
 //!
 //! For each native PDB of the fixture manifest (see [`super::native::native_fixtures`]), the
 //! command makes the range sets of [`ranges`] from the procedures of the source
@@ -19,9 +19,14 @@
 //! A procedure is removable if no reference record of the global index (`S_PROCREF`,
 //! `S_LPROCREF`) names it and it has no separated code chunk (`S_SEPCODE`). The removal set
 //! removes these procedures.
+//!
+//! After the OMAP part, the command checks the clean output of each set (see [`clean`]). It
+//! compares the clean output with the OMAP output of the same set.
 
+mod clean;
 mod dia;
 mod ranges;
+mod unwind;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -57,6 +62,8 @@ struct Tools {
     pdbtool: PathBuf,
     /// `DIA2Dump.exe`.
     dia2dump: PathBuf,
+    /// `llvm-pdbutil.exe`.
+    pdbutil: PathBuf,
 }
 
 /// The result of one range set on one PDB.
@@ -87,6 +94,8 @@ struct FixtureResult {
     notes: Vec<String>,
     /// A problem of the PDB before the sets.
     problem: Option<String>,
+    /// The results of the clean check of each set.
+    clean: Vec<(SetKind, clean::SetResult)>,
 }
 
 /// The source PDB, read once for all sets.
@@ -99,6 +108,8 @@ struct Source {
     procedures: Vec<Procedure>,
     /// `true` for a PDB without type merging (feature `NOTM`).
     lazy: bool,
+    /// The facts of the clean check.
+    facts: clean::Facts,
 }
 
 /// Read the source PDB and select its procedures.
@@ -144,11 +155,13 @@ fn source(path: &Path) -> Result<Source, String> {
         .info()
         .features()
         .any(|feature| feature == Feature::NO_TYPE_MERGE);
+    let facts = clean::Facts::read(&pdb, &locator, &tables)?;
     Ok(Source {
         bytes,
         tables,
         procedures,
         lazy,
+        facts,
     })
 }
 
@@ -257,14 +270,18 @@ fn check_output(source: &Source, remap: &ImageRemap, output: &Output) -> Vec<Str
     problems
 }
 
-/// Remap one PDB with one range set and check the output.
+/// The OMAP output of one set for the clean check: the bytes and the `DIA2Dump` outputs.
+type OmapResult = Option<(Vec<u8>, Option<dia::OmapDumps>)>;
+
+/// Remap one PDB with one range set and check the output. Return the result and the
+/// written output.
 fn check_set(
     tools: &Tools,
     source: &Source,
     baseline: &Baseline,
     set: &RangeSet,
     path: &Path,
-) -> SetResult {
+) -> (SetResult, OmapResult) {
     let mut result = SetResult {
         ranges: set.ranges.len(),
         removed: set.removed(&source.procedures),
@@ -285,7 +302,7 @@ fn check_set(
         Ok(output) => output,
         Err(error) => {
             result.problems.push(error);
-            return result;
+            return (result, None);
         }
     };
     result.changed = output.changed.iter().copied().collect();
@@ -294,7 +311,7 @@ fn check_set(
         result
             .problems
             .push(format!("cannot write {}: {error}", path.display()));
-        return result;
+        return (result, None);
     }
     match pdbtool_check(&tools.pdbtool, path) {
         Ok(0) => {}
@@ -303,14 +320,18 @@ fn check_set(
             .push(format!("pdbtool check: {errors} PDBs with errors")),
         Err(error) => result.problems.push(error),
     }
-    match dia::check(&tools.dia2dump, baseline, set, path) {
-        Ok((counts, problems)) => {
+    let dumps = match dia::check(&tools.dia2dump, baseline, set, path) {
+        Ok((counts, problems, dumps)) => {
             result.counts = counts;
             result.problems.extend(problems);
+            Some(dumps)
         }
-        Err(error) => result.problems.push(error),
-    }
-    result
+        Err(error) => {
+            result.problems.push(error);
+            None
+        }
+    };
+    (result, Some((output.bytes, dumps)))
 }
 
 /// Remap one PDB with each range set and check the outputs.
@@ -327,22 +348,42 @@ fn check_fixture(tools: &Tools, fixture: &NativeFixture, work: &Path) -> Fixture
         Ok(baseline) => baseline,
         Err(error) => return failed(error),
     };
+    let clean_baseline = match clean::baseline(tools, &fixture.pdb) {
+        Ok(baseline) => baseline,
+        Err(error) => return failed(error),
+    };
     let directory = fixture.work_directory(work);
     if let Err(error) = fs::create_dir_all(&directory) {
         return failed(format!("cannot make {}: {error}", directory.display()));
     }
     let sections: Vec<_> = source.tables.sections.iter().collect();
     let mut sets = Vec::new();
+    let mut clean = Vec::new();
     for kind in SetKind::ALL {
         let path = directory.join(format!("{}.pdb", kind.name()));
-        let result = match ranges::range_set(kind, &sections, &source.procedures) {
-            Ok(set) => check_set(tools, &source, &baseline, &set, &path),
-            Err(error) => SetResult {
-                problems: vec![error],
-                ..SetResult::default()
-            },
+        let clean_path = directory.join(format!("{}.clean.pdb", kind.name()));
+        let (result, clean_result) = match ranges::range_set(kind, &sections, &source.procedures) {
+            Ok(set) => {
+                let (result, omap) = check_set(tools, &source, &baseline, &set, &path);
+                let omap = omap.as_ref().map(|(bytes, dumps)| clean::OmapOutput {
+                    bytes,
+                    path: &path,
+                    dumps: dumps.as_ref(),
+                });
+                let clean_result =
+                    clean::check_set(tools, &source, &clean_baseline, &set, omap, &clean_path);
+                (result, clean_result)
+            }
+            Err(error) => (
+                SetResult {
+                    problems: vec![error],
+                    ..SetResult::default()
+                },
+                clean::SetResult::default(),
+            ),
         };
         sets.push((kind, result));
+        clean.push((kind, clean_result));
     }
     FixtureResult {
         procedures: source.procedures.len(),
@@ -354,6 +395,7 @@ fn check_fixture(tools: &Tools, fixture: &NativeFixture, work: &Path) -> Fixture
         sets,
         notes: baseline.notes,
         problem: None,
+        clean,
     }
 }
 
@@ -406,6 +448,9 @@ fn tools(workspace: &Path, fixtures: &Path) -> Result<Tools, String> {
         dia2dump: consumers
             .dia2dump
             .map_err(|reason| missing("DIA2Dump", &reason))?,
+        pdbutil: consumers
+            .pdbutil
+            .map_err(|reason| missing("llvm-pdbutil", &reason))?,
     })
 }
 
@@ -447,5 +492,23 @@ pub fn verify_remap(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bo
         "native PDBs: {}, outputs: {outputs}, {totals}, problems: {problems}",
         list.len()
     );
-    Ok(problems == 0)
+    println!("{}", clean::HEADER);
+    let mut clean_totals = clean::Totals::default();
+    for (fixture, result) in list.iter().zip(&results) {
+        if result.problem.is_some() {
+            println!("{}: skipped, the OMAP part failed", fixture.label());
+        } else {
+            clean_totals.print_fixture(&fixture.label(), &result.clean);
+        }
+    }
+    clean_totals.print_summary();
+    if problems + clean_totals.problems == 0 {
+        println!("result: pass");
+    } else {
+        println!(
+            "result: FAIL, problems: OMAP {problems}, clean {}",
+            clean_totals.problems
+        );
+    }
+    Ok(problems + clean_totals.problems == 0)
 }

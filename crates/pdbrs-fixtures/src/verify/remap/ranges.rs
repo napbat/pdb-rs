@@ -115,6 +115,57 @@ impl RangeSet {
             .filter(|procedure| self.map(procedure.start).is_none())
             .count()
     }
+
+    /// Return the old RVA of the new RVA `rva`, or `None` if no range holds it.
+    pub(crate) fn old(&self, rva: u32) -> Option<u32> {
+        self.ranges.iter().find_map(|range| {
+            let offset = rva.checked_sub(range.new)?;
+            (offset < range.length).then(|| range.old + offset)
+        })
+    }
+
+    /// Return the parts of the old extent of `length` bytes at `start`: one range for each
+    /// piece that a range maps, in old RVA order. Two pieces that continue each other in the
+    /// old and in the new image are one part. The bytes without a range are not in a part.
+    pub(crate) fn parts(&self, start: u32, length: u32) -> Vec<Range> {
+        let end = u64::from(start) + u64::from(length);
+        let first = self.ranges.partition_point(|range| {
+            u64::from(range.old) + u64::from(range.length) <= u64::from(start)
+        });
+        let mut parts: Vec<Range> = Vec::new();
+        for range in &self.ranges[first..] {
+            if u64::from(range.old) >= end {
+                break;
+            }
+            let old = range.old.max(start);
+            let part_end = (u64::from(range.old) + u64::from(range.length)).min(end);
+            let part = Range {
+                old,
+                length: u32::try_from(part_end - u64::from(old)).unwrap_or(0),
+                new: range.new + (old - range.old),
+            };
+            match parts.last_mut() {
+                Some(last)
+                    if last.old + last.length == part.old && last.new + last.length == part.new =>
+                {
+                    last.length += part.length;
+                }
+                _ => parts.push(part),
+            }
+        }
+        parts
+    }
+
+    /// Return `true` if the set cuts the old extent of `length` bytes at `start`: a part of
+    /// the extent has a range and the extent is not one part.
+    pub(crate) fn cuts(&self, start: u32, length: u32) -> bool {
+        let parts = self.parts(start, length);
+        match parts.as_slice() {
+            [] => false,
+            [part] => part.length != length,
+            _ => true,
+        }
+    }
 }
 
 /// A part of a code section: a procedure or a gap.
@@ -473,5 +524,36 @@ mod tests {
         assert_eq!(set.map(0x105f), None);
         assert_eq!(set.map(0x1060), Some(0x1060));
         assert_eq!(set.removed(&procedures), 1);
+    }
+
+    #[test]
+    fn parts_follow_the_ranges_and_merge_continued_pieces() {
+        let range = |old, length, new| Range { old, length, new };
+        let set = RangeSet {
+            kind: SetKind::Split,
+            sections: Vec::new(),
+            ranges: vec![
+                range(0x1000, 0x10, 0x5000),
+                // Continues the first range in the old and in the new image.
+                range(0x1010, 0x10, 0x5010),
+                range(0x1020, 0x10, 0x4000),
+                // 0x1030 to 0x1040 has no range.
+                range(0x1040, 0x10, 0x6000),
+            ],
+        };
+        assert_eq!(
+            set.parts(0x1008, 0x20),
+            [range(0x1008, 0x18, 0x5008), range(0x1020, 0x8, 0x4000)]
+        );
+        assert!(set.cuts(0x1008, 0x20));
+        // Continued pieces are one part: the extent is whole.
+        assert!(!set.cuts(0x1000, 0x20));
+        // A partly removed extent is cut; a fully removed extent is not.
+        assert!(set.cuts(0x102c, 0x18));
+        assert!(!set.cuts(0x1030, 0x10));
+        assert_eq!(set.parts(0x1030, 0x10), []);
+        assert_eq!(set.old(0x4004), Some(0x1024));
+        assert_eq!(set.old(0x5018), Some(0x1018));
+        assert_eq!(set.old(0x4010), None);
     }
 }

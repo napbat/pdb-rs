@@ -60,9 +60,10 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
                  with pdbtool compare and the native example. Write the results to
                  target/verify-msfz/.
 
-  verify-remap   Remap the addresses of each native PDB fixture with the pdbrs editor
-                 (OMAP output) for five range sets, write the results to target/verify-remap/
-                 and check them with DIA2Dump, pdbtool check and the plan report.
+  verify-remap   Remap the addresses of each native PDB fixture with the pdbrs editor for
+                 five range sets, as OMAP output and as clean output, write the results to
+                 target/verify-remap/ and check them with DIA2Dump, pdbtool check,
+                 llvm-pdbutil, SymbolLocator and the plan report.
 
   detect         Open each fixture output with pdbrs::Pdb and compare the detected format
                  with the manifest. The CLI metadata of each image must be rejected.

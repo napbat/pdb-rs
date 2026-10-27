@@ -142,7 +142,7 @@ fn hex(text: &str, digits: usize) -> Option<u32> {
 }
 
 /// Find the next address of `text`. Return the byte range of its RVA digits and the RVA.
-fn next_address(text: &str) -> Option<(usize, u32)> {
+pub(super) fn next_address(text: &str) -> Option<(usize, u32)> {
     let mut from = 0;
     while let Some(found) = text[from..].find('[') {
         let start = from + found;
@@ -197,7 +197,11 @@ fn translate(line: &str, set: &RangeSet) -> (String, usize, usize) {
 }
 
 /// Run `DIA2Dump` and return the lines of its output.
-fn run(dia2dump_path: &Path, arguments: &[String], pdb: &Path) -> Result<Vec<String>, String> {
+pub(super) fn run(
+    dia2dump_path: &Path,
+    arguments: &[String],
+    pdb: &Path,
+) -> Result<Vec<String>, String> {
     let run = dia2dump(dia2dump_path, arguments, pdb)?;
     if !run.success() {
         return Err(format!(
@@ -357,7 +361,8 @@ fn check_symbols(
     }
 }
 
-/// Compare the line answers of the output with the source answers.
+/// Compare the line answers of the output with the source answers. Return the new RVAs of
+/// the queries with the answers of the output.
 fn check_lines(
     dia2dump_path: &Path,
     baseline: &Baseline,
@@ -365,7 +370,7 @@ fn check_lines(
     path: &Path,
     counts: &mut Counts,
     differences: &mut Differences,
-) -> Result<(), String> {
+) -> Result<Vec<(u32, Vec<String>)>, String> {
     let mut queries = Vec::new();
     let mut expected = Vec::new();
     for (rva, answer) in &baseline.lines {
@@ -395,19 +400,29 @@ fn check_lines(
             });
         }
     }
-    Ok(())
+    Ok(queries.into_iter().zip(answers).collect())
+}
+
+/// The `DIA2Dump` outputs of an OMAP output, for the comparison with the clean output.
+#[derive(Debug, Default)]
+pub(super) struct OmapDumps {
+    /// The symbol dump commands with their output lines.
+    pub symbols: Vec<(&'static str, Vec<String>)>,
+    /// The new RVA of each line query, with the answer of `-l <rva> 1`.
+    pub lines: Vec<(u32, Vec<String>)>,
 }
 
 /// Run the `DIA2Dump` commands on the output at `path` of the range set `set`, and compare
-/// them with the source. Return the counts and the problems.
+/// them with the source. Return the counts, the problems and the outputs.
 pub(super) fn check(
     dia2dump_path: &Path,
     baseline: &Baseline,
     set: &RangeSet,
     path: &Path,
-) -> Result<(Counts, Vec<String>), String> {
+) -> Result<(Counts, Vec<String>, OmapDumps), String> {
     let mut counts = Counts::default();
     let mut differences = Differences::default();
+    let mut dumps = OmapDumps::default();
     for (command, source) in &baseline.symbols {
         let output = run(dia2dump_path, &[(*command).to_owned()], path)?;
         check_symbols(
@@ -419,8 +434,9 @@ pub(super) fn check(
             &mut counts,
             &mut differences,
         );
+        dumps.symbols.push((command, output));
     }
-    check_lines(
+    dumps.lines = check_lines(
         dia2dump_path,
         baseline,
         set,
@@ -428,7 +444,7 @@ pub(super) fn check(
         &mut counts,
         &mut differences,
     )?;
-    Ok((counts, differences.problems()))
+    Ok((counts, differences.problems(), dumps))
 }
 
 #[cfg(test)]

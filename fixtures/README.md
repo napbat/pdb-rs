@@ -981,7 +981,8 @@ the output file.
 
 ## Remap check
 
-The `verify-remap` command checks the OMAP output of the address remap of pdbrs (#43):
+The `verify-remap` command checks the OMAP output and the clean output of the address remap
+of pdbrs (#43):
 
 ```sh
 cargo run -p pdbrs-fixtures --release -- verify-remap [--fixtures <dir>] [--jobs <n>]
@@ -1029,3 +1030,64 @@ exits with a failure for each problem and for each missing tool. These results a
   command prints a note and does not compare `-g` for that PDB.
 - In a PDB without type merging (`link /DEBUG:LAZY`, feature `NOTM`), DIA prints a procedure
   without a range with an empty name. The command counts these lines as explained.
+
+### Clean output
+
+After the last line of the OMAP part (`native PDBs: ..., problems: N`), the command prints
+the clean part. For each PDB and each set, it remaps the PDB with `RemapMode::Clean`. It
+writes the output of `RemovedCode::Drop` to
+`target/verify-remap/<fixture>/<PDB file stem>/<set>.clean.pdb` and does these checks:
+
+1. The policies. The plan with `RemovedCode::Fail` must fail with `UnsupportedEdit` exactly
+   when the plan with `RemovedCode::Drop` removes records (for example in the `removal` set,
+   and for the symbols at RVA 0 of the HLSL and .NET fixtures). The address of the error
+   (`Error::remap_address`) must have no range. Without removed records, both policies must
+   give the same bytes. A set that removes procedures must remove records.
+2. Records without a split form (decision 4 of #43). The plan can fail with `UnsupportedEdit`
+   for a record that the ranges split, for example `S_BLOCK32`, an inline site in more than
+   one part, or an FPO record. The command then decodes the record at the source location of
+   the error (`Error::stream_location`), or finds the procedure that holds the address. A
+   range boundary must cut the code of that record. The set line then shows
+   `no split form: <kind>` (or `partly removed: <kind>` for a record whose code is only
+   partly removed), and the command does no other check of the set.
+3. The unwind streams. For a PDB with `.pdata` or `.xdata` (`msvc-x64-debugtype` and
+   `msvc-arm64-debugtype`), the call without the streams of the new image must fail with
+   `UnsupportedEdit`. The command keeps `.xdata` (its section has an identity range) and
+   rewrites each `.pdata` runtime function through the ranges: one entry for each part with a
+   range and the same unwind information, sorted by the new start. It gives both streams
+   with `ImageRemap::with_unwind_streams`.
+4. The report and the reader. The output DBI stream names no OMAP stream and no original
+   section headers (slots 3, 4 and 10). The pdbrs reader finds the section headers of the set
+   and no OMAP. `PlanReport::dropped` is empty. For the `identity` set of a PDB without OMAP
+   and without removed records, `PlanReport::changed` lists only the Info stream and the DBI
+   stream. The ranges in reverse order must give the same bytes.
+5. `pdbtool check` shows 0 PDBs with errors, and `llvm-pdbutil dump --all` exits with the
+   exit code of the source.
+6. DIA2Dump on the clean output must give the answers of the OMAP output of the same set. The
+   OMAP output keeps the source section and offset, so the command compares the RVA of each
+   address only. It also ignores the DIA symbol IDs (`SymIndex` and the properties that end
+   with `Id`).
+   - `-s` line by line, `-p` and `-g` as sorted lists (their order follows the hash tables).
+     An OMAP line with RVA 0 in a section has no clean line: the clean output removed the
+     record. In `-s`, the lines of such a procedure up to the next empty line go with it.
+   - `-l <RVA> 1` at the new RVA of each line start of the OMAP check.
+   - `-sym <RVA>` at 3 addresses (the second byte, the middle and the last byte) of up to 100
+     procedures, and `-fpo <RVA>` at the addresses of these that an FPO or new FPO record of
+     the source holds. A query without an answer (DIA2Dump stops at it) runs again alone.
+7. `SymbolLocator::locate` on both outputs at the same 3 addresses of each procedure must give
+   the same procedure name, innermost block, inline call chain (names and call site lines)
+   and line (file and line number).
+
+Each set line gives the removed records and the added parts of the report
+(`RemapReport::removed_items`, `added_items`), the number of contributions with new CRCs, and
+the compared, removed and explained items of checks 6 and 7. The lines
+`explained (clean): ...` give the totals of each explained class:
+
+- `no split form: <kind>` and `partly removed: <kind>`: see check 2.
+- A `Block` line of the clean output without an OMAP line: DIA shows an `S_SEPCODE` scope as
+  a block, and the clean output adds one for each part of a split procedure after the first.
+- A line that differs only in a smaller length, for a record that a range boundary cuts: the
+  clean record describes the first part.
+
+The line `clean outputs: ...` ends the clean part. The last line is `result: pass`, or
+`result: FAIL` with the problems of both parts.
