@@ -7,7 +7,7 @@ The fixture counts are the module and shared records of the native fixture PDBs 
 `Symbol::decode` reads every record, and `SymbolData::encode` and `Symbol::encode` write it again to the same bytes.
 `validate_module_symbols` and `validate_shared_symbols` check scope links, type, ID and module references, def-range gaps, def-ranges in inline sites (`Rule::DefRangeOutsideInlineSite`) and subfield offsets against type sizes (`Rule::SubfieldOutsideType`).
 In a PDB without type merging (`NOTM`), the type and ID references of a module resolve against the records that its `S_MOD_TYPEREF` names (#30, #32).
-`ModuleSymbolWriter`, `SymbolRecordWriter`, `GlobalSymbolIndex::encode_parts` and `PublicSymbolIndex::encode_parts` rebuild the symbol streams and indexes. `PdbBuilder` (#33) and `PdbEditor` (#34) use them.
+`ModuleSymbolWriter`, `SymbolRecordWriter`, `GlobalSymbolIndex::encode_parts` and `PublicSymbolIndex::encode_parts` rebuild the symbol streams and indexes. `PdbEditor` (#33, #34) uses them.
 The layouts of the kinds above `0x1168` come from the debug type records of `cvinfo.h` in the DIA SDK `diaguids.lib` (#30).
 
 ## Symbol kinds
@@ -282,11 +282,11 @@ A legacy record in a modern module stream still keeps its bytes as `SymbolData::
 [e32n]: https://github.com/napbat/pdbrs/issues/32#issuecomment-6417232562
 [e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
 [e5]: https://github.com/napbat/pdbrs/issues/5#issuecomment-6407599155
-[edsym]: ../../../crates/pdbrs/src/native/edit/symbols.rs
+[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
 [exs]: ../../../crates/pdbrs/examples/native/symbols.rs
 [gsiw]: ../../../crates/pdbrs/src/native/symbols/gsi/write.rs
 [num]: ../../../crates/pdbrs/src/native/codeview/numeric.rs
-[plantypes]: ../../../crates/pdbrs/src/native/build/plan/module_types.rs
+[plantypes]: ../../../crates/pdbrs/src/native/editor/plan/layout/module_types.rs
 [sattr]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/attribute.rs
 [scdi]: ../../../crates/pdbrs/src/native/codeview/symbol/managed/custom_debug_info.rs
 [slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs

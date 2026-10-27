@@ -40,7 +40,7 @@ Each row has six status columns:
 | Semantic reading | A typed decoder reads every field of the item |
 | Reference validation | The library or the `native` example checks every reference that the item holds: type and ID indices, stream IDs, `/names` offsets, scope links, module indices, addresses and container ranges |
 | Writing | An encoder writes the item from its decoded form, to the same bytes for a decoded item |
-| Editing and index rebuilding | `PdbBuilder` (#33), `PdbEditor` (#34) or a container conversion (#38) writes or changes the item and rebuilds the streams and indexes that depend on it (hashes, offsets, address maps) |
+| Editing and index rebuilding | `PdbEditor` (#33, #34, #42) or a container conversion (#38) writes or changes the item and rebuilds the streams and indexes that depend on it (hashes, offsets, address maps) |
 | Independent fixture evidence | A PDB from an independent producer holds the item, and an independent consumer (`llvm-pdbutil` 22.1.6, DIA2Dump, `pdbtool` or `llvm-symbolizer`, #21) agrees with pdbrs |
 
 ## Values
@@ -302,7 +302,7 @@ pdbrs uses these layouts and rules, and no imported document states them:
 - `link.exe` writes `LF_UDT_MOD_SRC_LINE` without padding, and the MSVC fixtures split field lists at `0xfb00` bytes (LLVM uses `0xff00`) (#29).
 - MASM (`ml64` 14.50) ends some `LF_STRUCTURE` records with `f1` and two stale bytes instead of `f3 f2 f1`; the static runtime libraries contain them (`clang-lld-x64-static`, #29).
 - The hash table growth rules of Microsoft `map.h` and LLVM `HashTable.h` (#32), and the hash stream forms of Microsoft and LLVM (`TypeHeader::producer`, `TypeStreamOptions::with_producer`, #29).
-- `link /PDBSTRIPPED` output: the rules of `strip_private` come from `msvc-x64-stripped/demo.stripped.pdb`, and for `NOTM` PDBs from a `link /DEBUG:LAZY /PDBSTRIPPED` scratch link (#34, #32).
+- `link /PDBSTRIPPED` output: the rules of `EditOptions::with_strip_private` come from `msvc-x64-stripped/demo.stripped.pdb`, and for `NOTM` PDBs from a `link /DEBUG:LAZY /PDBSTRIPPED` scratch link (#34, #32).
 - `pdbtool pdz-encode` writes stream 0 as an empty stream and the Info stream and the DBI header as uncompressed fragments (#37, #38).
 - In a `NOTM` PDB, the inlinee of an inline site is an ID of the module records, not an IPI index; `SymbolLocator` resolves it there (#30).
 - `ml64` and `ml` write 6 zero bytes after the data of each `LF_POINTER` of a `TYPEDEF PTR` (`Pointer::trailing_zeros`, #29).

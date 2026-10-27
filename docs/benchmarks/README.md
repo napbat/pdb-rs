@@ -102,11 +102,11 @@ its times are not comparable.
 | `native/symbol-by-name` | native | `SymbolLocator::find_name` for up to 1000 names of procedures and of the public symbols at their starts. | Matches |
 | `native/symbol-by-address` | native | `SymbolLocator::public_at` for the start and the middle byte of up to 2000 procedures. | Addresses with a public symbol |
 | `native/line-lookup` | native | `SymbolLocator::locate` for the same addresses: module, procedure, inline frames and line. | Addresses with a line |
-| `native/edit-named-stream` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `set_named_stream(b"srcsrv", ...)`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |
-| `native/edit-rename-public` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `rename_public` of the first public symbol with a unique name, plan, `to_vec`. | Output bytes |
-| `native/edit-append-type` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `add_type` of a field list and a structure, plan, `to_vec`. | Output bytes |
-| `native/edit-strip-private` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `strip_private`, plan, `to_vec`. | Output bytes |
-| `native/rebuild` | native | `Pdb::contents`, `PdbContents::to_builder(IdentityPolicy::Preserve)`, `PdbBuilder::plan(contents.build_options())`, `to_vec`. | Output bytes |
+| `native/edit-named-stream` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `named_streams_mut()?.insert(b"srcsrv", ...)`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |
+| `native/edit-rename-public` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `publics_mut`, `find` and `get_mut` rename the first public symbol with a unique name, plan, `to_vec`. | Output bytes |
+| `native/edit-append-type` | native | `Pdb::edit(IdentityPolicy::IncrementAge)`, `types_mut()?.push` of a field list and a structure, plan, `to_vec`. | Output bytes |
+| `native/edit-strip-private` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `plan(EditOptions::default().with_strip_private(true))`, `to_vec`. | Output bytes |
+| `native/rebuild` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `decode_all`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |
 | `portable/read` | Portable | `portable::Pdb::parse`, every row of the eight debug tables with its heap values, the custom debug information values, the document sources, the sequence points, the local variables and constants, the imports, the state machine methods and `validate_debug`. | Rows and decoded values |
 | `portable/rebuild` | Portable | `Pdb::to_parts`, `PdbParts::plan(IdentityPolicy::ContentDerived)`, `to_vec`. | Output bytes |
 | `portable/edit` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of all sequence points and a rename of document 1, `plan(EditOptions::default())`, `to_vec`. Before #42 stage 7: `Pdb::edit()` and `plan(IdentityPolicy::ContentDerived)`. | Output bytes |

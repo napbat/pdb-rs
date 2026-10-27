@@ -6,7 +6,7 @@ The fixture counts come from the native fixture PDBs (see [fixture evidence](../
 
 `TypeLeaf::decode`, `Member` and `IdRecord::decode` read the records. `TypeLeaf::encode`, `Member::encode`, `encode_field_list` and `IdRecord::encode` write them again to the same bytes.
 `validate_type_references` checks type and ID references by role, with depth and work limits.
-`encode_type_stream` writes the TPI and IPI streams with their hash streams. `PdbBuilder` (#33) and `PdbEditor::add_type` (#34) use these encoders.
+`encode_type_stream` writes the TPI and IPI streams with their hash streams. `PdbEditor` (#33, #34) uses these encoders; `TypeList::push` and `IdList::push` add records in reference order and return the final index.
 The same decoders read the module type streams of a PDB without type merging (`NOTM`, see the [streams](streams.md) page).
 The `types` example prints each UDT, enum and procedure signature in a C-like form, and the evidence on #1 compares its output with DIA2Dump and `llvm-pdbutil pretty`.
 
@@ -346,7 +346,7 @@ A legacy top-level record in a modern TPI stream still keeps its bytes as `TypeL
 | `LF_MEMBERMODIFY_ST` | `0x140e` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 | `LF_MANAGED_ST` | `0x140f` | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) | not applicable (legacy, #16) |  |
 
-[build]: ../../../crates/pdbrs/src/native/build.rs
+[build]: ../../../crates/pdbrs/src/native/editor/plan/layout.rs
 [cv]: ../../../crates/pdbrs/src/native/codeview.rs
 [e11]: https://github.com/napbat/pdbrs/issues/11#issuecomment-6408363519
 [e14]: https://github.com/napbat/pdbrs/issues/14#issuecomment-6409977445
@@ -361,7 +361,7 @@ A legacy top-level record in a modern TPI stream still keeps its bytes as `TypeL
 [e33]: https://github.com/napbat/pdbrs/issues/33#issuecomment-6415053819
 [e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
 [e4]: https://github.com/napbat/pdbrs/issues/4#issuecomment-6407539418
-[edtyp]: ../../../crates/pdbrs/src/native/edit/types.rs
+[edtyp]: ../../../crates/pdbrs/src/native/editor/types.rs
 [exs]: ../../../crates/pdbrs/examples/native/symbols.rs
 [ext_]: ../../../crates/pdbrs/examples/native/types.rs
 [exty]: ../../../crates/pdbrs/examples/types/main.rs

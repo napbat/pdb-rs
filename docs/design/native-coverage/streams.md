@@ -4,7 +4,7 @@ This page is part of the [native coverage](../native-coverage.md) accounting. Re
 The version lists come from LLVM `RawConstants.h` (`PdbRaw_ImplVer`, `PdbRaw_TpiVer`, `PdbRaw_DbiVer`, `PdbRaw_DbiSecContribVer`, `PdbRaw_FeatureSig`, `DbgHeaderType`), `cvinfo.h`, Microsoft `pdb.h` and `dbi.h` as the pdbrs sources cite them, and the MSFZ specification `msfz.md` with `ms-pdb-msfz` 0.1.10.
 
 Every stream keeps its bytes: `Pdb::stream_bytes` reads any stream through `native::container::Container`, and `Msf::repack`, `io::copy_exact` and the MSFZ conversions keep every stream byte (#15, #37, #38).
-Each stream decoder has an encoder that writes a decoded stream again to the same bytes (#29 to #32). `PdbBuilder` (#33) writes new PDBs, and `PdbEditor` (#34) edits PDBs and rebuilds the dependent streams.
+Each stream decoder has an encoder that writes a decoded stream again to the same bytes (#29 to #32). `PdbEditor` writes new PDBs (#33), and edits PDBs (#34) and rebuilds the dependent streams.
 A recognized version that pdbrs does not decode gives `UnsupportedVersion`. Malformed data gives `InvalidFormat`, `InvalidReference` or `UnexpectedEof`. The two classes stay distinct.
 An unknown version value also gives `UnsupportedVersion`. pdbrs does not separate it from a recognized older version.
 
@@ -184,7 +184,7 @@ The optional debug header holds one stream index for each slot. The slot order i
 | Hash version 1 (`LHashPbCb`) | `1` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][names], [check][t:names], [check][e7]) | complete ([code][names], [check][t:names], [check][e7]) | complete ([code][names], [code][namesb], [check][t:names], [check][e32]) | complete ([code][namesb], [code][build], [check][e32], [check][e33]) | complete ([code][exnm], [check][e7], [check][e32]) | 60 fixture PDBs; `StringTableBuilder` follows Microsoft `NMT` (same bytes for the MSVC tables; LLVM orders buckets differently) |
 | Hash version 2 (`LHashPbCbV2`) | `2` | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | complete ([code][names], [code][hash], [check][t:names], [check][e32]) | complete ([code][names], [check][t:names], [check][e32]) | complete ([code][names], [code][namesb], [check][t:names], [check][e32]) | complete ([code][namesb], [code][build], [check][e32], [check][e33]) | missing (#32: external-input; `link` with every `/DEBUG` option and `pdbcopy` write version 1 (#32 evidence); `pdbcopy` also writes version 1 ([triage][e39p])) | No fixture |
 | Other hash versions | any other value | complete ([code][cont], [code][reader], [check][t:msf], [check][e15]) | not applicable (`StringTable::parse` returns `UnsupportedVersion`) | not applicable (no layout) | not applicable (no layout) | not applicable (no layout) | not applicable (no producer known) |  |
-| No `/names` stream (stripped PDB) | — | not applicable (no stream) | complete ([code][reader], [check][t:native], [check][e32]) | not applicable (no stream) | complete ([code][edstrip], [check][t:native_edit], [check][e34]) | complete ([code][edstrip], [check][t:native_edit], [check][e34]) | complete ([code][exnm], [check][e27s], [check][e34]) | 1 fixture PDB (`msvc-x64-stripped/demo.stripped.pdb`); `strip_private` matches `link /PDBSTRIPPED` (#34) |
+| No `/names` stream (stripped PDB) | — | not applicable (no stream) | complete ([code][reader], [check][t:native], [check][e32]) | not applicable (no stream) | complete ([code][edstrip], [check][t:native_edit], [check][e34]) | complete ([code][edstrip], [check][t:native_edit], [check][e34]) | complete ([code][exnm], [check][e27s], [check][e34]) | 1 fixture PDB (`msvc-x64-stripped/demo.stripped.pdb`); `EditOptions::with_strip_private` matches `link /PDBSTRIPPED` (#34) |
 
 ## Global and public symbol indexes (GSI and PSI)
 
@@ -230,7 +230,7 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 
 [addr]: ../../../crates/pdbrs/src/native/address.rs
 [blob]: ../../../crates/pdbrs/src/native/debug_stream/blob.rs
-[build]: ../../../crates/pdbrs/src/native/build.rs
+[build]: ../../../crates/pdbrs/src/native/editor/plan/layout.rs
 [cont]: ../../../crates/pdbrs/src/native/container.rs
 [conv]: ../../../crates/pdbrs/src/native/container/convert.rs
 [dbg]: ../../../crates/pdbrs/src/native/debug_stream.rs
@@ -281,12 +281,12 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 [e7]: https://github.com/napbat/pdbrs/issues/7#issuecomment-6407578735
 [e8]: https://github.com/napbat/pdbrs/issues/8#issuecomment-6407490702
 [e9]: https://github.com/napbat/pdbrs/issues/9#issuecomment-6407615021
-[edit]: ../../../crates/pdbrs/src/native/edit.rs
-[ednam]: ../../../crates/pdbrs/src/native/edit/named.rs
-[edop]: ../../../crates/pdbrs/src/native/edit/opaque.rs
-[edstrip]: ../../../crates/pdbrs/src/native/edit/strip.rs
-[edsym]: ../../../crates/pdbrs/src/native/edit/symbols.rs
-[edtyp]: ../../../crates/pdbrs/src/native/edit/types.rs
+[edit]: ../../../crates/pdbrs/src/native/editor/model.rs
+[ednam]: ../../../crates/pdbrs/src/native/editor/named.rs
+[edop]: ../../../crates/pdbrs/src/native/editor/plan/opaque.rs
+[edstrip]: ../../../crates/pdbrs/src/native/editor/plan/strip.rs
+[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
+[edtyp]: ../../../crates/pdbrs/src/native/editor/types.rs
 [exd]: ../../../crates/pdbrs/examples/native/dbi.rs
 [exm]: ../../../crates/pdbrs/examples/msf.rs
 [exn]: ../../../crates/pdbrs/examples/native/main.rs
@@ -326,11 +326,11 @@ By the scope decision of #32, pdbrs keeps Natvis XML, Source Link JSON and `srcs
 [natvis]: ../../../crates/pdbrs/src/native/injected_source/natvis.rs
 [old]: ../../../crates/pdbrs/src/native/msf/old_directory.rs
 [omap]: ../../../crates/pdbrs/src/native/debug_stream/omap.rs
-[plantypes]: ../../../crates/pdbrs/src/native/build/plan/module_types.rs
+[plantypes]: ../../../crates/pdbrs/src/native/editor/plan/layout/module_types.rs
 [psi]: ../../../crates/pdbrs/src/native/symbols/psi.rs
 [psiw]: ../../../crates/pdbrs/src/native/symbols/psi/write.rs
 [reader]: ../../../crates/pdbrs/src/native/reader.rs
-[rebuild]: ../../../crates/pdbrs/src/native/build/rebuild.rs
+[rebuild]: ../../../crates/pdbrs/src/native/editor/rebuild.rs
 [sec]: ../../../crates/pdbrs/src/native/section.rs
 [slinker]: ../../../crates/pdbrs/src/native/codeview/symbol/linker.rs
 [slnk]: ../../../crates/pdbrs/src/native/auxiliary/source_link.rs

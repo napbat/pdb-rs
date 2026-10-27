@@ -74,8 +74,8 @@ These rows split the layout variants inside the decoded kinds.
 [e34]: https://github.com/napbat/pdbrs/issues/34#issuecomment-6415135725
 [e5]: https://github.com/napbat/pdbrs/issues/5#issuecomment-6407599155
 [e6]: https://github.com/napbat/pdbrs/issues/6#issuecomment-6407539677
-[edit]: ../../../crates/pdbrs/src/native/edit.rs
-[edsym]: ../../../crates/pdbrs/src/native/edit/symbols.rs
+[edit]: ../../../crates/pdbrs/src/native/editor/model.rs
+[edsym]: ../../../crates/pdbrs/src/native/editor/symbols.rs
 [exl]: ../../../crates/pdbrs/examples/native/lines.rs
 [gref]: ../../../crates/pdbrs/src/native/dbi/module/global_refs.rs
 [lasm]: ../../../crates/pdbrs/src/native/lines/assembly_input.rs

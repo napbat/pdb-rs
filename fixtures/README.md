@@ -720,7 +720,7 @@ it reads that file in the selected mode and deletes it. All modes must give the 
 
 ## Native build check
 
-The `verify-native-build` command checks the native PDB builder of pdbrs (#33) with each
+The `verify-native-build` command checks the native rebuild of pdbrs (#33, #42) with each
 `native-pdb` output of `manifest.json`:
 
 ```sh
@@ -730,8 +730,8 @@ cargo run -p pdbrs-fixtures --release -- verify-native-build [--fixtures <dir>] 
 The command skips `hlsl-dxc-debug`, because `pdbtool`, `llvm-pdbutil` and `DIA2Dump` reject
 its original PDBs. For each other PDB, it does these steps:
 
-1. Rebuild the PDB with `Pdb::contents`, `PdbContents::to_builder` (`IdentityPolicy::Preserve`)
-   and `PdbBuilder::plan` with `PdbContents::build_options`. A second plan must give the same
+1. Rebuild the PDB with `Pdb::edit` (`IdentityPolicy::Preserve`), `PdbEditor::decode_all` and
+   `PdbEditor::plan` with `EditOptions::default()`. A second rebuild must give the same
    bytes. The rebuilt PDB has the file name of the original, in
    `target/verify-native-build/<fixture>/<PDB file stem>/rebuilt/`.
 2. Run `pdbtool check` on the rebuilt PDB. The line `Number of PDBs with errors` must show 0.
@@ -774,14 +774,14 @@ These differences are explained and do not make a check fail:
 The command prints one line for each PDB. The line shows the rebuild, the `pdbtool` errors,
 the classified `llvm-pdbutil` and `DIA2Dump -all` differences, the sample size, the mismatch
 counts of the DIA queries and the symbolizer, and the source streams that the rebuild drops
-(`PdbContents::unclaimed_streams`). A sample with fewer than 200 addresses tells why. The
+(`PlanReport::dropped`). A sample with fewer than 200 addresses tells why. The
 command writes the dumps (`*.original.txt`, `*.rebuilt.txt`) and the differences (`*.diff`) to
 the directory of the PDB. It exits with a failure code if a rebuild fails, a check cannot run
 or a difference is unexplained.
 
 ## Native edit check
 
-The `verify-native-edit` command checks the native PDB editor of pdbrs (#34) with each
+The `verify-native-edit` command checks the native PDB editor of pdbrs (#34, #42) with each
 `native-pdb` output of `manifest.json`:
 
 ```sh
@@ -798,7 +798,7 @@ each other PDB with `Pdb::edit` and `PdbEditor::plan`:
 | `rename-symbols` | Append `_pdbrs_renamed` to a unique public name and to a unique data, constant or UDT global name. The later records move | `IncrementAge` |
 | `types` | Add a field list, the structure `PdbrsEditType`, its `S_UDT` global and the `LF_STRING_ID` record `pdbrs edit string` | `IncrementAge` |
 | `identity` | Write the signature `0x52444250`, the GUID `pdbrs-edit-guid!` and age 7 | `Replace` |
-| `strip` | `PdbEditor::strip_private` | `Preserve` |
+| `strip` | `EditOptions::with_strip_private(true)` | `Preserve` |
 
 The edited PDB is `target/verify-native-edit/<fixture>/<PDB file stem>/<edit>.pdb`. For each
 edited PDB, the command does these checks:
@@ -806,7 +806,7 @@ edited PDB, the command does these checks:
 1. `pdbtool check` shows 0 PDBs with errors.
 2. `llvm-pdbutil dump --all` and `DIA2Dump -all` succeed, or fail as on the source PDB.
 3. `pdbtool compare --continue-on-differences` shows exactly the streams of
-   `PdbEditPlan::changed_streams`, and the stream counts of the added streams.
+   `PlanReport::changed`, and the stream counts of the added streams.
 4. The independent lookups of the edit:
    - `llvm-pdbutil --named-streams` lists the added streams and not the removed ones.
      `pdbstr -r -s:srcsrv` reads the written `srcsrv` text.
@@ -817,7 +817,7 @@ edited PDB, the command does these checks:
    - `llvm-pdbutil --types` and `DIA2Dump -type` find `PdbrsEditType`, and `llvm-pdbutil --ids`
      finds the added string.
    - `llvm-pdbutil --summary` shows the new signature, age and GUID, and
-     `PdbEditPlan::identity` gives the GUID and the age.
+     `PdbWritePlan::identity` gives the GUID and the age.
 
 The command also compares the strip of `msvc-x64-stripped/demo.pdb` with
 `demo.stripped.pdb`, which `link /PDBSTRIPPED` wrote. These `llvm-pdbutil` sections must be
@@ -836,6 +836,38 @@ classes are:
 - `DIA2Dump -t` lists no UDT of the source PDB (FASTLINK and managed PDBs), so `-type` finds no added type.
 - The stripped PDB keeps the source stream IDs, and `link.exe` writes the stripped symbol
   records in another order, so the stream numbers and the symbol record offsets differ.
+
+After the summary line of these edits, the command prints the section `new edit cases:` (#42).
+It runs 8 more cases on each PDB, each with `IdentityPolicy::IncrementAge`. A case that does
+not apply to a PDB gives a `note:` line and no output.
+
+| Case | Change (the first record that applies) |
+| --- | --- |
+| `public-address` | The first public symbol with a unique name: address offset + 1 |
+| `global-type` | The first `S_GDATA32` or `S_LDATA32` global with a unique name: type `T_INT4` (`T_UINT4` if it is `T_INT4`) |
+| `local-type` | In module order, the first module symbol in pre-order of kind `S_REGREL32`, `S_BPREL32`, `S_LOCAL` or `S_LDATA32`: the same type change |
+| `line-number` | In module order, the first `DEBUG_S_LINES` line entry with a line number below `0xF00F00`: line number + 1 |
+| `member-offset` | In index order, the first `LF_FIELDLIST` with an `LF_MEMBER` offset below `0x7FFF`: offset + 1. The plan writes the TPI stream and its hash stream again |
+| `remove-public` | The public symbol of `public-address`: removed |
+| `remove-global` | The first data, constant or UDT global with a unique name: removed |
+| `remove-module-symbol` | In module order, the first record in pre-order of kind `S_LABEL32`, `S_REGREL32` or `S_BPREL32`: removed |
+
+Each case writes `target/verify-native-edit/<fixture>/<PDB file stem>/<case>.pdb` and gets
+checks 1 to 3 above, the name lookups of the removed names, and a read of the output with
+pdbrs that finds the new value (or no record).
+
+The section then has two more steps:
+
+- Scope trees: the command decodes each module of each PDB with `PdbEditor::module_mut`. Each
+  module with a symbol region must form a scope tree; an opaque module is a problem. A plan
+  without a change must give an empty `PlanReport::changed`: each module stream encodes
+  again to its source bytes.
+- Read count: on `msvc-x64-large`, a counting source maps each read to the pages of the stream
+  directory. The plan of a new `srcsrv` stream must read only the Info stream and the first 56
+  bytes of the TPI stream. `write_to` must read each page of each `Copied` stream exactly once
+  and no other page.
+
+The last line of the section gives the counts. The command fails for a problem in the section.
 
 ## MSFZ writer check
 
