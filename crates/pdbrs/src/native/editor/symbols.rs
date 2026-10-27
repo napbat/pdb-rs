@@ -13,6 +13,10 @@ use crate::native::symbols::{
 };
 use crate::{Error, ErrorKind, Result};
 
+mod index;
+
+use index::{NameIndex, View};
+
 /// An entry of the global or the public symbol index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct IndexEntry {
@@ -76,6 +80,8 @@ pub(super) struct SharedSymbols {
     pub(super) section_starts: Vec<SectionStart>,
     /// The source, or `None` for a model without a source.
     pub(super) source: Option<SharedSource>,
+    /// The index of the names (#48).
+    name_index: NameIndex,
 }
 
 /// Return the handle of the record at `offset`.
@@ -144,6 +150,11 @@ impl SharedSymbols {
             publics: model.publics.clone(),
             count: model.records.len(),
         });
+        model.name_index = NameIndex::from_source(
+            model.records.len(),
+            globals.map(|index| (index.hash_table().bucket_count(), &model.globals[..])),
+            publics.map(|index| (index.hash_table().bucket_count(), &model.publics[..])),
+        )?;
         Ok(model)
     }
 
@@ -152,8 +163,8 @@ impl SharedSymbols {
         self.records.get(handle.0 as usize).and_then(Option::as_ref)
     }
 
-    /// Add a record and return its handle.
-    pub(super) fn add(&mut self, record: SymbolRecord) -> Result<SymbolHandle> {
+    /// Add a record of the index `view` and return its handle.
+    fn add(&mut self, record: SymbolRecord, view: View) -> Result<SymbolHandle> {
         let position = u32::try_from(self.records.len())
             .ok()
             .filter(|&position| position != u32::MAX)
@@ -162,7 +173,12 @@ impl SharedSymbols {
                     .with_context("symbol record stream has too many records")
             })?;
         push(&mut self.records, Some(record))?;
-        Ok(SymbolHandle(position))
+        let handle = SymbolHandle(position);
+        let name = self.records[position as usize]
+            .as_ref()
+            .and_then(SymbolRecord::name);
+        self.name_index.add(&self.records, view, handle, name)?;
+        Ok(handle)
     }
 
     /// Remove a record and its index entries.
@@ -175,19 +191,31 @@ impl SharedSymbols {
         *slot = None;
         self.globals.retain(|entry| entry.symbol != handle);
         self.publics.retain(|entry| entry.symbol != handle);
+        self.name_index.remove(&self.records, handle);
         Ok(())
     }
 
-    /// Return the only record of `entries` with the name `name`.
-    fn find(&self, entries: &[IndexEntry], name: &[u8]) -> Result<Option<SymbolHandle>> {
+    /// Return the record of `handle` for a change. Its name can change.
+    fn lend(&mut self, handle: SymbolHandle) -> Option<&mut SymbolRecord> {
+        self.name_index.lend(&self.records, handle);
+        self.records
+            .get_mut(handle.0 as usize)
+            .and_then(Option::as_mut)
+    }
+
+    /// Return the only record of the index `view` with the name `name`.
+    ///
+    /// The function compares the names of the candidates of the name index
+    /// only: it does not scan the records (#48).
+    fn find(&self, view: View, name: &[u8]) -> Result<Option<SymbolHandle>> {
         let mut found = None;
-        for entry in entries {
-            if self.record(entry.symbol).and_then(SymbolRecord::name) == Some(name) {
-                if found.is_some_and(|handle| handle != entry.symbol) {
+        for symbol in self.name_index.candidates(view, name) {
+            if self.record(symbol).and_then(SymbolRecord::name) == Some(name) {
+                if found.is_some_and(|handle| handle != symbol) {
                     return Err(Error::new(ErrorKind::InvalidReference, None)
                         .with_context("the name identifies more than one symbol record"));
                 }
-                found = Some(entry.symbol);
+                found = Some(symbol);
             }
         }
         Ok(found)
@@ -225,7 +253,7 @@ fn check_shared(data: &SymbolData<'_>) -> Result<()> {
 }
 
 macro_rules! shared_view {
-    ($(#[$doc:meta])* $name:ident, $entries:ident, $what:literal) => {
+    ($(#[$doc:meta])* $name:ident, $entries:ident, $view:ident, $what:literal) => {
         $(#[$doc])*
         #[derive(Debug)]
         pub struct $name<'e> {
@@ -253,12 +281,16 @@ macro_rules! shared_view {
 
             #[doc = concat!("Return the record of the ", $what, " with the name `name`.")]
             ///
+            /// The function looks in the hash bucket of the name in the source
+            /// index and in the records with a changed name. It does not scan
+            /// the records.
+            ///
             /// # Errors
             ///
             /// Returns [`ErrorKind::InvalidReference`] if more than one record
             /// has the name.
             pub fn find(&self, name: &[u8]) -> Result<Option<SymbolHandle>> {
-                self.model.find(&self.model.$entries, name)
+                self.model.find(View::$view, name)
             }
 
             /// Return the record of `handle`.
@@ -274,10 +306,7 @@ macro_rules! shared_view {
             /// `S_PROCREF` with [`ErrorKind::UnsupportedEdit`]: the module
             /// record holds the same name.
             pub fn get_mut(&mut self, handle: SymbolHandle) -> Option<&mut SymbolRecord> {
-                self.model
-                    .records
-                    .get_mut(handle.0 as usize)
-                    .and_then(Option::as_mut)
+                self.model.lend(handle)
             }
 
             /// Remove the record of `handle` from the symbol record stream and
@@ -305,6 +334,7 @@ shared_view!(
     /// stream.
     PublicSymbols,
     publics,
+    Publics,
     "public symbol index"
 );
 
@@ -316,6 +346,7 @@ shared_view!(
     /// stream.
     GlobalSymbols,
     globals,
+    Globals,
     "global symbol index"
 );
 
@@ -332,7 +363,9 @@ impl PublicSymbols<'_> {
         let data = SymbolData::Public(public);
         check_shared(&data)?;
         self.model.publics.try_reserve(1).map_err(|_| no_memory())?;
-        let handle = self.model.add(SymbolRecord::new(S_PUB32, data))?;
+        let handle = self
+            .model
+            .add(SymbolRecord::new(S_PUB32, data), View::Publics)?;
         self.model.publics.push(IndexEntry {
             symbol: handle,
             reference_count: 1,
@@ -390,7 +423,9 @@ impl GlobalSymbols<'_> {
     ) -> Result<SymbolHandle> {
         check_shared(&data)?;
         self.model.globals.try_reserve(1).map_err(|_| no_memory())?;
-        let handle = self.model.add(SymbolRecord::new(kind, data))?;
+        let handle = self
+            .model
+            .add(SymbolRecord::new(kind, data), View::Globals)?;
         self.model.globals.push(IndexEntry {
             symbol: handle,
             reference_count,
