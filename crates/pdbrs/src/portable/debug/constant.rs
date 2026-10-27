@@ -1,4 +1,4 @@
-//! The `LocalConstant` table: local constant signatures and the typed row.
+//! The `LocalConstant` table: local constant signatures and the local constant record.
 //!
 //! A signature is `CustomMod* (PrimitiveConstant | EnumConstant | GeneralConstant)`. The type
 //! codes come from ECMA-335 II.23.1.16. Type handles are `TypeDefOrRefOrSpecEncoded` values of

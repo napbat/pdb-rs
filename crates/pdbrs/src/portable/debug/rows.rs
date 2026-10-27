@@ -1,4 +1,4 @@
-//! Shared helpers of the typed row accessors: error locations and row iteration.
+//! Shared helpers of the record accessors: error locations and row iteration.
 
 use crate::PortableLocation;
 use crate::io::ReadAt;
@@ -57,9 +57,9 @@ pub(crate) fn each_row<'a, S: ReadAt, T>(
     }
 }
 
-/// An iterator over the typed rows of one debug table of a [`Pdb`], in row order.
+/// An iterator over the records of one debug table of a [`Pdb`], in row order.
 ///
-/// Each item is a typed row, or the error of that row.
+/// Each item is the row ID with the record, or the error of that row.
 #[derive(Debug)]
 pub struct TypedRows<'a, S, T> {
     /// The PDB.

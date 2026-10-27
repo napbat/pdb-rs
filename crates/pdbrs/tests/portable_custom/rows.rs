@@ -1,8 +1,10 @@
 //! Tests for the `CustomDebugInformation` rows of a synthetic Portable PDB.
 
 use pdbrs::portable::Pdb;
-use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue};
-use pdbrs::portable::metadata::{CustomDebugInformationId, MetadataStream, MetadataToken, TableId};
+use pdbrs::portable::custom::{CustomDebugKind, CustomDebugParent, CustomDebugValue};
+use pdbrs::portable::metadata::{
+    CustomDebugInformationId, CustomDebugInformationRow, MetadataToken, TableId,
+};
 use pdbrs::{Bytes, ErrorKind};
 
 use super::builder::{Builder, row, value};
@@ -48,39 +50,39 @@ fn reads_and_decodes_custom_debug_information_rows() {
     let rows = pdb.custom_debug_informations();
     assert_eq!(rows.len(), 4);
     let rows: Vec<_> = rows.collect();
+    let raw: Vec<CustomDebugInformationRow> = pdb
+        .rows::<CustomDebugInformationRow>()
+        .map(|row| row.unwrap().1)
+        .collect();
 
-    let first = rows[0].as_ref().unwrap();
-    assert_eq!(first.id(), CustomDebugInformationId(1));
+    let (id, first) = rows[0].as_ref().unwrap();
+    assert_eq!(*id, CustomDebugInformationId(1));
     assert_eq!(
-        first.parent(),
-        MetadataToken::new(TableId::METHOD_DEF, 1).unwrap()
+        first.parent,
+        CustomDebugParent::Metadata(MetadataToken::new(TableId::METHOD_DEF, 1).unwrap())
     );
-    assert_eq!(first.kind(), CustomDebugKind::DEFAULT_NAMESPACE);
-    assert_eq!(first.kind_index().0, 1);
-    assert_eq!(first.value_offset().0, 1);
-    assert_eq!(first.value(), b"abc");
+    assert_eq!(first.kind, CustomDebugKind::DEFAULT_NAMESPACE);
+    assert_eq!(raw[0].kind.0, 1);
+    assert_eq!(raw[0].value.0, 1);
+    assert_eq!(first.value, b"abc");
     let CustomDebugValue::DefaultNamespace(name) = first.decode().unwrap() else {
         panic!("expected a default namespace");
     };
     assert_eq!(name.as_bytes(), b"abc");
 
-    // A malformed value gives an error with the row, the column and the blob offset.
-    let second = rows[1].as_ref().unwrap();
+    // A malformed value gives an error without a location. The raw row has the blob offset.
+    let (_, second) = rows[1].as_ref().unwrap();
     assert_eq!(
-        second.parent(),
-        MetadataToken::new(TableId::MODULE, 1).unwrap()
+        second.parent,
+        CustomDebugParent::Metadata(MetadataToken::new(TableId::MODULE, 1).unwrap())
     );
     let error = second.decode().unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let location = error.portable_location().unwrap();
-    assert_eq!(location.stream(), Some(MetadataStream::Tables));
-    assert_eq!(location.table(), Some(TableId::CUSTOM_DEBUG_INFORMATION));
-    assert_eq!(location.row(), Some(2));
-    assert_eq!(location.column(), Some("Value"));
-    assert_eq!(location.heap_offset(), Some(5));
+    assert!(error.portable_location().is_none());
+    assert_eq!(raw[1].value.0, 5);
 
     // Unknown kinds and the nil kind keep their raw bytes.
-    let third = rows[2].as_ref().unwrap();
+    let (_, third) = rows[2].as_ref().unwrap();
     assert_eq!(
         third.decode().unwrap(),
         CustomDebugValue::Unknown {
@@ -88,8 +90,8 @@ fn reads_and_decodes_custom_debug_information_rows() {
             value: Bytes::new(b"abc")
         }
     );
-    let fourth = rows[3].as_ref().unwrap();
-    assert_eq!(fourth.kind(), CustomDebugKind([0; 16]));
+    let (_, fourth) = rows[3].as_ref().unwrap();
+    assert_eq!(fourth.kind, CustomDebugKind([0; 16]));
     assert_eq!(
         fourth.decode().unwrap(),
         CustomDebugValue::Unknown {

@@ -4,18 +4,18 @@
 //! the input. If the plan succeeds, the written PDB must read back with the same documents,
 //! sequence points, scopes and custom debug information values.
 
-use pdbrs::portable::build::{
-    CustomDebugInfo, CustomDebugParent, DocumentInfo, ImportInfo, ImportScopeInfo,
-    LocalConstantInfo, LocalScopeHandle, LocalScopeInfo, LocalVariableInfo, MethodInfo,
+use pdbrs::Bytes;
+use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugKind, CustomDebugParent};
+use pdbrs::portable::debug::{
+    Document, Import, ImportScope, LocalConstant, LocalScope, LocalScopeHandle, LocalVariable,
 };
-use pdbrs::portable::custom::CustomDebugKind;
-use pdbrs::portable::debug::{LocalSignatureForm, SequencePoint, SourceSpan};
+use pdbrs::portable::debug::{LocalSignatureForm, SequencePoint, SequencePoints, SourceSpan};
 use pdbrs::portable::metadata::{
     AssemblyRefId, DocumentId, IlOffset, ImportScopeId, MetadataToken, MethodDefId,
     StandAloneSigId, TableId,
 };
 use pdbrs::portable::write::ExternalRowCounts;
-use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
 
 use crate::input::Input;
 use crate::ok;
@@ -56,46 +56,46 @@ fn sequence_point(input: &mut Input<'_>, documents: &[DocumentId]) -> SequencePo
 }
 
 /// Read an import with names from the input.
-fn import(input: &mut Input<'_>) -> ImportInfo {
+fn import(input: &mut Input<'_>) -> Import<'static> {
     let selector = input.u8();
-    let name = text(input).to_vec();
+    let name = Bytes::from(text(input).to_vec());
     let assembly = AssemblyRefId(u32::from(input.u8()) % (EXTERNAL_ROWS + 1));
     let target_type = MetadataToken::from_raw(input.u32());
     match selector % 9 {
-        0 => ImportInfo::Namespace { namespace: name },
-        1 => ImportInfo::AssemblyNamespace {
+        0 => Import::Namespace { namespace: name },
+        1 => Import::AssemblyNamespace {
             assembly,
             namespace: name,
         },
-        2 => ImportInfo::Type { target_type },
-        3 => ImportInfo::XmlNamespace {
+        2 => Import::Type { target_type },
+        3 => Import::XmlNamespace {
             alias: name.clone(),
             namespace: name,
         },
-        4 => ImportInfo::AssemblyReferenceAlias { alias: name },
-        5 => ImportInfo::AliasAssemblyReference {
+        4 => Import::AssemblyReferenceAlias { alias: name },
+        5 => Import::AliasAssemblyReference {
             alias: name,
             assembly,
         },
-        6 => ImportInfo::AliasNamespace {
+        6 => Import::AliasNamespace {
             alias: name.clone(),
             namespace: name,
         },
-        7 => ImportInfo::AliasAssemblyNamespace {
+        7 => Import::AliasAssemblyNamespace {
             alias: name.clone(),
             assembly,
             namespace: name,
         },
-        _ => ImportInfo::AliasType {
+        _ => Import::AliasType {
             alias: name,
             target_type,
         },
     }
 }
 
-/// The state of one build: the builder and the records that the commands added.
+/// The state of one build: the editor and the records that the commands added.
 struct Build {
-    builder: PdbBuilder,
+    editor: PdbEditor<'static>,
     documents: Vec<DocumentId>,
     scopes: Vec<LocalScopeHandle>,
     imports: Vec<ImportScopeId>,
@@ -103,18 +103,19 @@ struct Build {
 }
 
 impl Build {
-    /// Run one command from the input. Return `None` if the builder rejects the record or
+    /// Run one command from the input. Return `None` if the editor rejects the record or
     /// if the command needs a record that does not exist.
     fn command(&mut self, input: &mut Input<'_>) -> Option<()> {
         let selector = input.u8();
         match selector % 7 {
             0 => {
-                let mut document = DocumentInfo::default();
-                document.name = text(input).to_vec();
+                let mut document = Document::default();
+                document.name = text(input).to_vec().into();
                 document.hash_algorithm = (input.u8() & 1 == 1).then_some([input.u8(); 16]);
-                document.hash = text(input).to_vec();
+                document.hash = text(input).to_vec().into();
                 document.language = (input.u8() & 1 == 1).then_some([input.u8(); 16]);
-                ok(self.builder.add_document(document)).map(|id| self.documents.push(id))
+                let documents = ok(self.editor.documents_mut())?;
+                ok(documents.push(document)).map(|id| self.documents.push(id))
             }
             1 => {
                 let method = MethodDefId(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
@@ -127,44 +128,48 @@ impl Build {
                 } else {
                     LocalSignatureForm::Token
                 };
-                let mut info = MethodInfo::default();
-                info.local_signature = StandAloneSigId(u32::from(input.u8() % 2));
-                info.local_signature_form = form;
-                info.sequence_points.clone_from(&points);
-                self.builder.set_method(method, info);
+                let signature = StandAloneSigId(u32::from(input.u8() % 2));
+                let info = ok(SequencePoints::encode_parts(signature, form, &points))?;
+                ok(self.editor.methods_mut())?.insert(method, info);
                 self.methods.retain(|(id, _)| *id != method);
                 self.methods.push((method, points));
                 Some(())
             }
             2 => {
-                let mut scope = LocalScopeInfo::default();
+                let mut scope = LocalScope::default();
                 scope.method = MethodDefId(1 + u32::from(input.u8()) % EXTERNAL_ROWS);
                 scope.import_scope = self.imports.first().copied().unwrap_or_default();
                 scope.start_offset = IlOffset(u32::from(input.u16()));
                 scope.length = u32::from(input.u16());
-                ok(self.builder.add_local_scope(scope)).map(|handle| self.scopes.push(handle))
+                let scopes = ok(self.editor.local_scopes_mut())?;
+                ok(scopes.push(scope)).map(|handle| self.scopes.push(handle))
             }
             3 => {
                 let scope = *self.scopes.last()?;
-                let mut variable = LocalVariableInfo::default();
+                let mut variable = LocalVariable::default();
                 variable.attributes = input.u16();
                 variable.index = input.u16();
-                variable.name = text(input).to_vec();
-                ok(self.builder.add_local_variable(scope, variable)).map(|_| ())
+                variable.name = text(input).to_vec().into();
+                let scopes = ok(self.editor.local_scopes_mut())?;
+                scopes.get_mut(scope)?.variables.push(variable);
+                Some(())
             }
             4 => {
                 let scope = *self.scopes.last()?;
-                let mut constant = LocalConstantInfo::default();
-                constant.name = text(input).to_vec();
-                constant.signature = text(input).to_vec();
-                ok(self.builder.add_local_constant(scope, constant)).map(|_| ())
+                let mut constant = LocalConstant::default();
+                constant.name = text(input).to_vec().into();
+                constant.signature = text(input).to_vec().into();
+                let scopes = ok(self.editor.local_scopes_mut())?;
+                scopes.get_mut(scope)?.constants.push(constant);
+                Some(())
             }
             5 => {
                 let count = usize::from(input.u8() % 4);
-                let mut scope = ImportScopeInfo::default();
+                let mut scope = ImportScope::default();
                 scope.parent = self.imports.last().copied().unwrap_or_default();
                 scope.imports = (0..count).map(|_| import(input)).collect();
-                ok(self.builder.add_import_scope(scope)).map(|id| self.imports.push(id))
+                let scopes = ok(self.editor.import_scopes_mut())?;
+                ok(scopes.push(scope)).map(|id| self.imports.push(id))
             }
             _ => {
                 let parent = match input.u8() % 3 {
@@ -178,9 +183,10 @@ impl Build {
                     _ => CustomDebugParent::LocalScope(*self.scopes.first()?),
                 };
                 let mut information =
-                    CustomDebugInfo::new(parent, CustomDebugKind([input.u8(); 16]));
-                information.value = text(input).to_vec();
-                ok(self.builder.add_custom_debug_information(information)).map(|_| ())
+                    CustomDebugInformation::new(parent, CustomDebugKind([input.u8(); 16]));
+                information.value = text(input).to_vec().into();
+                let informations = ok(self.editor.custom_debug_information_mut())?;
+                ok(informations.push(information)).map(|_| ())
             }
         }
     }
@@ -191,7 +197,7 @@ impl Build {
 /// # Panics
 ///
 /// Panics if a planned PDB does not write or read, or if the written PDB has other
-/// documents or sequence points than the builder.
+/// documents or sequence points than the editor.
 pub fn build(data: &[u8]) {
     let mut external = ExternalRowCounts::new();
     for table in [
@@ -205,7 +211,7 @@ pub fn build(data: &[u8]) {
         external.set(table, EXTERNAL_ROWS);
     }
     let mut build = Build {
-        builder: PdbBuilder::new(external),
+        editor: PdbEditor::new(external, IdentityPolicy::ContentDerived),
         documents: Vec::new(),
         scopes: Vec::new(),
         imports: Vec::new(),
@@ -218,21 +224,22 @@ pub fn build(data: &[u8]) {
         }
         let _ = build.command(&mut input);
     }
-    let Some(plan) = ok(build.builder.plan(IdentityPolicy::ContentDerived)) else {
+    let Some(plan) = ok(build.editor.plan(EditOptions::default())) else {
         return;
     };
     let bytes = plan.to_vec().expect("a planned PDB writes");
     let pdb = Pdb::with_options(bytes.as_slice(), options()).expect("a built PDB reads");
     assert_eq!(pdb.identity(), plan.identity());
-    assert_eq!(pdb.documents().count(), build.builder.document_count());
-    for (id, document) in pdb.documents().enumerate() {
-        let document = document.expect("a built document reads");
-        let expected = build
-            .builder
-            .document(document.id())
-            .expect("a read document has a record");
-        assert_eq!(document.name(), expected.name, "document {id}");
-        assert_eq!(document.hash(), expected.hash);
+    let documents = build
+        .editor
+        .documents_mut()
+        .expect("new editor documents decode");
+    assert_eq!(pdb.documents().count(), documents.len());
+    for (index, document) in pdb.documents().enumerate() {
+        let (id, document) = document.expect("a built document reads");
+        let expected = documents.get(id).expect("a read document has a record");
+        assert_eq!(document.name, expected.name, "document {index}");
+        assert_eq!(document.hash, expected.hash);
     }
     for (method, points) in &build.methods {
         let id = pdbrs::portable::metadata::MethodDebugInformationId(method.0);
@@ -240,7 +247,7 @@ pub fn build(data: &[u8]) {
             .method_debug_information(id)
             .expect("a built method reads");
         let decoded: Vec<SequencePoint> = info
-            .sequence_points()
+            .decode()
             .expect("built sequence points decode")
             .map(Iterator::collect::<pdbrs::Result<_>>)
             .transpose()

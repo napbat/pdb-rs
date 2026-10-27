@@ -6,7 +6,7 @@
 use pdbrs::io::copy_exact;
 use pdbrs::portable::embedded::decode_embedded;
 use pdbrs::portable::write::PdbParts;
-use pdbrs::portable::{IdentityPolicy, Pdb};
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
 
 use crate::ok;
 use crate::portable::{options, walk};
@@ -66,19 +66,27 @@ fn same_parts(left: &PdbParts, right: &PdbParts) {
 
 /// Make an editor from a Portable PDB, write it and read the output.
 fn edit(pdb: &Pdb<&[u8]>) {
-    let Some(editor) = ok(pdb.edit()) else {
+    let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+    let Some(documents) = ok(editor.documents_mut().map(|documents| documents.len())) else {
         return;
     };
-    let Some(plan) = ok(editor.plan(IdentityPolicy::ContentDerived)) else {
+    let Some(plan) = ok(editor.plan(EditOptions::default())) else {
         return;
     };
+    let _ = plan.report().streams().len();
     let bytes = plan.to_vec().expect("a planned PDB writes");
     let written = Pdb::with_options(bytes.as_slice(), options()).expect("an edited PDB reads");
     assert_eq!(
         written
             .tables()
             .row_count(pdbrs::portable::metadata::TableId::DOCUMENT),
-        u32::try_from(editor.document_count()).unwrap_or(u32::MAX),
+        u32::try_from(documents).unwrap_or(u32::MAX),
     );
     walk(&written);
+    let mut again = written.edit(IdentityPolicy::ContentDerived);
+    if ok(again.decode_all()).is_some()
+        && let Some(plan) = ok(again.plan(EditOptions::default()))
+    {
+        let _ = plan.report().streams().len();
+    }
 }

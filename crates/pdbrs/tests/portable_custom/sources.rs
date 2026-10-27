@@ -154,8 +154,9 @@ fn decodes_and_checks_embedded_sources() {
     ];
     for (index, expected) in expected.into_iter().enumerate() {
         let row = u32::try_from(index + 1).unwrap();
-        let document = pdb.document(DocumentId(row)).unwrap();
-        let source = pdb.document_source(&document, SOURCE.len()).unwrap();
+        let id = DocumentId(row);
+        let document = pdb.document(id).unwrap();
+        let source = pdb.document_source(id, &document, SOURCE.len()).unwrap();
         let actual = source
             .as_ref()
             .map(|source| (source.format(), source.content(), source.check()));
@@ -190,7 +191,9 @@ fn applies_the_limit_to_raw_and_deflate_sources() {
     let pdb = Pdb::parse(&bytes).unwrap();
     for row in [1, 2] {
         let document = pdb.document(DocumentId(row)).unwrap();
-        let error = pdb.document_source(&document, 2).unwrap_err();
+        let error = pdb
+            .document_source(DocumentId(row), &document, 2)
+            .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::LimitExceeded, "document {row}");
         let location = error.portable_location().unwrap();
         assert_eq!(location.stream(), Some(MetadataStream::Tables));
@@ -214,7 +217,9 @@ fn rejects_bad_embedded_sources() {
     let pdb = Pdb::parse(&bytes).unwrap();
     for (row, kind) in [(1, ErrorKind::InvalidFormat), (2, ErrorKind::UnexpectedEof)] {
         let document = pdb.document(DocumentId(row)).unwrap();
-        let error = pdb.document_source(&document, 1024).unwrap_err();
+        let error = pdb
+            .document_source(DocumentId(row), &document, 1024)
+            .unwrap_err();
         assert_eq!(error.kind(), kind, "document {row}");
         assert_eq!(error.portable_location().unwrap().row(), Some(row));
     }
@@ -229,7 +234,9 @@ fn rejects_two_embedded_sources_for_one_document() {
     let bytes = pdb.bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
     let document = pdb.document(DocumentId(1)).unwrap();
-    let error = pdb.document_source(&document, 1024).unwrap_err();
+    let error = pdb
+        .document_source(DocumentId(1), &document, 1024)
+        .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     assert_eq!(error.portable_location().unwrap().row(), Some(2));
 }

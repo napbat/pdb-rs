@@ -99,13 +99,22 @@ fn pdb_joins_the_parts_of_each_document_name() {
     let pdb = pdbrs::portable::Pdb::parse(&bytes).unwrap();
     let names: Vec<Vec<u8>> = pdb
         .documents()
-        .map(|document| document.unwrap().name().to_vec())
+        .map(|document| document.unwrap().1.name.into_vec())
         .collect();
     assert_eq!(names, [b"/src/a.cs".to_vec(), b"/src/b.cs".to_vec()]);
     let document = pdb.document(DocumentId(1)).unwrap();
-    assert_eq!(document.language(), Some(Language::CSharp));
-    assert_eq!(document.hash_algorithm(), Some(HashAlgorithm::Sha256));
-    assert_eq!(document.hash().len(), 32);
+    assert_eq!(
+        document.language.as_ref().and_then(Language::from_guid),
+        Some(Language::CSharp)
+    );
+    assert_eq!(
+        document
+            .hash_algorithm
+            .as_ref()
+            .and_then(HashAlgorithm::from_guid),
+        Some(HashAlgorithm::Sha256)
+    );
+    assert_eq!(document.hash.len(), 32);
 }
 
 #[test]

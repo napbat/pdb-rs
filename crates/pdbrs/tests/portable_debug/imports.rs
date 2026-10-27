@@ -1,53 +1,53 @@
 //! Import blobs: every import kind, unknown kinds, truncation and the encoder.
 
 use pdbrs::ErrorKind;
-use pdbrs::portable::debug::{Import, Imports};
+use pdbrs::portable::debug::{Imports, RawImport};
 use pdbrs::portable::metadata::{AssemblyRefId, BlobOffset, MetadataToken, TableId};
 
 use crate::{encoded, every_prefix_fails, expect};
 
 /// One import of each kind and its encoding.
-fn every_kind() -> [(Import, &'static [u8]); 9] {
+fn every_kind() -> [(RawImport, &'static [u8]); 9] {
     let blob = BlobOffset;
     let assembly = AssemblyRefId(2);
     let target_type = MetadataToken::new(TableId::TYPE_REF, 7).unwrap();
     [
-        (Import::Namespace { namespace: blob(5) }, &[0x01, 0x05]),
+        (RawImport::Namespace { namespace: blob(5) }, &[0x01, 0x05]),
         (
-            Import::AssemblyNamespace {
+            RawImport::AssemblyNamespace {
                 assembly,
                 namespace: blob(5),
             },
             &[0x02, 0x02, 0x05],
         ),
-        (Import::Type { target_type }, &[0x03, 0x1d]),
+        (RawImport::Type { target_type }, &[0x03, 0x1d]),
         (
-            Import::XmlNamespace {
+            RawImport::XmlNamespace {
                 alias: blob(0),
                 namespace: blob(0x80),
             },
             &[0x04, 0x00, 0x80, 0x80],
         ),
         (
-            Import::AssemblyReferenceAlias { alias: blob(9) },
+            RawImport::AssemblyReferenceAlias { alias: blob(9) },
             &[0x05, 0x09],
         ),
         (
-            Import::AliasAssemblyReference {
+            RawImport::AliasAssemblyReference {
                 alias: blob(9),
                 assembly,
             },
             &[0x06, 0x09, 0x02],
         ),
         (
-            Import::AliasNamespace {
+            RawImport::AliasNamespace {
                 alias: blob(9),
                 namespace: blob(5),
             },
             &[0x07, 0x09, 0x05],
         ),
         (
-            Import::AliasAssemblyNamespace {
+            RawImport::AliasAssemblyNamespace {
                 alias: blob(9),
                 assembly,
                 namespace: blob(5),
@@ -55,7 +55,7 @@ fn every_kind() -> [(Import, &'static [u8]); 9] {
             &[0x08, 0x09, 0x02, 0x05],
         ),
         (
-            Import::AliasType {
+            RawImport::AliasType {
                 alias: blob(9),
                 target_type,
             },
@@ -68,7 +68,7 @@ fn every_kind() -> [(Import, &'static [u8]); 9] {
 fn every_import_kind_round_trips() {
     for (index, (import, bytes)) in every_kind().into_iter().enumerate() {
         assert_eq!(import.kind(), u32::try_from(index).unwrap() + 1);
-        let decoded: Vec<Import> = Imports::parse(bytes).collect::<Result<_, _>>().unwrap();
+        let decoded: Vec<RawImport> = Imports::parse(bytes).collect::<Result<_, _>>().unwrap();
         assert_eq!(decoded, [import]);
         assert_eq!(
             encoded(|out| Imports::encode_parts(&[import], out)).unwrap(),
@@ -84,7 +84,7 @@ fn every_import_kind_round_trips() {
             }
         });
     }
-    let all: Vec<Import> = every_kind().into_iter().map(|(import, _)| import).collect();
+    let all: Vec<RawImport> = every_kind().into_iter().map(|(import, _)| import).collect();
     let bytes: Vec<u8> = every_kind()
         .into_iter()
         .flat_map(|(_, bytes)| bytes.to_vec())
@@ -93,7 +93,7 @@ fn every_import_kind_round_trips() {
         encoded(|out| Imports::encode_parts(&all, out)).unwrap(),
         bytes
     );
-    let decoded: Vec<Import> = Imports::parse(&bytes).collect::<Result<_, _>>().unwrap();
+    let decoded: Vec<RawImport> = Imports::parse(&bytes).collect::<Result<_, _>>().unwrap();
     assert_eq!(decoded, all);
 }
 
@@ -139,7 +139,7 @@ fn invalid_targets_give_errors() {
         ErrorKind::InvalidFormat,
         "tag 3",
     );
-    let nil = Import::AliasAssemblyReference {
+    let nil = RawImport::AliasAssemblyReference {
         alias: BlobOffset(1),
         assembly: AssemblyRefId(0),
     };

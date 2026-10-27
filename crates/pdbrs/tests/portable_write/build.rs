@@ -1,21 +1,20 @@
-//! The semantic builder: handles, row order, reference resolution and width changes.
+//! Builds with `PdbEditor::new`: handles, row order, reference resolution and width changes.
 
 use pdbrs::ErrorKind;
-use pdbrs::portable::build::{
-    CustomDebugInfo, CustomDebugParent, DocumentInfo, ImportInfo, ImportScopeInfo,
-    LocalConstantInfo, LocalScopeInfo, LocalVariableInfo, MethodInfo,
-};
-use pdbrs::portable::custom::CustomDebugKind;
+use pdbrs::io::ReadAt;
+use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugKind, CustomDebugParent};
 use pdbrs::portable::debug::{
-    ConstantValue, Import, Language, LocalConstantSignature, LocalSignatureForm, PrimitiveConstant,
-    SequencePoint, SourceSpan, ValidateOptions,
+    ConstantValue, Document, Import, ImportScope, Language, LocalConstant, LocalConstantHandle,
+    LocalConstantSignature, LocalScope, LocalSignatureForm, LocalVariable, LocalVariableHandle,
+    MethodDebugInformation, PrimitiveConstant, SequencePoint, SequencePoints, SourceSpan,
+    StateMachineMethod, ValidateOptions,
 };
 use pdbrs::portable::metadata::{
-    CodedIndex, DocumentId, IlOffset, ImportScopeId, LocalScopeId, MetadataToken, MethodDefId,
-    StandAloneSigId, TableId,
+    CodedIndex, CustomDebugInformationRow, DocumentId, IlOffset, ImportScopeId, LocalScopeId,
+    MetadataToken, MethodDefId, StandAloneSigId, TableId,
 };
 use pdbrs::portable::write::ExternalRowCounts;
-use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
 
 use crate::{location, open};
 
@@ -29,6 +28,15 @@ pub(crate) fn external(methods: u32) -> ExternalRowCounts {
     external.set(TableId::MODULE, 1);
     external.set(TableId::STAND_ALONE_SIG, 2);
     external
+}
+
+/// Plan an editor with the content-derived ID and return the output bytes.
+pub(crate) fn write<S: ReadAt>(editor: &PdbEditor<'_, S>) -> Vec<u8> {
+    editor
+        .plan(EditOptions::default())
+        .unwrap()
+        .to_vec()
+        .unwrap()
 }
 
 /// Make a visible sequence point.
@@ -45,9 +53,9 @@ pub(crate) fn point(il: u32, document: u32, line: u32) -> SequencePoint {
     point
 }
 
-/// Make a local scope record.
-pub(crate) fn scope(method: u32, start: u32, length: u32) -> LocalScopeInfo {
-    let mut scope = LocalScopeInfo::default();
+/// Make a local scope record without variables and constants.
+pub(crate) fn scope(method: u32, start: u32, length: u32) -> LocalScope<'static> {
+    let mut scope = LocalScope::default();
     scope.method = MethodDefId(method);
     scope.import_scope = ImportScopeId(0);
     scope.start_offset = IlOffset(start);
@@ -55,16 +63,26 @@ pub(crate) fn scope(method: u32, start: u32, length: u32) -> LocalScopeInfo {
     scope
 }
 
+/// Make a local variable record.
+pub(crate) fn variable(name: &[u8], index: u16) -> LocalVariable<'static> {
+    let mut variable = LocalVariable::default();
+    variable.index = index;
+    variable.name = name.to_vec().into();
+    variable
+}
+
 /// Make a local constant record with an `I4` value.
-pub(crate) fn constant(name: &[u8], value: i32) -> LocalConstantInfo {
-    let mut constant = LocalConstantInfo::default();
-    constant.name = name.to_vec();
+pub(crate) fn constant(name: &[u8], value: i32) -> LocalConstant<'static> {
+    let mut signature = Vec::new();
     LocalConstantSignature::encode_parts(
         &[],
         &ConstantValue::Primitive(PrimitiveConstant::I4(value)),
-        &mut constant.signature,
+        &mut signature,
     )
     .unwrap();
+    let mut constant = LocalConstant::default();
+    constant.name = name.to_vec().into();
+    constant.signature = signature.into();
     constant
 }
 
@@ -73,130 +91,135 @@ pub(crate) fn information(
     parent: CustomDebugParent,
     kind: CustomDebugKind,
     value: Vec<u8>,
-) -> CustomDebugInfo {
-    let mut information = CustomDebugInfo::new(parent, kind);
-    information.value = value;
+) -> CustomDebugInformation<'static> {
+    let mut information = CustomDebugInformation::new(parent, kind);
+    information.value = value.into();
     information
 }
 
 /// Make a document record with `name` and `language`.
-fn document(name: &[u8], language: Option<[u8; 16]>) -> DocumentInfo {
-    let mut document = DocumentInfo::default();
-    document.name = name.to_vec();
+pub(crate) fn document(name: &[u8], language: Option<[u8; 16]>) -> Document<'static> {
+    let mut document = Document::default();
+    document.name = name.to_vec().into();
     document.language = language;
     document
 }
 
 /// Make an import scope record.
-fn import_scope(parent: ImportScopeId, imports: Vec<ImportInfo>) -> ImportScopeInfo {
-    let mut scope = ImportScopeInfo::default();
+fn import_scope(parent: ImportScopeId, imports: Vec<Import<'static>>) -> ImportScope<'static> {
+    let mut scope = ImportScope::default();
     scope.parent = parent;
     scope.imports = imports;
     scope
 }
 
-/// Make the sequence points of a method.
-fn method(sequence_points: Vec<SequencePoint>) -> MethodInfo {
-    let mut method = MethodInfo::default();
-    method.sequence_points = sequence_points;
-    method
+/// Encode the sequence points of a method with the local signature row `signature`.
+pub(crate) fn method(signature: u32, points: &[SequencePoint]) -> MethodDebugInformation<'static> {
+    SequencePoints::encode_parts(StandAloneSigId(signature), LocalSignatureForm::Row, points)
+        .unwrap()
 }
 
-/// Make a builder with two documents, three methods with sequence points, unsorted local
-/// scopes with variables and constants, two import scopes, a state machine and custom debug
-/// information of each parent kind.
-pub(crate) fn sample() -> PdbBuilder {
-    let mut builder = PdbBuilder::new(external(4));
-    builder.set_entry_point(Some(MethodDefId(1)));
-    let first = builder
-        .add_document(document(
+/// Make an editor without a source with two documents, two methods with sequence points,
+/// unsorted local scopes with variables and constants, two import scopes, a state machine
+/// and custom debug information of each parent kind.
+pub(crate) fn sample() -> PdbEditor<'static> {
+    let mut editor = PdbEditor::new(external(4), IdentityPolicy::ContentDerived);
+    editor.set_entry_point(Some(MethodDefId(1)));
+    let documents = editor.documents_mut().unwrap();
+    let first = documents
+        .push(document(
             b"C:\\src\\Program.cs",
             Some(Language::CSharp.guid()),
         ))
         .unwrap();
     let mut other = document(b"/src/Other.cs", None);
     other.hash_algorithm = Some([3; 16]);
-    other.hash = vec![0xAB; 32];
-    let second = builder.add_document(other).unwrap();
+    other.hash = vec![0xAB; 32].into();
+    let second = documents.push(other).unwrap();
     assert_eq!((first.0, second.0), (1, 2));
-    let mut first_method = method(vec![point(0, 1, 10), point(4, 2, 3), point(9, 1, 12)]);
-    first_method.local_signature = StandAloneSigId(1);
-    first_method.local_signature_form = LocalSignatureForm::Row;
-    builder.set_method(MethodDefId(1), first_method);
-    builder.set_method(MethodDefId(3), method(vec![point(0, 2, 20)]));
-    let imports = builder
-        .add_import_scope(import_scope(
+    let methods = editor.methods_mut().unwrap();
+    methods.insert(
+        MethodDefId(1),
+        method(1, &[point(0, 1, 10), point(4, 2, 3), point(9, 1, 12)]),
+    );
+    methods.insert(MethodDefId(3), method(0, &[point(0, 2, 20)]));
+    let import_scopes = editor.import_scopes_mut().unwrap();
+    let imports = import_scopes
+        .push(import_scope(
             ImportScopeId(0),
-            vec![ImportInfo::Namespace {
-                namespace: b"System".to_vec(),
+            vec![Import::Namespace {
+                namespace: b"System".into(),
             }],
         ))
         .unwrap();
-    builder
-        .add_import_scope(import_scope(
+    import_scopes
+        .push(import_scope(
             imports,
-            vec![ImportInfo::AliasNamespace {
-                alias: b"IO".to_vec(),
-                namespace: b"System.IO".to_vec(),
+            vec![Import::AliasNamespace {
+                alias: b"IO".into(),
+                namespace: b"System.IO".into(),
             }],
         ))
         .unwrap();
     // Added out of order: method 3 first, then the inner scope of method 1, then its outer
     // scope.
-    let late = builder.add_local_scope(scope(3, 0, 8)).unwrap();
-    let inner = builder.add_local_scope(scope(1, 2, 4)).unwrap();
-    let outer = builder.add_local_scope(scope(1, 0, 12)).unwrap();
-    let variable = |name: &[u8], index| {
-        let mut variable = LocalVariableInfo::default();
-        variable.index = index;
-        variable.name = name.to_vec();
-        variable
-    };
-    builder
-        .add_local_variable(late, variable(b"late", 0))
-        .unwrap();
-    let inner_variable = builder
-        .add_local_variable(inner, variable(b"inner", 1))
-        .unwrap();
-    builder
-        .add_local_variable(outer, variable(b"outer", 0))
-        .unwrap();
-    let pi = builder
-        .add_local_constant(inner, constant(b"Pi", 3))
-        .unwrap();
-    builder
-        .add_state_machine_method(MethodDefId(4), MethodDefId(2))
-        .unwrap();
+    let scopes = editor.local_scopes_mut().unwrap();
+    let mut late = scope(3, 0, 8);
+    late.variables.push(variable(b"late", 0));
+    scopes.push(late).unwrap();
+    let mut inner = scope(1, 2, 4);
+    inner.variables.push(variable(b"inner", 1));
+    inner.constants.push(constant(b"Pi", 3));
+    let inner = scopes.push(inner).unwrap();
+    let mut outer = scope(1, 0, 12);
+    outer.variables.push(variable(b"outer", 0));
+    scopes.push(outer).unwrap();
+    let mut machine = StateMachineMethod::default();
+    machine.move_next_method = MethodDefId(4);
+    machine.kickoff_method = MethodDefId(2);
+    editor.state_machine_methods_mut().unwrap().push(machine);
     let parents = [
-        CustomDebugParent::LocalVariable(inner_variable),
-        CustomDebugParent::LocalConstant(pi),
+        CustomDebugParent::LocalVariable(LocalVariableHandle {
+            scope: inner,
+            index: 0,
+        }),
+        CustomDebugParent::LocalConstant(LocalConstantHandle {
+            scope: inner,
+            index: 0,
+        }),
         CustomDebugParent::LocalScope(inner),
         CustomDebugParent::Document(second),
         CustomDebugParent::ImportScope(imports),
         CustomDebugParent::Metadata(MetadataToken::new(TableId::MODULE, 1).unwrap()),
         CustomDebugParent::Metadata(MetadataToken::new(TableId::METHOD_DEF, 2).unwrap()),
     ];
+    let custom = editor.custom_debug_information_mut().unwrap();
     for (value, parent) in (1_u8..).zip(parents) {
-        builder
-            .add_custom_debug_information(information(parent, UNKNOWN, vec![value]))
+        custom
+            .push(information(parent, UNKNOWN, vec![value]))
             .unwrap();
     }
-    builder
+    editor
+}
+
+/// Return the names of the variables of a scope.
+fn variable_names(scope: &LocalScope<'_>) -> Vec<Vec<u8>> {
+    scope
+        .variables
+        .iter()
+        .map(|variable| variable.name.to_vec())
+        .collect()
 }
 
 #[test]
 fn builder_sorts_rows_and_resolves_handles() {
-    let bytes = sample()
-        .plan(IdentityPolicy::ContentDerived)
-        .unwrap()
-        .to_vec()
-        .unwrap();
+    let bytes = write(&sample());
     let pdb = open(&bytes);
     pdb.validate_debug(ValidateOptions::default()).unwrap();
     assert_eq!(pdb.pdb_stream().entry_point(), Some(MethodDefId(1)));
     let names: Vec<Vec<u8>> = pdb
         .documents()
-        .map(|document| document.unwrap().name().to_vec())
+        .map(|document| document.unwrap().1.name.into_vec())
         .collect();
     assert_eq!(
         names,
@@ -206,14 +229,14 @@ fn builder_sorts_rows_and_resolves_handles() {
     // Method 1 changes documents, method 3 has one document, methods 2 and 4 have none.
     let methods: Vec<_> = pdb
         .method_debug_informations()
-        .map(Result::unwrap)
+        .map(|method| method.unwrap().1)
         .collect();
     assert_eq!(methods.len(), 4);
-    assert_eq!(methods[0].document().0, 0);
-    assert_eq!(methods[2].document().0, 2);
-    assert_eq!(methods[1].sequence_points_blob(), []);
+    assert_eq!(methods[0].document.0, 0);
+    assert_eq!(methods[2].document.0, 2);
+    assert!(methods[1].sequence_points.is_empty());
     let points: Vec<SequencePoint> = methods[0]
-        .sequence_points()
+        .decode()
         .unwrap()
         .unwrap()
         .map(Result::unwrap)
@@ -221,40 +244,32 @@ fn builder_sorts_rows_and_resolves_handles() {
     assert_eq!(points, [point(0, 1, 10), point(4, 2, 3), point(9, 1, 12)]);
 
     // Scopes in method, start and length order, each with its own run.
-    let scopes: Vec<_> = pdb.local_scopes().map(Result::unwrap).collect();
+    let scopes: Vec<_> = pdb.local_scopes().map(|scope| scope.unwrap().1).collect();
     let keys: Vec<(u32, u32, u32)> = scopes
         .iter()
-        .map(|scope| (scope.method().0, scope.start_offset().0, scope.length()))
+        .map(|scope| (scope.method.0, scope.start_offset.0, scope.length))
         .collect();
     assert_eq!(keys, [(1, 0, 12), (1, 2, 4), (3, 0, 8)]);
-    let variable = |scope: &pdbrs::portable::debug::LocalScope| -> Vec<Vec<u8>> {
-        scope
-            .variables()
-            .map(|id| pdb.local_variable(id).unwrap().name().to_vec())
-            .collect()
-    };
-    assert_eq!(variable(&scopes[0]), [b"outer".to_vec()]);
-    assert_eq!(variable(&scopes[1]), [b"inner".to_vec()]);
-    assert_eq!(variable(&scopes[2]), [b"late".to_vec()]);
-    let constants: Vec<_> = scopes[1].constants().collect();
-    assert_eq!(constants.len(), 1);
-    assert_eq!(pdb.local_constant(constants[0]).unwrap().name(), b"Pi");
+    assert_eq!(variable_names(&scopes[0]), [b"outer".to_vec()]);
+    assert_eq!(variable_names(&scopes[1]), [b"inner".to_vec()]);
+    assert_eq!(variable_names(&scopes[2]), [b"late".to_vec()]);
+    assert_eq!(scopes[1].constants.len(), 1);
+    assert_eq!(scopes[1].constants[0].name, b"Pi");
 
     let imports = pdb.import_scope(ImportScopeId(2)).unwrap();
-    assert_eq!(imports.parent().0, 1);
-    let imports: Vec<Import> = imports.imports().map(Result::unwrap).collect();
-    let [Import::AliasNamespace { alias, namespace }] = imports[..] else {
-        panic!("unexpected imports {imports:?}");
+    assert_eq!(imports.parent.0, 1);
+    let [Import::AliasNamespace { alias, namespace }] = &imports.imports[..] else {
+        panic!("unexpected imports {:?}", imports.imports);
     };
-    assert_eq!(pdb.blob(alias).unwrap(), b"IO");
-    assert_eq!(pdb.blob(namespace).unwrap(), b"System.IO");
+    assert_eq!(alias, b"IO");
+    assert_eq!(namespace, b"System.IO");
 
     // Custom debug information sorted by the coded parent, with resolved rows.
     let rows: Vec<(MetadataToken, Vec<u8>)> = pdb
-        .custom_debug_informations()
+        .rows::<CustomDebugInformationRow>()
         .map(|row| {
-            let row = row.unwrap();
-            (row.parent(), row.value().to_vec())
+            let row = row.unwrap().1;
+            (row.parent, pdb.blob(row.value).unwrap())
         })
         .collect();
     let coded: Vec<u32> = rows
@@ -285,59 +300,52 @@ fn builder_sorts_rows_and_resolves_handles() {
 
 #[test]
 fn identical_builders_give_identical_bytes() {
-    let first = sample()
-        .plan(IdentityPolicy::ContentDerived)
-        .unwrap()
-        .to_vec()
-        .unwrap();
-    let second = sample()
-        .plan(IdentityPolicy::ContentDerived)
-        .unwrap()
-        .to_vec()
-        .unwrap();
-    assert_eq!(first, second);
+    assert_eq!(write(&sample()), write(&sample()));
 }
 
 #[test]
 fn builder_widens_the_coded_parent_for_many_documents() {
     for (count, width) in [(0x7FF_u32, 2), (0x800, 4)] {
-        let mut builder = PdbBuilder::new(external(1));
+        let mut editor = PdbEditor::new(external(1), IdentityPolicy::ContentDerived);
+        let documents = editor.documents_mut().unwrap();
         let mut last = DocumentId::default();
         for index in 0..count {
-            last = builder
-                .add_document(document(format!("/src/{index}.cs").as_bytes(), None))
+            last = documents
+                .push(document(format!("/src/{index}.cs").as_bytes(), None))
                 .unwrap();
         }
-        builder
-            .add_custom_debug_information(information(
+        editor
+            .custom_debug_information_mut()
+            .unwrap()
+            .push(information(
                 CustomDebugParent::Document(last),
                 UNKNOWN,
                 b"last".to_vec(),
             ))
             .unwrap();
-        let bytes = builder
-            .plan(IdentityPolicy::ContentDerived)
-            .unwrap()
-            .to_vec()
-            .unwrap();
+        let bytes = write(&editor);
         let pdb = Pdb::parse(&bytes).unwrap();
         let tables = pdb.tables();
         assert_eq!(
             tables.coded_index_width(CodedIndex::HasCustomDebugInformation),
             width
         );
-        let row = pdb.custom_debug_informations().next().unwrap().unwrap();
-        assert_eq!(row.parent().row(), count);
+        let (_, information) = pdb.custom_debug_informations().next().unwrap().unwrap();
+        assert_eq!(information.parent, CustomDebugParent::Document(last));
+        assert_eq!(last.0, count);
         let name = pdb.document(last).unwrap();
-        assert_eq!(name.name(), format!("/src/{}.cs", count - 1).as_bytes());
+        assert_eq!(name.name, format!("/src/{}.cs", count - 1).as_bytes());
     }
 }
 
 #[test]
 fn builder_rejects_unknown_handles_before_output() {
-    let mut builder = sample();
-    builder.set_method(MethodDefId(2), method(vec![point(0, 3, 1)]));
-    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
+    let mut editor = sample();
+    editor
+        .methods_mut()
+        .unwrap()
+        .insert(MethodDefId(2), method(0, &[point(0, 3, 1)]));
+    let error = editor.plan(EditOptions::default()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(
         location(&error).table(),
@@ -345,19 +353,24 @@ fn builder_rejects_unknown_handles_before_output() {
     );
     assert_eq!(location(&error).row(), Some(2));
 
-    let mut builder = sample();
-    builder.set_method(MethodDefId(5), MethodInfo::default());
-    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
+    let mut editor = sample();
+    editor
+        .methods_mut()
+        .unwrap()
+        .insert(MethodDefId(5), method(0, &[point(0, 1, 1)]));
+    let error = editor.plan(EditOptions::default()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
 
-    let mut builder = sample();
-    builder
-        .add_custom_debug_information(CustomDebugInfo::new(
+    let mut editor = sample();
+    editor
+        .custom_debug_information_mut()
+        .unwrap()
+        .push(CustomDebugInformation::new(
             CustomDebugParent::Document(DocumentId(3)),
             UNKNOWN,
         ))
         .unwrap();
-    let error = builder.plan(IdentityPolicy::ContentDerived).unwrap_err();
+    let error = editor.plan(EditOptions::default()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidReference);
     assert_eq!(
         location(&error).table(),

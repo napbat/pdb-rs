@@ -9,6 +9,7 @@ use pdbrs::io::ReadAt;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugValue, LambdaClosure, LocalSlot};
 use pdbrs::portable::embedded::{EmbeddedSource, SourceCheck};
+use pdbrs::portable::metadata::CustomDebugInformationRow;
 
 use super::{Dump, quote};
 
@@ -18,16 +19,17 @@ const MAX_SOURCE: usize = 64 << 20;
 /// Print the decoded value of each `CustomDebugInformation` row.
 pub fn custom<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for row in pdb.custom_debug_informations() {
-        let row = row?;
+        let (id, row) = row?;
+        let raw: CustomDebugInformationRow = pdb.row(id)?;
         let value = row.decode()?;
-        let id = row.id().0;
+        let id = id.0;
         out.line(format_args!(
             "cdi id={id} parent={:#010x} kind={} codec={}",
-            row.parent().raw(),
-            row.kind(),
+            raw.parent.raw(),
+            row.kind,
             codec(&value)
         ));
-        details(&row, &value, out)?;
+        details(id, &row, &value, out)?;
     }
     Ok(())
 }
@@ -36,8 +38,8 @@ pub fn custom<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
 /// source against the document hash.
 pub fn sources<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
     for document in pdb.documents() {
-        let document = document?;
-        let Some(source) = pdb.document_source(&document, MAX_SOURCE)? else {
+        let (id, document) = document?;
+        let Some(source) = pdb.document_source(id, &document, MAX_SOURCE)? else {
             continue;
         };
         let check = match source.check() {
@@ -48,7 +50,7 @@ pub fn sources<S: ReadAt>(pdb: &Pdb<S>, out: &mut Dump) -> pdbrs::Result<()> {
         };
         out.line(format_args!(
             "source document={} cdi={} size={:#x} check={check}",
-            document.id().0,
+            id.0,
             source.custom_debug_information().0,
             source.content().len()
         ));
@@ -79,11 +81,11 @@ fn codec(value: &CustomDebugValue<'_>) -> &'static str {
 
 /// Print the detail lines of a decoded value.
 fn details(
-    row: &CustomDebugInformation,
+    id: u32,
+    row: &CustomDebugInformation<'_>,
     value: &CustomDebugValue<'_>,
     out: &mut Dump,
 ) -> pdbrs::Result<()> {
-    let id = row.id().0;
     match value {
         CustomDebugValue::AsyncMethodSteppingInformation(info) => {
             let catch = info
@@ -157,8 +159,8 @@ fn details(
         | CustomDebugValue::EncStateMachineStateMap(_) => edit_and_continue(id, value, out),
         _ => out.line(format_args!(
             "cdi-raw id={id} size={:#x} bytes={}",
-            row.value().len(),
-            hex(row.value())
+            row.value.len(),
+            hex(&row.value)
         )),
     }
     Ok(())

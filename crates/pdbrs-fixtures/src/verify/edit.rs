@@ -1,12 +1,12 @@
 //! The `verify-edit` command.
 //!
 //! The command reads each Portable PDB of the fixture manifest (a standalone file or the
-//! decoded `MPDB` payload of an image) with `Pdb::edit` and checks the pdbrs builder and editor
-//! against the verifier (`System.Reflection.Metadata`):
+//! decoded `MPDB` payload of an image) with `Pdb::edit` and checks the pdbrs editor against
+//! the verifier (`System.Reflection.Metadata`):
 //!
 //! 1. A plan of the editor without a change has the original bytes.
-//! 2. `PdbBuilder::plan` of the same records writes new heaps. The decoded sections of its
-//!    verifier dump are the same as those of the original.
+//! 2. A new `PdbEditor` with a copy of all records writes new heaps. The decoded sections of
+//!    its verifier dump are the same as those of the original.
 //! 3. An edit renames document 1, moves each visible sequence point 1000 lines down, adds the
 //!    local constant `pdbrsAdded` (`i4=42`) to the last local scope and adds a custom debug
 //!    information value of an unknown kind to `MethodDef` 1. The decoded sections of its
@@ -26,12 +26,15 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use pdbrs::portable::build::{CustomDebugInfo, CustomDebugParent, LocalConstantInfo};
-use pdbrs::portable::custom::CustomDebugKind;
-use pdbrs::portable::debug::{ConstantValue, LocalConstantSignature, PrimitiveConstant};
+use pdbrs::io::ReadAt;
+use pdbrs::portable::custom::{CustomDebugInformation, CustomDebugKind, CustomDebugParent};
+use pdbrs::portable::debug::{
+    ConstantValue, LocalConstant, LocalConstantSignature, PrimitiveConstant, SequencePoints,
+};
 use pdbrs::portable::embedded::decode_embedded;
 use pdbrs::portable::metadata::{DocumentId, MetadataToken, TableId};
-use pdbrs::portable::{IdentityPolicy, Pdb, PdbBuilder, PdbEditor};
+use pdbrs::portable::write::ExternalRowCounts;
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
 
 use super::rebuild::{hex, yes};
 use super::{
@@ -156,9 +159,9 @@ fn check(
     let identity = IdentityPolicy::Explicit(pdb.identity());
     let _ = writeln!(log, "{fixture}:");
 
-    let editor = pdb.edit().map_err(pdbrs)?;
-    let unchanged = editor
-        .plan(IdentityPolicy::ContentDerived)
+    let unchanged = pdb
+        .edit(IdentityPolicy::ContentDerived)
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let mut passed = unchanged == original;
@@ -168,9 +171,8 @@ fn check(
         yes(passed)
     );
 
-    let builder: &PdbBuilder = &editor;
-    let built = builder
-        .plan(identity)
+    let built = copy(&pdb, identity)
+        .and_then(|editor| editor.plan(EditOptions::default()))
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let _ = writeln!(
@@ -188,16 +190,16 @@ fn check(
         &expect::decoded(&built_dump),
     );
 
-    let mut editor = pdb.edit().map_err(pdbrs)?;
+    let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
     apply(&mut editor, true).map_err(pdbrs)?;
     let edited = editor
-        .plan(IdentityPolicy::ContentDerived)
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
-    let mut again = pdb.edit().map_err(pdbrs)?;
+    let mut again = pdb.edit(IdentityPolicy::ContentDerived);
     apply(&mut again, true).map_err(pdbrs)?;
     let repeated = again
-        .plan(IdentityPolicy::ContentDerived)
+        .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .map_err(pdbrs)?;
     let _ = writeln!(
@@ -223,17 +225,17 @@ fn check(
     );
 
     if let Input::Standalone(path) = &comparison.input {
-        let mut lines = pdb.edit().map_err(pdbrs)?;
+        let mut lines = pdb.edit(identity);
         apply(&mut lines, false).map_err(pdbrs)?;
         let moved = lines
-            .plan(identity)
+            .plan(EditOptions::default())
             .and_then(|plan| plan.to_vec())
             .map_err(pdbrs)?;
-        let documents = (1..=lines.document_count())
-            .filter_map(|row| {
-                let document = lines.document(DocumentId(u32::try_from(row).ok()?))?;
-                String::from_utf8(document.name.clone()).ok()
-            })
+        let documents = lines
+            .documents_mut()
+            .map_err(pdbrs)?
+            .iter()
+            .filter_map(|(_, document)| String::from_utf8(document.name.to_vec()).ok())
             .collect();
         let pdbs = stack::Pdbs {
             original: &original,
@@ -288,45 +290,81 @@ fn guid_text(kind: &CustomDebugKind) -> String {
     )
 }
 
+/// Copy all records of `pdb` into a new editor, which writes new heaps.
+fn copy<S: ReadAt>(pdb: &Pdb<S>, identity: IdentityPolicy) -> pdbrs::Result<PdbEditor<'static>> {
+    let mut editor = PdbEditor::new(
+        ExternalRowCounts::from_pdb_stream(pdb.pdb_stream()),
+        identity,
+    );
+    editor.set_entry_point(pdb.pdb_stream().entry_point());
+    let mut source = pdb.edit(identity);
+    *editor.methods_mut()? = source.methods_mut()?.clone();
+    let documents = editor.documents_mut()?;
+    for document in pdb.documents() {
+        documents.push(document?.1)?;
+    }
+    // A source handle index is the source row - 1, so the parents of the custom debug
+    // information stay valid.
+    let scopes = editor.local_scopes_mut()?;
+    for scope in pdb.local_scopes() {
+        scopes.push(scope?.1)?;
+    }
+    let imports = editor.import_scopes_mut()?;
+    for scope in pdb.import_scopes() {
+        imports.push(scope?.1)?;
+    }
+    let methods = editor.state_machine_methods_mut()?;
+    for method in pdb.state_machine_methods() {
+        methods.push(method?.1);
+    }
+    let custom = editor.custom_debug_information_mut()?;
+    for information in source.custom_debug_information_mut()?.iter() {
+        custom.push(information.1.clone())?;
+    }
+    Ok(editor)
+}
+
 /// Apply the edit. With `all` `false`, only move the sequence points.
-fn apply(editor: &mut PdbEditor, all: bool) -> pdbrs::Result<()> {
-    for (_, method) in editor.methods_mut() {
-        for point in &mut method.sequence_points {
+fn apply<S: ReadAt>(editor: &mut PdbEditor<'_, S>, all: bool) -> pdbrs::Result<()> {
+    for method in editor.methods_mut()?.values_mut() {
+        let Some(points) = method.decode()? else {
+            continue;
+        };
+        let signature = points.local_signature();
+        let form = points.local_signature_form();
+        let mut moved = points.collect::<pdbrs::Result<Vec<_>>>()?;
+        for point in &mut moved {
             if let Some(span) = &mut point.span {
                 span.start_line += LINE_SHIFT;
                 span.end_line += LINE_SHIFT;
             }
         }
+        *method = SequencePoints::encode_parts(signature, form, &moved)?;
     }
     if !all {
         return Ok(());
     }
-    if let Some(document) = editor.document_mut(DocumentId(1)) {
-        document.name.extend_from_slice(RENAME_SUFFIX);
+    if let Some(document) = editor.documents_mut()?.get_mut(DocumentId(1)) {
+        let mut name = document.name.to_vec();
+        name.extend_from_slice(RENAME_SUFFIX);
+        document.name = name.into();
     }
-    let last = editor
-        .local_scopes()
-        .max_by_key(|(_, scope)| {
-            (
-                scope.method,
-                scope.start_offset,
-                std::cmp::Reverse(scope.length),
-            )
-        })
-        .map(|(handle, _)| handle);
-    if let Some(scope) = last {
-        let mut constant = LocalConstantInfo::default();
-        constant.name = ADDED_CONSTANT.to_vec();
+    if let Some((_, scope)) = editor.local_scopes_mut()?.iter_mut().last() {
+        let mut signature = Vec::new();
         LocalConstantSignature::encode_parts(
             &[],
             &ConstantValue::Primitive(PrimitiveConstant::I4(ADDED_VALUE)),
-            &mut constant.signature,
+            &mut signature,
         )?;
-        editor.add_local_constant(scope, constant)?;
+        let mut constant = LocalConstant::default();
+        constant.name = ADDED_CONSTANT.into();
+        constant.signature = signature.into();
+        scope.constants.push(constant);
     }
     let method = MetadataToken::new(TableId::METHOD_DEF, 1).unwrap_or_default();
-    let mut information = CustomDebugInfo::new(CustomDebugParent::Metadata(method), ADDED_KIND);
-    information.value = ADDED_INFORMATION.to_vec();
-    editor.add_custom_debug_information(information)?;
+    let mut information =
+        CustomDebugInformation::new(CustomDebugParent::Metadata(method), ADDED_KIND);
+    information.value = ADDED_INFORMATION.into();
+    editor.custom_debug_information_mut()?.push(information)?;
     Ok(())
 }

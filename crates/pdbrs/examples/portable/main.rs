@@ -129,7 +129,7 @@ impl<S: ReadAt> Reader<'_, S> {
     fn custom_debug_information(&mut self) -> Outcome {
         let pdb = self.pdb;
         for row in pdb.custom_debug_informations() {
-            let row = row?;
+            let (_, row) = row?;
             let value = row.decode()?;
             self.counts.add("custom debug values decoded", 1);
             if matches!(value, CustomDebugValue::Unknown { .. }) {
@@ -137,7 +137,7 @@ impl<S: ReadAt> Reader<'_, S> {
             }
             let mut encoded = Vec::new();
             value.encode(&mut encoded)?;
-            if encoded == row.value() {
+            if encoded == *row.value {
                 self.counts
                     .add("custom debug values encoded to the same bytes", 1);
             } else {

@@ -12,7 +12,7 @@ use pdbrs::portable::debug::{
     DocumentName, Imports, LocalConstantSignature, SequencePoint, SequencePoints, ValidateOptions,
     split_document_name,
 };
-use pdbrs::portable::metadata::{BlobOffset, DocumentId};
+use pdbrs::portable::metadata::{BlobOffset, DocumentId, DocumentRow, ImportScopeRow};
 
 use crate::input::Input;
 use crate::{MAX_STREAM, encoded, ok};
@@ -78,7 +78,7 @@ fn sequence_points(blob: &[u8], document: DocumentId) {
     if points.is_empty() {
         return;
     }
-    let again = SequencePoints::parse(&encoded.blob, encoded.document)
+    let again = SequencePoints::parse(&encoded.sequence_points, encoded.document)
         .expect("encoded sequence points decode");
     assert_eq!(again.local_signature(), signature);
     assert_eq!(again.local_signature_form(), form);
@@ -162,50 +162,57 @@ fn compressed(bytes: &[u8]) {
 /// Decode the debug table rows of a Portable PDB through the typed accessors.
 pub(crate) fn walk_debug<S: ReadAt>(pdb: &Pdb<S>) {
     for document in pdb.documents().take(MAX_ITEMS) {
-        let Some(document) = ok(document) else {
+        let Some((id, document)) = ok(document) else {
             break;
         };
-        let _ = (document.name(), document.hash(), document.language());
-        let _ = document.hash_algorithm();
-        if let Some(Some(source)) = ok(pdb.document_source(&document, MAX_STREAM)) {
+        let _ = (document.name.len(), document.hash.len(), document.language);
+        let _ = document.hash_algorithm;
+        if let Some(Some(source)) = ok(pdb.document_source(id, &document, MAX_STREAM)) {
             let _ = (source.format(), source.check(), source.content().len());
         }
-        let _ = pdb.embedded_source_row(&document);
-        if let Some(blob) = ok(pdb.blob(document.row().name)) {
-            document_name(&blob);
+        let _ = pdb.embedded_source_row(id);
+        if let Some(row) = ok(pdb.row::<DocumentRow>(id)) {
+            if let Some(blob) = ok(pdb.blob(row.name)) {
+                document_name(&blob);
+            }
+            let _ = pdb.document_name(row.name);
         }
-        let _ = pdb.document_name(document.row().name);
     }
     for method in pdb.method_debug_informations().take(MAX_ITEMS) {
-        let Some(method) = ok(method) else {
+        let Some((_, method)) = ok(method) else {
             break;
         };
-        sequence_points(method.sequence_points_blob(), method.document());
-        if let Some(Some(points)) = ok(method.sequence_points()) {
+        sequence_points(&method.sequence_points, method.document);
+        if let Some(Some(points)) = ok(method.decode()) {
             let _ = points.take(MAX_ITEMS).count();
         }
     }
     for scope in pdb.local_scopes().take(MAX_ITEMS) {
-        let Some(scope) = ok(scope) else {
+        let Some((_, scope)) = ok(scope) else {
             break;
         };
-        let _ = (scope.end_offset(), scope.method(), scope.import_scope());
-        for id in scope.variables().take(MAX_ITEMS) {
-            let _ = pdb.local_variable(id);
+        let _ = (scope.end_offset(), scope.method, scope.import_scope);
+        for variable in scope.variables.iter().take(MAX_ITEMS) {
+            let _ = variable.is_debugger_hidden();
         }
-        for id in scope.constants().take(MAX_ITEMS) {
-            if let Some(local) = ok(pdb.local_constant(id)) {
-                let _ = local.signature();
-                constant(local.signature_blob());
-            }
+        for local in scope.constants.iter().take(MAX_ITEMS) {
+            let _ = local.decode();
+            constant(&local.signature);
         }
     }
     for scope in pdb.import_scopes().take(MAX_ITEMS) {
-        let Some(scope) = ok(scope) else {
+        if scope.is_err() {
+            break;
+        }
+    }
+    for row in pdb.rows::<ImportScopeRow>().take(MAX_ITEMS) {
+        let Some((_, row)) = ok(row) else {
             break;
         };
-        let _ = scope.parent();
-        imports(scope.imports_blob());
+        let _ = row.parent;
+        if let Some(blob) = ok(pdb.blob(row.imports)) {
+            imports(&blob);
+        }
     }
     for method in pdb.state_machine_methods().take(MAX_ITEMS) {
         if method.is_err() {

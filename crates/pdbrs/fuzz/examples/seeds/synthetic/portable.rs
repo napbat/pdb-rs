@@ -1,20 +1,19 @@
 //! A synthetic Portable PDB with rows in each debug table and each custom debug information
 //! kind.
 
-use pdbrs::portable::build::{
-    CustomDebugInfo, CustomDebugParent, DocumentInfo, ImportInfo, ImportScopeInfo,
-    LocalConstantInfo, LocalScopeInfo, LocalVariableInfo, MethodInfo,
-};
+use pdbrs::Bytes;
 use pdbrs::portable::custom::{
     AsyncMethodSteppingInformation, AsyncStep, CompilationMetadataReferences, CompilationOption,
-    CompilationOptions, CustomDebugKind, DynamicLocalVariables, EncLambdaAndClosureMap,
-    EncLocalSlotMap, EncStateMachineStateMap, HoistedLocalScope, HoistedLocalScopes, Lambda,
-    LambdaClosure, LocalSlot, MetadataReference, StateMachineState, TupleElementNames,
-    TypeDefinitionDocuments,
+    CompilationOptions, CustomDebugInformation, CustomDebugKind, CustomDebugParent,
+    DynamicLocalVariables, EncLambdaAndClosureMap, EncLocalSlotMap, EncStateMachineStateMap,
+    HoistedLocalScope, HoistedLocalScopes, Lambda, LambdaClosure, LocalSlot, MetadataReference,
+    StateMachineState, TupleElementNames, TypeDefinitionDocuments,
 };
 use pdbrs::portable::debug::{
-    ConstantValue, HashAlgorithm, Language, LocalConstantSignature, LocalSignatureForm,
-    PrimitiveConstant, SequencePoint, SourceSpan,
+    ConstantValue, Document, HashAlgorithm, Import, ImportScope, Language, LocalConstant,
+    LocalConstantSignature, LocalScope, LocalSignatureForm, LocalVariable, LocalVariableHandle,
+    MethodDebugInformation, PrimitiveConstant, SequencePoint, SequencePoints, SourceSpan,
+    StateMachineMethod,
 };
 use pdbrs::portable::embedded::{EmbeddedFormat, EmbeddedSource};
 use pdbrs::portable::metadata::{
@@ -22,7 +21,7 @@ use pdbrs::portable::metadata::{
     StandAloneSigId, TableId,
 };
 use pdbrs::portable::write::ExternalRowCounts;
-use pdbrs::portable::{Identity, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::portable::{EditOptions, Identity, IdentityPolicy, Pdb, PdbEditor};
 
 use crate::Outcome;
 
@@ -38,24 +37,27 @@ fn information(
     parent: CustomDebugParent,
     kind: CustomDebugKind,
     value: Vec<u8>,
-) -> CustomDebugInfo {
-    let mut information = CustomDebugInfo::new(parent, kind);
-    information.value = value;
+) -> CustomDebugInformation<'static> {
+    let mut information = CustomDebugInformation::new(parent, kind);
+    information.value = value.into();
     information
 }
 
 /// Make the sequence points of a method with a local signature row.
-fn method(local_signature: u32, sequence_points: Vec<SequencePoint>) -> MethodInfo {
-    let mut method = MethodInfo::default();
-    method.local_signature = StandAloneSigId(local_signature);
-    method.local_signature_form = LocalSignatureForm::Row;
-    method.sequence_points = sequence_points;
-    method
+fn method(
+    local_signature: u32,
+    sequence_points: &[SequencePoint],
+) -> pdbrs::Result<MethodDebugInformation<'static>> {
+    SequencePoints::encode_parts(
+        StandAloneSigId(local_signature),
+        LocalSignatureForm::Row,
+        sequence_points,
+    )
 }
 
 /// Make an import scope.
-fn import_scope(parent: ImportScopeId, imports: Vec<ImportInfo>) -> ImportScopeInfo {
-    let mut scope = ImportScopeInfo::default();
+fn import_scope(parent: ImportScopeId, imports: Vec<Import<'static>>) -> ImportScope<'static> {
+    let mut scope = ImportScope::default();
     scope.parent = parent;
     scope.imports = imports;
     scope
@@ -78,44 +80,46 @@ fn point(offset: u32, document: DocumentId, line: Option<u32>) -> SequencePoint 
 }
 
 /// Add the documents and the methods with their sequence points.
-fn documents_and_methods(builder: &mut PdbBuilder, source: &[u8]) -> Outcome<DocumentId> {
+fn documents_and_methods(editor: &mut PdbEditor<'static>, source: &[u8]) -> Outcome<DocumentId> {
     let mut documents = Vec::new();
     for name in [&b"C:\\src\\Program.cs"[..], b"/src/Helper.cs"] {
-        let mut document = DocumentInfo::default();
-        document.name = name.to_vec();
+        let mut document = Document::default();
+        document.name = name.to_vec().into();
         document.hash_algorithm = Some(HashAlgorithm::Sha256.guid());
-        document.hash = vec![0x33; 32];
+        document.hash = vec![0x33; 32].into();
         document.language = Some(Language::CSharp.guid());
-        documents.push(builder.add_document(document)?);
+        documents.push(editor.documents_mut()?.push(document)?);
     }
     let hidden = point(6, documents[0], None);
-    builder.set_method(
+    let methods = editor.methods_mut()?;
+    methods.insert(
         MethodDefId(1),
         method(
             1,
-            vec![
+            &[
                 point(0, documents[0], Some(3)),
                 hidden,
                 point(8, documents[0], Some(4)),
             ],
-        ),
+        )?,
     );
-    builder.set_method(
+    methods.insert(
         MethodDefId(2),
         method(
             0,
-            vec![
+            &[
                 point(0, documents[0], Some(10)),
                 point(4, documents[1], Some(2)),
             ],
-        ),
+        )?,
     );
-    builder.add_custom_debug_information(information(
+    let informations = editor.custom_debug_information_mut()?;
+    informations.push(information(
         CustomDebugParent::Document(documents[0]),
         CustomDebugKind::EMBEDDED_SOURCE,
         blob(|out| EmbeddedSource::encode_parts(source, EmbeddedFormat::Deflate, out))?,
     ))?;
-    builder.add_custom_debug_information(information(
+    informations.push(information(
         CustomDebugParent::Document(documents[1]),
         CustomDebugKind::EMBEDDED_SOURCE,
         blob(|out| EmbeddedSource::encode_parts(b"class Helper { }\n", EmbeddedFormat::Raw, out))?,
@@ -124,39 +128,39 @@ fn documents_and_methods(builder: &mut PdbBuilder, source: &[u8]) -> Outcome<Doc
 }
 
 /// Add an import scope, a local scope with a variable and constants, and a state machine.
-fn scopes(builder: &mut PdbBuilder) -> Outcome {
-    let root = builder.add_import_scope(import_scope(
+fn scopes(editor: &mut PdbEditor<'static>) -> Outcome {
+    let import_scopes = editor.import_scopes_mut()?;
+    let root = import_scopes.push(import_scope(
         ImportScopeId(0),
-        vec![ImportInfo::AssemblyReferenceAlias {
-            alias: b"Ext".to_vec(),
+        vec![Import::AssemblyReferenceAlias {
+            alias: Bytes::new(b"Ext"),
         }],
     ))?;
     let type_token = MetadataToken::new(TableId::TYPE_REF, 1).ok_or("bad token")?;
-    let imports = builder.add_import_scope(import_scope(
+    let imports = import_scopes.push(import_scope(
         root,
         vec![
-            ImportInfo::Namespace {
-                namespace: b"System".to_vec(),
+            Import::Namespace {
+                namespace: Bytes::new(b"System"),
             },
-            ImportInfo::AliasType {
-                alias: b"Con".to_vec(),
+            Import::AliasType {
+                alias: Bytes::new(b"Con"),
                 target_type: type_token,
             },
-            ImportInfo::AssemblyNamespace {
+            Import::AssemblyNamespace {
                 assembly: AssemblyRefId(1),
-                namespace: b"System.Linq".to_vec(),
+                namespace: Bytes::new(b"System.Linq"),
             },
         ],
     ))?;
-    let mut scope = LocalScopeInfo::default();
+    let mut scope = LocalScope::default();
     scope.method = MethodDefId(1);
     scope.import_scope = imports;
     scope.start_offset = IlOffset(0);
     scope.length = 12;
-    let scope = builder.add_local_scope(scope)?;
-    let mut variable = LocalVariableInfo::default();
-    variable.name = b"count".to_vec();
-    let variable = builder.add_local_variable(scope, variable)?;
+    let mut variable = LocalVariable::default();
+    variable.name = Bytes::new(b"count");
+    scope.variables.push(variable);
     for (name, value) in [
         (
             &b"Answer"[..],
@@ -168,27 +172,34 @@ fn scopes(builder: &mut PdbBuilder) -> Outcome {
             ConstantValue::Primitive(PrimitiveConstant::String(Some(b"h\0i\0".into()))),
         ),
     ] {
-        let mut constant = LocalConstantInfo::default();
-        constant.name = name.to_vec();
-        LocalConstantSignature::encode_parts(&[], &value, &mut constant.signature)?;
-        builder.add_local_constant(scope, constant)?;
+        let mut constant = LocalConstant::default();
+        constant.name = name.to_vec().into();
+        constant.signature =
+            blob(|out| LocalConstantSignature::encode_parts(&[], &value, out))?.into();
+        scope.constants.push(constant);
     }
-    builder.add_custom_debug_information(information(
+    let scope = editor.local_scopes_mut()?.push(scope)?;
+    let variable = LocalVariableHandle { scope, index: 0 };
+    let informations = editor.custom_debug_information_mut()?;
+    informations.push(information(
         CustomDebugParent::LocalVariable(variable),
         CustomDebugKind::DYNAMIC_LOCAL_VARIABLES,
         blob(|out| DynamicLocalVariables::encode_parts([false, true, true], out))?,
     ))?;
-    builder.add_custom_debug_information(information(
+    informations.push(information(
         CustomDebugParent::LocalScope(scope),
         CustomDebugKind::TUPLE_ELEMENT_NAMES,
         blob(|out| TupleElementNames::encode_parts([&b"first"[..], b"", b"second"], out))?,
     ))?;
-    builder.add_state_machine_method(MethodDefId(3), MethodDefId(2))?;
+    let mut machine = StateMachineMethod::default();
+    machine.move_next_method = MethodDefId(3);
+    machine.kickoff_method = MethodDefId(2);
+    editor.state_machine_methods_mut()?.push(machine);
     Ok(())
 }
 
 /// Add one value of each method-level custom debug information kind.
-fn method_values(builder: &mut PdbBuilder, document: DocumentId) -> Outcome {
+fn method_values(editor: &mut PdbEditor<'static>, document: DocumentId) -> Outcome {
     let method = |row| -> Outcome<CustomDebugParent> {
         Ok(CustomDebugParent::Metadata(
             MethodDefId(row).token().ok_or("bad token")?,
@@ -295,8 +306,9 @@ fn method_values(builder: &mut PdbBuilder, document: DocumentId) -> Outcome {
             blob(|out| TypeDefinitionDocuments::encode_parts([document], out))?,
         ),
     ];
+    let informations = editor.custom_debug_information_mut()?;
     for (parent, kind, value) in values {
-        builder.add_custom_debug_information(information(parent, kind, value))?;
+        informations.push(information(parent, kind, value))?;
     }
     Ok(())
 }
@@ -314,17 +326,17 @@ pub fn portable_pdb() -> Outcome<Vec<u8>> {
     ] {
         external.set(table, count);
     }
-    let mut builder = PdbBuilder::new(external);
-    builder.set_entry_point(Some(MethodDefId(1)));
-    let source = b"class Program { static void Main() { } }\n".repeat(8);
-    let document = documents_and_methods(&mut builder, &source)?;
-    scopes(&mut builder)?;
-    method_values(&mut builder, document)?;
     let identity = Identity::new([0x5a; 16], 0x1234_5678);
-    let bytes = builder.plan(IdentityPolicy::Explicit(identity))?.to_vec()?;
+    let mut editor = PdbEditor::new(external, IdentityPolicy::Explicit(identity));
+    editor.set_entry_point(Some(MethodDefId(1)));
+    let source = b"class Program { static void Main() { } }\n".repeat(8);
+    let document = documents_and_methods(&mut editor, &source)?;
+    scopes(&mut editor)?;
+    method_values(&mut editor, document)?;
+    let bytes = editor.plan(EditOptions::default())?.to_vec()?;
     let pdb = Pdb::parse(&bytes)?;
     for row in pdb.custom_debug_informations() {
-        row?.decode()?;
+        row?.1.decode()?;
     }
     Ok(bytes)
 }

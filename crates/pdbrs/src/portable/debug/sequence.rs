@@ -1,4 +1,4 @@
-//! The `MethodDebugInformation` table: sequence point blobs and the typed row.
+//! The `MethodDebugInformation` table: sequence point blobs and the method record.
 //!
 //! A sequence point blob has a header (the `LocalSignature` row and, for a method with
 //! several documents, the initial document) and then records. A record is a sequence point,

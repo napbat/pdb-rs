@@ -77,37 +77,42 @@ fn the_valid_pdb_passes_every_rule() {
 fn typed_rows_give_runs_names_and_values() {
     let bytes = Synthetic::valid().bytes();
     let pdb = Pdb::parse(&bytes).unwrap();
-    let scopes: Vec<_> = pdb.local_scopes().map(Result::unwrap).collect();
-    let runs: Vec<(Vec<u32>, usize)> = scopes
+    let scopes: Vec<_> = pdb.local_scopes().map(|scope| scope.unwrap().1).collect();
+    let variable = |row| pdb.local_variable(LocalVariableId(row)).unwrap();
+    let runs: Vec<_> = scopes
         .iter()
-        .map(|scope| {
-            let variables = scope.variables().map(|id| id.0).collect();
-            (variables, scope.constants().len())
-        })
+        .map(|scope| (scope.variables.clone(), scope.constants.len()))
         .collect();
     assert_eq!(
         runs,
-        [(vec![1], 1), (vec![2], 0), (vec![], 0), (vec![3], 0)]
+        [
+            (vec![variable(1)], 1),
+            (vec![variable(2)], 0),
+            (vec![], 0),
+            (vec![variable(3)], 0)
+        ]
     );
     assert_eq!(scopes[1].end_offset(), Some(IlOffset(0x10)));
-    assert_eq!(scopes[3].method(), MethodDefId(2));
-    let variable = pdb.local_variable(LocalVariableId(2)).unwrap();
-    assert_eq!((variable.name(), variable.index()), (&b"b"[..], 1));
+    assert_eq!(scopes[3].method, MethodDefId(2));
+    let variable = variable(2);
+    assert_eq!((variable.name.as_bytes(), variable.index), (&b"b"[..], 1));
     assert!(variable.is_debugger_hidden());
     let constant = pdb.local_constant(LocalConstantId(1)).unwrap();
-    assert_eq!(constant.name(), b"c");
+    assert_eq!(constant.name, b"c");
+    assert_eq!(scopes[0].constants, core::slice::from_ref(&constant));
     assert_eq!(
-        constant.signature().unwrap().value(),
+        constant.decode().unwrap().value(),
         &ConstantValue::Primitive(PrimitiveConstant::I4(5))
     );
     let child = pdb.import_scope(ImportScopeId(2)).unwrap();
-    assert_eq!(child.parent(), ImportScopeId(1));
-    let imports: Vec<Import> = child.imports().map(Result::unwrap).collect();
-    let alias = imports[0].alias().unwrap();
-    assert_eq!(pdb.blob(alias).unwrap(), b"Alias");
+    assert_eq!(child.parent, ImportScopeId(1));
+    let [Import::AliasType { alias, .. }] = &child.imports[..] else {
+        panic!("unexpected imports {:?}", child.imports);
+    };
+    assert_eq!(alias, b"Alias");
     let machine = pdb.state_machine_method(StateMachineMethodId(1)).unwrap();
     assert_eq!(
-        (machine.move_next_method(), machine.kickoff_method()),
+        (machine.move_next_method, machine.kickoff_method),
         (MethodDefId(2), MethodDefId(1))
     );
     assert_eq!(pdb.state_machine_methods().len(), 1);
@@ -115,7 +120,7 @@ fn typed_rows_give_runs_names_and_values() {
     assert_eq!(pdb.local_constants().len(), 1);
     assert_eq!(pdb.local_variables().len(), 3);
     let scope = pdb.local_scope(LocalScopeId(4)).unwrap();
-    assert_eq!(scope.import_scope(), ImportScopeId(2));
+    assert_eq!(scope.import_scope, ImportScopeId(2));
 }
 
 #[test]

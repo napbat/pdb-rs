@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use pdbrs::portable::debug::ValidateOptions;
+use pdbrs::portable::debug::{SequencePoints, ValidateOptions};
 use pdbrs::portable::metadata::{
     CustomDebugInformationRow, DocumentId, DocumentRow, ImportScopeRow, LocalConstantRow,
     LocalScopeRow, LocalVariableRow, MethodDebugInformationRow, StateMachineMethodRow, TableRow,
 };
-use pdbrs::portable::{IdentityPolicy, Pdb};
+use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
 
 use crate::Outcome;
 use crate::measure::Bench;
@@ -71,40 +71,34 @@ fn tables(pdb: &Pdb<&[u8]>) -> Outcome<u64> {
 fn blobs(pdb: &Pdb<&[u8]>) -> Outcome<u64> {
     let mut count = 0;
     for row in pdb.custom_debug_informations() {
-        std::hint::black_box(row?.decode()?);
+        std::hint::black_box(row?.1.decode()?);
         count += 1;
     }
     for document in pdb.documents() {
-        let document = document?;
-        std::hint::black_box(pdb.document_source(&document, MAX_EMBEDDED_SOURCE)?);
+        let (id, document) = document?;
+        std::hint::black_box(pdb.document_source(id, &document, MAX_EMBEDDED_SOURCE)?);
         count += 1;
     }
     for method in pdb.method_debug_informations() {
-        let method = method?;
-        if let Some(points) = method.sequence_points()? {
+        let (_, method) = method?;
+        if let Some(points) = method.decode()? {
             for point in points {
-                std::hint::black_box(point.map_err(|error| method.blob_error(error))?);
+                std::hint::black_box(point?);
                 count += 1;
             }
         }
     }
     for scope in pdb.local_scopes() {
-        let scope = scope?;
-        for id in scope.variables() {
-            pdb.local_variable(id)?;
-            count += 1;
-        }
-        for id in scope.constants() {
-            std::hint::black_box(pdb.local_constant(id)?.signature()?);
+        let (_, scope) = scope?;
+        count += u64::try_from(scope.variables.len())?;
+        for constant in &scope.constants {
+            std::hint::black_box(constant.decode()?);
             count += 1;
         }
     }
     for scope in pdb.import_scopes() {
-        let scope = scope?;
-        for import in scope.imports() {
-            std::hint::black_box(import.map_err(|error| scope.blob_error(error))?);
-            count += 1;
-        }
+        let (_, scope) = scope?;
+        count += u64::try_from(std::hint::black_box(scope.imports).len())?;
     }
     for method in pdb.state_machine_methods() {
         method?;
@@ -144,19 +138,28 @@ pub(crate) fn edit(path: &Path, bench: &mut Bench) -> Outcome {
     let bytes = std::fs::read(path)?;
     let pdb = Pdb::parse(&bytes)?;
     bench.measure(|| {
-        let mut editor = pdb.edit()?;
-        for (_, method) in editor.methods_mut() {
-            for point in &mut method.sequence_points {
+        let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
+        for method in editor.methods_mut()?.values_mut() {
+            let Some(decoded) = method.decode()? else {
+                continue;
+            };
+            let signature = decoded.local_signature();
+            let form = decoded.local_signature_form();
+            let mut points = decoded.collect::<pdbrs::Result<Vec<_>>>()?;
+            for point in &mut points {
                 if let Some(span) = &mut point.span {
                     span.start_line += LINE_SHIFT;
                     span.end_line += LINE_SHIFT;
                 }
             }
+            *method = SequencePoints::encode_parts(signature, form, &points)?;
         }
-        if let Some(document) = editor.document_mut(DocumentId(1)) {
-            document.name.extend_from_slice(RENAME_SUFFIX);
+        if let Some(document) = editor.documents_mut()?.get_mut(DocumentId(1)) {
+            let mut name = std::mem::take(&mut document.name).into_vec();
+            name.extend_from_slice(RENAME_SUFFIX);
+            document.name = name.into();
         }
-        let output = editor.plan(IdentityPolicy::ContentDerived)?.to_vec()?;
+        let output = editor.plan(EditOptions::default())?.to_vec()?;
         Ok(u64::try_from(output.len())?)
     })
 }

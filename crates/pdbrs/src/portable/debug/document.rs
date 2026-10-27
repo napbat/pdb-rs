@@ -1,4 +1,4 @@
-//! The `Document` table: name blobs, languages, hash algorithms and the typed row.
+//! The `Document` table: name blobs, languages, hash algorithms and the document record.
 //!
 //! A document name blob is `separator part+`. The separator is one UTF-8 character, or byte 0
 //! for no separator. Each part is a compressed `#Blob` offset of UTF-8 text. The name is the
