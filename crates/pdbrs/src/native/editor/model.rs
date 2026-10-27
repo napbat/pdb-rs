@@ -133,6 +133,8 @@ pub(super) enum Names {
 /// - [`PdbEditor::remove_named_stream`]: a named stream and its Info entry.
 /// - [`PdbEditor::rename_symbols`]: public and global symbols, and module
 ///   procedures with their reference records.
+/// - [`PdbEditor::remap_source_paths`]: the source paths of the PDB, with
+///   `/names` again without the old paths (#46).
 ///
 /// # Layouts
 ///
@@ -155,7 +157,9 @@ pub(super) enum Names {
 ///   other stream names; the report gives it as removed.
 ///
 /// In both layouts, type indices, ID indices and `/names` offsets keep their
-/// values: the index spaces only grow (rule 5 of #42).
+/// values: the index spaces only grow (rule 5 of #42). Only
+/// [`PdbEditor::remap_source_paths`] builds `/names` again (#46): it writes
+/// the new offsets into every decoded field.
 ///
 /// # Dependencies
 ///
@@ -193,6 +197,17 @@ pub(super) enum Names {
 ///   the index space ([`Error::index_space`]).
 /// - A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream in the
 ///   copy-on-write layout: other records refer to their contents.
+///   [`PdbEditor::remap_source_paths`] changes the `/src/` streams together
+///   with the `/names` strings that they use.
+/// - After [`PdbEditor::remap_source_paths`] changed a path: data without a
+///   decoder that can hold a path or a `/names` offset. These are a module
+///   whose symbols do not form a scope tree, a symbol record or an IPI record
+///   of an unknown kind, an `S_MOD_TYPEREF` record with flags of unknown
+///   meaning, C11 line data, a C13 subsection of an unknown kind, an ignored,
+///   `DEBUG_S_SYMBOLS` or `DEBUG_S_STRINGTABLE` subsection, a named stream of
+///   an unknown kind and, in the copy-on-write layout, a present stream that
+///   no other stream names and that does not decode as a type map stream.
+///   The error names the stream.
 /// - A new name of a reference record such as `S_PROCREF`, unless the module
 ///   record that it names gets the same name in the model:
 ///   [`PdbEditor::rename_symbols`] renames both.
