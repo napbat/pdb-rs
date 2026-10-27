@@ -70,6 +70,7 @@ mod layout;
 mod parts;
 pub(super) mod plan;
 mod rebuild;
+pub(super) mod report;
 
 pub use heaps::{BlobHeap, GuidHeap, StringHeap, StringHeapBuilder, UserStringHeap};
 pub use identity::{ChecksumAlgorithm, CodeViewFields, PdbChecksum};

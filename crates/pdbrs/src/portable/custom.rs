@@ -6,8 +6,8 @@
 //! raw bytes. The decoder does not drop or interpret such a value.
 //!
 //! [`Pdb::custom_debug_information`](crate::portable::Pdb::custom_debug_information)
-//! reads a row with its GUID and its blob as a [`CustomDebugInformation`], and
-//! [`CustomDebugInformation::decode`] decodes it.
+//! reads a row with its parent, its GUID and its blob as a [`CustomDebugInformation`]
+//! record, and [`CustomDebugInformation::decode`] decodes it.
 //!
 //! The layouts come from these sources:
 //!
@@ -49,8 +49,8 @@
 //! codecs of this module (see
 //! [`crate::native::codeview::symbol::CustomDebugInfoData`]).
 //!
-//! The codec errors have no location; [`CustomDebugInformation::decode`] adds
-//! the row, the blob offset and the kind GUID. A blob that ends inside a field
+//! The codec errors have no location, because a record holds no position. A blob that ends
+//! inside a field
 //! gives [`ErrorKind::UnexpectedEof`](crate::ErrorKind::UnexpectedEof).
 
 /// Define an iterator type over the entries of a blob that its codec checked.
@@ -128,7 +128,7 @@ pub use enc::{
 pub use locals::{
     DynamicLocalVariables, DynamicLocalVariablesIter, TupleElementNames, TupleElementNamesIter,
 };
-pub use rows::{CustomDebugInformation, CustomDebugInformationIter};
+pub use rows::{CustomDebugHandle, CustomDebugInformation, CustomDebugParent};
 pub use state_machine::{
     AsyncMethodSteppingInformation, AsyncMethodSteppingInformationIter, AsyncStep,
     HoistedLocalScope, HoistedLocalScopes, HoistedLocalScopesIter,

@@ -1,4 +1,4 @@
-//! The Portable PDB backend: the reader, the identity and shared codecs.
+//! The Portable PDB backend: the reader, the editor, the identity and shared codecs.
 //!
 //! Portable PDBs use CLI metadata, not MSF. [`Pdb`] reads a standalone
 //! Portable PDB: [`metadata`] has the metadata root, the heaps, the `#Pdb`
@@ -7,33 +7,79 @@
 //! native PDB age.
 //!
 //! [`compressed`] decodes and encodes the compressed integers of metadata
-//! blobs. [`debug`] has the typed rows, the blob codecs and the validation of
-//! the debug tables. [`custom`] decodes and encodes custom debug information
-//! blobs.
+//! blobs. [`debug`] has the records, the blob codecs and the validation of
+//! the debug tables. [`custom`] has the custom debug information record and
+//! decodes and encodes custom debug information blobs.
 //! [`embedded`] decodes and encodes embedded Portable PDB payloads and
 //! embedded-source blobs. Windows PDB document records use the same
 //! embedded-source blob format. Decode an `MPDB` payload with
 //! [`embedded::decode_embedded`], then read the result with [`Pdb::parse`].
 //!
+//! [`PdbEditor`] builds and edits Portable PDBs from records: [`PdbEditor::new`] starts
+//! without a source, and [`Pdb::edit`] starts from a source. [`PdbEditor::plan`] makes a
+//! [`PdbWritePlan`] with the output, the identity and a [`PlanReport`].
 //! [`write`](mod@write) has the raw parts and heaps of new layouts: [`write::PdbParts::plan`]
-//! makes a [`PdbWritePlan`]. [`Pdb::to_parts`] reads a Portable PDB into such parts.
-//! [`PdbBuilder`] builds a Portable PDB from records with typed handles (see [`build`]), and
-//! [`Pdb::edit`] makes a [`PdbEditor`] that changes an existing one. For an exact copy, give
-//! [`Pdb::source`] to [`io::copy_exact`](crate::io::copy_exact).
+//! makes a plan from raw rows, and [`Pdb::to_parts`] reads a Portable PDB into such parts.
+//! For an exact copy, give [`Pdb::source`] to [`io::copy_exact`](crate::io::copy_exact).
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use pdbrs::portable::debug::{Document, LocalScope};
+//! use pdbrs::portable::metadata::{IlOffset, MethodDefId, TableId};
+//! use pdbrs::portable::write::ExternalRowCounts;
+//! use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb, PdbEditor};
+//!
+//! // Read: records with their row IDs.
+//! let bytes = std::fs::read("app.pdb")?;
+//! let pdb = Pdb::parse(&bytes)?;
+//! for document in pdb.documents() {
+//!     let (id, document) = document?;
+//!     println!("{} {:?}", id.0, document.name);
+//! }
+//!
+//! // Edit: the identity policy at the entry.
+//! let mut edit = pdb.edit(IdentityPolicy::ContentDerived);
+//! for (_, document) in edit.documents_mut()?.iter_mut() {
+//!     document.name = document.name.to_ascii_lowercase().into();
+//! }
+//! let plan = edit.plan(EditOptions::default())?;
+//! std::fs::write("app.edited.pdb", plan.to_vec()?)?;
+//! // Write the new identity into the CodeView debug entry of the assembly.
+//! let identity = plan.identity();
+//!
+//! // Build: the same type without a source.
+//! let mut external = ExternalRowCounts::new();
+//! external.set(TableId::METHOD_DEF, 1);
+//! let mut build = PdbEditor::new(external, IdentityPolicy::Explicit(identity));
+//! let mut document = Document::default();
+//! document.name = b"/src/Program.cs".into();
+//! build.documents_mut()?.push(document)?;
+//! let mut scope = LocalScope::default();
+//! scope.method = MethodDefId(1);
+//! scope.start_offset = IlOffset(0);
+//! scope.length = 10;
+//! build.local_scopes_mut()?.push(scope)?;
+//! let plan = build.plan(EditOptions::default())?;
+//! for (stream, change) in plan.report().streams() {
+//!     println!("{stream:?}: {change:?}");
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
-pub mod build;
-mod builder;
 pub mod compressed;
 pub mod custom;
 pub mod debug;
+pub mod editor;
 pub mod embedded;
 pub mod metadata;
 mod reader;
 pub mod write;
 
-pub use builder::{PdbBuilder, PdbEditor};
+pub use editor::model::{EditOptions, PdbEditor};
 pub use reader::{Pdb, ReadOptions, Rows};
 pub use write::plan::PdbWritePlan;
+pub use write::report::{PlanReport, RebuildReason, StreamChange};
 
 /// How a write plan sets the 20-byte PDB ID.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

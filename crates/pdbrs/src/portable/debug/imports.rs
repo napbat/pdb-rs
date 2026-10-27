@@ -1,4 +1,4 @@
-//! The `ImportScope` table: import blobs and the typed row.
+//! The `ImportScope` table: import blobs and the import scope record.
 //!
 //! An imports blob is a sequence of imports. Each import is a compressed kind (1 to 9) and the
 //! fields of that kind in this order: alias, target assembly, target namespace, target type.
@@ -10,18 +10,21 @@ use core::iter::FusedIterator;
 
 use super::rows::{TypedRows, each_row, in_blob};
 use super::type_handle;
+use crate::Result;
+use crate::bytes::Bytes;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid};
 use crate::portable::metadata::{
     AssemblyRefId, BlobOffset, ImportScopeId, ImportScopeRow, MetadataToken, TableId,
 };
-use crate::{Error, Result};
 
-/// One import of an import scope.
+/// One import of an imports blob, with the `#Blob` offsets of its names.
+///
+/// This is the table layer of an import. [`Import`] is the record with the names.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum Import {
+pub enum RawImport {
     /// Kind 1: import the members of a namespace.
     Namespace {
         /// The namespace.
@@ -83,7 +86,7 @@ pub enum Import {
     },
 }
 
-impl Import {
+impl RawImport {
     /// Return the import kind (1 to 9).
     #[must_use]
     pub const fn kind(&self) -> u32 {
@@ -252,7 +255,7 @@ impl<'a> Imports<'a> {
     ///   in a compressed integer.
     ///
     /// On error, `out` does not change.
-    pub fn encode_parts(imports: &[Import], out: &mut Vec<u8>) -> Result<()> {
+    pub fn encode_parts(imports: &[RawImport], out: &mut Vec<u8>) -> Result<()> {
         let mut writer = Writer::append(out);
         for import in imports {
             import.write(&mut writer)?;
@@ -263,13 +266,13 @@ impl<'a> Imports<'a> {
 }
 
 impl Iterator for Imports<'_> {
-    type Item = Result<Import>;
+    type Item = Result<RawImport>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed || self.reader.is_empty() {
             return None;
         }
-        let import = Import::read(&mut self.reader);
+        let import = RawImport::read(&mut self.reader);
         self.failed = import.is_err();
         Some(import)
     }
@@ -277,79 +280,296 @@ impl Iterator for Imports<'_> {
 
 impl FusedIterator for Imports<'_> {}
 
-/// A typed row of the `ImportScope` table with its imports blob.
+/// One import of an import scope, with its names.
+///
+/// The variants are the import kinds 1 to 9. The plan of an editor adds each name to the
+/// `#Blob` heap and encodes the imports as a [`RawImport`] list.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ImportScope {
-    id: ImportScopeId,
-    row: ImportScopeRow,
-    imports: Vec<u8>,
+#[non_exhaustive]
+pub enum Import<'a> {
+    /// Kind 1: import the members of a namespace.
+    Namespace {
+        /// The namespace.
+        namespace: Bytes<'a>,
+    },
+    /// Kind 2: import the members of a namespace in an assembly.
+    AssemblyNamespace {
+        /// The assembly.
+        assembly: AssemblyRefId,
+        /// The namespace.
+        namespace: Bytes<'a>,
+    },
+    /// Kind 3: import the members of a type.
+    Type {
+        /// The type: a `TypeDef`, `TypeRef` or `TypeSpec` token.
+        target_type: MetadataToken,
+    },
+    /// Kind 4: import an XML namespace with a prefix.
+    XmlNamespace {
+        /// The prefix.
+        alias: Bytes<'a>,
+        /// The XML namespace.
+        namespace: Bytes<'a>,
+    },
+    /// Kind 5: import an assembly reference alias of an ancestor scope.
+    AssemblyReferenceAlias {
+        /// The alias.
+        alias: Bytes<'a>,
+    },
+    /// Kind 6: define an alias for an assembly.
+    AliasAssemblyReference {
+        /// The alias.
+        alias: Bytes<'a>,
+        /// The assembly.
+        assembly: AssemblyRefId,
+    },
+    /// Kind 7: define an alias for a namespace.
+    AliasNamespace {
+        /// The alias.
+        alias: Bytes<'a>,
+        /// The namespace.
+        namespace: Bytes<'a>,
+    },
+    /// Kind 8: define an alias for a namespace in an assembly.
+    AliasAssemblyNamespace {
+        /// The alias.
+        alias: Bytes<'a>,
+        /// The assembly.
+        assembly: AssemblyRefId,
+        /// The namespace.
+        namespace: Bytes<'a>,
+    },
+    /// Kind 9: define an alias for a type.
+    AliasType {
+        /// The alias.
+        alias: Bytes<'a>,
+        /// The type: a `TypeDef`, `TypeRef` or `TypeSpec` token.
+        target_type: MetadataToken,
+    },
 }
 
-impl ImportScope {
-    /// Return the row ID.
+impl<'a> Import<'a> {
+    /// Return the import kind (1 to 9).
     #[must_use]
-    pub const fn id(&self) -> ImportScopeId {
-        self.id
+    pub const fn kind(&self) -> u32 {
+        match self {
+            Self::Namespace { .. } => 1,
+            Self::AssemblyNamespace { .. } => 2,
+            Self::Type { .. } => 3,
+            Self::XmlNamespace { .. } => 4,
+            Self::AssemblyReferenceAlias { .. } => 5,
+            Self::AliasAssemblyReference { .. } => 6,
+            Self::AliasNamespace { .. } => 7,
+            Self::AliasAssemblyNamespace { .. } => 8,
+            Self::AliasType { .. } => 9,
+        }
     }
 
-    /// Return the raw row.
+    /// Return an import that owns its bytes. Copy borrowed bytes.
     #[must_use]
-    pub const fn row(&self) -> &ImportScopeRow {
-        &self.row
+    pub fn into_owned(self) -> Import<'static> {
+        self.map_names(Bytes::into_owned)
     }
 
-    /// Return the parent import scope, or nil.
-    #[must_use]
-    pub const fn parent(&self) -> ImportScopeId {
-        self.row.parent
+    /// Return the import with each name changed by `name`.
+    fn map_names<'b>(self, mut name: impl FnMut(Bytes<'a>) -> Bytes<'b>) -> Import<'b> {
+        match self {
+            Self::Namespace { namespace } => Import::Namespace {
+                namespace: name(namespace),
+            },
+            Self::AssemblyNamespace {
+                assembly,
+                namespace,
+            } => Import::AssemblyNamespace {
+                assembly,
+                namespace: name(namespace),
+            },
+            Self::Type { target_type } => Import::Type { target_type },
+            Self::XmlNamespace { alias, namespace } => Import::XmlNamespace {
+                alias: name(alias),
+                namespace: name(namespace),
+            },
+            Self::AssemblyReferenceAlias { alias } => {
+                Import::AssemblyReferenceAlias { alias: name(alias) }
+            }
+            Self::AliasAssemblyReference { alias, assembly } => Import::AliasAssemblyReference {
+                alias: name(alias),
+                assembly,
+            },
+            Self::AliasNamespace { alias, namespace } => Import::AliasNamespace {
+                alias: name(alias),
+                namespace: name(namespace),
+            },
+            Self::AliasAssemblyNamespace {
+                alias,
+                assembly,
+                namespace,
+            } => Import::AliasAssemblyNamespace {
+                alias: name(alias),
+                assembly,
+                namespace: name(namespace),
+            },
+            Self::AliasType { alias, target_type } => Import::AliasType {
+                alias: name(alias),
+                target_type,
+            },
+        }
     }
 
-    /// Return the bytes of the imports blob.
-    #[must_use]
-    pub fn imports_blob(&self) -> &[u8] {
-        &self.imports
-    }
-
-    /// Return the imports. Add the blob location to an error with
-    /// [`ImportScope::blob_error`].
-    #[must_use]
-    pub fn imports(&self) -> Imports<'_> {
-        Imports::parse(&self.imports)
-    }
-
-    /// Add the location of the imports blob to a codec error.
-    #[must_use]
-    pub fn blob_error(&self, error: Error) -> Error {
-        in_blob(
-            error,
-            TableId::IMPORT_SCOPE,
-            self.id.0,
-            "Imports",
-            self.row.imports,
-        )
+    /// Return the raw import. `blob` gives the `#Blob` offset of each name.
+    pub(crate) fn to_raw(
+        &self,
+        mut blob: impl FnMut(&[u8]) -> Result<BlobOffset>,
+    ) -> Result<RawImport> {
+        Ok(match self {
+            Self::Namespace { namespace } => RawImport::Namespace {
+                namespace: blob(namespace)?,
+            },
+            Self::AssemblyNamespace {
+                assembly,
+                namespace,
+            } => RawImport::AssemblyNamespace {
+                assembly: *assembly,
+                namespace: blob(namespace)?,
+            },
+            Self::Type { target_type } => RawImport::Type {
+                target_type: *target_type,
+            },
+            Self::XmlNamespace { alias, namespace } => RawImport::XmlNamespace {
+                alias: blob(alias)?,
+                namespace: blob(namespace)?,
+            },
+            Self::AssemblyReferenceAlias { alias } => RawImport::AssemblyReferenceAlias {
+                alias: blob(alias)?,
+            },
+            Self::AliasAssemblyReference { alias, assembly } => RawImport::AliasAssemblyReference {
+                alias: blob(alias)?,
+                assembly: *assembly,
+            },
+            Self::AliasNamespace { alias, namespace } => RawImport::AliasNamespace {
+                alias: blob(alias)?,
+                namespace: blob(namespace)?,
+            },
+            Self::AliasAssemblyNamespace {
+                alias,
+                assembly,
+                namespace,
+            } => RawImport::AliasAssemblyNamespace {
+                alias: blob(alias)?,
+                assembly: *assembly,
+                namespace: blob(namespace)?,
+            },
+            Self::AliasType { alias, target_type } => RawImport::AliasType {
+                alias: blob(alias)?,
+                target_type: *target_type,
+            },
+        })
     }
 }
+
+impl crate::bytes::IntoOwned for Import<'_> {
+    type Owned = Import<'static>;
+
+    fn to_static(self) -> Import<'static> {
+        self.into_owned()
+    }
+}
+
+impl RawImport {
+    /// Return the import with the names. `blob` reads the name at a `#Blob` offset.
+    fn resolve(
+        self,
+        mut blob: impl FnMut(BlobOffset) -> Result<Vec<u8>>,
+    ) -> Result<Import<'static>> {
+        let mut name = |offset| blob(offset).map(Bytes::from);
+        Ok(match self {
+            Self::Namespace { namespace } => Import::Namespace {
+                namespace: name(namespace)?,
+            },
+            Self::AssemblyNamespace {
+                assembly,
+                namespace,
+            } => Import::AssemblyNamespace {
+                assembly,
+                namespace: name(namespace)?,
+            },
+            Self::Type { target_type } => Import::Type { target_type },
+            Self::XmlNamespace { alias, namespace } => Import::XmlNamespace {
+                alias: name(alias)?,
+                namespace: name(namespace)?,
+            },
+            Self::AssemblyReferenceAlias { alias } => Import::AssemblyReferenceAlias {
+                alias: name(alias)?,
+            },
+            Self::AliasAssemblyReference { alias, assembly } => Import::AliasAssemblyReference {
+                alias: name(alias)?,
+                assembly,
+            },
+            Self::AliasNamespace { alias, namespace } => Import::AliasNamespace {
+                alias: name(alias)?,
+                namespace: name(namespace)?,
+            },
+            Self::AliasAssemblyNamespace {
+                alias,
+                assembly,
+                namespace,
+            } => Import::AliasAssemblyNamespace {
+                alias: name(alias)?,
+                assembly,
+                namespace: name(namespace)?,
+            },
+            Self::AliasType { alias, target_type } => Import::AliasType {
+                alias: name(alias)?,
+                target_type,
+            },
+        })
+    }
+}
+
+/// An import scope: its parent and its imports.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct ImportScope<'a> {
+    /// The parent import scope, or nil.
+    pub parent: ImportScopeId,
+    /// The imports in their order.
+    pub imports: Vec<Import<'a>>,
+}
+
+crate::bytes::into_owned!(struct ImportScope { imports; parent });
 
 impl<S: ReadAt> Pdb<S> {
-    /// Read an `ImportScope` row with its imports blob.
+    /// Read an import scope and decode its imports with their names.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`Pdb::row`] and [`Pdb::blob`].
-    pub fn import_scope(&self, id: ImportScopeId) -> Result<ImportScope> {
+    /// - The errors of [`Pdb::row`] and [`Pdb::blob`].
+    /// - The errors of [`Imports`], with the location of the imports blob: for example an
+    ///   import of an unknown kind.
+    pub fn import_scope(&self, id: ImportScopeId) -> Result<ImportScope<'static>> {
         let row: ImportScopeRow = self.row(id)?;
+        let blob = self.blob(row.imports)?;
+        let imports = Imports::parse(&blob)
+            .map(|import| {
+                import
+                    .map_err(|error| {
+                        in_blob(error, TableId::IMPORT_SCOPE, id.0, "Imports", row.imports)
+                    })?
+                    .resolve(|offset| self.blob(offset))
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(ImportScope {
-            id,
-            row,
-            imports: self.blob(row.imports)?,
+            parent: row.parent,
+            imports,
         })
     }
 
-    /// Read all `ImportScope` rows in row order.
+    /// Read all import scopes in row order, each with its row ID.
     #[must_use]
-    pub fn import_scopes(&self) -> TypedRows<'_, S, ImportScope> {
+    pub fn import_scopes(&self) -> TypedRows<'_, S, (ImportScopeId, ImportScope<'static>)> {
         each_row(self, TableId::IMPORT_SCOPE, |pdb, row| {
-            pdb.import_scope(ImportScopeId(row))
+            let id = ImportScopeId(row);
+            pdb.import_scope(id).map(|scope| (id, scope))
         })
     }
 }

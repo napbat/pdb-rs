@@ -8,23 +8,30 @@ use super::methods::reference;
 use super::{Rule, ValidationReport, external_exists};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::debug::rows::row_error;
-use crate::portable::debug::{ConstantValue, LocalConstant, LocalScope};
-use crate::portable::metadata::{MethodDefId, TableId};
+use crate::portable::debug::rows::{in_blob, row_error};
+use crate::portable::debug::{ConstantValue, LocalConstantSignature};
+use crate::portable::metadata::{
+    LocalConstantId, LocalConstantRow, LocalScopeId, LocalVariableId, MethodDefId, TableId,
+};
 use crate::{ErrorKind, Result};
 
 /// The end of the IL range of a scope (exclusive).
 const MAX_SCOPE_END: u32 = 0x8000_0000;
 
 /// Make an [`ErrorKind::InvalidFormat`] error for a `LocalScope` row.
-fn scope_error(scope: &LocalScope, context: &'static str, column: &'static str) -> crate::Error {
+fn scope_error(id: LocalScopeId, context: &'static str, column: &'static str) -> crate::Error {
     row_error(
         ErrorKind::InvalidFormat,
         context,
         TableId::LOCAL_SCOPE,
-        scope.id().0,
+        id.0,
         Some(column),
     )
+}
+
+/// Return the IDs of the `LocalScope` rows in row order.
+fn scope_ids<S: ReadAt>(pdb: &Pdb<S>) -> impl Iterator<Item = LocalScopeId> {
+    (1..=pdb.tables().row_count(TableId::LOCAL_SCOPE)).map(LocalScopeId)
 }
 
 /// The open scopes of the current method.
@@ -41,37 +48,30 @@ pub(super) fn scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> 
     let mut previous = None;
     let mut nesting: Option<Nesting> = None;
     let mut items = 0;
-    for scope in pdb.local_scopes() {
-        let scope = scope?;
-        if scope.method().is_nil() {
-            return Err(scope_error(&scope, "scope method is nil", "Method"));
+    for id in scope_ids(pdb) {
+        let scope = pdb.scope_runs(id)?.row;
+        if scope.method.is_nil() {
+            return Err(scope_error(id, "scope method is nil", "Method"));
         }
-        let key = (
-            scope.method(),
-            scope.start_offset(),
-            Reverse(scope.length()),
-        );
+        let key = (scope.method, scope.start_offset, Reverse(scope.length));
         if previous.is_some_and(|previous| key < previous) {
             return Err(scope_error(
-                &scope,
+                id,
                 "LocalScope table is not sorted by Method, StartOffset and descending Length",
                 "Method",
             ));
         }
         previous = Some(key);
-        let start = scope.start_offset().0;
-        let end = scope
-            .end_offset()
-            .map(|end| end.0)
-            .filter(|&end| scope.length() > 0 && end < MAX_SCOPE_END)
-            .ok_or_else(|| {
-                scope_error(&scope, "scope is empty or ends after 0x7FFFFFFF", "Length")
-            })?;
+        let start = scope.start_offset.0;
+        let end = start
+            .checked_add(scope.length)
+            .filter(|&end| scope.length > 0 && end < MAX_SCOPE_END)
+            .ok_or_else(|| scope_error(id, "scope is empty or ends after 0x7FFFFFFF", "Length"))?;
         match &mut nesting {
-            Some(open) if open.method == scope.method() => {
+            Some(open) if open.method == scope.method => {
                 if end > open.root_end {
                     return Err(scope_error(
-                        &scope,
+                        id,
                         "scope is outside the first scope of its method",
                         "StartOffset",
                     ));
@@ -81,7 +81,7 @@ pub(super) fn scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> 
                 }
                 if open.open.last().is_some_and(|&last| end > last) {
                     return Err(scope_error(
-                        &scope,
+                        id,
                         "scope overlaps another scope of its method without nesting",
                         "Length",
                     ));
@@ -91,14 +91,14 @@ pub(super) fn scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> 
             _ => {
                 if start != 0 {
                     return Err(scope_error(
-                        &scope,
+                        id,
                         "first scope of a method does not start at IL offset 0",
                         "StartOffset",
                     ));
                 }
                 let open = alloc::vec![end];
                 nesting = Some(Nesting {
-                    method: scope.method(),
+                    method: scope.method,
                     root_end: end,
                     open,
                 });
@@ -113,14 +113,14 @@ pub(super) fn scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> 
 
 /// Check that the runs of a list column start at row 1 and give each row to one scope.
 ///
-/// [`Pdb::local_scope`] checks that the runs do not decrease and that the last run ends after
+/// [`Pdb::scope_runs`] checks that the runs do not decrease and that the last run ends after
 /// the last row. If the table has no rows, the runs are empty.
 fn check_runs<S: ReadAt>(pdb: &Pdb<S>, table: TableId, column: &'static str) -> Result<()> {
     let rows = pdb.tables().row_count(table);
     if rows == 0 {
         return Ok(());
     }
-    let Some(first) = pdb.local_scopes().next() else {
+    let Some(first) = scope_ids(pdb).next() else {
         return Err(row_error(
             ErrorKind::InvalidFormat,
             "rows have no owner scope because the LocalScope table is empty",
@@ -129,17 +129,17 @@ fn check_runs<S: ReadAt>(pdb: &Pdb<S>, table: TableId, column: &'static str) -> 
             None,
         ));
     };
-    let first = first?;
+    let row = pdb.scope_runs(first)?.row;
     let start = if table == TableId::LOCAL_VARIABLE {
-        first.row().variable_list.0
+        row.variable_list.0
     } else {
-        first.row().constant_list.0
+        row.constant_list.0
     };
     if start == 1 {
         Ok(())
     } else {
         Err(scope_error(
-            &first,
+            first,
             "rows before the run of the first scope have no owner scope",
             column,
         ))
@@ -150,11 +150,11 @@ fn check_runs<S: ReadAt>(pdb: &Pdb<S>, table: TableId, column: &'static str) -> 
 pub(super) fn variables<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> Result<()> {
     check_runs(pdb, TableId::LOCAL_VARIABLE, "VariableList")?;
     let mut items = 0;
-    for scope in pdb.local_scopes() {
-        let scope = scope?;
+    for scope in scope_ids(pdb) {
+        let runs = pdb.scope_runs(scope)?;
         let mut indexes = BTreeSet::new();
         let mut names = BTreeSet::new();
-        for id in scope.variables() {
+        for id in runs.variables.map(LocalVariableId) {
             let variable = pdb.local_variable(id)?;
             let duplicate = |context| {
                 row_error(
@@ -165,12 +165,12 @@ pub(super) fn variables<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
                     None,
                 )
             };
-            if !indexes.insert(variable.index()) {
+            if !indexes.insert(variable.index) {
                 return Err(duplicate(
                     "two variables of a scope have the same slot index",
                 ));
             }
-            if !names.insert(variable.name().to_vec()) {
+            if !names.insert(variable.name.into_vec()) {
                 return Err(duplicate("two variables of a scope have the same name"));
             }
             items += 1;
@@ -185,13 +185,14 @@ pub(super) fn variables<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
 pub(super) fn constants<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> Result<()> {
     check_runs(pdb, TableId::LOCAL_CONSTANT, "ConstantList")?;
     let mut items = 0;
-    for scope in pdb.local_scopes() {
-        let scope = scope?;
+    for scope in scope_ids(pdb) {
+        let runs = pdb.scope_runs(scope)?;
         let mut names = BTreeSet::new();
-        for id in scope.constants() {
-            let constant = pdb.local_constant(id)?;
-            check_signature(pdb, &constant)?;
-            if !names.insert(constant.name().to_vec()) {
+        for id in runs.constants.map(LocalConstantId) {
+            let row: LocalConstantRow = pdb.row(id)?;
+            let name = pdb.string(row.name)?;
+            check_signature(pdb, id, row)?;
+            if !names.insert(name) {
                 return Err(row_error(
                     ErrorKind::InvalidFormat,
                     "two constants of a scope have the same name",
@@ -209,8 +210,22 @@ pub(super) fn constants<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
 }
 
 /// Decode a constant signature and check that its type rows exist.
-fn check_signature<S: ReadAt>(pdb: &Pdb<S>, constant: &LocalConstant) -> Result<()> {
-    let signature = constant.signature()?;
+fn check_signature<S: ReadAt>(
+    pdb: &Pdb<S>,
+    id: LocalConstantId,
+    row: LocalConstantRow,
+) -> Result<()> {
+    let at = |error| {
+        in_blob(
+            error,
+            TableId::LOCAL_CONSTANT,
+            id.0,
+            "Signature",
+            row.signature,
+        )
+    };
+    let blob = pdb.blob(row.signature)?;
+    let signature = LocalConstantSignature::parse(&blob).map_err(at)?;
     let value_type = match signature.value() {
         ConstantValue::Enum { enum_type, .. } => Some(*enum_type),
         ConstantValue::General { constant_type, .. } => Some(*constant_type),
@@ -222,7 +237,7 @@ fn check_signature<S: ReadAt>(pdb: &Pdb<S>, constant: &LocalConstant) -> Result<
         .chain(value_type);
     for token in types {
         if !external_exists(pdb, token) {
-            return Err(constant.blob_error(reference("constant type row does not exist")));
+            return Err(at(reference("constant type row does not exist")));
         }
     }
     Ok(())

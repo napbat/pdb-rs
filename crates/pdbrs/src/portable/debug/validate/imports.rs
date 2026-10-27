@@ -6,10 +6,10 @@ use super::methods::reference;
 use super::{Rule, ValidationReport, external_exists};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::debug::ImportScope;
-use crate::portable::debug::rows::row_error;
-use crate::portable::metadata::TableId;
-use crate::{ErrorKind, Result};
+use crate::portable::debug::Imports;
+use crate::portable::debug::rows::{in_blob, row_error};
+use crate::portable::metadata::{ImportScopeId, ImportScopeRow, TableId};
+use crate::{Error, ErrorKind, Result};
 
 /// The state of an import scope in the cycle search.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -26,10 +26,10 @@ enum Visit {
 pub(super) fn import_scopes<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) -> Result<()> {
     let mut parents = Vec::new();
     let mut imports = 0;
-    for scope in pdb.import_scopes() {
-        let scope = scope?;
-        parents.push(scope.parent().0);
-        imports += check_imports(pdb, &scope)?;
+    for row in pdb.rows::<ImportScopeRow>() {
+        let (id, row) = row?;
+        parents.push(row.parent.0);
+        imports += check_imports(pdb, id, row)?;
     }
     check_cycles(&parents)?;
     report.checked(
@@ -75,25 +75,27 @@ fn check_cycles(parents: &[u32]) -> Result<()> {
 }
 
 /// Decode the imports of a scope, check their references and return their number.
-fn check_imports<S: ReadAt>(pdb: &Pdb<S>, scope: &ImportScope) -> Result<u64> {
+fn check_imports<S: ReadAt>(pdb: &Pdb<S>, id: ImportScopeId, row: ImportScopeRow) -> Result<u64> {
+    let at = |error: Error| in_blob(error, TableId::IMPORT_SCOPE, id.0, "Imports", row.imports);
     let assemblies = pdb.pdb_stream().external_row_count(TableId::ASSEMBLY_REF);
+    let blob = pdb.blob(row.imports)?;
     let mut items = 0;
-    for import in scope.imports() {
-        let import = import.map_err(|error| scope.blob_error(error))?;
+    for import in Imports::parse(&blob) {
+        let import = import.map_err(at)?;
         if import
             .assembly()
             .is_some_and(|assembly| assembly.0 > assemblies)
         {
-            return Err(scope.blob_error(reference("import AssemblyRef row does not exist")));
+            return Err(at(reference("import AssemblyRef row does not exist")));
         }
         if import
             .target_type()
             .is_some_and(|token| !external_exists(pdb, token))
         {
-            return Err(scope.blob_error(reference("import type row does not exist")));
+            return Err(at(reference("import type row does not exist")));
         }
         for text in [import.alias(), import.namespace()].into_iter().flatten() {
-            pdb.blob(text).map_err(|error| scope.blob_error(error))?;
+            pdb.blob(text).map_err(at)?;
         }
         items += 1;
     }

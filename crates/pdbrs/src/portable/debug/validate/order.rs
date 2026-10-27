@@ -18,17 +18,17 @@ pub(super) fn state_machine_methods<S: ReadAt>(
     let mut kickoffs = BTreeSet::new();
     let mut items = 0;
     for method in pdb.state_machine_methods() {
-        let method = method?;
+        let (id, method) = method?;
         let error = |context, column| {
             row_error(
                 ErrorKind::InvalidFormat,
                 context,
                 TableId::STATE_MACHINE_METHOD,
-                method.id().0,
+                id.0,
                 Some(column),
             )
         };
-        let (move_next, kickoff) = (method.move_next_method(), method.kickoff_method());
+        let (move_next, kickoff) = (method.move_next_method, method.kickoff_method);
         if move_next.is_nil() {
             return Err(error("MoveNextMethod is nil", "MoveNextMethod"));
         }

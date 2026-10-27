@@ -45,7 +45,7 @@ pub(super) fn row_error(
 }
 
 /// Call `read` for each row number of `table` in row order.
-pub(super) fn each_row<'a, S: ReadAt, T>(
+pub(crate) fn each_row<'a, S: ReadAt, T>(
     pdb: &'a Pdb<S>,
     table: TableId,
     read: fn(&'a Pdb<S>, u32) -> Result<T>,

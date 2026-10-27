@@ -12,16 +12,14 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{TypedRows, each_row, in_blob};
+use super::rows::{TypedRows, each_row};
 use super::type_handle;
+use crate::Result;
 use crate::bytes::{Bytes, into_owned};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid};
-use crate::portable::metadata::{
-    BlobOffset, LocalConstantId, LocalConstantRow, MetadataToken, TableId,
-};
-use crate::{Error, Result};
+use crate::portable::metadata::{LocalConstantId, LocalConstantRow, MetadataToken, TableId};
 
 /// `ELEMENT_TYPE_BOOLEAN`.
 const BOOLEAN: u8 = 0x02;
@@ -506,65 +504,29 @@ fn write_general(writer: &mut Writer<'_>, value: &GeneralValue) -> Result<()> {
     }
 }
 
-/// A typed row of the `LocalConstant` table with its name and signature blob.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct LocalConstant {
-    id: LocalConstantId,
-    row: LocalConstantRow,
-    name: Vec<u8>,
-    signature: Vec<u8>,
+/// A local constant of a local scope: its name and its signature blob.
+///
+/// The signature stays encoded. [`LocalConstant::decode`] decodes it. Encode a new signature
+/// with [`LocalConstantSignature::encode_parts`].
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct LocalConstant<'a> {
+    /// The name. The bytes are UTF-8 in valid metadata.
+    pub name: Bytes<'a>,
+    /// The local constant signature blob.
+    pub signature: Bytes<'a>,
 }
 
-impl LocalConstant {
-    /// Return the row ID.
-    #[must_use]
-    pub const fn id(&self) -> LocalConstantId {
-        self.id
-    }
+into_owned!(struct LocalConstant { name, signature; });
 
-    /// Return the raw row.
-    #[must_use]
-    pub const fn row(&self) -> &LocalConstantRow {
-        &self.row
-    }
-
-    /// Return the name. The bytes are UTF-8 in valid metadata.
-    #[must_use]
-    pub fn name(&self) -> &[u8] {
-        &self.name
-    }
-
-    /// Return the bytes of the signature blob.
-    #[must_use]
-    pub fn signature_blob(&self) -> &[u8] {
-        &self.signature
-    }
-
+impl LocalConstant<'_> {
     /// Decode the signature.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`LocalConstantSignature::parse`] with the location of the blob.
-    pub fn signature(&self) -> Result<LocalConstantSignature<'_>> {
-        LocalConstantSignature::parse(&self.signature).map_err(|error| self.blob_error(error))
-    }
-
-    /// Add the location of the signature blob to a codec error.
-    #[must_use]
-    pub fn blob_error(&self, error: Error) -> Error {
-        in_blob(
-            error,
-            TableId::LOCAL_CONSTANT,
-            self.id.0,
-            "Signature",
-            self.row.signature,
-        )
-    }
-
-    /// Return the `#Blob` offset of the signature.
-    #[must_use]
-    pub const fn signature_offset(&self) -> BlobOffset {
-        self.row.signature
+    /// Returns the errors of [`LocalConstantSignature::parse`]. The errors have no location.
+    pub fn decode(&self) -> Result<LocalConstantSignature<'_>> {
+        LocalConstantSignature::parse(&self.signature)
     }
 }
 
@@ -574,21 +536,20 @@ impl<S: ReadAt> Pdb<S> {
     /// # Errors
     ///
     /// Returns the errors of [`Pdb::row`], [`Pdb::string`] and [`Pdb::blob`].
-    pub fn local_constant(&self, id: LocalConstantId) -> Result<LocalConstant> {
+    pub fn local_constant(&self, id: LocalConstantId) -> Result<LocalConstant<'static>> {
         let row: LocalConstantRow = self.row(id)?;
         Ok(LocalConstant {
-            id,
-            row,
-            name: self.string(row.name)?,
-            signature: self.blob(row.signature)?,
+            name: self.string(row.name)?.into(),
+            signature: self.blob(row.signature)?.into(),
         })
     }
 
-    /// Read all `LocalConstant` rows in row order.
+    /// Read all `LocalConstant` rows in row order, each with its row ID.
     #[must_use]
-    pub fn local_constants(&self) -> TypedRows<'_, S, LocalConstant> {
+    pub fn local_constants(&self) -> TypedRows<'_, S, (LocalConstantId, LocalConstant<'static>)> {
         each_row(self, TableId::LOCAL_CONSTANT, |pdb, row| {
-            pdb.local_constant(LocalConstantId(row))
+            let id = LocalConstantId(row);
+            pdb.local_constant(id).map(|constant| (id, constant))
         })
     }
 }

@@ -21,8 +21,8 @@
 //! native record and stream has an encoder. [`native::PdbBuilder`] builds new
 //! native PDBs, and [`native::PdbEditor`] edits native PDBs and rebuilds the
 //! dependent indexes. [`portable::write`] writes Portable PDBs in new layouts
-//! from raw rows and heaps. [`portable::PdbBuilder`] and
-//! [`portable::PdbEditor`] build and edit Portable PDBs from typed records.
+//! from raw rows and heaps. [`portable::PdbEditor`] builds and edits Portable
+//! PDBs from records.
 //!
 //! [`probe`] identifies containers, not valid PDBs. In particular,
 //! CLI metadata is not necessarily a Portable PDB. Legacy MSF identification

@@ -9,15 +9,16 @@
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use super::rows::{TypedRows, each_row, in_blob};
+use super::rows::{TypedRows, each_row};
+use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid};
 use crate::portable::metadata::{
-    BlobOffset, DocumentId, IlOffset, MAX_ROW, MethodDebugInformationId, MethodDebugInformationRow,
+    DocumentId, IlOffset, MAX_ROW, MethodDebugInformationId, MethodDebugInformationRow,
     StandAloneSigId, TableId,
 };
-use crate::{Error, Result};
 
 /// The start line and end line of a hidden sequence point.
 pub const HIDDEN_LINE: u32 = 0x00fe_efee;
@@ -273,23 +274,14 @@ pub enum LocalSignatureForm {
     Token,
 }
 
-/// The result of [`SequencePoints::encode_parts`].
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct EncodedSequencePoints {
-    /// The value of the `Document` column: the single document of all sequence points, or nil
-    /// if the method has several documents or no sequence points.
-    pub document: DocumentId,
-    /// The blob, or an empty blob if the method has no sequence points.
-    pub blob: Vec<u8>,
-}
-
 impl SequencePoints<'_> {
-    /// Encode the sequence points of a method in the form that Roslyn writes.
+    /// Encode the sequence points of a method in the form that Roslyn writes, and return the
+    /// record of the method.
     ///
-    /// If all points have the same document, the blob has no document and the result gives
-    /// the document for the `Document` column. Otherwise, the header has the initial document
-    /// and a document record comes before each point with a different document. `form`
+    /// If all points have the same document, the blob has no document and the record gives
+    /// the document for the `Document` column. Otherwise, the header has the initial document,
+    /// a document record comes before each point with a different document, and the record
+    /// document is nil. Without points, the blob is empty and the document is nil. `form`
     /// selects how the header stores `local_signature`; use
     /// [`SequencePoints::local_signature_form`] to keep the form of a decoded blob.
     ///
@@ -303,12 +295,9 @@ impl SequencePoints<'_> {
         local_signature: StandAloneSigId,
         form: LocalSignatureForm,
         points: &[SequencePoint],
-    ) -> Result<EncodedSequencePoints> {
+    ) -> Result<MethodDebugInformation<'static>> {
         let Some(first) = points.first() else {
-            return Ok(EncodedSequencePoints {
-                document: DocumentId(0),
-                blob: Vec::new(),
-            });
+            return Ok(MethodDebugInformation::default());
         };
         let single = points.iter().all(|point| point.document == first.document);
         let mut blob = Vec::new();
@@ -353,13 +342,13 @@ impl SequencePoints<'_> {
             previous_start = Some((span.start_line, span.start_column));
         }
         writer.finish();
-        Ok(EncodedSequencePoints {
+        Ok(MethodDebugInformation {
             document: if single {
                 first.document
             } else {
                 DocumentId(0)
             },
-            blob,
+            sequence_points: Bytes::from(blob),
         })
     }
 }
@@ -393,75 +382,38 @@ fn write_span(
     }
 }
 
-/// A typed row of the `MethodDebugInformation` table with its sequence point blob.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct MethodDebugInformation {
-    id: MethodDebugInformationId,
-    row: MethodDebugInformationRow,
-    sequence_points: Vec<u8>,
+/// The sequence points of a method: the `Document` column and the sequence point blob.
+///
+/// The blob stays encoded. [`MethodDebugInformation::decode`] decodes it, and
+/// [`SequencePoints::encode_parts`] makes a record from sequence points.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct MethodDebugInformation<'a> {
+    /// The `Document` column: the single document of all sequence points, or nil if the
+    /// method has several documents or no sequence points.
+    pub document: DocumentId,
+    /// The sequence point blob. It is empty if the method has no sequence points.
+    pub sequence_points: Bytes<'a>,
 }
 
-impl MethodDebugInformation {
-    /// Return the row ID. It is the row number of the `MethodDef` row that the row extends.
-    #[must_use]
-    pub const fn id(&self) -> MethodDebugInformationId {
-        self.id
-    }
+into_owned!(struct MethodDebugInformation { sequence_points; document });
 
-    /// Return the raw row.
-    #[must_use]
-    pub const fn row(&self) -> &MethodDebugInformationRow {
-        &self.row
-    }
-
-    /// Return the `Document` column: the single document, or nil.
-    #[must_use]
-    pub const fn document(&self) -> DocumentId {
-        self.row.document
-    }
-
-    /// Return the bytes of the sequence point blob. They are empty if the method has no
-    /// sequence points.
-    #[must_use]
-    pub fn sequence_points_blob(&self) -> &[u8] {
-        &self.sequence_points
-    }
-
-    /// Return the sequence points, or `None` if the method has no sequence points.
+impl MethodDebugInformation<'_> {
+    /// Decode the sequence points, or return `None` if the method has no sequence points.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`SequencePoints::parse`] with the location of the blob.
-    pub fn sequence_points(&self) -> Result<Option<SequencePoints<'_>>> {
+    /// Returns the errors of [`SequencePoints::parse`]. The errors have no location.
+    pub fn decode(&self) -> Result<Option<SequencePoints<'_>>> {
         if self.sequence_points.is_empty() {
             return Ok(None);
         }
-        SequencePoints::parse(&self.sequence_points, self.row.document)
-            .map(Some)
-            .map_err(|error| self.blob_error(error))
-    }
-
-    /// Add the location of the sequence point blob to a codec error.
-    #[must_use]
-    pub fn blob_error(&self, error: Error) -> Error {
-        in_blob(
-            error,
-            TableId::METHOD_DEBUG_INFORMATION,
-            self.id.0,
-            "SequencePoints",
-            self.row.sequence_points,
-        )
-    }
-
-    /// Return the `#Blob` offset of the sequence point blob.
-    #[must_use]
-    pub const fn sequence_points_offset(&self) -> BlobOffset {
-        self.row.sequence_points
+        SequencePoints::parse(&self.sequence_points, self.document).map(Some)
     }
 }
 
 impl<S: ReadAt> Pdb<S> {
-    /// Read a `MethodDebugInformation` row with its sequence point blob.
+    /// Read the sequence points of a method: a `MethodDebugInformation` row with its blob.
     ///
     /// # Errors
     ///
@@ -469,20 +421,24 @@ impl<S: ReadAt> Pdb<S> {
     pub fn method_debug_information(
         &self,
         id: MethodDebugInformationId,
-    ) -> Result<MethodDebugInformation> {
+    ) -> Result<MethodDebugInformation<'static>> {
         let row: MethodDebugInformationRow = self.row(id)?;
         Ok(MethodDebugInformation {
-            id,
-            row,
-            sequence_points: self.blob(row.sequence_points)?,
+            document: row.document,
+            sequence_points: self.blob(row.sequence_points)?.into(),
         })
     }
 
-    /// Read all `MethodDebugInformation` rows in row order.
+    /// Read all `MethodDebugInformation` rows in row order, each with its row ID. The row ID
+    /// is the row number of the `MethodDef` row that the row extends.
     #[must_use]
-    pub fn method_debug_informations(&self) -> TypedRows<'_, S, MethodDebugInformation> {
+    pub fn method_debug_informations(
+        &self,
+    ) -> TypedRows<'_, S, (MethodDebugInformationId, MethodDebugInformation<'static>)> {
         each_row(self, TableId::METHOD_DEBUG_INFORMATION, |pdb, row| {
-            pdb.method_debug_information(MethodDebugInformationId(row))
+            let id = MethodDebugInformationId(row);
+            pdb.method_debug_information(id)
+                .map(|information| (id, information))
         })
     }
 }

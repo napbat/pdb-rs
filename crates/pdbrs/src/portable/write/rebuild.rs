@@ -17,7 +17,7 @@ use super::parts::{DebugTables, ExternalRowCounts, PdbParts};
 use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
-use crate::portable::debug::{DocumentName, Import, Imports};
+use crate::portable::debug::{DocumentName, Imports, RawImport};
 use crate::portable::metadata::{
     BlobOffset, GuidIndex, MetadataStream, StringOffset, TableId, TableRow,
 };
@@ -71,46 +71,48 @@ fn cell_error(table: TableId, row: usize, column: &'static str) -> Error {
 
 /// Give each `#Blob` offset of an import a new value.
 fn map_import(
-    import: Import,
+    import: RawImport,
     mut map: impl FnMut(BlobOffset) -> Result<BlobOffset>,
-) -> Result<Import> {
+) -> Result<RawImport> {
     Ok(match import {
-        Import::Namespace { namespace } => Import::Namespace {
+        RawImport::Namespace { namespace } => RawImport::Namespace {
             namespace: map(namespace)?,
         },
-        Import::AssemblyNamespace {
+        RawImport::AssemblyNamespace {
             assembly,
             namespace,
-        } => Import::AssemblyNamespace {
+        } => RawImport::AssemblyNamespace {
             assembly,
             namespace: map(namespace)?,
         },
-        Import::Type { target_type } => Import::Type { target_type },
-        Import::XmlNamespace { alias, namespace } => Import::XmlNamespace {
+        RawImport::Type { target_type } => RawImport::Type { target_type },
+        RawImport::XmlNamespace { alias, namespace } => RawImport::XmlNamespace {
             alias: map(alias)?,
             namespace: map(namespace)?,
         },
-        Import::AssemblyReferenceAlias { alias } => {
-            Import::AssemblyReferenceAlias { alias: map(alias)? }
+        RawImport::AssemblyReferenceAlias { alias } => {
+            RawImport::AssemblyReferenceAlias { alias: map(alias)? }
         }
-        Import::AliasAssemblyReference { alias, assembly } => Import::AliasAssemblyReference {
-            alias: map(alias)?,
-            assembly,
-        },
-        Import::AliasNamespace { alias, namespace } => Import::AliasNamespace {
+        RawImport::AliasAssemblyReference { alias, assembly } => {
+            RawImport::AliasAssemblyReference {
+                alias: map(alias)?,
+                assembly,
+            }
+        }
+        RawImport::AliasNamespace { alias, namespace } => RawImport::AliasNamespace {
             alias: map(alias)?,
             namespace: map(namespace)?,
         },
-        Import::AliasAssemblyNamespace {
+        RawImport::AliasAssemblyNamespace {
             alias,
             assembly,
             namespace,
-        } => Import::AliasAssemblyNamespace {
+        } => RawImport::AliasAssemblyNamespace {
             alias: map(alias)?,
             assembly,
             namespace: map(namespace)?,
         },
-        Import::AliasType { alias, target_type } => Import::AliasType {
+        RawImport::AliasType { alias, target_type } => RawImport::AliasType {
             alias: map(alias)?,
             target_type,
         },
