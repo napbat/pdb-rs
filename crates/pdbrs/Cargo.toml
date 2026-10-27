@@ -46,6 +46,10 @@ name = "native_synthetic"
 required-features = ["std"]
 
 [[example]]
+name = "edit"
+required-features = ["std"]
+
+[[example]]
 name = "types"
 required-features = ["std"]
 

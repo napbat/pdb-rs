@@ -570,9 +570,24 @@ For each case, the command checks these items:
    dumps of the original and the output, and compares the bytes of each stream.
 3. The same edit again gives the same bytes.
 
+After the section `new edit cases:`, the section `task cases:` applies the editing tasks of
+`PdbEditor` (#41), each from `Pdb::edit` with `IdentityPolicy::ContentDerived`:
+
+| Case | Task |
+| --- | --- |
+| `source-link` | `set_source_link`: the Source Link record of the module gets a new JSON text. |
+| `embed-source` | `embed_source` (DEFLATE): the first document without embedded source whose file below `fixtures/dotnet/` has the SHA-256 hash of the document. A note if the PDB has no such document. |
+| `replace-embedded-source` | `embed_source`: the first document with embedded source gets its decoded source again in the other form (raw for DEFLATE, DEFLATE for raw). |
+
+Each task case gets checks 2 and 3 above. For check 1, the command compares the lines without
+custom debug information line for line, and the custom debug information values as in item 3.
+The verifier decodes the Source Link text and each embedded source, and the `source` line of
+an embedded source must give `check=verified` (the SHA-256 hash of the document).
+
 The command writes the PDBs, the dumps and the traces to `target/verify-edit/`. A case writes
-`<fixture>.<case>.pdb` and `<fixture>.<case>.srm.txt`. The command exits with a failure code if
-a check fails.
+`<fixture>.<case>.pdb` and `<fixture>.<case>.srm.txt`, and a task case writes
+`<fixture>.task-<case>.pdb` and `<fixture>.task-<case>.srm.txt`. The command exits with a
+failure code if a check fails.
 
 ### Dump format
 
@@ -891,6 +906,24 @@ The section then has two more steps:
   bytes of the TPI stream. `write_to` must read each page of each `Copied` stream exactly once
   and no other page.
 
+The last line of the section gives the counts. The command fails for a problem in the section.
+
+After the summary line of that section, the command prints the section `task cases:` (#41). It
+runs each editing task of `PdbEditor` on each PDB. A case that does not apply to a PDB gives a
+`note:` line and no output.
+
+| Case | Task | Identity |
+| --- | --- | --- |
+| `set-source-link` | `set_source_link` with a Source Link file; `pdbstr -r -s:sourcelink` must read it | `Preserve` |
+| `set-source-server` | `set_source_server` with a `srcsrv` stream; `pdbstr -r -s:srcsrv` must read it | `Preserve` |
+| `remove-named-stream` | `remove_named_stream` of the first named stream in map order that the editor can remove (not `/names`, `/TMCache`, `/UDTSRCLINEUNDONE` or `/src/`); `llvm-pdbutil --named-streams` must not list it | `Preserve` |
+| `rename-symbols` | `rename_symbols` gives the suffix `_pdbrs_task` to the first unique public name, the first unique data, constant or UDT global name and the first unique `S_PROCREF` or `S_LPROCREF` name | `IncrementAge` |
+
+Each case writes `target/verify-native-edit/<fixture>/<PDB file stem>/task-<case>.pdb` and gets
+checks 1 to 3 above. For `rename-symbols`, `llvm-pdbutil --publics` and `--globals` and
+`DIA2Dump -p` must list the new names and not the old names, `DIA2Dump -sym` must find a
+function with the new procedure name and no function with the old name, and a read with pdbrs
+must find the new name in each renamed reference record and in the procedure that it names.
 The last line of the section gives the counts. The command fails for a problem in the section.
 
 ## MSFZ writer check

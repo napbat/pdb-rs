@@ -31,6 +31,17 @@ pub(super) trait ModuleTargets {
     /// Return the offset map of a module, or `None` if the plan keeps the
     /// module stream.
     fn map(&self, module: ModuleIndex) -> Option<&OffsetMap>;
+    /// Return the name of the module record that `target` names in the
+    /// model, or `None` if its module is not decoded or has no such record.
+    fn name(&self, target: ModuleSymbolTarget) -> Option<&[u8]>;
+}
+
+/// Return the module of a reference target, if the target gives one.
+pub(super) const fn target_module(target: ModuleSymbolTarget) -> Option<ModuleIndex> {
+    match target {
+        ModuleSymbolTarget::Handle(handle) => Some(ModuleIndex(handle.module)),
+        ModuleSymbolTarget::Position { module, .. } => module,
+    }
 }
 
 /// The encoded symbol record stream.
@@ -140,12 +151,15 @@ fn encode_record(
     let Some(target) = reference(record.data()).map(|reference| reference.target) else {
         return record.encode(out);
     };
+    // A reference record can get a new name only together with its target:
+    // the module record holds the same name (#41 rule 4).
     if let (Some(origin), None) = (record.origin(), record.unchanged())
         && origin.name() != record.data().name()
+        && modules.name(target) != record.name()
     {
         return Err(Error::new(ErrorKind::UnsupportedEdit, None)
             .with_context(
-                "a reference record keeps its name: the module record holds the same name",
+                "a reference record keeps its name unless its module record gets the same name",
             )
             .with_stream(stream.unwrap_or(StreamId(0)), u64::from(source_offset)));
     }

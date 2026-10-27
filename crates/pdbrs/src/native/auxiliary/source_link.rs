@@ -23,6 +23,21 @@ pub struct SourceLink<'a> {
     json: &'a str,
 }
 
+/// Return the bytes of a Source Link file as text if they have the shape that
+/// [`SourceLink::parse`] accepts. Else return the reason.
+///
+/// The Portable PDB editor uses the same rules for the Source Link custom
+/// debug information (#41 rule 5).
+pub(crate) fn json_object(bytes: &[u8]) -> core::result::Result<&str, &'static str> {
+    let json = core::str::from_utf8(bytes).map_err(|_| "Source Link stream is not UTF-8")?;
+    let object = json.trim_start_matches('\u{feff}').trim();
+    if object.starts_with('{') && object.ends_with('}') {
+        Ok(json)
+    } else {
+        Err("Source Link stream is not a JSON object")
+    }
+}
+
 impl<'a> SourceLink<'a> {
     /// Decode the `sourcelink` stream `stream`.
     ///
@@ -35,17 +50,11 @@ impl<'a> SourceLink<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] with the stream ID and logical offset 0 if the bytes
     /// are not UTF-8 or do not have the shape of a JSON object.
     pub fn parse(bytes: &'a [u8], stream: StreamId) -> Result<Self> {
-        let invalid = |context| {
+        let json = json_object(bytes).map_err(|context| {
             Error::new(ErrorKind::InvalidFormat, None)
                 .with_context(context)
                 .with_stream(stream, 0)
-        };
-        let json =
-            core::str::from_utf8(bytes).map_err(|_| invalid("Source Link stream is not UTF-8"))?;
-        let object = json.trim_start_matches('\u{feff}').trim();
-        if !(object.starts_with('{') && object.ends_with('}')) {
-            return Err(invalid("Source Link stream is not a JSON object"));
-        }
+        })?;
         Ok(Self { json })
     }
 

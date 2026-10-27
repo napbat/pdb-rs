@@ -7,7 +7,7 @@ use super::record::SymbolRecord;
 use super::tree::{self, ModuleSymbol, Open, Pushed, Scope};
 use crate::native::codeview::SymbolKind;
 use crate::native::codeview::index::{ModuleIndex, ModuleSymbolHandle, SymbolHandle};
-use crate::native::codeview::symbol::SymbolData;
+use crate::native::codeview::symbol::{ModuleSymbolTarget, SymbolData};
 use crate::native::dbi::{Module, ModuleStream};
 use crate::native::lines::{LineSubsection, ModuleLines};
 use crate::native::output::no_memory;
@@ -426,6 +426,39 @@ impl ModuleContents {
     /// Return the source of the module.
     pub(super) fn source(&self) -> Option<&ModuleSource> {
         self.source.as_deref()
+    }
+
+    /// Return the name of the record that the reference target `target`
+    /// names, or `None` if the scope tree of this module has no such record
+    /// or the record has no name.
+    ///
+    /// A [`ModuleSymbolTarget::Position`] names a source record by its
+    /// source offset. A [`ModuleSymbolTarget::Handle`] names a record by its
+    /// number.
+    pub(super) fn target_name(&self, target: ModuleSymbolTarget) -> Option<&[u8]> {
+        let Symbols::Tree(nodes) = &self.symbols else {
+            return None;
+        };
+        let found = match target {
+            ModuleSymbolTarget::Handle(handle) => {
+                if handle.module != self.index.0 {
+                    return None;
+                }
+                tree::find(nodes, &|record| record.id() == Some(handle.position))
+            }
+            ModuleSymbolTarget::Position { module, offset } => {
+                if module != Some(self.index) {
+                    return None;
+                }
+                let base = symbol_base(self.source.as_deref()?.stream.as_ref()?);
+                tree::find(nodes, &|record| {
+                    record.origin().is_some_and(|origin| {
+                        base.checked_add(origin.record().offset) == Some(offset.0)
+                    })
+                })
+            }
+        };
+        found?.name()
     }
 
     /// Return `true` if the source file names changed.

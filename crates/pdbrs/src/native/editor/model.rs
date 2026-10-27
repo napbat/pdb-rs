@@ -123,6 +123,17 @@ pub(super) enum Names {
 /// order of the calls. Two changes of the same record do not commute: the
 /// last change wins.
 ///
+/// # Tasks
+///
+/// The common edits are functions over the same model (#41). Each one checks
+/// all its inputs first, so an error leaves the model unchanged:
+///
+/// - [`PdbEditor::set_source_link`]: the `sourcelink` named stream.
+/// - [`PdbEditor::set_source_server`]: the `srcsrv` named stream.
+/// - [`PdbEditor::remove_named_stream`]: a named stream and its Info entry.
+/// - [`PdbEditor::rename_symbols`]: public and global symbols, and module
+///   procedures with their reference records.
+///
 /// # Layouts
 ///
 /// The plan writes one of two layouts:
@@ -182,8 +193,9 @@ pub(super) enum Names {
 ///   the index space ([`Error::index_space`]).
 /// - A change of `/TMCache`, `/UDTSRCLINEUNDONE` or a `/src/` stream in the
 ///   copy-on-write layout: other records refer to their contents.
-/// - A new name of a reference record such as `S_PROCREF`: the module record
-///   holds the same name.
+/// - A new name of a reference record such as `S_PROCREF`, unless the module
+///   record that it names gets the same name in the model:
+///   [`PdbEditor::rename_symbols`] renames both.
 /// - A symbol edit of a module whose symbols do not form a scope tree.
 /// - A type or ID record that refers to itself or to a later record of its
 ///   index space (decision 7 of #42).

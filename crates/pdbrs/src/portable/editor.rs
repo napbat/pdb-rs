@@ -8,6 +8,7 @@ mod collections;
 mod decode;
 pub(super) mod model;
 mod resolve;
+mod tasks;
 
 use alloc::collections::BTreeMap;
 
