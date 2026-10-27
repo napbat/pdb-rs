@@ -4,7 +4,7 @@ This document records the benchmark of `pdbrs`: the command, the method, the sce
 limits of each number (#44). [baseline.md](baseline.md) records the machine, the toolchain, the
 commit, the fixtures, the run count and the baseline numbers. The API redesign (#42) and #48,
 #49 and #50 compare their results with this baseline. [msfz-write.md](msfz-write.md) records
-the result of #50.
+the result of #50, and [portable-cow.md](portable-cow.md) records the result of #49.
 
 ## Command
 
@@ -110,6 +110,8 @@ its times are not comparable.
 | `portable/read` | Portable | `portable::Pdb::parse`, every row of the eight debug tables with its heap values, the custom debug information values, the document sources, the sequence points, the local variables and constants, the imports, the state machine methods and `validate_debug`. | Rows and decoded values |
 | `portable/rebuild` | Portable | `Pdb::to_parts`, `PdbParts::plan(IdentityPolicy::ContentDerived)`, `to_vec`. | Output bytes |
 | `portable/edit` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of all sequence points and a rename of document 1, `plan(EditOptions::default())`, `to_vec`. Before #42 stage 7: `Pdb::edit()` and `plan(IdentityPolicy::ContentDerived)`. | Output bytes |
+| `portable/edit-document` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, the suffix `.edited` on the name of document 1, `plan(EditOptions::default())`, `to_vec`. Added for #49. | Output bytes |
+| `portable/edit-method` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of the sequence points of the first method that has them, `plan(EditOptions::default())`, `to_vec`. Added for #49. | Output bytes |
 | `msfz/open` | MSFZ | `Pdb::open` of the MSFZ file. | Streams |
 | `msfz/full-read` | MSFZ | The full read of `native/full-read` on the MSFZ file. | Decoded records and streams |
 | `msfz/write-default` | `msvc-x64-large` | `Container::to_msfz(MsfzWriteOptions::default(), OldDirectoryPolicy::Empty)` and `to_vec`. `verify-msfz` and `pdbtool pdz-encode` use the same stream 0 policy. | Output bytes |

@@ -7,11 +7,13 @@ use super::Methods;
 use super::collections::{
     CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes, SourceRun,
 };
+use super::resolve::Model;
 use crate::PortableLocation;
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::debug::StateMachineMethod;
-use crate::portable::metadata::{LocalScopeId, MetadataStream, MethodDefId, TableId};
+use crate::portable::metadata::{LocalScopeId, MetadataStream, MethodDefId, TableId, TableRow};
+use crate::portable::write::DebugTables;
 use crate::{Error, ErrorKind, Result};
 
 /// Read the documents in row order.
@@ -64,13 +66,9 @@ pub(super) fn local_scopes<S: ReadAt>(pdb: &Pdb<S>) -> Result<LocalScopes> {
                 form(TableId::LOCAL_CONSTANT, runs.row.constant_list.0),
             ];
         }
-        let run = |range: core::ops::Range<u32>| SourceRun {
-            start: range.start,
-            count: range.end - range.start,
-        };
         scopes
             .source
-            .push([run(runs.variables), run(runs.constants)]);
+            .push([source_run(runs.variables), source_run(runs.constants)]);
         scopes.push(scope)?;
     }
     let count = |constants: bool| -> usize {
@@ -122,4 +120,52 @@ pub(super) fn custom_debug_information<S: ReadAt>(pdb: &Pdb<S>) -> Result<Custom
         .map(|information| information.map(|(_, information)| Some(information)))
         .collect::<Result<Vec<_>>>()?;
     Ok(CustomDebugInformations { records })
+}
+
+/// Read the variable run and the constant run of each local scope, in row order.
+pub(super) fn scope_runs<S: ReadAt>(pdb: &Pdb<S>) -> Result<Vec<[SourceRun; 2]>> {
+    let count = pdb.tables().row_count(TableId::LOCAL_SCOPE);
+    (1..=count)
+        .map(|id| {
+            let runs = pdb.scope_runs(LocalScopeId(id))?;
+            Ok([source_run(runs.variables), source_run(runs.constants)])
+        })
+        .collect()
+}
+
+/// Return the source run of a range of rows.
+const fn source_run(range: core::ops::Range<u32>) -> SourceRun {
+    SourceRun {
+        start: range.start,
+        count: range.end - range.start,
+    }
+}
+
+/// Read all rows of a table.
+pub(super) fn table<S: ReadAt, T: TableRow>(pdb: &Pdb<S>) -> Result<Vec<T>> {
+    pdb.rows::<T>().map(|row| row.map(|(_, row)| row)).collect()
+}
+
+/// Read the raw rows of each table group that `model` does not have. The other tables and
+/// the `CustomDebugInformation` table stay empty.
+pub(super) fn raw_rows<S: ReadAt>(pdb: &Pdb<S>, model: &Model<'_>) -> Result<DebugTables> {
+    let mut tables = DebugTables::default();
+    if model.documents.is_none() {
+        tables.documents = table(pdb)?;
+    }
+    if model.methods.is_none() {
+        tables.method_debug_information = table(pdb)?;
+    }
+    if model.scopes.is_none() {
+        tables.local_scopes = table(pdb)?;
+        tables.local_variables = table(pdb)?;
+        tables.local_constants = table(pdb)?;
+    }
+    if model.import_scopes.is_none() {
+        tables.import_scopes = table(pdb)?;
+    }
+    if model.state_machines.is_none() {
+        tables.state_machine_methods = table(pdb)?;
+    }
+    Ok(tables)
 }

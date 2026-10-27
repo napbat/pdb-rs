@@ -6,7 +6,7 @@ use core::cmp::Reverse;
 
 use super::Methods;
 use super::collections::{
-    CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes,
+    CustomDebugInformations, Documents, EmptyListForm, ImportScopes, LocalScopes, SourceRun,
 };
 use crate::PortableLocation;
 use crate::io::ReadAt;
@@ -38,19 +38,22 @@ pub(super) struct Base {
 }
 
 impl Base {
-    /// Read the heaps of `pdb`. Record the offset of each local variable and constant name,
-    /// so that a name in the middle of another string keeps its source offset.
-    pub(super) fn read<S: ReadAt>(pdb: &Pdb<S>) -> Result<Self> {
+    /// Read the heaps of `pdb`. If `locals` is `true`, record the offset of each local
+    /// variable and constant name, so that a name in the middle of another string keeps its
+    /// source offset.
+    pub(super) fn read<S: ReadAt>(pdb: &Pdb<S>, locals: bool) -> Result<Self> {
         let heap =
             |stream| -> Result<Vec<u8>> { Ok(pdb.stream_bytes(stream)?.unwrap_or_default()) };
         let mut strings = StringHeap::from_bytes(heap(MetadataStream::Strings)?)?;
-        for row in pdb.rows::<LocalVariableRow>() {
-            let (_, row) = row?;
-            strings.register(&pdb.string(row.name)?, row.name);
-        }
-        for row in pdb.rows::<LocalConstantRow>() {
-            let (_, row) = row?;
-            strings.register(&pdb.string(row.name)?, row.name);
+        if locals {
+            for row in pdb.rows::<LocalVariableRow>() {
+                let (_, row) = row?;
+                strings.register(&pdb.string(row.name)?, row.name);
+            }
+            for row in pdb.rows::<LocalConstantRow>() {
+                let (_, row) = row?;
+                strings.register(&pdb.string(row.name)?, row.name);
+            }
         }
         Ok(Self {
             strings,
@@ -61,7 +64,8 @@ impl Base {
     }
 }
 
-/// The records of an editor, decoded or read for the plan.
+/// The records of an editor for the plan. `None` selects the raw rows of the source for a
+/// table group that the editor did not decode.
 pub(super) struct Model<'m> {
     /// The metadata version string.
     pub(super) version: &'m [u8],
@@ -70,28 +74,47 @@ pub(super) struct Model<'m> {
     /// The external row counts.
     pub(super) external: ExternalRowCounts,
     /// The documents.
-    pub(super) documents: &'m Documents,
+    pub(super) documents: Option<&'m Documents>,
     /// The methods with sequence points.
-    pub(super) methods: &'m Methods,
+    pub(super) methods: Option<&'m Methods>,
     /// The local scopes.
-    pub(super) scopes: &'m LocalScopes,
+    pub(super) scopes: Option<&'m LocalScopes>,
     /// The import scopes.
-    pub(super) import_scopes: &'m ImportScopes,
+    pub(super) import_scopes: Option<&'m ImportScopes>,
     /// The state machine methods.
-    pub(super) state_machines: &'m [StateMachineMethod],
-    /// The custom debug information.
-    pub(super) custom: &'m CustomDebugInformations,
+    pub(super) state_machines: Option<&'m [StateMachineMethod]>,
 }
 
-/// The parts of a model and the rows of each local scope.
+/// The parts of a model without the custom debug information, and the rows of each local
+/// scope.
 pub(super) struct Resolved {
     /// The raw parts.
     pub(super) parts: PdbParts,
-    /// The row ID of each local scope, by handle.
-    pub(super) scope_rows: Vec<u32>,
-    /// The first `LocalVariable` row and the first `LocalConstant` row of each local scope,
-    /// by handle.
-    pub(super) list_rows: Vec<[u32; 2]>,
+    /// The rows of each local scope, by handle.
+    pub(super) scopes: ScopeRows,
+}
+
+/// The output rows of the local scopes, by handle. Custom debug information parents refer
+/// to them.
+#[derive(Default)]
+pub(super) struct ScopeRows {
+    /// The row ID of each local scope.
+    pub(super) rows: Vec<u32>,
+    /// The first `LocalVariable` row and the first `LocalConstant` row of each local scope.
+    pub(super) lists: Vec<[u32; 2]>,
+    /// The number of local variables and of local constants of each local scope.
+    lengths: Vec<[u32; 2]>,
+}
+
+impl ScopeRows {
+    /// Return the rows of local scopes that keep their source rows, from the source runs.
+    pub(super) fn from_source(runs: &[[SourceRun; 2]]) -> Self {
+        Self {
+            rows: (1..).take(runs.len()).collect(),
+            lists: runs.iter().map(|runs| runs.map(|run| run.start)).collect(),
+            lengths: runs.iter().map(|runs| runs.map(|run| run.count)).collect(),
+        }
+    }
 }
 
 /// Return the location of a cell of a debug table. `row` is a zero-based index.
@@ -136,8 +159,12 @@ impl Heaps {
     }
 }
 
-/// Resolve the handles of `model`. With a base, the heaps start with the base heaps.
-pub(super) fn resolve(model: &Model<'_>, base: Option<Base>) -> Result<Resolved> {
+/// Resolve the handles of `model` and make the rows of all tables but the custom debug
+/// information. With a base, the heaps start with the base heaps. `raw` has the source rows
+/// of each table group that `model` does not have (see [`decode::raw_rows`]).
+///
+/// [`decode::raw_rows`]: super::decode::raw_rows
+pub(super) fn resolve(model: &Model<'_>, base: Option<Base>, raw: DebugTables) -> Result<Resolved> {
     let (mut strings, user_strings, blobs, guids) = match base {
         Some(base) => (
             StringHeapBuilder::with_base(base.strings),
@@ -152,7 +179,7 @@ pub(super) fn resolve(model: &Model<'_>, base: Option<Base>) -> Result<Resolved>
             GuidHeap::new(),
         ),
     };
-    for scope in &model.scopes.records {
+    for scope in model.scopes.iter().flat_map(|scopes| &scopes.records) {
         for variable in &scope.variables {
             strings.add(&variable.name)?;
         }
@@ -165,32 +192,33 @@ pub(super) fn resolve(model: &Model<'_>, base: Option<Base>) -> Result<Resolved>
         blobs,
         guids,
     };
-    let mut tables = DebugTables {
-        documents: documents(model.documents, &mut heaps)?,
-        method_debug_information: methods(model, &mut heaps)?,
-        ..DebugTables::default()
+    let mut tables = raw;
+    if let Some(model_documents) = model.documents {
+        tables.documents = documents(model_documents, &mut heaps)?;
+    }
+    if let Some(model_methods) = model.methods {
+        let documents = tables.documents.len();
+        tables.method_debug_information = methods(model, model_methods, documents, &mut heaps)?;
+    }
+    let scope_rows = match model.scopes {
+        Some(model_scopes) => scopes(model_scopes, &mut heaps, &mut tables)?,
+        None => ScopeRows::default(),
     };
-    let (scope_rows, list_rows) = scopes(model.scopes, &mut heaps, &mut tables)?;
-    tables.import_scopes = import_scopes(model.import_scopes, &mut heaps)?;
-    tables.state_machine_methods = model
-        .state_machines
-        .iter()
-        .map(|method| StateMachineMethodRow {
-            move_next_method: method.move_next_method,
-            kickoff_method: method.kickoff_method,
-        })
-        .collect();
-    tables
-        .state_machine_methods
-        .sort_by_key(|row| row.move_next_method);
-    let rows = Targets {
-        documents: model.documents.len(),
-        import_scopes: model.import_scopes.len(),
-        scopes: model.scopes,
-        scope_rows: &scope_rows,
-        list_rows: &list_rows,
-    };
-    tables.custom_debug_information = custom(model.custom, &mut heaps, &rows)?;
+    if let Some(model_imports) = model.import_scopes {
+        tables.import_scopes = import_scopes(model_imports, &mut heaps)?;
+    }
+    if let Some(state_machines) = model.state_machines {
+        tables.state_machine_methods = state_machines
+            .iter()
+            .map(|method| StateMachineMethodRow {
+                move_next_method: method.move_next_method,
+                kickoff_method: method.kickoff_method,
+            })
+            .collect();
+        tables
+            .state_machine_methods
+            .sort_by_key(|row| row.move_next_method);
+    }
     let Heaps {
         strings,
         blobs,
@@ -207,8 +235,7 @@ pub(super) fn resolve(model: &Model<'_>, base: Option<Base>) -> Result<Resolved>
             guids,
             tables,
         },
-        scope_rows,
-        list_rows,
+        scopes: scope_rows,
     })
 }
 
@@ -237,12 +264,18 @@ fn documents(documents: &Documents, heaps: &mut Heaps) -> Result<Vec<DocumentRow
 }
 
 /// Make the `MethodDebugInformation` rows: none, or one for each external `MethodDef` row.
+/// The output has `documents` documents.
 ///
 /// Each sequence point blob keeps its bytes. The function decodes it only to check that its
 /// documents exist.
-fn methods(model: &Model<'_>, heaps: &mut Heaps) -> Result<Vec<MethodDebugInformationRow>> {
-    let methods = &model.methods.records;
-    if !model.methods.table && methods.is_empty() {
+fn methods(
+    model: &Model<'_>,
+    model_methods: &Methods,
+    documents: usize,
+    heaps: &mut Heaps,
+) -> Result<Vec<MethodDebugInformationRow>> {
+    let methods = &model_methods.records;
+    if !model_methods.table && methods.is_empty() {
         return Ok(Vec::new());
     }
     let table = TableId::METHOD_DEBUG_INFORMATION;
@@ -257,7 +290,6 @@ fn methods(model: &Model<'_>, heaps: &mut Heaps) -> Result<Vec<MethodDebugInform
             "the method is after the external MethodDef rows",
         ));
     }
-    let documents = model.documents.len();
     let exists = |document: DocumentId| {
         usize::try_from(document.0).is_ok_and(|document| document <= documents)
     };
@@ -305,11 +337,8 @@ fn methods(model: &Model<'_>, heaps: &mut Heaps) -> Result<Vec<MethodDebugInform
     Ok(rows)
 }
 
-/// The rows of each local scope: the scope row and the first variable and constant rows.
-type ScopeRows = (Vec<u32>, Vec<[u32; 2]>);
-
 /// Sort the local scopes, give each scope one run of variables and of constants, and make
-/// the rows. Return the row ID and the list rows of each scope handle.
+/// the rows. Return the rows of each scope handle.
 fn scopes(scopes: &LocalScopes, heaps: &mut Heaps, tables: &mut DebugTables) -> Result<ScopeRows> {
     let records = &scopes.records;
     let mut order: Vec<usize> = (0..records.len()).collect();
@@ -319,15 +348,22 @@ fn scopes(scopes: &LocalScopes, heaps: &mut Heaps, tables: &mut DebugTables) -> 
     });
     let any_variables = records.iter().any(|scope| !scope.variables.is_empty());
     let any_constants = records.iter().any(|scope| !scope.constants.is_empty());
-    let mut scope_rows = vec![0; records.len()];
-    let mut list_rows = vec![[0; 2]; records.len()];
+    let length = |len: usize| u32::try_from(len).unwrap_or(u32::MAX);
+    let mut rows = ScopeRows {
+        rows: vec![0; records.len()],
+        lists: vec![[0; 2]; records.len()],
+        lengths: records
+            .iter()
+            .map(|scope| [length(scope.variables.len()), length(scope.constants.len())])
+            .collect(),
+    };
     let [empty_variables, empty_constants] = scopes.empty_lists.map(EmptyListForm::value);
     for (position, &index) in order.iter().enumerate() {
-        scope_rows[index] = row_id(position);
+        rows.rows[index] = row_id(position);
         let scope = &records[index];
         let first_variable = row_id(tables.local_variables.len());
         let first_constant = row_id(tables.local_constants.len());
-        list_rows[index] = [first_variable, first_constant];
+        rows.lists[index] = [first_variable, first_constant];
         for variable in &scope.variables {
             tables.local_variables.push(LocalVariableRow {
                 attributes: variable.attributes,
@@ -358,7 +394,7 @@ fn scopes(scopes: &LocalScopes, heaps: &mut Heaps, tables: &mut DebugTables) -> 
             length: scope.length,
         });
     }
-    Ok((scope_rows, list_rows))
+    Ok(rows)
 }
 
 /// Make the `ImportScope` rows.
@@ -386,23 +422,15 @@ fn import_scopes(scopes: &ImportScopes, heaps: &mut Heaps) -> Result<Vec<ImportS
 struct Targets<'a> {
     documents: usize,
     import_scopes: usize,
-    scopes: &'a LocalScopes,
-    scope_rows: &'a [u32],
-    list_rows: &'a [[u32; 2]],
+    scopes: &'a ScopeRows,
 }
 
 impl Targets<'_> {
     /// Return the row of the entry `index` of the list `list` (0: variables, 1: constants) of
     /// a scope, or `None` if the scope or the entry does not exist.
     fn local(&self, scope: usize, index: u32, list: usize) -> Option<u32> {
-        let record = self.scopes.records.get(scope)?;
-        let len = if list == 0 {
-            record.variables.len()
-        } else {
-            record.constants.len()
-        };
-        let index_usize = usize::try_from(index).ok()?;
-        (index_usize < len).then(|| self.list_rows[scope][list] + index)
+        let length = self.scopes.lengths.get(scope)?[list];
+        (index < length).then(|| self.scopes.lists[scope][list] + index)
     }
 
     /// Return the token of a parent, or `None` if the editor has no such record.
@@ -424,7 +452,7 @@ impl Targets<'_> {
             }
             CustomDebugParent::LocalScope(handle) => (
                 TableId::LOCAL_SCOPE,
-                self.scope_rows.get(handle.index()).copied(),
+                self.scopes.rows.get(handle.index()).copied(),
             ),
             CustomDebugParent::LocalVariable(handle) => (
                 TableId::LOCAL_VARIABLE,
@@ -440,35 +468,41 @@ impl Targets<'_> {
     }
 }
 
-/// Make the `CustomDebugInformation` rows, sorted by the coded parent.
-fn custom(
-    custom: &CustomDebugInformations,
-    heaps: &mut Heaps,
-    rows: &Targets<'_>,
-) -> Result<Vec<CustomDebugInformationRow>> {
-    let table = TableId::CUSTOM_DEBUG_INFORMATION;
-    let mut keyed = Vec::with_capacity(custom.records.len());
-    for (index, information) in custom.records.iter().enumerate() {
-        let Some(information) = information else {
-            continue;
+impl Resolved {
+    /// Make the `CustomDebugInformation` rows of `custom`, sorted by the coded parent.
+    pub(super) fn add_custom(&mut self, custom: &CustomDebugInformations) -> Result<()> {
+        let parts = &mut self.parts;
+        let rows = Targets {
+            documents: parts.tables.documents.len(),
+            import_scopes: parts.tables.import_scopes.len(),
+            scopes: &self.scopes,
         };
-        let parent = rows.token(information.parent);
-        let coded = parent.and_then(|token| CodedIndex::HasCustomDebugInformation.encode(token));
-        let (Some(parent), Some(coded)) = (parent, coded) else {
-            return Err(reference(
-                table,
-                index,
-                "Parent",
-                "parent is not a record of the editor or a HasCustomDebugInformation row",
-            ));
-        };
-        let row = CustomDebugInformationRow {
-            parent,
-            kind: heaps.guids.add(information.kind.0)?,
-            value: heaps.blobs.add(&information.value)?,
-        };
-        keyed.push((coded, row));
+        let table = TableId::CUSTOM_DEBUG_INFORMATION;
+        let mut keyed = Vec::with_capacity(custom.records.len());
+        for (index, information) in custom.records.iter().enumerate() {
+            let Some(information) = information else {
+                continue;
+            };
+            let parent = rows.token(information.parent);
+            let coded =
+                parent.and_then(|token| CodedIndex::HasCustomDebugInformation.encode(token));
+            let (Some(parent), Some(coded)) = (parent, coded) else {
+                return Err(reference(
+                    table,
+                    index,
+                    "Parent",
+                    "parent is not a record of the editor or a HasCustomDebugInformation row",
+                ));
+            };
+            let row = CustomDebugInformationRow {
+                parent,
+                kind: parts.guids.add(information.kind.0)?,
+                value: parts.blobs.add(&information.value)?,
+            };
+            keyed.push((coded, row));
+        }
+        keyed.sort_by_key(|&(coded, _)| coded);
+        parts.tables.custom_debug_information = keyed.into_iter().map(|(_, row)| row).collect();
+        Ok(())
     }
-    keyed.sort_by_key(|&(coded, _)| coded);
-    Ok(keyed.into_iter().map(|(_, row)| row).collect())
 }
