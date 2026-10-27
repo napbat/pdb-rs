@@ -48,14 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for record in types.records() {
             let record = record?;
             if let Some(tag) = TypeLeaf::decode(record.record)?.tag() {
-                println!("{:#x}: {}", record.index, String::from_utf8_lossy(tag.name));
+                println!("{:#x}: {}", record.index, String::from_utf8_lossy(&tag.name));
             }
         }
     }
 
     if let Some(dbi) = pdb.debug_info()? {
         for module in dbi.modules() {
-            let Some(stream) = pdb.module_stream(&module?)? else { continue };
+            let (_, module) = module?;
+            let Some(stream) = pdb.module_stream(&module)? else { continue };
             let base = u32::try_from(stream.symbol_offset())?;
             for symbol in ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, 256) {
                 if let Some(name) = symbol?.symbol.name() {
@@ -68,8 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The library keeps names as bytes. It does not decode text or demangle names.
-Record kinds without a decoder stay available as raw bytes.
+The library keeps names as bytes (`pdbrs::Bytes`). It does not decode text or demangle names.
+Record kinds without a decoder stay available as raw bytes. A decoded record borrows the PDB
+bytes; `into_owned` gives a copy that owns its bytes.
 
 ## Features
 

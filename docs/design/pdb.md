@@ -137,6 +137,9 @@ Examples: DIA2Dump prints `&&` as `*` and a function pointer as `function *`, an
 The comment on #1 lists each difference class with its count.
 
 `Pdb::stream_bytes` and `Pdb::named_stream_bytes` load bounded stream bytes for decoders that borrow their input.
+The decoded records keep their bytes in `pdbrs::Bytes`. A decoder gives records that borrow the stream bytes.
+`into_owned` gives the same record with its own bytes and the `'static` lifetime ([#42](https://github.com/napbat/pdbrs/issues/42)).
+Iterators, the record frames (`codeview::Record`) and the stream-level tables keep borrowed slices.
 `Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
 GitHub issues #1 to #14, #29 to #34, #37 and #38 record the implementation and the evidence for each area.
@@ -579,16 +582,16 @@ The names of these items use one vocabulary (rule 13 of #40):
 | `ModuleTypeReference::flags` | Not known | The flags, with the reserved bits 6 to 14. | The same flags. |
 | `CustomDebugInfoRecord::alignment`, `CustomDebugInfoRecord::reserved` | Roslyn (`MD2` in `S_OEM`; Roslyn writes 0 in `reserved`) | The reserved header byte and the count of zero padding bytes at the end of the record, raw. | No typed encoder. The `S_OEM` encoder writes the raw `Oem::data` bytes. |
 | `CustomDebugInfo::reserved` | Roslyn (writes zeros) | The two reserved bytes of the global header, raw. | No typed encoder. The `S_OEM` encoder writes the raw `Oem::data` bytes. |
-| `dbi::Module::unused1`, `OwnedModule::unused1` | Microsoft writers (a stale `pmod` pointer at offset 0) | The raw `u32`. | The same `u32`. |
-| `dbi::Module::file_name_offset`, `OwnedModule::file_name_offset` | Microsoft writers (a stale `mpifileichFile` pointer at offset 52) | The raw `u32`. Readers ignore it. | The same `u32`. |
-| `dbi::Module::padding`, `OwnedModule::padding` | Not known | The raw `u16` at offset 50. | The same `u16`. |
-| `dbi::Module::name_padding`, `OwnedModule::name_padding` | Not known | The bytes after the object file name up to the next 4-byte boundary. | The same bytes, as many as the record needs. |
+| `dbi::Module::unused1` | Microsoft writers (a stale `pmod` pointer at offset 0) | The raw `u32`. | The same `u32`. |
+| `dbi::Module::file_name_offset` | Microsoft writers (a stale `mpifileichFile` pointer at offset 52) | The raw `u32`. Readers ignore it. | The same `u32`. |
+| `dbi::Module::padding` | Not known | The raw `u16` at offset 50. | The same `u16`. |
+| `dbi::Module::name_padding` | Not known | The bytes after the object file name up to the next 4-byte boundary. | The same bytes, as many as the record needs. |
 | `SectionContribution::padding1`, `SectionContribution::padding2` | Writers that leave the bytes uninitialized | The raw `u16` after the section number and after the module index. | The same `u16` values. |
 | `dbi::TypeServer::reserved`, `dbi::TypeServer::padding` | Microsoft writers (a stale pointer in `reserved`) | The raw `u32` and the bytes after the path up to the next 4-byte boundary. | The same `u32` and bytes. |
 | `DbiHeader::reserved` | Not known | The raw `u32` at offset 60. | The same `u32`. |
-| `ModuleSources::raw_start`, `OwnedModuleSources::raw_start` | Microsoft writers (the low 16 bits of the first file entry index); LLVM writers (the module index) | The raw `u16` start index. The decoder does not use it for the layout. | The same `u16`. `OwnedSourceInfo::from_file_names` writes the Microsoft value. |
-| `SourceInfo::raw_file_count()`, `OwnedSourceInfo::raw_file_count` | All producers (the low 16 bits of the file entry count) | The raw `u16` count of the header. | The same `u16`. |
-| `SourceInfo::names()`, `OwnedSourceInfo::names` | All producers (alignment padding after the last name) | The names buffer with the bytes after the last name. | The same bytes. |
+| `ModuleSources::raw_start` | Microsoft writers (the low 16 bits of the first file entry index); LLVM writers (the module index) | The raw `u16` start index. The decoder does not use it for the layout. | The same `u16`. `SourceInfo::from_file_names` writes the Microsoft value. |
+| `SourceInfo::raw_file_count` | All producers (the low 16 bits of the file entry count) | The raw `u16` count of the header. | The same `u16`. |
+| `SourceInfo::names` | All producers (alignment padding after the last name) | The names buffer with the bytes after the last name. | The same bytes. |
 | `BlobHeader::reserved` | `link.exe` (writes 0) | The two reserved `u32` values of the `DbgRvaVaBlob` header. | The same values. `BlobHeader::default()` sets 0. |
 | `RvaVaBlob::extra_header()`, `RvaVaBlob::new(.., extra_header, ..)` | Not known (version 1 writers write none) | The header bytes after offset 32. | The same bytes. |
 | `Fixup::extra` | `link.exe /DEBUGTYPE:FIXUP` | The raw `wExtra` value. The PDB sources do not give its meaning. | The same `u16`. |
