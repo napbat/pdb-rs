@@ -4,7 +4,7 @@ This document records the benchmark of `pdbrs`: the command, the method, the sce
 limits of each number (#44). [baseline.md](baseline.md) records the machine, the toolchain, the
 commit, the fixtures, the run count and the baseline numbers. The API redesign (#42) and #48,
 #49 and #50 compare their results with this baseline. [msfz-write.md](msfz-write.md) records
-the result of #50.
+the result of #50, and [portable-cow.md](portable-cow.md) records the result of #49.
 
 ## Command
 
