@@ -10,8 +10,8 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 
 ## Method
 
-- Before: `main` at `a2162d8`. After: branch `msfz-single-compression`. Both are release
-  builds with the same toolchain as [baseline.md](baseline.md), on the same machine.
+- Before: `main` at `a2162d8`. After: commit `b4154eb`. Both are release builds with the same
+  toolchain as [baseline.md](baseline.md), on the same machine.
 - Bench: `cargo bench -p pdbrs --bench baseline -- --filter msfz/write-default --runs 10`. The
   row `msfz/write-default` writes `msvc-x64-large` with the default options (1 warm-up run and
   10 timed runs in one child process).

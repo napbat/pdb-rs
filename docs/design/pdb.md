@@ -259,7 +259,7 @@ Evidence: `cargo run -p pdbrs-fixtures -- verify-rebuild` rebuilds the four stan
 Each rebuild has the original bytes and the original content-derived ID, and its verifier dump has no differences.
 `cargo run -p pdbrs-fixtures -- verify-edit` edits and builds the same five PDBs and compares the verifier dumps with the expected change.
 It runs each standalone fixture program with a built PDB and with a PDB whose sequence points move 1000 lines (see `fixtures/README.md`).
-Its section `new edit cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
+Its section `change and removal cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
 For each case, the verifier dump shows the expected change, and the streams with other bytes are exactly the streams that `PlanReport` does not give as copied.
 Its section `task cases:` runs the editing tasks `set_source_link` and `embed_source` (#41) with the same checks; the verifier decodes each embedded source and checks it against the SHA-256 hash of its document.
 Its section `remap cases:` runs `remap_source_paths` (#46): the build root of the document names becomes `/_/`, the verifier reads the new names, and all other lines, also the sequence points, stay equal.
@@ -458,7 +458,7 @@ Two clean calls apply their maps in call order. OMAP output after clean output f
 
 Clean output has these rules:
 
-- Rule 6: the call checks the section headers and the OMAP tables of the model and the unwind streams. Then it keeps a copy of the map and the policy and does not change the records.
+- The call checks the section headers and the OMAP tables of the model and the unwind streams. Then it keeps a copy of the map and the policy and does not change the records.
   The plan applies the rewrite to a copy of the address-bearing parts. Thus records that other edits add or change, before or after the call, use the addresses of the source PDB, and the model keeps the source addresses.
 - An address is a section and an offset with a section from 1 to the number of section headers that the records use. Section 0 and larger section numbers (absolute symbols) keep their values. An RVA field with the value 0 has no address and keeps its value.
 - The plan rewrites the module symbols, the C13 line blocks (`DEBUG_S_LINES`), the module frame data (`DEBUG_S_FRAMEDATA`), the COFF symbol RVAs, the symbol record stream with the GSI and the PSI (address map, thunk table and section starts),
@@ -718,7 +718,7 @@ Do not allocate a buffer from an unchecked length in the file.
 Some producers write CodeView records and stream bytes that the format does not require or that a canonical encoder does not write.
 `native::codeview` and the native stream modules keep these details, so that a decoded record or stream encodes to the same bytes.
 Microsoft and LLVM writers also differ in the layout of some hash streams and hash tables. `native::Producer` selects the layout of one producer.
-The names of these items use one vocabulary (rule 13 of #40):
+The names of these items use one vocabulary (#40):
 
 - `trailing_zeros`: the count of zero bytes after the last field of a record.
 - `trailing`: the bytes after the last field that are not zero bytes, for example the MASM end bytes of a UDT record.

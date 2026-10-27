@@ -546,9 +546,9 @@ For each input, the command checks these items:
    gives the original trace. The moved PDB gives each line number plus 1000 in the frames of
    the fixture documents; frames of other assemblies, for example `FSharp.Core`, do not change.
 
-After these items, the section `new edit cases:` applies one change in each case below (#42).
-Each case starts from `Pdb::edit` with `IdentityPolicy::ContentDerived` and changes the first
-record that applies. A case that does not apply gives a `note:` line and no output.
+After these items, the section `change and removal cases:` applies one change in each case
+below (#42). Each case starts from `Pdb::edit` with `IdentityPolicy::ContentDerived` and changes
+the first record that applies. A case that does not apply gives a `note:` line and no output.
 
 | Case | Change |
 | --- | --- |
@@ -570,8 +570,8 @@ For each case, the command checks these items:
    dumps of the original and the output, and compares the bytes of each stream.
 3. The same edit again gives the same bytes.
 
-After the section `new edit cases:`, the section `task cases:` applies the editing tasks of
-`PdbEditor` (#41), each from `Pdb::edit` with `IdentityPolicy::ContentDerived`:
+After the section `change and removal cases:`, the section `task cases:` applies the editing
+tasks of `PdbEditor` (#41), each from `Pdb::edit` with `IdentityPolicy::ContentDerived`:
 
 | Case | Task |
 | --- | --- |
@@ -883,9 +883,10 @@ classes are:
 - The stripped PDB keeps the source stream IDs, and `link.exe` writes the stripped symbol
   records in another order, so the stream numbers and the symbol record offsets differ.
 
-After the summary line of these edits, the command prints the section `new edit cases:` (#42).
-It runs 8 more cases on each PDB, each with `IdentityPolicy::IncrementAge`. A case that does
-not apply to a PDB gives a `note:` line and no output.
+After the summary line of these edits, the command prints the section
+`change and removal cases:` (#42). It runs 8 more cases on each PDB, each with
+`IdentityPolicy::IncrementAge`. A case that does not apply to a PDB gives a `note:` line and no
+output.
 
 | Case | Change (the first record that applies) |
 | --- | --- |
@@ -1119,7 +1120,7 @@ writes the output of `RemovedCode::Drop` to
    and for the symbols at RVA 0 of the HLSL and .NET fixtures). The address of the error
    (`Error::remap_address`) must have no range. Without removed records, both policies must
    give the same bytes. A set that removes procedures must remove records.
-2. Records without a split form (decision 4 of #43). The plan can fail with `UnsupportedEdit`
+2. Records without a split form (#43). The plan can fail with `UnsupportedEdit`
    for a record that the ranges split, for example `S_BLOCK32`, an inline site in more than
    one part, or an FPO record. The command then decodes the record at the source location of
    the error (`Error::stream_location`), or finds the procedure that holds the address. A
@@ -1175,9 +1176,9 @@ the compared, removed and explained items of checks 6 and 7. The lines
   after the procedure through OMAP, so it gets the RVA of the next range (or 0). The clean
   record keeps the offset in the procedure, so DIA gives the new end of the procedure.
 - A `FuncDebugStart` or `FuncDebugEnd` line of a split procedure whose old address is outside
-  the first part. Decision 4 limits the debug start and end to the length of the first part,
-  so the clean line must give the end of the first part. The OMAP line must give the new RVA
-  of an old address in a later part of the procedure.
+  the first part. The clean record limits the debug start and end to the length of the first
+  part (#43), so the clean line must give the end of the first part. The OMAP line must give
+  the new RVA of an old address in a later part of the procedure.
 - `-sym` at an address in a later part of a split procedure. DIA finds the procedure in the
   OMAP output, and the `S_SEPCODE` block of the part in the clean output. The clean block must
   hold the address, the address must be outside the first part, and the parent of the block
@@ -1201,7 +1202,7 @@ the compared, removed and explained items of checks 6 and 7. The lines
   public symbol (`SymTag` 0xA) at the highest public RVA of the clean `-p` dump.
 - A PGO phase line (`Phase Name: <phase>`, and its `-sym` property) of one output only. DIA
   takes the phase from the COFF group `<section>$lp<phase>` that holds the procedure. A COFF
-  group is a point (decision 4): the clean group keeps its start and length, so after a
+  group is a point (#43): the clean group keeps its start and length, so after a
   reorder it holds other procedures (`msvc-x64-pgo`). The source group must hold the old start
   of the procedure exactly if the OMAP output prints the line. The clean group must hold the
   new start exactly if the clean output prints it.

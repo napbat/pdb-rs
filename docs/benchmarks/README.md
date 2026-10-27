@@ -111,7 +111,7 @@ its times are not comparable.
 | `native/rebuild` | native | `Pdb::edit(IdentityPolicy::Preserve)`, `decode_all`, `plan(EditOptions::default())`, `to_vec`. | Output bytes |
 | `portable/read` | Portable | `portable::Pdb::parse`, every row of the eight debug tables with its heap values, the custom debug information values, the document sources, the sequence points, the local variables and constants, the imports, the state machine methods and `validate_debug`. | Rows and decoded values |
 | `portable/rebuild` | Portable | `Pdb::to_parts`, `PdbParts::plan(IdentityPolicy::ContentDerived)`, `to_vec`. | Output bytes |
-| `portable/edit` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of all sequence points and a rename of document 1, `plan(EditOptions::default())`, `to_vec`. Before #42 stage 7: `Pdb::edit()` and `plan(IdentityPolicy::ContentDerived)`. | Output bytes |
+| `portable/edit` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of all sequence points and a rename of document 1, `plan(EditOptions::default())`, `to_vec`. Before the API redesign of #42: `Pdb::edit()` and `plan(IdentityPolicy::ContentDerived)`. | Output bytes |
 | `portable/edit-document` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, the suffix `.edited` on the name of document 1, `plan(EditOptions::default())`, `to_vec`. Added for #49. | Output bytes |
 | `portable/edit-method` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of the sequence points of the first method that has them, `plan(EditOptions::default())`, `to_vec`. Added for #49. | Output bytes |
 | `msfz/open` | MSFZ | `Pdb::open` of the MSFZ file. | Streams |
