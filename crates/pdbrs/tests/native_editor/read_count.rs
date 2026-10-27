@@ -23,7 +23,7 @@ const TPI_HEADER_SIZE: usize = 56;
 const RAW_SIZE: usize = 3 * 4096 + 100;
 
 /// An input that records each read: the file offset and the length.
-struct Counting<'a> {
+pub struct Counting<'a> {
     /// The bytes of the input.
     bytes: &'a [u8],
     /// The reads since the last call of [`Counting::take`].
@@ -32,7 +32,7 @@ struct Counting<'a> {
 
 impl<'a> Counting<'a> {
     /// Make a counting input of `bytes`.
-    const fn new(bytes: &'a [u8]) -> Self {
+    pub const fn new(bytes: &'a [u8]) -> Self {
         Self {
             bytes,
             reads: RefCell::new(Vec::new()),
@@ -40,7 +40,7 @@ impl<'a> Counting<'a> {
     }
 
     /// Return the recorded reads and reset the record.
-    fn take(&self) -> Vec<(u64, usize)> {
+    pub fn take(&self) -> Vec<(u64, usize)> {
         core::mem::take(&mut *self.reads.borrow_mut())
     }
 }

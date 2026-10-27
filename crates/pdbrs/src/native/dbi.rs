@@ -39,6 +39,7 @@ mod write;
 pub use builder::DbiBuilder;
 pub use debug_header::{DebugStream, DebugStreams, encode_debug_streams};
 pub use header::DbiHeader;
+pub(crate) use module::{GlobalRefRegion, read_global_refs};
 pub use module::{
     GlobalRefs, GlobalRefsIter, ModuleRegionSizes, ModuleStream, ModuleStreamParts, Subsection,
     Subsections,

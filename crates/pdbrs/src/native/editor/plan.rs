@@ -16,6 +16,7 @@ mod cow;
 mod layout;
 mod modules;
 mod opaque;
+mod patch;
 mod shared;
 mod strip;
 mod types;
@@ -28,6 +29,8 @@ pub(super) enum Planned<'e, S> {
     Owned(Vec<u8>),
     /// Bytes that the editor model holds.
     Borrowed(&'e [u8]),
+    /// Base bytes with new fixed-width values (#48).
+    Patched(patch::Patched<'e, S>),
 }
 
 impl<S: ReadAt> ReadAt for Planned<'_, S> {
@@ -36,6 +39,7 @@ impl<S: ReadAt> ReadAt for Planned<'_, S> {
             Self::Source(stream) => stream.len(),
             Self::Owned(bytes) => ReadAt::len(bytes.as_slice()),
             Self::Borrowed(bytes) => ReadAt::len(*bytes),
+            Self::Patched(patched) => patched.len(),
         }
     }
 
@@ -44,6 +48,7 @@ impl<S: ReadAt> ReadAt for Planned<'_, S> {
             Self::Source(stream) => stream.read_exact_at(offset, buffer),
             Self::Owned(bytes) => bytes.as_slice().read_exact_at(offset, buffer),
             Self::Borrowed(bytes) => bytes.read_exact_at(offset, buffer),
+            Self::Patched(patched) => patched.read_exact_at(offset, buffer),
         }
     }
 }
@@ -156,7 +161,12 @@ pub(super) fn unsupported(context: &'static str) -> Error {
 ///
 /// [`PdbEditor::plan`] makes the plan. The plan encoded all changed streams
 /// and checked the MSF layout, so the write functions do only output work.
-/// They read each copied stream from the source.
+/// They read each copied stream from the source. A stream that gets only
+/// new fixed-width values (for example the global references of a module
+/// after a move of symbol records) is a patched stream: the plan keeps the
+/// new values only. The write functions read the stream from the source (or
+/// from the bytes that the source session holds) and write the new values
+/// over it.
 ///
 /// # Errors and partial output
 ///

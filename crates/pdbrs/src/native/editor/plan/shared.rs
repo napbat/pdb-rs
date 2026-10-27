@@ -4,6 +4,7 @@
 use alloc::vec::Vec;
 
 use super::modules::OffsetMap;
+use super::patch::Patch;
 use crate::native::Producer;
 use crate::native::codeview::Records;
 use crate::native::codeview::index::{ModuleIndex, ModuleSymbolHandle, ModuleSymbolOffset};
@@ -290,14 +291,14 @@ pub(super) fn index_changed(
         })
 }
 
-/// Write the new targets of the reference records of an undecoded symbol
-/// record stream. Return `None` if no target moved.
+/// Return the new targets of the reference records of an undecoded symbol
+/// record stream as patches (#48). Return an empty list if no target moved.
 pub(super) fn patch_targets(
     records: &[u8],
     modules: &dyn ModuleTargets,
     stream: StreamId,
-) -> Result<Option<Vec<u8>>> {
-    let mut patched: Option<Vec<u8>> = None;
+) -> Result<Vec<Patch>> {
+    let mut patches = Vec::new();
     for record in Records::new(records) {
         let record = record?;
         let symbol = Symbol::decode(record)?;
@@ -309,18 +310,8 @@ pub(super) fn patch_targets(
         else {
             continue;
         };
-        if patched.is_none() {
-            let mut copy = Vec::new();
-            copy.try_reserve_exact(records.len())
-                .map_err(|_| no_memory())?;
-            copy.extend_from_slice(records);
-            patched = Some(copy);
-        }
-        if let Some(bytes) = &mut patched {
-            let start = record.offset as usize;
-            bytes[start + TARGET_OFFSET..start + TARGET_MODULE]
-                .copy_from_slice(&offset.0.to_le_bytes());
-        }
+        patches.try_reserve(1).map_err(|_| no_memory())?;
+        patches.push(Patch::new(record.offset as usize + TARGET_OFFSET, offset.0));
     }
-    Ok(patched)
+    Ok(patches)
 }

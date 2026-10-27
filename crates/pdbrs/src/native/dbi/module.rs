@@ -12,9 +12,11 @@ use crate::native::msf::StreamId;
 use crate::{Bytes, Error, ErrorKind, Result};
 
 mod global_refs;
+mod tail;
 mod write;
 
 pub use global_refs::{GlobalRefs, GlobalRefsIter};
+pub(crate) use tail::{GlobalRefRegion, read_global_refs};
 pub use write::ModuleStreamParts;
 
 /// The `CV_SIGNATURE_C13` value at the start of a symbol region.

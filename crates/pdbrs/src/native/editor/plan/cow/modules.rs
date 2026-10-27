@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use super::super::layout::global_refs;
 use super::super::modules::{self as encode, EncodedModule, OffsetMap};
 use super::super::opaque::{self, Scope};
+use super::super::patch::Patch;
 use super::super::shared::{self, EncodedShared, ModuleTargets};
 use super::super::{checks, missing};
 use super::{Bytes, Work, push};
@@ -15,7 +16,7 @@ use crate::native::codeview::symbol::ModuleTypeReference;
 use crate::native::codeview::symbol::validate::{
     ValidationContext, validate_module_symbols, validate_shared_symbols,
 };
-use crate::native::dbi::{Module, SourceInfo};
+use crate::native::dbi::{GlobalRefRegion, Module, SourceInfo, read_global_refs};
 use crate::native::editor::ModuleSlot;
 use crate::native::editor::module::{ModuleContents, SYMBOL_BASE};
 use crate::native::editor::report::{IndexSpace, RebuildReason, StreamChange};
@@ -172,13 +173,15 @@ fn plan_shared<S: ReadAt>(
         if module_moved
             && let Some(stream) = work.source_dbi()?.header().symbol_stream
             && let Some(records) = pdb.symbol_records()?
-            && let Some(bytes) = shared::patch_targets(records, modules, stream)?
         {
-            work.changes.set(
-                stream,
-                Bytes::Owned(bytes),
-                StreamChange::Remapped(IndexSpace::ModuleSymbolOffset),
-            )?;
+            let patches = shared::patch_targets(records, modules, stream)?;
+            if !patches.is_empty() {
+                work.changes.set(
+                    stream,
+                    Bytes::SessionPatched(records, patches),
+                    StreamChange::Remapped(IndexSpace::ModuleSymbolOffset),
+                )?;
+            }
         }
         return Ok(None);
     };
@@ -243,6 +246,10 @@ fn plan_shared<S: ReadAt>(
 
 /// Write the new offsets into the global references of each module stream
 /// that the model did not decode. A reference to a removed record goes away.
+///
+/// The plan reads only the global reference region of each module stream.
+/// A new offset becomes a patch over the source stream (#48). A removed
+/// reference makes the stream shorter, so that stream gets new bytes.
 fn move_global_refs<S: ReadAt>(work: &mut Work<'_, S>, shared: &EncodedShared) -> Result<()> {
     let pdb = work.pdb;
     let decoded = |index: u32| {
@@ -257,52 +264,74 @@ fn move_global_refs<S: ReadAt>(work: &mut Work<'_, S>, shared: &EncodedShared) -
         if decoded(index.0) {
             continue;
         }
-        let Some(stream) = pdb.load_module(&module)? else {
+        let Some(id) = module.stream else {
             continue;
         };
-        let refs = stream.global_refs()?;
-        let mut moved = Vec::new();
-        moved
-            .try_reserve_exact(refs.len())
-            .map_err(|_| crate::native::output::no_memory())?;
-        let mut differs = false;
-        for offset in &refs {
+        let reader = pdb
+            .container()
+            .stream(id)?
+            .ok_or_else(|| missing("PDB has no stream for a module"))?;
+        let region = read_global_refs(&reader, &module)?;
+        let mut patches = Vec::new();
+        let mut removed = false;
+        for (position, &offset) in region.offsets.iter().enumerate() {
             match shared.get(offset) {
-                Some(new) => {
-                    differs |= new != offset;
-                    moved.push(new);
+                Some(new) if new != offset => {
+                    push(&mut patches, Patch::new(region.start + position * 4, new.0))?;
                 }
-                None => differs = true,
+                Some(_) => {}
+                None => removed = true,
             }
         }
-        if !differs {
+        let bytes = if removed {
+            Bytes::Owned(shorten_global_refs(work, &module, &region, shared)?)
+        } else if patches.is_empty() {
             continue;
-        }
-        let id = stream.stream();
-        let start = stream.symbol_offset()
-            + stream.symbol_data().len()
-            + stream.c11_data().len()
-            + stream.c13_data().len();
-        let mut bytes = stream.into_bytes();
-        bytes.truncate(start);
-        let size = u32::try_from(moved.len() * 4).map_err(|_| {
-            Error::new(ErrorKind::LimitExceeded, None)
-                .with_context("global references do not fit in 32 bits")
-        })?;
-        bytes.extend_from_slice(&size.to_le_bytes());
-        for offset in &moved {
-            bytes.extend_from_slice(&offset.0.to_le_bytes());
-        }
+        } else {
+            Bytes::SourcePatched(patches)
+        };
         push(&mut changed, (id, bytes))?;
     }
     for (id, bytes) in changed {
-        work.changes.set(
-            id,
-            Bytes::Owned(bytes),
-            StreamChange::Remapped(IndexSpace::SymbolOffset),
-        )?;
+        work.changes
+            .set(id, bytes, StreamChange::Remapped(IndexSpace::SymbolOffset))?;
     }
     Ok(())
+}
+
+/// Return the bytes of the module stream of `module` without the global
+/// references to removed records and with the new offsets of the others.
+fn shorten_global_refs<S: ReadAt>(
+    work: &Work<'_, S>,
+    module: &Module<'_>,
+    region: &GlobalRefRegion,
+    shared: &EncodedShared,
+) -> Result<Vec<u8>> {
+    let stream = work
+        .pdb
+        .load_module(module)?
+        .ok_or_else(|| missing("PDB has no stream for a module"))?;
+    let mut moved = Vec::new();
+    moved
+        .try_reserve_exact(region.offsets.len())
+        .map_err(|_| crate::native::output::no_memory())?;
+    moved.extend(
+        region
+            .offsets
+            .iter()
+            .filter_map(|&offset| shared.get(offset)),
+    );
+    let mut bytes = stream.into_bytes();
+    bytes.truncate(region.start - 4);
+    let size = u32::try_from(moved.len() * 4).map_err(|_| {
+        Error::new(ErrorKind::LimitExceeded, None)
+            .with_context("global references do not fit in 32 bits")
+    })?;
+    bytes.extend_from_slice(&size.to_le_bytes());
+    for offset in &moved {
+        bytes.extend_from_slice(&offset.0.to_le_bytes());
+    }
+    Ok(bytes)
 }
 
 /// Join the decoded modules with their global references and store the

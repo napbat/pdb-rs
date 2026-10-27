@@ -599,7 +599,7 @@ fn push<'e, S: ReadAt>(
     let bytes: &[u8] = match &stream {
         Planned::Owned(bytes) => bytes,
         Planned::Borrowed(bytes) => bytes,
-        Planned::Source(_) => &[],
+        Planned::Source(_) | Planned::Patched(_) => &[],
     };
     let change = change(pdb, source, bytes)?;
     let source = if change == StreamChange::Added {

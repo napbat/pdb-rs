@@ -2,6 +2,7 @@
 //! #42):
 //!
 //! - `read_count.rs`: the reads of a named stream change and its output.
+//! - `patched.rs`: the reads of a patched stream and its output (#48).
 //! - `opaque.rs`: a module whose symbols do not form a scope tree.
 //! - `rejected.rs`: the rejected edits and the editor after a rejection.
 //! - `determinism.rs`: the output depends only on the final model.
@@ -16,6 +17,7 @@ mod program;
 mod determinism;
 mod layout;
 mod opaque;
+mod patched;
 mod read_count;
 mod rejected;
 

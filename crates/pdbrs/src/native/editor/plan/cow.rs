@@ -7,12 +7,14 @@ use core::cell::Cell;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use super::patch::{Base, Patch, Patched};
 use super::types::write_cow;
 use super::{Assembly, Planned, checks, missing, same_bytes};
 use crate::io::ReadAt;
 use crate::native::auxiliary::{LinkInfo, NamedStreamKind, SourceLink, SourceServer};
 use crate::native::codeview::id_record::IdTable;
 use crate::native::codeview::index::{FIRST_RECORD_INDEX, IdIndex, TypeIndex};
+use crate::native::container::Stream;
 use crate::native::dbi::{Dbi, DbiBuilder};
 use crate::native::editor::named::Content as NamedContent;
 use crate::native::editor::report::{RebuildReason, StreamChange};
@@ -57,14 +59,20 @@ pub(super) enum Bytes<'e> {
     Owned(Vec<u8>),
     /// Bytes that the model holds.
     Borrowed(&'e [u8]),
+    /// The source stream with the same stream ID, with patches (#48).
+    SourcePatched(Vec<Patch>),
+    /// Bytes that the source session holds, with patches (#48).
+    SessionPatched(&'e [u8], Vec<Patch>),
 }
 
 impl Bytes<'_> {
-    /// Return the bytes.
-    fn as_slice(&self) -> &[u8] {
+    /// Return the bytes, or `None` for patched bytes. A patched stream
+    /// differs from its source stream, because each patch has a new value.
+    fn as_slice(&self) -> Option<&[u8]> {
         match self {
-            Self::Owned(bytes) => bytes,
-            Self::Borrowed(bytes) => bytes,
+            Self::Owned(bytes) => Some(bytes),
+            Self::Borrowed(bytes) => Some(bytes),
+            Self::SourcePatched(_) | Self::SessionPatched(..) => None,
         }
     }
 }
@@ -174,12 +182,20 @@ impl<'e> Changes<'e> {
             let stream = StreamId(id);
             let reader = container.stream(stream)?;
             let (planned, change) = match (source.remove(&id), reader) {
-                (Some(Change::Replace(bytes, _)), Some(reader))
-                    if same_bytes(&reader, bytes.as_slice())? =>
-                {
-                    (Some(Planned::Source(reader)), StreamChange::Copied)
+                (Some(Change::Replace(bytes, reason)), Some(reader)) => {
+                    let same = match bytes.as_slice() {
+                        Some(slice) => same_bytes(&reader, slice)?,
+                        None => false,
+                    };
+                    if same {
+                        (Some(Planned::Source(reader)), StreamChange::Copied)
+                    } else {
+                        (Some(planned(bytes, Some(reader))?), reason)
+                    }
                 }
-                (Some(Change::Replace(bytes, reason)), _) => (Some(planned(bytes)), reason),
+                (Some(Change::Replace(bytes, reason)), None) => {
+                    (Some(planned(bytes, None)?), reason)
+                }
                 (Some(Change::Remove), Some(_)) => (None, StreamChange::Removed),
                 (Some(Change::Remove), None) => (None, StreamChange::Copied),
                 (None, reader) => (reader.map(Planned::Source), StreamChange::Copied),
@@ -191,18 +207,29 @@ impl<'e> Changes<'e> {
                 Error::new(ErrorKind::InvalidFormat, None)
                     .with_context("the plan reserved a stream and did not fill it")
             })?;
-            assembly.push(Some(planned(bytes)), None, StreamChange::Added)?;
+            assembly.push(Some(planned(bytes, None)?), None, StreamChange::Added)?;
         }
         Ok(assembly)
     }
 }
 
-/// Return the planned stream of changed bytes.
-fn planned<S>(bytes: Bytes<'_>) -> Planned<'_, S> {
-    match bytes {
+/// Return the planned stream of changed bytes. `source` is the source
+/// stream with the same stream ID, the base of [`Bytes::SourcePatched`].
+fn planned<'e, S: ReadAt>(
+    bytes: Bytes<'e>,
+    source: Option<Stream<'e, S>>,
+) -> Result<Planned<'e, S>> {
+    Ok(match bytes {
         Bytes::Owned(bytes) => Planned::Owned(bytes),
         Bytes::Borrowed(bytes) => Planned::Borrowed(bytes),
-    }
+        Bytes::SourcePatched(patches) => {
+            let source = source.ok_or_else(|| missing("a patched stream has no source stream"))?;
+            Planned::Patched(Patched::new(Base::Source(source), patches)?)
+        }
+        Bytes::SessionPatched(base, patches) => {
+            Planned::Patched(Patched::new(Base::Session(base), patches)?)
+        }
+    })
 }
 
 /// The source streams that the strip and the opaque check read.
