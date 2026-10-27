@@ -168,9 +168,10 @@ cargo run -p pdbrs-fixtures -- detect
 
 | Path | Contents |
 | --- | --- |
-| `crates/pdbrs/` | The library, its examples and its integration tests. |
+| `crates/pdbrs/` | The library, its examples, its integration tests and the `baseline` benchmark. |
 | `crates/pdbrs-fixtures/` | The fixture generator, the `tools` command for the consumer tools and the `verify-portable` and `detect` commands. |
 | `fixtures/` | Demo program sources for the fixtures and the .NET Portable PDB verifier. |
+| `docs/benchmarks/` | The benchmark method, its limits and the baseline numbers (#44). |
 | `docs/design/` | The reader and writer design and the implementation evidence. |
 | `docs/reference/` | Pinned LLVM and Microsoft PDB documentation, with provenance and licenses. |
 

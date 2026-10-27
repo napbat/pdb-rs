@@ -48,3 +48,8 @@ required-features = ["std"]
 [[example]]
 name = "types"
 required-features = ["std"]
+
+[[bench]]
+name = "baseline"
+harness = false
+required-features = ["std"]
