@@ -23,6 +23,7 @@ use super::super::Entries;
 use super::super::blob::{Reader, Writer, invalid, too_large};
 use super::{read_baseline, read_syntax_offset, write_baseline, write_syntax_offset};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 
 /// The largest number of zero bytes after the states.
 const MAX_TRAILING: usize = 3;
@@ -42,19 +43,20 @@ pub struct StateMachineState {
 }
 
 /// An Edit and Continue state machine state map.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EncStateMachineStateMap<'a> {
     /// The blob.
-    bytes: &'a [u8],
-    /// The states. [`EncStateMachineStateMap::parse`] checked them.
-    states: &'a [u8],
+    bytes: Bytes<'a>,
+    /// The blob range of the states. [`EncStateMachineStateMap::parse`]
+    /// checked them. The zero bytes after the states follow to the end.
+    states: core::ops::Range<usize>,
     /// The number of states.
     len: usize,
     /// The syntax offset baseline.
     baseline: i32,
-    /// The zero bytes after the states.
-    trailing: &'a [u8],
 }
+
+into_owned!(struct EncStateMachineStateMap { bytes; states, len, baseline });
 
 impl<'a> EncStateMachineStateMap<'a> {
     /// Decode a state machine state map blob.
@@ -75,7 +77,7 @@ impl<'a> EncStateMachineStateMap<'a> {
         } else {
             read_baseline(&mut reader)?
         };
-        let start = reader.rest();
+        let start = blob.len() - reader.rest().len();
         let mut order = Order::default();
         let mut len = 0;
         for _ in 0..declared {
@@ -87,18 +89,17 @@ impl<'a> EncStateMachineStateMap<'a> {
             return Err(invalid("bytes follow the state machine states"));
         }
         Ok(Self {
-            bytes: blob,
-            states: &start[..start.len() - trailing.len()],
+            bytes: Bytes::new(blob),
+            states: start..blob.len() - trailing.len(),
             len,
             baseline,
-            trailing,
         })
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the syntax offset baseline, or 0 if there are no states.
@@ -109,8 +110,8 @@ impl<'a> EncStateMachineStateMap<'a> {
 
     /// Return the zero bytes after the states (at most three).
     #[must_use]
-    pub const fn trailing(&self) -> &'a [u8] {
-        self.trailing
+    pub fn trailing(&self) -> &[u8] {
+        &self.bytes[self.states.end..]
     }
 
     /// Return the number of states.
@@ -127,9 +128,9 @@ impl<'a> EncStateMachineStateMap<'a> {
 
     /// Return an iterator over the states.
     #[must_use]
-    pub const fn iter(&self) -> EncStateMachineStateMapIter<'a> {
+    pub fn iter(&self) -> EncStateMachineStateMapIter<'_> {
         EncStateMachineStateMapIter(Entries::new(
-            self.states,
+            &self.bytes[self.states.clone()],
             self.len,
             self.baseline,
             read_state,

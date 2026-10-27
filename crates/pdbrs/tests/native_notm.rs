@@ -5,7 +5,6 @@
 //! these records, the rebuild carries the streams, and the editor treats
 //! them as streams of the module (#32, #33, #34).
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, TypeIndex};
 use pdbrs::native::codeview::symbol::{
@@ -13,10 +12,11 @@ use pdbrs::native::codeview::symbol::{
     S_LDATA32, S_MOD_TYPEREF, S_PUB32, SymbolData,
 };
 use pdbrs::native::codeview::type_record::{ArgumentList, TypeLeaf};
-use pdbrs::native::dbi::{OwnedModule, SectionContribution};
+use pdbrs::native::dbi::{Module, SectionContribution};
 use pdbrs::native::info::Feature;
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::{BuildOptions, EditOptions, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::{Bytes, ErrorKind};
 
 /// The flags of a module that owns its type records (`fOwnTMR`).
 const OWN_TYPE_RECORDS: u32 = 0x08;
@@ -24,7 +24,7 @@ const OWN_TYPE_RECORDS: u32 = 0x08;
 const OTHER_MODULE: u32 = 0x20;
 
 /// Return a module record with a name and no section contribution.
-fn module_record(name: &[u8]) -> OwnedModule {
+fn module_record(name: &[u8]) -> Module<'static> {
     let mut contribution = SectionContribution::default();
     contribution.section = 0xffff;
     contribution.padding1 = 0;
@@ -36,7 +36,7 @@ fn module_record(name: &[u8]) -> OwnedModule {
     contribution.data_crc = Some(0);
     contribution.reloc_crc = Some(0);
     contribution.coff_section = None;
-    let mut module = OwnedModule::default();
+    let mut module = Module::default();
     module.unused1 = 0;
     module.section_contribution = contribution;
     module.flags = 0;
@@ -49,8 +49,8 @@ fn module_record(name: &[u8]) -> OwnedModule {
     module.file_name_offset = 0;
     module.source_file_name_index = 0;
     module.pdb_file_path_index = 0;
-    module.name = name.to_vec();
-    module.object_file = name.to_vec();
+    module.name = name.to_vec().into();
+    module.object_file = name.to_vec().into();
     module.name_padding = [0; 3];
     module
 }
@@ -74,7 +74,7 @@ fn local(type_index: TypeIndex) -> SymbolData<'static> {
         section: 1,
         offset: 0,
     };
-    data.name = b"local";
+    data.name = Bytes::new(b"local");
     SymbolData::Data(data)
 }
 
@@ -124,7 +124,7 @@ fn builder(first: TypeIndex, second: TypeIndex) -> PdbBuilder<'static> {
             section: 1,
             offset: 0,
         };
-        record.name = name;
+        record.name = Bytes::new(name);
         let public = builder
             .add_symbol_fields(S_PUB32, SymbolData::Public(record))
             .expect("public");

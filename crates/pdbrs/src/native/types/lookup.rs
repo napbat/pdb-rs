@@ -11,9 +11,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{TypeRecord, TypeStream};
+use crate::native::codeview::LeafKind;
 use crate::native::codeview::field_list::{FieldList, Member, Members};
 use crate::native::codeview::index::{IdIndex, TypeIndex};
-use crate::native::codeview::type_record::TypeLeaf;
+use crate::native::codeview::type_record::{LF_FIELDLIST, TypeLeaf};
 use crate::{Error, ErrorKind, Result};
 
 /// Return an invalid-reference error with `context`.
@@ -144,15 +145,31 @@ impl<'a> TypeTable<'a> {
     /// The iterator returns the errors for the continuation records, and an
     /// [`ErrorKind::InvalidFormat`] error for a continuation cycle.
     pub fn members(&self, index: TypeIndex) -> Result<FieldMembers<'_, 'a>> {
-        let list = self.field_list(index)?;
         Ok(FieldMembers {
             table: self,
-            members: list.members(),
+            members: self.field_members(index)?,
             tortoise: index,
             power: 1,
             steps: 1,
             done: false,
         })
+    }
+
+    /// Return an iterator over the members of the `LF_FIELDLIST` record of a
+    /// type index. The iterator borrows the stream bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`TypeTable::field_list`].
+    fn field_members(&self, index: TypeIndex) -> Result<Members<'a>> {
+        let record = self.record(index)?.record;
+        if LeafKind(record.kind) != LF_FIELDLIST {
+            return Err(invalid_reference(
+                "type index does not refer to a field list",
+            ));
+        }
+        FieldList::parse(record.data)?;
+        Ok(Members::new(record.data))
     }
 }
 
@@ -190,7 +207,7 @@ impl<'a> FieldMembers<'_, 'a> {
             self.steps = 0;
         }
         self.steps = self.steps.saturating_add(1);
-        self.members = self.table.field_list(next)?.members();
+        self.members = self.table.field_members(next)?;
         Ok(())
     }
 

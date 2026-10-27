@@ -136,7 +136,7 @@ fn named_streams_are_classified_by_exact_name_bytes() {
         (
             b"/src/files/c:\\a.natvis",
             NamedStreamKind::SourceFile {
-                virtual_file_name: b"c:\\a.natvis",
+                virtual_file_name: b"c:\\a.natvis".into(),
             },
         ),
         (SOURCE_SERVER_STREAM_NAME, NamedStreamKind::SourceServer),

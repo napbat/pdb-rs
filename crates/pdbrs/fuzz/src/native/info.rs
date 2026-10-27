@@ -22,9 +22,9 @@ pub fn info(data: &[u8]) {
     let _ = (info.version(), info.signature(), info.identity().age());
     let _ = (info.named_stream_capacity(), info.next_name_index());
     for named in info.named_streams() {
-        let _ = NamedStreamKind::classify(named.name);
+        let _ = NamedStreamKind::classify(&named.name);
         assert!(
-            info.named_stream(named.name).is_some(),
+            info.named_stream(&named.name).is_some(),
             "a decoded name has a stream"
         );
     }

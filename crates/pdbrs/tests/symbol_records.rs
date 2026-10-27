@@ -1,6 +1,5 @@
 //! Tests for the typed decoding of each symbol record kind.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::id_record::IdList;
 use pdbrs::native::codeview::index::{IdIndex, ModuleIndex, ModuleSymbolOffset, TypeIndex};
@@ -16,6 +15,7 @@ use pdbrs::native::codeview::symbol::{
     SymbolData, ThunkOrdinal,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
+use pdbrs::{Bytes, ErrorKind};
 
 /// A builder for little-endian symbol payloads.
 #[derive(Default)]
@@ -88,8 +88,8 @@ fn decodes_object_name() {
         let SymbolData::ObjectName(value) = symbol.data() else {
             panic!("expected S_OBJNAME");
         };
-        assert_eq!((value.signature, value.name), (7, &b"C:\\a.o"[..]));
-        assert_eq!(symbol.name(), Some(&b"C:\\a.o"[..]));
+        assert_eq!((value.signature, &value.name[..]), (7, &b"C:\\a.o"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"C:\\a.o"[..]));
     });
 }
 
@@ -132,7 +132,7 @@ fn compile3_accepts_zero_bytes_after_the_version() {
     for tail in [&b""[..], b"\0", b"\0\0\0\0\0"] {
         let bytes = unpadded(S_COMPILE3, &compile3(tail).0);
         let record = Records::new(&bytes).next().unwrap().unwrap();
-        let SymbolData::Compile3(value) = *Symbol::decode(record).unwrap().data() else {
+        let SymbolData::Compile3(value) = Symbol::decode(record).unwrap().data().clone() else {
             panic!("expected S_COMPILE3");
         };
         assert_eq!(value.version, b"ML");
@@ -179,7 +179,7 @@ fn compile2_extra_strings_can_be_absent_or_empty() {
             unpadded(S_COMPILE2, &payload.0)
         };
         let record = Records::new(&bytes).next().unwrap().unwrap();
-        let SymbolData::Compile2(value) = *Symbol::decode(record).unwrap().data() else {
+        let SymbolData::Compile2(value) = Symbol::decode(record).unwrap().data().clone() else {
             panic!("expected S_COMPILE2");
         };
         assert!(value.extra_strings.is_empty());
@@ -189,7 +189,7 @@ fn compile2_extra_strings_can_be_absent_or_empty() {
     payload.0.truncate(payload.0.len() - 2);
     let bytes = unpadded(S_COMPILE2, &payload.bytes(b"\0").0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    let SymbolData::Compile2(value) = *Symbol::decode(record).unwrap().data() else {
+    let SymbolData::Compile2(value) = Symbol::decode(record).unwrap().data().clone() else {
         panic!("expected S_COMPILE2");
     };
     assert_eq!(value.version, b"LIN");
@@ -231,8 +231,11 @@ fn decodes_build_info_and_using_namespace() {
         S_UNAMESPACE,
         &Payload::default().bytes(b"std\0"),
         |symbol| {
-            assert_eq!(*symbol.data(), SymbolData::UsingNamespace(b"std"));
-            assert_eq!(symbol.name(), Some(&b"std"[..]));
+            assert_eq!(
+                *symbol.data(),
+                SymbolData::UsingNamespace(Bytes::new(b"std"))
+            );
+            assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"std"[..]));
         },
     );
 }
@@ -289,7 +292,7 @@ fn decodes_block_and_label() {
             (value.parent, value.end, value.code_length),
             (parent, end, 0x20)
         );
-        assert_eq!(symbol.name(), Some(&b""[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b""[..]));
         let scope = symbol.scope_links().unwrap();
         assert_eq!((scope.parent, scope.end), (parent, end));
     });
@@ -308,7 +311,7 @@ fn decodes_block_and_label() {
             offset: 0x30,
         };
         assert_eq!(symbol.address(), Some(address));
-        assert_eq!(symbol.name(), Some(&b"cs10"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"cs10"[..]));
     });
 }
 
@@ -334,7 +337,7 @@ fn decodes_standard_thunk() {
         assert_eq!(value.ordinal, ThunkOrdinal::STANDARD);
         assert_eq!((value.end, value.length), (ModuleSymbolOffset(112), 6));
         assert_eq!(value.variant, b"");
-        assert_eq!(symbol.name(), Some(&b"memset"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"memset"[..]));
         assert_eq!(symbol.address().unwrap().offset, 0x1234);
     });
     assert_eq!(
@@ -401,10 +404,10 @@ fn decodes_inline_site() {
 }
 
 /// Return the ID list of an `S_INLINEES`, `S_CALLEES` or `S_CALLERS` record.
-fn id_list(symbol: Symbol<'_>) -> IdList<'_> {
-    match *symbol.data() {
+fn id_list<'a>(symbol: &Symbol<'a>) -> IdList<'a> {
+    match symbol.data().clone() {
         SymbolData::Inlinees(list) => list,
-        SymbolData::Callees(list) | SymbolData::Callers(list) => list.functions(),
+        SymbolData::Callees(list) | SymbolData::Callers(list) => list.functions().clone(),
         _ => panic!("expected an ID list"),
     }
 }
@@ -414,13 +417,13 @@ fn decodes_inlinee_and_callee_lists() {
     for kind in [S_INLINEES, S_CALLEES, S_CALLERS] {
         let payload = Payload::default().u32(2).u32(0x11fd).u32(0x1237);
         decode(kind, &payload, |symbol| {
-            let list = id_list(symbol);
+            let list = id_list(&symbol);
             assert_eq!(list.len(), 2);
             let ids: Vec<IdIndex> = list.iter().collect();
             assert_eq!(ids, [IdIndex(0x11fd), IdIndex(0x1237)]);
         });
         decode(kind, &Payload::default().u32(0), |symbol| {
-            assert!(id_list(symbol).is_empty());
+            assert!(id_list(&symbol).is_empty());
         });
         let short = Payload::default().u32(3).u32(1).u32(2);
         assert_eq!(error(kind, &short), ErrorKind::InvalidFormat);
@@ -430,7 +433,8 @@ fn decodes_inlinee_and_callee_lists() {
     // A function list can have one invocation count for each function.
     for kind in [S_CALLEES, S_CALLERS] {
         decode(kind, &extra, |symbol| {
-            let (SymbolData::Callees(list) | SymbolData::Callers(list)) = *symbol.data() else {
+            let (SymbolData::Callees(list) | SymbolData::Callers(list)) = symbol.data().clone()
+            else {
                 panic!("expected a function list");
             };
             assert_eq!(list.invocations().collect::<Vec<_>>(), [2]);
@@ -487,7 +491,7 @@ fn decodes_local() {
         assert!(value.flags.contains(LocalFlags::OPTIMIZED_OUT));
         assert!(!value.flags.contains(LocalFlags::ALIAS));
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x1326)));
-        assert_eq!(symbol.name(), Some(&b"self"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"self"[..]));
     });
 }
 
@@ -610,7 +614,7 @@ fn decodes_section_and_checks_reserved_byte() {
         assert_eq!((value.number, value.alignment), (1, 12));
         assert_eq!((value.rva, value.length), (0x1000, 131_496));
         assert_eq!(value.characteristics, 0x6000_0020);
-        assert_eq!(symbol.name(), Some(&b".text"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b".text"[..]));
         assert_eq!(symbol.address(), None);
     });
     let mut reserved = payload.0.clone();
@@ -647,7 +651,7 @@ fn decodes_user_defined_type() {
     let payload = Payload::default().u32(0x1010).bytes(b"T\0");
     decode(S_UDT, &payload, |symbol| {
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x1010)));
-        assert_eq!(symbol.name(), Some(&b"T"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"T"[..]));
     });
 }
 
@@ -709,7 +713,7 @@ fn decodes_procedure_references() {
                 (ModuleSymbolOffset(396), Some(ModuleIndex(2)))
             );
             assert_eq!(reference.name_checksum, 0);
-            assert_eq!(symbol.name(), Some(&b"main"[..]));
+            assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"main"[..]));
         });
     }
     let payload = Payload::default().u32(0).u32(4).u16(0).bytes(b"x\0");
@@ -725,7 +729,7 @@ fn keeps_skip_filler_without_padding_rules() {
         let bytes = unpadded(S_SKIP, filler);
         let record = Records::new(&bytes).next().unwrap().unwrap();
         let symbol = Symbol::decode(record).unwrap();
-        assert_eq!(*symbol.data(), SymbolData::Skip(filler));
+        assert_eq!(*symbol.data(), SymbolData::Skip(Bytes::new(filler)));
         assert_eq!(symbol.name(), None);
         assert_eq!(symbol.address(), None);
     }

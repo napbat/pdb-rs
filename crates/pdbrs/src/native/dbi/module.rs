@@ -5,10 +5,11 @@ use core::iter::FusedIterator;
 use core::ops::Range;
 
 use super::{Module, align4, logical, read_u32};
+use crate::bytes::into_owned;
 use crate::native::codeview::Records;
 use crate::native::lines::SubsectionKind;
 use crate::native::msf::StreamId;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 mod global_refs;
 mod write;
@@ -262,7 +263,7 @@ impl ModuleStream {
 /// One framed C13 subsection.
 ///
 /// The kind keeps unknown values and the ignore bit.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Subsection<'a> {
     /// The offset of the subsection header in the C13 line region.
@@ -270,8 +271,13 @@ pub struct Subsection<'a> {
     /// The `DEBUG_S_SUBSECTION_TYPE` value.
     pub kind: SubsectionKind,
     /// The subsection contents, without the header and the alignment padding.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
+
+into_owned!(struct Subsection { data; offset, kind });
+
+/// The offset, the kind and the data of one framed subsection.
+type SubsectionParts<'a> = (u32, SubsectionKind, &'a [u8]);
 
 /// An iterator that frames a C13 line region into subsections.
 ///
@@ -291,8 +297,29 @@ pub struct Subsections<'a> {
 }
 
 impl<'a> Subsections<'a> {
-    /// Frame the subsection at the current position; return it and the next position.
-    fn read(&self) -> Result<(Subsection<'a>, usize)> {
+    /// Frame the next subsection and return its offset, its kind and its data.
+    ///
+    /// The function moves the iterator like [`Iterator::next`]. The data
+    /// borrows the C13 line region for `'a`, so a decoder can keep it
+    /// after the iterator moves on.
+    pub fn next_parts(&mut self) -> Option<Result<(u32, SubsectionKind, &'a [u8])>> {
+        if self.position >= self.bytes.len() {
+            return None;
+        }
+        match self.read() {
+            Ok((parts, next)) => {
+                self.position = next;
+                Some(Ok(parts))
+            }
+            Err(error) => {
+                self.position = self.bytes.len();
+                Some(Err(error))
+            }
+        }
+    }
+
+    /// Frame the subsection at the current position; return its parts and the next position.
+    fn read(&self) -> Result<(SubsectionParts<'a>, usize)> {
         let start = self.position;
         let end = self.base.saturating_add(self.bytes.len());
         let error = |kind, context| module_error(self.stream, kind, end, context);
@@ -333,12 +360,8 @@ impl<'a> Subsections<'a> {
                 "C13 subsection offset does not fit in 32 bits",
             )
         })?;
-        let subsection = Subsection {
-            offset,
-            kind: SubsectionKind(u32::from_le_bytes([k0, k1, k2, k3])),
-            data,
-        };
-        Ok((subsection, start + padded))
+        let kind = SubsectionKind(u32::from_le_bytes([k0, k1, k2, k3]));
+        Ok(((offset, kind, data), start + padded))
     }
 }
 
@@ -346,19 +369,11 @@ impl<'a> Iterator for Subsections<'a> {
     type Item = Result<Subsection<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.bytes.len() {
-            return None;
-        }
-        match self.read() {
-            Ok((subsection, next)) => {
-                self.position = next;
-                Some(Ok(subsection))
-            }
-            Err(error) => {
-                self.position = self.bytes.len();
-                Some(Err(error))
-            }
-        }
+        Some(self.next_parts()?.map(|(offset, kind, data)| Subsection {
+            offset,
+            kind,
+            data: Bytes::new(data),
+        }))
     }
 }
 

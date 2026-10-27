@@ -39,12 +39,12 @@ fn parses_the_format_field() {
     let raw = blob(0, b"abc");
     assert_eq!(
         EmbeddedSource::parse(&raw).unwrap(),
-        EmbeddedSource::Raw(b"abc")
+        EmbeddedSource::Raw(b"abc".into())
     );
     let empty = blob(0, b"");
     assert_eq!(
         EmbeddedSource::parse(&empty).unwrap(),
-        EmbeddedSource::Raw(b"")
+        EmbeddedSource::Raw(b"".into())
     );
     // The largest positive format is a DEFLATE size.
     let deflate = blob(0x7fff_ffff, &FIXED_ABC);
@@ -53,7 +53,7 @@ fn parses_the_format_field() {
         parsed,
         EmbeddedSource::Deflate {
             size: 0x7fff_ffff,
-            data: &FIXED_ABC
+            data: pdbrs::Bytes::new(&FIXED_ABC)
         }
     );
     assert_eq!(parsed.decoded_size(), 0x7fff_ffff);
@@ -76,12 +76,17 @@ fn rejects_short_and_reserved_blobs() {
 #[test]
 fn decodes_raw_sources_without_a_copy() {
     let raw = blob(0, b"abc");
-    let source = EmbeddedSource::parse(&raw).unwrap().decode(3).unwrap();
+    let parsed = EmbeddedSource::parse(&raw).unwrap();
+    let source = parsed.decode(3).unwrap();
     assert!(matches!(source, Cow::Borrowed(b"abc")));
     assert_eq!(decode_error(&raw, 2), ErrorKind::LimitExceeded);
     let empty = blob(0, b"");
     assert_eq!(
-        &*EmbeddedSource::parse(&empty).unwrap().decode(0).unwrap(),
+        &*EmbeddedSource::parse(&empty)
+            .unwrap()
+            .decode(0)
+            .unwrap()
+            .into_owned(),
         b""
     );
 }
@@ -90,7 +95,8 @@ fn decodes_raw_sources_without_a_copy() {
 fn decodes_deflate_sources() {
     for data in [&STORED_ABC[..], &FIXED_ABC] {
         let bytes = blob(3, data);
-        let source = EmbeddedSource::parse(&bytes).unwrap().decode(3).unwrap();
+        let parsed = EmbeddedSource::parse(&bytes).unwrap();
+        let source = parsed.decode(3).unwrap();
         assert!(matches!(source, Cow::Owned(_)));
         assert_eq!(&*source, b"abc");
     }

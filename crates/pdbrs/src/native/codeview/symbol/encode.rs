@@ -271,7 +271,7 @@ impl Symbol<'_> {
         let start = out.len();
         self.data.encode_with(self.kind(), Padding::None, out)?;
         // The record had a valid u16 length, so the original length fits.
-        let original = self.record().data.len() + 4;
+        let original = self.payload.len() + 4;
         let extra = original.saturating_sub(out.len() - start);
         if extra == 0 {
             return Ok(());

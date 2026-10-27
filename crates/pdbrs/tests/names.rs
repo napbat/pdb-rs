@@ -97,7 +97,7 @@ fn v1_table_resolves_offsets_and_names() {
             buckets[usize::try_from(entry.bucket).unwrap()],
             entry.offset.0
         );
-        assert_eq!(table.get(entry.offset).unwrap(), entry.name);
+        assert_eq!(table.get(entry.offset).unwrap(), &entry.name[..]);
     }
 
     let placement = table.validate_buckets().unwrap();

@@ -39,7 +39,7 @@ pub struct ForwardRefs<'t, 'a> {
 fn tag<'a>(table: &TypeTable<'a>, index: u32) -> Result<(u16, Tag<'a>, &'a [u8])> {
     let record = table.record_at_index(index)?.record;
     let full = table.stream().full_record(&record)?;
-    let tag = TypeLeaf::decode(record)?.tag().ok_or_else(|| {
+    let tag = TypeLeaf::decode(record)?.into_tag().ok_or_else(|| {
         Error::new(ErrorKind::InvalidReference, None)
             .with_context("type index does not refer to a user-defined type")
     })?;
@@ -132,7 +132,7 @@ impl<'t, 'a> ForwardRefs<'t, 'a> {
             if tag_hash(&definition, full) != hash {
                 continue;
             }
-            if let (Some(left), Some(right)) = (forward.unique_name, definition.unique_name) {
+            if let (Some(left), Some(right)) = (&forward.unique_name, &definition.unique_name) {
                 if left == right {
                     return Ok(Some(TypeIndex(candidate)));
                 }

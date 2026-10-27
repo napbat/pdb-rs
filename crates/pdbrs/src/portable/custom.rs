@@ -28,11 +28,11 @@
 //! | [`CustomDebugKind::STATE_MACHINE_HOISTED_LOCAL_SCOPES`] | `MethodDef` | [`HoistedLocalScopes`] |
 //! | [`CustomDebugKind::DYNAMIC_LOCAL_VARIABLES`] | `LocalVariable`, `LocalConstant` | [`DynamicLocalVariables`] |
 //! | [`CustomDebugKind::TUPLE_ELEMENT_NAMES`] | `LocalVariable`, `LocalConstant` | [`TupleElementNames`] |
-//! | [`CustomDebugKind::DEFAULT_NAMESPACE`] | `Module` | [`Utf8Bytes`] |
+//! | [`CustomDebugKind::DEFAULT_NAMESPACE`] | `Module` | [`Bytes`] (UTF-8) |
 //! | [`CustomDebugKind::ENC_LOCAL_SLOT_MAP`] | `MethodDef` | [`EncLocalSlotMap`] |
 //! | [`CustomDebugKind::ENC_LAMBDA_AND_CLOSURE_MAP`] | `MethodDef` | [`EncLambdaAndClosureMap`] |
 //! | [`CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP`] | `MethodDef` | [`EncStateMachineStateMap`] |
-//! | [`CustomDebugKind::SOURCE_LINK`] | `Module` | [`Utf8Bytes`] (JSON) |
+//! | [`CustomDebugKind::SOURCE_LINK`] | `Module` | [`Bytes`] (UTF-8 JSON) |
 //! | [`CustomDebugKind::EMBEDDED_SOURCE`] | `Document` | [`EmbeddedSource`] |
 //! | [`CustomDebugKind::COMPILATION_METADATA_REFERENCES`] | `Module` | [`CompilationMetadataReferences`] |
 //! | [`CustomDebugKind::COMPILATION_OPTIONS`] | `Module` | [`CompilationOptions`] |
@@ -78,9 +78,10 @@ macro_rules! entry_iter {
     };
 }
 
-/// Define the iterator type `$iter` of a codec type, and implement `IntoIterator` for the
-/// codec type and its reference through its `iter` method. The `@into` form only implements
-/// `IntoIterator` for an iterator type that the codec module defines.
+/// Define the iterator type `$iter` of a codec type, and implement `IntoIterator` for a
+/// reference to the codec type through its `iter` method. The `@into` form only implements
+/// `IntoIterator` for an iterator type that the codec module defines. The lifetime `'a` in
+/// `$item` is the lifetime of the reference.
 macro_rules! iterable {
     ($list:ident => $iter:ident, $item:ty) => {
         entry_iter!(
@@ -91,16 +92,7 @@ macro_rules! iterable {
         iterable!(@into $list => $iter, $item);
     };
     (@into $list:ident => $iter:ident, $item:ty) => {
-        impl<'a> IntoIterator for $list<'a> {
-            type Item = $item;
-            type IntoIter = $iter<'a>;
-
-            fn into_iter(self) -> Self::IntoIter {
-                self.iter()
-            }
-        }
-
-        impl<'a> IntoIterator for &$list<'a> {
+        impl<'a> IntoIterator for &'a $list<'_> {
             type Item = $item;
             type IntoIter = $iter<'a>;
 
@@ -144,6 +136,7 @@ pub use state_machine::{
 
 use self::blob::{Reader, Writer, invalid};
 use crate::Result;
+use crate::bytes::Bytes;
 use crate::portable::embedded::EmbeddedSource;
 
 /// The kind of a custom debug information value: a GUID.
@@ -296,39 +289,6 @@ impl fmt::Display for CustomDebugKind {
     }
 }
 
-/// Text bytes that should be UTF-8. The decoders do not check the encoding.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Utf8Bytes<'a>(&'a [u8]);
-
-impl<'a> Utf8Bytes<'a> {
-    /// Wrap `bytes`.
-    #[must_use]
-    pub const fn new(bytes: &'a [u8]) -> Self {
-        Self(bytes)
-    }
-
-    /// Return the bytes.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.0
-    }
-
-    /// Return `true` if there are no bytes.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Decode the bytes as UTF-8 text.
-    ///
-    /// # Errors
-    ///
-    /// Return the UTF-8 error if the bytes are not UTF-8.
-    pub const fn to_str(&self) -> core::result::Result<&'a str, core::str::Utf8Error> {
-        core::str::from_utf8(self.0)
-    }
-}
-
 /// The reader of one entry. The `i32` is the syntax offset baseline of an
 /// Edit and Continue map; the other codecs ignore it.
 type Read<'a, T> = fn(&mut Reader<'a>, i32) -> Result<T>;
@@ -396,8 +356,9 @@ fn count_to_end<'a, T>(bytes: &'a [u8], baseline: i32, read: Read<'a, T>) -> Res
     Ok(count)
 }
 
-/// A decoded custom debug information value, borrowed from the blob.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A decoded custom debug information value. It borrows the blob until
+/// [`CustomDebugValue::into_owned`] copies it.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CustomDebugValue<'a> {
     /// [`CustomDebugKind::ASYNC_METHOD_STEPPING_INFORMATION`].
@@ -409,7 +370,7 @@ pub enum CustomDebugValue<'a> {
     /// [`CustomDebugKind::TUPLE_ELEMENT_NAMES`].
     TupleElementNames(TupleElementNames<'a>),
     /// [`CustomDebugKind::DEFAULT_NAMESPACE`]: the namespace name.
-    DefaultNamespace(Utf8Bytes<'a>),
+    DefaultNamespace(Bytes<'a>),
     /// [`CustomDebugKind::ENC_LOCAL_SLOT_MAP`].
     EncLocalSlotMap(EncLocalSlotMap<'a>),
     /// [`CustomDebugKind::ENC_LAMBDA_AND_CLOSURE_MAP`].
@@ -418,7 +379,7 @@ pub enum CustomDebugValue<'a> {
     EncStateMachineStateMap(EncStateMachineStateMap<'a>),
     /// [`CustomDebugKind::SOURCE_LINK`]: the JSON text. pdbrs does not parse
     /// the JSON and does not fetch the URLs.
-    SourceLink(Utf8Bytes<'a>),
+    SourceLink(Bytes<'a>),
     /// [`CustomDebugKind::EMBEDDED_SOURCE`].
     EmbeddedSource(EmbeddedSource<'a>),
     /// [`CustomDebugKind::COMPILATION_METADATA_REFERENCES`].
@@ -435,7 +396,7 @@ pub enum CustomDebugValue<'a> {
         /// The kind GUID.
         kind: CustomDebugKind,
         /// The raw blob.
-        value: &'a [u8],
+        value: Bytes<'a>,
     },
 }
 
@@ -463,7 +424,7 @@ impl<'a> CustomDebugValue<'a> {
                 CustomDebugValue::TupleElementNames(TupleElementNames::parse(blob)?)
             }
             CustomDebugKind::DEFAULT_NAMESPACE => {
-                CustomDebugValue::DefaultNamespace(Utf8Bytes(blob))
+                CustomDebugValue::DefaultNamespace(Bytes::new(blob))
             }
             CustomDebugKind::ENC_LOCAL_SLOT_MAP => {
                 CustomDebugValue::EncLocalSlotMap(EncLocalSlotMap::parse(blob)?)
@@ -474,7 +435,7 @@ impl<'a> CustomDebugValue<'a> {
             CustomDebugKind::ENC_STATE_MACHINE_STATE_MAP => {
                 CustomDebugValue::EncStateMachineStateMap(EncStateMachineStateMap::parse(blob)?)
             }
-            CustomDebugKind::SOURCE_LINK => CustomDebugValue::SourceLink(Utf8Bytes(blob)),
+            CustomDebugKind::SOURCE_LINK => CustomDebugValue::SourceLink(Bytes::new(blob)),
             CustomDebugKind::EMBEDDED_SOURCE => {
                 CustomDebugValue::EmbeddedSource(EmbeddedSource::parse(blob)?)
             }
@@ -495,8 +456,50 @@ impl<'a> CustomDebugValue<'a> {
                 }
                 CustomDebugValue::PrimaryConstructorInformation
             }
-            _ => CustomDebugValue::Unknown { kind, value: blob },
+            _ => CustomDebugValue::Unknown {
+                kind,
+                value: Bytes::new(blob),
+            },
         })
+    }
+
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> CustomDebugValue<'static> {
+        match self {
+            Self::AsyncMethodSteppingInformation(v) => {
+                CustomDebugValue::AsyncMethodSteppingInformation(v.into_owned())
+            }
+            Self::StateMachineHoistedLocalScopes(v) => {
+                CustomDebugValue::StateMachineHoistedLocalScopes(v.into_owned())
+            }
+            Self::DynamicLocalVariables(v) => {
+                CustomDebugValue::DynamicLocalVariables(v.into_owned())
+            }
+            Self::TupleElementNames(v) => CustomDebugValue::TupleElementNames(v.into_owned()),
+            Self::DefaultNamespace(v) => CustomDebugValue::DefaultNamespace(v.into_owned()),
+            Self::EncLocalSlotMap(v) => CustomDebugValue::EncLocalSlotMap(v.into_owned()),
+            Self::EncLambdaAndClosureMap(v) => {
+                CustomDebugValue::EncLambdaAndClosureMap(v.into_owned())
+            }
+            Self::EncStateMachineStateMap(v) => {
+                CustomDebugValue::EncStateMachineStateMap(v.into_owned())
+            }
+            Self::SourceLink(v) => CustomDebugValue::SourceLink(v.into_owned()),
+            Self::EmbeddedSource(v) => CustomDebugValue::EmbeddedSource(v.into_owned()),
+            Self::CompilationMetadataReferences(v) => {
+                CustomDebugValue::CompilationMetadataReferences(v.into_owned())
+            }
+            Self::CompilationOptions(v) => CustomDebugValue::CompilationOptions(v.into_owned()),
+            Self::TypeDefinitionDocuments(v) => {
+                CustomDebugValue::TypeDefinitionDocuments(v.into_owned())
+            }
+            Self::PrimaryConstructorInformation => CustomDebugValue::PrimaryConstructorInformation,
+            Self::Unknown { kind, value } => CustomDebugValue::Unknown {
+                kind,
+                value: value.into_owned(),
+            },
+        }
     }
 
     /// Return the kind GUID of the value.
@@ -554,9 +557,7 @@ impl<'a> CustomDebugValue<'a> {
             Self::DynamicLocalVariables(flags) => {
                 DynamicLocalVariables::encode_parts(flags.iter(), out)
             }
-            Self::TupleElementNames(names) => {
-                TupleElementNames::encode_parts(names.iter().map(|name| name.as_bytes()), out)
-            }
+            Self::TupleElementNames(names) => TupleElementNames::encode_parts(names.iter(), out),
             Self::EncLocalSlotMap(map) => EncLocalSlotMap::encode_parts(map.iter(), out),
             Self::EncLambdaAndClosureMap(map) => EncLambdaAndClosureMap::encode_parts(
                 map.method_ordinal(),
@@ -567,7 +568,7 @@ impl<'a> CustomDebugValue<'a> {
             Self::EncStateMachineStateMap(map) => {
                 EncStateMachineStateMap::encode_parts(map.iter(), out)
             }
-            Self::DefaultNamespace(text) | Self::SourceLink(text) => copy(text.as_bytes(), out),
+            Self::DefaultNamespace(text) | Self::SourceLink(text) => copy(text, out),
             Self::EmbeddedSource(source) => source.encode(out),
             Self::CompilationMetadataReferences(references) => {
                 CompilationMetadataReferences::encode_parts(references.iter(), out)
@@ -581,6 +582,14 @@ impl<'a> CustomDebugValue<'a> {
             Self::PrimaryConstructorInformation => Ok(()),
             Self::Unknown { value, .. } => copy(value, out),
         }
+    }
+}
+
+impl crate::bytes::IntoOwned for CustomDebugValue<'_> {
+    type Owned = CustomDebugValue<'static>;
+
+    fn to_static(self) -> Self::Owned {
+        self.into_owned()
     }
 }
 

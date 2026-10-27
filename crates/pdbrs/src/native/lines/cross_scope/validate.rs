@@ -332,7 +332,7 @@ pub fn validate_cross_scope(
                         continue;
                     };
                     let candidates = || core::iter::once(first).chain(matches.clone());
-                    for id in import.ids {
+                    for id in &import.ids {
                         let exported = candidates().any(|module| {
                             module
                                 .exports

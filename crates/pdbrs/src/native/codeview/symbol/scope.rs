@@ -20,6 +20,7 @@ use core::iter::FusedIterator;
 use super::super::index::ModuleSymbolOffset;
 use super::super::{Record, Records};
 use super::{S_INLINESITE, S_INLINESITE_END, S_INLINESITE2, Symbol, SymbolData};
+use crate::bytes::into_owned;
 use crate::native::msf::StreamId;
 use crate::{Error, ErrorKind, Result};
 
@@ -28,7 +29,7 @@ mod write;
 pub use write::ModuleSymbolWriter;
 
 /// A symbol with its place in the scope tree.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ScopedSymbol<'a> {
     /// The offset of the record in the module stream.
@@ -45,6 +46,8 @@ pub struct ScopedSymbol<'a> {
     /// The decoded symbol.
     pub symbol: Symbol<'a>,
 }
+
+into_owned!(struct ScopedSymbol { symbol; offset, depth, scope });
 
 impl<'a> ScopedSymbol<'a> {
     /// Make a record with `symbol`. The other fields are zero or empty.

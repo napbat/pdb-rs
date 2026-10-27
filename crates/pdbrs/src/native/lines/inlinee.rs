@@ -4,9 +4,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
+use crate::bytes::into_owned;
 use crate::native::codeview::index::{ChecksumOffset, IdIndex};
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The size of the signature at the start of the subsection.
 const SIGNATURE_SIZE: usize = 4;
@@ -55,15 +56,17 @@ impl InlineeSignature {
 ///
 /// [`InlineeLines::parse`] validates all entries. The entry iterator then
 /// cannot fail.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct InlineeLines<'a> {
     /// The entry layout.
     signature: InlineeSignature,
     /// The validated entries after the signature.
-    entries: &'a [u8],
+    entries: Bytes<'a>,
     /// The number of entries.
     count: usize,
 }
+
+into_owned!(struct InlineeLines { entries; signature, count });
 
 impl<'a> InlineeLines<'a> {
     /// Parse and validate the data of a `DEBUG_S_INLINEELINES` subsection.
@@ -98,7 +101,7 @@ impl<'a> InlineeLines<'a> {
         }
         Ok(Self {
             signature,
-            entries,
+            entries: Bytes::new(entries),
             count,
         })
     }
@@ -123,9 +126,9 @@ impl<'a> InlineeLines<'a> {
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub const fn iter(&self) -> InlineeLinesIter<'a> {
+    pub fn iter(&self) -> InlineeLinesIter<'_> {
         InlineeLinesIter {
-            bytes: self.entries,
+            bytes: &self.entries,
             signature: self.signature,
             left: self.count,
         }
@@ -147,18 +150,9 @@ impl<'a> InlineeLines<'a> {
     }
 }
 
-impl<'a> IntoIterator for InlineeLines<'a> {
-    type Item = InlineeLine<'a>;
-    type IntoIter = InlineeLinesIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &InlineeLines<'a> {
-    type Item = InlineeLine<'a>;
-    type IntoIter = InlineeLinesIter<'a>;
+impl<'s> IntoIterator for &'s InlineeLines<'_> {
+    type Item = InlineeLine<'s>;
+    type IntoIter = InlineeLinesIter<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -166,7 +160,7 @@ impl<'a> IntoIterator for &InlineeLines<'a> {
 }
 
 /// The source location of one inlined function (`InlineeSourceLine`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineeLine<'a> {
     /// The `LF_FUNC_ID` or `LF_MFUNC_ID` record of the inlined function.
@@ -181,6 +175,8 @@ pub struct InlineeLine<'a> {
     /// The list is empty for [`InlineeSignature::Normal`].
     pub extra_files: ChecksumOffsets<'a>,
 }
+
+into_owned!(struct InlineeLine { extra_files; inlinee, checksum_offset, source_line });
 
 impl InlineeLine<'_> {
     /// Append the entry to `out` in the layout of `signature`.

@@ -98,7 +98,7 @@ fn typed_rows_give_runs_names_and_values() {
     assert_eq!(constant.name(), b"c");
     assert_eq!(
         constant.signature().unwrap().value(),
-        ConstantValue::Primitive(PrimitiveConstant::I4(5))
+        &ConstantValue::Primitive(PrimitiveConstant::I4(5))
     );
     let child = pdb.import_scope(ImportScopeId(2)).unwrap();
     assert_eq!(child.parent(), ImportScopeId(1));

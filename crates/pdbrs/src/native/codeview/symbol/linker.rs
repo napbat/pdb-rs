@@ -9,10 +9,11 @@
 use super::super::index::ModuleIndex;
 use super::super::{Fields, SymbolKind};
 use super::{Symbol, SymbolData};
+use crate::bytes::into_owned;
 use crate::native::codeview::Records;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of an export record (`S_EXPORT`).
 pub const S_EXPORT: SymbolKind = SymbolKind(0x1138);
@@ -47,7 +48,7 @@ flags! {
 }
 
 /// An export record ([`S_EXPORT`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Export<'a> {
     /// The ordinal.
@@ -56,15 +57,17 @@ pub struct Export<'a> {
     /// keeps them.
     pub flags: ExportFlags,
     /// The exported name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Export { name; ordinal, flags });
 
 impl<'a> Export<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let ordinal = fields.u16()?;
         let flags = ExportFlags(fields.u16()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             ordinal,
             flags,
@@ -76,7 +79,7 @@ impl<'a> Export<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u16(self.ordinal)?;
         out.u16(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -93,7 +96,7 @@ values! {
 }
 
 /// A record that the linker discarded ([`S_DISCARDED`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Discarded<'a> {
     /// The reason in bits 0 to 7 and unused bits 8 to 31, raw.
@@ -104,8 +107,10 @@ pub struct Discarded<'a> {
     pub line: u32,
     /// The original records with type indices that are not valid, with the
     /// record padding.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
+
+into_owned!(struct Discarded { data; raw_reason, file_id, line });
 
 impl<'a> Discarded<'a> {
     /// Read the fields and the original records.
@@ -113,7 +118,7 @@ impl<'a> Discarded<'a> {
         let raw_reason = fields.u32()?;
         let file_id = fields.u32()?;
         let line = fields.u32()?;
-        let data = fields.bytes(fields.rest().len())?;
+        let data = Bytes::new(fields.bytes(fields.rest().len())?);
         Ok(Self {
             raw_reason,
             file_id,
@@ -127,7 +132,7 @@ impl<'a> Discarded<'a> {
         out.u32(self.raw_reason)?;
         out.u32(self.file_id)?;
         out.u32(self.line)?;
-        out.bytes(self.data)
+        out.bytes(&self.data)
     }
 
     /// Return the reason in bits 0 to 7.
@@ -411,27 +416,29 @@ impl ModuleTypeReference {
 ///
 /// Both names are UTF-16 strings with a NUL code unit at the end. The values
 /// hold the little-endian code units without the terminator.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct PdbMap<'a> {
     /// The source PDB file name.
-    pub from: &'a [u8],
+    pub from: Bytes<'a>,
     /// The destination PDB file name.
-    pub to: &'a [u8],
+    pub to: Bytes<'a>,
 }
+
+into_owned!(struct PdbMap { from, to; });
 
 impl<'a> PdbMap<'a> {
     /// Read the two names.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
-        let from = read_utf16(fields)?;
-        let to = read_utf16(fields)?;
+        let from = Bytes::new(read_utf16(fields)?);
+        let to = Bytes::new(read_utf16(fields)?);
         Ok(Self { from, to })
     }
 
     /// Write the two names and their terminators.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        write_utf16(out, self.from)?;
-        write_utf16(out, self.to)
+        write_utf16(out, &self.from)?;
+        write_utf16(out, &self.to)
     }
 }
 

@@ -120,7 +120,7 @@ fn inlinee_name(
                         .with_context("member function ID does not name a class, union or enum"));
                 }
             };
-            extend(&mut qualified, class)?;
+            extend(&mut qualified, &class)?;
             extend(&mut qualified, b"::")?;
             function.name
         }
@@ -130,7 +130,7 @@ fn inlinee_name(
         }
     };
     let name_start = qualified.len();
-    extend(&mut qualified, name)?;
+    extend(&mut qualified, &name)?;
     Ok(InlineeName {
         scope,
         id,

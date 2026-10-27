@@ -95,14 +95,14 @@ fn constant(blob: &[u8]) {
     };
     let modifiers: Vec<_> = signature.modifiers().take(MAX_ITEMS).collect();
     let Some(encoded) = ok(encoded(|out| {
-        LocalConstantSignature::encode_parts(&modifiers, &signature.value(), out)
+        LocalConstantSignature::encode_parts(&modifiers, signature.value(), out)
     })) else {
         return;
     };
     let again = LocalConstantSignature::parse(&encoded).expect("an encoded constant decodes");
     assert!(again.modifiers().eq(modifiers.iter().copied()));
     let mut twice = Vec::new();
-    LocalConstantSignature::encode_parts(&modifiers, &again.value(), &mut twice)
+    LocalConstantSignature::encode_parts(&modifiers, again.value(), &mut twice)
         .expect("a decoded constant encodes");
     assert_eq!(twice, encoded);
 }

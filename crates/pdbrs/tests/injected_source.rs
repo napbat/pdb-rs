@@ -311,19 +311,22 @@ fn add_file_inserts_names_and_computes_crc_and_size() {
     let mut builder = SourceHeaderBlockBuilder::new(Producer::Llvm, 0, 0).unwrap();
     let content = b"<AutoVisualizer/>\r\n";
     let mut file = InjectedFile::default();
-    file.file_name = b"C:\\Src\\App.natvis";
-    file.object_name = b"";
-    file.virtual_file_name = b"c:\\src\\app.natvis";
+    file.file_name = b"C:\\Src\\App.natvis".into();
+    file.object_name = b"".into();
+    file.virtual_file_name = b"c:\\src\\app.natvis".into();
     file.compression = SourceCompression::NONE;
     file.is_virtual = false;
-    file.stream = content;
+    file.stream = content.into();
     let source = builder.add_file(&mut names, &file).unwrap();
     assert_eq!(source.crc, hash_buffer_v8(content));
     assert_eq!(source.file_size, 19);
-    assert_eq!(names.get(source.file_name_offset).unwrap(), file.file_name);
+    assert_eq!(
+        names.get(source.file_name_offset).unwrap(),
+        &*file.file_name
+    );
     assert_eq!(
         names.get(source.virtual_file_name_offset).unwrap(),
-        file.virtual_file_name
+        &*file.virtual_file_name
     );
     assert_eq!(names.get(source.object_name_offset).unwrap(), b"");
     assert!(source.file_name_offset < source.virtual_file_name_offset);
@@ -340,10 +343,10 @@ fn add_file_inserts_names_and_computes_crc_and_size() {
     let names = StringTable::parse(&table).unwrap();
     assert_eq!(
         names.get(NameOffset(block.entries()[0].key)).unwrap(),
-        file.virtual_file_name
+        &*file.virtual_file_name
     );
     assert_eq!(
-        content_stream_name(file.virtual_file_name).unwrap(),
+        content_stream_name(&file.virtual_file_name).unwrap(),
         b"/src/files/c:\\src\\app.natvis"
     );
 }
@@ -353,21 +356,21 @@ fn add_file_rejects_other_compression_and_empty_virtual_names() {
     let mut names = StringTableBuilder::new(HashVersion::V1).unwrap();
     let mut builder = SourceHeaderBlockBuilder::new(Producer::Microsoft, 1, 1).unwrap();
     let mut file = InjectedFile::default();
-    file.file_name = b"a";
-    file.object_name = b"o";
-    file.virtual_file_name = b"a";
+    file.file_name = b"a".into();
+    file.object_name = b"o".into();
+    file.virtual_file_name = b"a".into();
     file.compression = SourceCompression::LZ;
     file.is_virtual = false;
-    file.stream = b"x";
+    file.stream = b"x".into();
     let error = builder.add_file(&mut names, &file).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
-    let mut empty = file;
-    empty.virtual_file_name = b"";
+    let mut empty = file.clone();
+    empty.virtual_file_name = b"".into();
     empty.compression = SourceCompression::DOT_NET;
     let error = builder.add_file(&mut names, &empty).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidFormat);
     let mut nul = file;
-    nul.virtual_file_name = b"a\0b";
+    nul.virtual_file_name = b"a\0b".into();
     nul.compression = SourceCompression::NONE;
     assert!(builder.add_file(&mut names, &nul).is_err());
     assert!(builder.table().is_empty());
@@ -384,11 +387,11 @@ fn dotnet_documents_encode_the_decoded_bytes_again() {
     let checksum = [7; 20];
     let cases = [
         None,
-        Some(EmbeddedSource::Raw(b"class A {}")),
-        Some(EmbeddedSource::Raw(b"")),
+        Some(EmbeddedSource::Raw(b"class A {}".into())),
+        Some(EmbeddedSource::Raw(b"".into())),
         Some(EmbeddedSource::Deflate {
             size: 3,
-            data: &[0x01, 0x03, 0x00, 0xfc, 0xff, b'a', b'b', b'c'],
+            data: pdbrs::Bytes::new(&[0x01, 0x03, 0x00, 0xfc, 0xff, b'a', b'b', b'c']),
         }),
     ];
     for embedded in cases {
@@ -397,7 +400,7 @@ fn dotnet_documents_encode_the_decoded_bytes_again() {
         document.language_vendor = VENDOR_MICROSOFT;
         document.document_type = DOCUMENT_TYPE_TEXT;
         document.checksum_algorithm = CHECKSUM_SHA1;
-        document.checksum = &checksum;
+        document.checksum = pdbrs::Bytes::new(&checksum);
         document.embedded = embedded;
         let mut bytes = Vec::new();
         document.encode(&mut bytes).unwrap();

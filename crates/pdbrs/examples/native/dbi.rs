@@ -4,7 +4,7 @@ use pdbrs::io::ReadAt;
 use pdbrs::native::Pdb;
 use pdbrs::native::address::{AddressMap, Rva, SectionOffset};
 use pdbrs::native::codeview::index::NameOffset;
-use pdbrs::native::dbi::{Dbi, DbiBuilder, DebugStream, OwnedModule, Substream};
+use pdbrs::native::dbi::{Dbi, DbiBuilder, DebugStream, Substream};
 use pdbrs::native::msf::StreamId;
 
 use crate::{Context, Outcome, Report};
@@ -25,11 +25,15 @@ pub(crate) fn reencode_dbi(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Repor
         dbi.encode_substream(kind, &mut encoded)?;
         report.reencoded("DBI substreams", dbi.substream(kind), &encoded);
     }
-    for module in dbi.modules() {
-        let module = module?;
-        let start = usize::try_from(module.offset)? - dbi.substream_offset(Substream::ModuleInfo);
+    let mut modules = dbi.modules();
+    loop {
+        let start = modules.position();
+        let Some(module) = modules.next() else {
+            break;
+        };
+        let (_, module) = module?;
         let mut encoded = Vec::new();
-        OwnedModule::from_module(&module)?.encode(&mut encoded)?;
+        module.encode(&mut encoded)?;
         let end = start + encoded.len();
         let stored = dbi
             .substream(Substream::ModuleInfo)
@@ -158,8 +162,8 @@ pub(crate) fn debug_info_tables(
         report.add("section map entries", map.iter().count());
     }
     if let Some(sources) = dbi.source_info()? {
-        for module in sources.modules() {
-            for name in module.file_names() {
+        for module in &sources.modules {
+            for name in sources.file_names(module) {
                 name?;
                 report.add("module source files", 1);
             }

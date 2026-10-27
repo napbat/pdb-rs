@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::rows::{TypedRows, each_row, in_blob, row_error};
+use crate::bytes::{Bytes, into_owned};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid, too_large, truncated};
@@ -146,12 +147,15 @@ impl HashAlgorithm {
     }
 }
 
-/// A checked document name blob, borrowed from the blob bytes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A checked document name blob. It borrows the blob bytes until
+/// [`DocumentName::into_owned`] copies them.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DocumentName<'a> {
     separator: Option<char>,
-    parts: &'a [u8],
+    parts: Bytes<'a>,
 }
+
+into_owned!(struct DocumentName { parts; separator });
 
 impl<'a> DocumentName<'a> {
     /// Decode and check a document name blob.
@@ -190,7 +194,10 @@ impl<'a> DocumentName<'a> {
         while !reader.is_empty() {
             reader.unsigned()?;
         }
-        Ok(Self { separator, parts })
+        Ok(Self {
+            separator,
+            parts: Bytes::new(parts),
+        })
     }
 
     /// Return the separator, or `None` for the empty separator (byte 0).
@@ -201,9 +208,9 @@ impl<'a> DocumentName<'a> {
 
     /// Return the `#Blob` offsets of the name parts. Offset 0 is an empty part.
     #[must_use]
-    pub const fn parts(&self) -> DocumentNameParts<'a> {
+    pub fn parts(&self) -> DocumentNameParts<'_> {
         DocumentNameParts {
-            reader: Reader::new(self.parts),
+            reader: Reader::new(&self.parts),
         }
     }
 

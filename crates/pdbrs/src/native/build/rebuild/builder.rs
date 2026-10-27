@@ -21,7 +21,6 @@ use crate::native::codeview::symbol::{
     S_PROCREF, S_TOKENREF, Symbol, SymbolData,
 };
 use crate::native::codeview::type_record::TypeLeaf;
-use crate::native::dbi::OwnedModule;
 use crate::native::injected_source::SourceHeaderBlock;
 use crate::native::lines::ModuleLines;
 use crate::native::msf::{MsfWriteOptions, StreamId};
@@ -160,9 +159,7 @@ impl PdbContents {
             list.extend(contributions.iter());
             builder.set_section_contributions(contributions.version(), list);
         }
-        if let Some(map) = dbi.section_map()? {
-            builder.set_section_map(Some(crate::native::dbi::OwnedSectionMap::from_map(&map)?));
-        }
+        builder.set_section_map(dbi.section_map()?);
         builder.set_type_servers(dbi.type_server_map()?);
         if let Some(names) = dbi.ec_names()? {
             builder.set_ec_names(Some(StringTableBuilder::from_table(&names)?));
@@ -205,15 +202,17 @@ impl PdbContents {
         type_streams: &TypeStreams,
     ) -> Result<ModuleSymbols> {
         let mut handles = ModuleSymbols::new();
-        let sources = self.dbi.source_info()?;
-        let mut files = sources.map(|info| info.modules());
+        let mut files = self
+            .sources
+            .iter()
+            .flat_map(|info| info.modules.iter().map(move |list| (info, list)));
         for (module, stream) in self.dbi.modules().zip(&self.modules) {
-            let module = module?;
-            let index = u16::try_from(module.index.0)
+            let (index, module) = module?;
+            let index = u16::try_from(index.0)
                 .map_err(|_| unsupported("PDB has more than 65535 modules"))?;
-            let target = builder.add_module(OwnedModule::from_module(&module)?)?;
-            if let Some(list) = files.as_mut().and_then(Iterator::next) {
-                for name in list.file_names() {
+            let target = builder.add_module(module.into_owned())?;
+            if let Some((info, list)) = files.next() {
+                for name in info.file_names(list) {
                     target.push_file(name?)?;
                 }
             }
@@ -265,7 +264,7 @@ impl PdbContents {
                     let kind = symbol.kind();
                     let wide = matches!(symbol.data(), SymbolData::SymbolReference(_));
                     builder.add_symbol_with(move |resolver, out| {
-                        let mut reference = reference;
+                        let mut reference = reference.clone();
                         reference.offset = resolver.module_symbol_offset(target)?;
                         reference.module = Some(resolver.module_index(target.module())?);
                         let data = if wide {
@@ -408,7 +407,7 @@ fn module_target<'a>(
     modules: &ModuleSymbols,
 ) -> Option<(ProcedureReference<'a>, ModuleSymbolHandle)> {
     let (SymbolData::ProcedureReference(reference) | SymbolData::SymbolReference(reference)) =
-        *symbol.data()
+        symbol.data()
     else {
         return None;
     };
@@ -420,7 +419,7 @@ fn module_target<'a>(
     }
     let module = u16::try_from(reference.module?.0).ok()?;
     let target = *modules.get(&(module, reference.offset.0))?;
-    Some((reference, target))
+    Some((reference.clone(), target))
 }
 
 /// Return the record and the stream handles of an `S_MOD_TYPEREF` record

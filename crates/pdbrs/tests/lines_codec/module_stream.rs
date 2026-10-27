@@ -31,7 +31,7 @@ fn module_dbi(sizes: ModuleRegionSizes) -> Dbi {
 /// Parse `bytes` as the module stream of a record with `sizes`.
 fn parse(bytes: Vec<u8>, sizes: ModuleRegionSizes) -> ModuleStream {
     let dbi = module_dbi(sizes);
-    let module = dbi.modules().next().unwrap().unwrap();
+    let (_, module) = dbi.modules().next().unwrap().unwrap();
     ModuleStream::parse(bytes, &module).unwrap()
 }
 
@@ -66,10 +66,10 @@ fn writer_joins_regions_and_reports_sizes() {
     let c13 = c13();
     let refs = [SymbolOffset(0), SymbolOffset(8)];
     let mut parts = ModuleStreamParts::default();
-    parts.symbols = Some(&SYMBOLS);
-    parts.c11 = &[0xaa; 4];
-    parts.c13 = &c13;
-    parts.global_refs = &refs;
+    parts.symbols = Some(pdbrs::Bytes::new(&SYMBOLS));
+    parts.c11 = pdbrs::Bytes::new(&[0xaa; 4]);
+    parts.c13 = pdbrs::Bytes::new(&c13);
+    parts.global_refs = refs[..].into();
     let (bytes, sizes) = encode(&parts).unwrap();
     assert_eq!(
         (sizes.symbol_bytes, sizes.c11_bytes, sizes.c13_bytes),
@@ -101,7 +101,7 @@ fn writer_joins_regions_and_reports_sizes() {
 
 #[test]
 fn writer_distinguishes_absent_and_empty_symbol_regions() {
-    for (symbols, symbol_bytes) in [(None, 0), (Some(&[][..]), 4)] {
+    for (symbols, symbol_bytes) in [(None, 0), (Some(pdbrs::Bytes::new(&[])), 4)] {
         let mut parts = ModuleStreamParts::default();
         parts.symbols = symbols;
         let (bytes, sizes) = encode(&parts).unwrap();
@@ -129,8 +129,8 @@ fn writer_rejects_malformed_regions() {
     ];
     for (symbols, c13, kind) in cases {
         let mut parts = ModuleStreamParts::default();
-        parts.symbols = Some(symbols);
-        parts.c13 = c13;
+        parts.symbols = Some(symbols.into());
+        parts.c13 = c13.into();
         let mut out = vec![0xcc];
         let error = parts.encode(&mut out).unwrap_err();
         assert_eq!(error.kind(), kind, "{symbols:?} {c13:?}");
@@ -146,7 +146,7 @@ fn global_refs_check_against_the_symbol_record_stream() {
     for (offset, valid) in [(0, true), (4, true), (2, false), (12, false)] {
         let refs = [SymbolOffset(4), SymbolOffset(offset)];
         let mut parts = ModuleStreamParts::default();
-        parts.global_refs = &refs;
+        parts.global_refs = refs[..].into();
         let (bytes, sizes) = encode(&parts).unwrap();
         let stream = parse(bytes, sizes);
         let refs = stream.global_refs().unwrap();

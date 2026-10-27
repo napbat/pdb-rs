@@ -241,7 +241,10 @@ fn malformed_payloads_fail_explicitly() {
 fn other_kinds_stay_raw() {
     let data = [1, 2, 3];
     let decoded = decode(LF_PROCEDURE, &data).unwrap();
-    assert_eq!(decoded, IdRecord::Unsupported(record(LF_PROCEDURE, &data)));
+    assert_eq!(
+        decoded,
+        IdRecord::Unsupported(record(LF_PROCEDURE, &data).into())
+    );
 }
 
 #[test]

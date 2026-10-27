@@ -119,7 +119,7 @@ fn cached_structures_equal_the_owned_loads() {
     let publics = pdb.publics().expect("PSI").expect("present");
     let names: Vec<_> = publics
         .symbols()
-        .map(|symbol| symbol.expect("public").name().map(<[u8]>::to_vec))
+        .map(|symbol| symbol.expect("public").name().map(|name| name.to_vec()))
         .collect();
     assert!(names.contains(&Some(b"main".to_vec())));
     let names = pdb.names().expect("/names").expect("present");
@@ -148,7 +148,8 @@ fn cached_structures_equal_the_owned_loads() {
     }
     let module_count = dbi.modules().count();
     let last = ModuleIndex(u32::try_from(module_count - 1).unwrap());
-    let module = dbi.modules().last().unwrap().unwrap();
+    let (index, module) = dbi.modules().last().unwrap().unwrap();
+    assert_eq!(index, last);
     let stream = pdb.module(last).expect("last module");
     assert_eq!(stream.map(|stream| stream.stream()), module.stream);
     let outside = ModuleIndex(u32::try_from(module_count).unwrap());

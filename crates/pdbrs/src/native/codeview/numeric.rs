@@ -12,7 +12,8 @@
 use alloc::vec::Vec;
 
 use super::{Fields, LeafKind};
-use crate::{Error, ErrorKind, Result};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The first leaf tag. Smaller values are immediate unsigned values.
 pub const LF_NUMERIC: LeafKind = LeafKind(0x8000);
@@ -311,7 +312,7 @@ pub struct Decimal {
 /// The non-integer variants keep the exact value bytes after the tag. The
 /// accessors give typed values where Rust has a type for them. The default
 /// value is the immediate integer 0.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Numeric<'a> {
     /// An immediate value or an integer leaf.
@@ -343,9 +344,9 @@ pub enum Numeric<'a> {
     /// ([`Numeric::date_ticks`]).
     Date([u8; 8]),
     /// `LF_VARSTRING`: the string bytes, without the `u16` count.
-    VarString(&'a [u8]),
+    VarString(Bytes<'a>),
     /// `LF_UTF8STRING`: the string bytes, without the NUL terminator.
-    Utf8String(&'a [u8]),
+    Utf8String(Bytes<'a>),
 }
 
 /// Read a fixed number of value bytes.
@@ -422,9 +423,9 @@ impl<'a> Numeric<'a> {
             LF_DATE => Self::Date(array(&mut fields)?),
             LF_VARSTRING => {
                 let count = usize::from(fields.u16()?);
-                Self::VarString(fields.bytes(count)?)
+                Self::VarString(Bytes::new(fields.bytes(count)?))
             }
-            LF_UTF8STRING => Self::Utf8String(fields.name()?),
+            LF_UTF8STRING => Self::Utf8String(Bytes::new(fields.name()?)),
             _ => {
                 return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                     .with_context("CodeView numeric leaf has an unknown tag"));
@@ -616,7 +617,7 @@ impl<'a> Numeric<'a> {
 
     /// Return the string bytes of an `LF_VARSTRING` or `LF_UTF8STRING` leaf.
     #[must_use]
-    pub const fn string(&self) -> Option<&'a [u8]> {
+    pub fn string(&self) -> Option<&[u8]> {
         match self {
             Self::VarString(bytes) | Self::Utf8String(bytes) => Some(bytes),
             _ => None,
@@ -689,6 +690,12 @@ impl<'a> Numeric<'a> {
         }
     }
 }
+
+into_owned!(enum Numeric {
+    VarString, Utf8String;
+    Integer, Real16, Real32, Real48, Real64, Real80, Real128, Complex32, Complex64,
+    Complex80, Complex128, Decimal, Date;
+});
 
 impl Default for Numeric<'_> {
     fn default() -> Self {

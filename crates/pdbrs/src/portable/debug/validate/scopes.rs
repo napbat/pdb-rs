@@ -212,8 +212,8 @@ pub(super) fn constants<S: ReadAt>(pdb: &Pdb<S>, report: &mut ValidationReport) 
 fn check_signature<S: ReadAt>(pdb: &Pdb<S>, constant: &LocalConstant) -> Result<()> {
     let signature = constant.signature()?;
     let value_type = match signature.value() {
-        ConstantValue::Enum { enum_type, .. } => Some(enum_type),
-        ConstantValue::General { constant_type, .. } => Some(constant_type),
+        ConstantValue::Enum { enum_type, .. } => Some(*enum_type),
+        ConstantValue::General { constant_type, .. } => Some(*constant_type),
         ConstantValue::Primitive(_) | ConstantValue::Object => None,
     };
     let types = signature

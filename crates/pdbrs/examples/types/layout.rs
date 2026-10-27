@@ -17,13 +17,13 @@ pub struct Udt<'a> {
     /// The name.
     pub name: &'a [u8],
     /// The size in bytes.
-    pub size: Numeric<'a>,
+    pub size: &'a Numeric<'a>,
     /// The field list, or `T_NOTYPE` if the type has no members.
     pub field_list: TypeIndex,
 }
 
 /// Return the UDT fields of a class or union record that is not a forward reference.
-pub fn udt<'a>(leaf: &TypeLeaf<'a>) -> Option<Udt<'a>> {
+pub fn udt<'a>(leaf: &'a TypeLeaf<'_>) -> Option<Udt<'a>> {
     if leaf.tag()?.options.is_forward_reference() {
         return None;
     }
@@ -36,26 +36,26 @@ pub fn udt<'a>(leaf: &TypeLeaf<'a>) -> Option<Udt<'a>> {
     Some(match leaf {
         TypeLeaf::Class(class) => Udt {
             keyword: keyword(class.kind),
-            name: class.name,
-            size: class.size,
+            name: &class.name,
+            size: &class.size,
             field_list: class.field_list,
         },
         TypeLeaf::WideClass(class) => Udt {
             keyword: keyword(class.kind),
-            name: class.name,
-            size: class.size,
+            name: &class.name,
+            size: &class.size,
             field_list: class.field_list,
         },
         TypeLeaf::Union(union) => Udt {
             keyword: "union",
-            name: union.name,
-            size: union.size,
+            name: &union.name,
+            size: &union.size,
             field_list: union.field_list,
         },
         TypeLeaf::WideUnion(union) => Udt {
             keyword: "union",
-            name: union.name,
-            size: union.size,
+            name: &union.name,
+            size: &union.size,
             field_list: union.field_list,
         },
         _ => return None,
@@ -67,7 +67,7 @@ fn number(value: &Numeric<'_>) -> String {
     match value.integer() {
         Some(Integer::Signed(value)) => value.to_string(),
         Some(Integer::Unsigned(value)) => value.to_string(),
-        None => format!("{value:?}"),
+        None => debug(value),
     }
 }
 
@@ -77,7 +77,17 @@ fn offset(value: &Numeric<'_>) -> String {
         Some(Integer::Signed(value)) if value < 0 => format!("-{:#x}", value.unsigned_abs()),
         Some(Integer::Signed(value)) => format!("+{value:#x}"),
         Some(Integer::Unsigned(value)) => format!("+{value:#x}"),
-        None => format!("{value:?}"),
+        None => debug(value),
+    }
+}
+
+/// Return a numeric leaf that is not an integer in debug form, with string bytes as a list of
+/// numbers.
+fn debug(value: &Numeric<'_>) -> String {
+    match value {
+        Numeric::VarString(bytes) => format!("VarString({:?})", bytes.as_bytes()),
+        Numeric::Utf8String(bytes) => format!("Utf8String({:?})", bytes.as_bytes()),
+        other => format!("{other:?}"),
     }
 }
 
@@ -184,10 +194,10 @@ fn member(types: &Types<'_, '_>, member: &Member<'_>) -> Result<()> {
         Member::FriendClass(class) => println!("  friend class {}", types.name(*class)?),
         Member::FriendFunction(function) => println!(
             "  friend {}",
-            types.signature(function.function_type, &text(function.name))?
+            types.signature(function.function_type, &text(&function.name))?
         ),
         Member::Enumerator(value) => {
-            println!("  {} = {}", text(value.name), number(&value.value));
+            println!("  {} = {}", text(&value.name), number(&value.value));
         }
         Member::DataMember(data) => {
             data_member(
@@ -195,13 +205,13 @@ fn member(types: &Types<'_, '_>, member: &Member<'_>) -> Result<()> {
                 data.attributes,
                 data.member_type,
                 &data.offset,
-                data.name,
+                &data.name,
             )?;
         }
         Member::StaticMember(data) => println!(
             "  static {}{}",
             access(data.attributes),
-            types.declare(data.member_type, &text(data.name), 0)?
+            types.declare(data.member_type, &text(&data.name), 0)?
         ),
         Member::OneMethod(one) => {
             method(
@@ -209,12 +219,12 @@ fn member(types: &Types<'_, '_>, member: &Member<'_>) -> Result<()> {
                 one.attributes,
                 one.method_type,
                 one.vtable_offset,
-                one.name,
+                &one.name,
             )?;
         }
         Member::OverloadedMethod(overloads) => {
             let TypeLeaf::MethodList(list) = types.leaf(overloads.method_list)? else {
-                println!("  method {} <no method list>", text(overloads.name));
+                println!("  method {} <no method list>", text(&overloads.name));
                 return Ok(());
             };
             for entry in list.entries() {
@@ -224,26 +234,26 @@ fn member(types: &Types<'_, '_>, member: &Member<'_>) -> Result<()> {
                     entry.attributes,
                     entry.method_type,
                     entry.vtable_offset,
-                    overloads.name,
+                    &overloads.name,
                 )?;
             }
         }
         Member::NestedType(nested) => println!(
             "  nested {} = {}",
-            text(nested.name),
+            text(&nested.name),
             types.name(nested.nested_type)?
         ),
         Member::NestedTypeEx(nested) => println!(
             "  nested {}{} = {}",
             access(nested.attributes),
-            text(nested.name),
+            text(&nested.name),
             types.name(nested.nested_type)?
         ),
         Member::MemberModify(modify) => println!(
             "  modify {}{}::{}",
             access(modify.attributes),
             types.name(modify.base_type)?,
-            text(modify.name)
+            text(&modify.name)
         ),
         // The member iterator follows continuations and does not return them.
         Member::Continuation(_) => {}
@@ -270,7 +280,7 @@ pub fn print_udt(types: &Types<'_, '_>, index: TypeIndex, udt: &Udt<'_>) -> Resu
         udt.keyword,
         text(udt.name),
         index.0,
-        number(&udt.size)
+        number(udt.size)
     );
     members(types, udt.field_list)?;
     println!("}}");
@@ -327,7 +337,7 @@ pub fn print_enum(
                         || number(&value.value),
                         |raw| enumerator_value(raw, signed, bits),
                     );
-                    println!("  {} = {shown}", text(value.name));
+                    println!("  {} = {shown}", text(&value.name));
                 }
                 (other, _) => member(types, &other)?,
             }

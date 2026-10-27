@@ -268,7 +268,7 @@ fn first_unique<'r>(
                 && name
                     .iter()
                     .all(|&byte| byte.is_ascii_alphanumeric() || byte == b'_');
-            candidates.push((!plain, record.symbol.0, name, *symbol.data()));
+            candidates.push((!plain, record.symbol.0, name, symbol.data().clone()));
         }
     }
     candidates.sort_by_key(|(other, offset, _, _)| (*other, *offset));
@@ -300,12 +300,12 @@ fn add_symbols(
     let mut public = Public::default();
     public.flags = flags;
     public.address = address;
-    public.name = ADDED_PUBLIC.as_bytes();
+    public.name = ADDED_PUBLIC.as_bytes().into();
     editor.add_public(&public)?;
     let mut data = Data::default();
     data.type_index = T_INT4;
     data.address = address;
-    data.name = ADDED_GLOBAL.as_bytes();
+    data.name = ADDED_GLOBAL.as_bytes().into();
     editor.add_global(S_GDATA32, &SymbolData::Data(data))?;
     expect.publics.push(ADDED_PUBLIC.into());
     expect.globals.push(ADDED_GLOBAL.into());
@@ -374,7 +374,7 @@ fn types(
     member.attributes = MemberAttributes::from_raw(3)?;
     member.member_type = T_INT4;
     member.offset = number(0);
-    member.name = b"value";
+    member.name = b"value".into();
     let members = [Member::DataMember(member)];
     let mut bytes = Vec::new();
     encode_field_list(
@@ -395,13 +395,13 @@ fn types(
     class.derivation_list = TypeIndex::NONE;
     class.vtable_shape = TypeIndex::NONE;
     class.size = number(4);
-    class.name = ADDED_TYPE.as_bytes();
+    class.name = ADDED_TYPE.as_bytes().into();
     class.unique_name = None;
-    class.trailing = &[];
+    class.trailing = pdbrs::Bytes::default();
     let structure = editor.add_type(&TypeLeaf::Class(class))?;
     let mut udt = UserDefinedType::default();
     udt.type_index = structure;
-    udt.name = ADDED_TYPE.as_bytes();
+    udt.name = ADDED_TYPE.as_bytes().into();
     editor.add_global(S_UDT, &SymbolData::UserDefinedType(udt))?;
     expect.types.push(ADDED_TYPE.into());
     expect.globals.push(ADDED_TYPE.into());
@@ -412,7 +412,7 @@ fn types(
     if has_ipi {
         let mut id = StringId::default();
         id.substrings = None;
-        id.string = ADDED_ID.as_bytes();
+        id.string = ADDED_ID.as_bytes().into();
         editor.add_id(&IdRecord::String(id))?;
         expect.ids.push(ADDED_ID.into());
     } else {

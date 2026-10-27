@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 
 use super::{entry_list, invalid};
 use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::fpo::{FRAME_DATA_SIZE, FrameData};
 use crate::native::output::Output;
 
@@ -29,13 +30,15 @@ entry_list!(
 );
 
 /// A decoded `DEBUG_S_FRAMEDATA` subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FrameDataSubsection<'a> {
     /// The relocation value before the records, if present.
     relocation: Option<u32>,
     /// The records.
     records: FrameDataRecords<'a>,
 }
+
+into_owned!(struct FrameDataSubsection { records; relocation });
 
 impl<'a> FrameDataSubsection<'a> {
     /// Parse the data of a `DEBUG_S_FRAMEDATA` subsection.
@@ -76,8 +79,8 @@ impl<'a> FrameDataSubsection<'a> {
 
     /// Return the records.
     #[must_use]
-    pub const fn records(&self) -> FrameDataRecords<'a> {
-        self.records
+    pub const fn records(&self) -> &FrameDataRecords<'a> {
+        &self.records
     }
 
     /// Append the subsection data to `out`.
@@ -89,7 +92,7 @@ impl<'a> FrameDataSubsection<'a> {
         if let Some(relocation) = self.relocation {
             Output::new(out).u32(relocation)?;
         }
-        for record in self.records {
+        for record in &self.records {
             record.encode(out)?;
         }
         Ok(())

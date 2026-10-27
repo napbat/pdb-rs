@@ -13,8 +13,9 @@
 use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
 use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of a virtual function table path (`S_VFTABLE32`).
 pub const S_VFTABLE32: SymbolKind = SymbolKind(0x100c);
@@ -34,7 +35,7 @@ pub const S_ASSOCIATION: SymbolKind = SymbolKind(0x117c);
 pub const S_HYBRIDRANGE: SymbolKind = SymbolKind(0x117d);
 
 /// A `with` block start record ([`S_WITH32`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct With<'a> {
     /// The module stream offset of the enclosing scope record.
@@ -46,8 +47,10 @@ pub struct With<'a> {
     /// The start address.
     pub address: SectionOffset,
     /// The expression string.
-    pub expression: &'a [u8],
+    pub expression: Bytes<'a>,
 }
+
+into_owned!(struct With { expression; parent, end, code_length, address });
 
 impl<'a> With<'a> {
     /// Read the fields.
@@ -56,7 +59,7 @@ impl<'a> With<'a> {
         let end = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
-        let expression = fields.name()?;
+        let expression = Bytes::new(fields.name()?);
         Ok(Self {
             parent,
             end,
@@ -72,7 +75,7 @@ impl<'a> With<'a> {
         out.u32(self.end.0)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
-        out.c_string(self.expression)
+        out.c_string(&self.expression)
     }
 }
 
@@ -224,16 +227,18 @@ impl VirtualFunctionTable {
 /// A list of annotation strings at a code address ([`S_ANNOTATION`]).
 ///
 /// MSVC writes the strings of the `__annotation` intrinsic in this record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AnnotationStrings<'a> {
     /// The code address.
     pub address: SectionOffset,
     /// The strings with their NUL terminators.
-    strings: &'a [u8],
+    strings: Bytes<'a>,
     /// The number of strings.
     count: u16,
 }
+
+into_owned!(struct AnnotationStrings { strings; address, count });
 
 impl<'a> AnnotationStrings<'a> {
     /// Create a value from strings with their NUL terminators.
@@ -243,7 +248,8 @@ impl<'a> AnnotationStrings<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] if `strings` does not end with a
     /// NUL byte. Returns [`ErrorKind::LimitExceeded`] for more than 65535
     /// strings.
-    pub fn new(address: SectionOffset, strings: &'a [u8]) -> Result<Self> {
+    pub fn new(address: SectionOffset, strings: impl Into<Bytes<'a>>) -> Result<Self> {
+        let strings = strings.into();
         if strings.last().is_some_and(|&byte| byte != 0) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("annotation strings do not end with a NUL byte"));
@@ -277,7 +283,7 @@ impl<'a> AnnotationStrings<'a> {
                 })?;
             length += end + 1;
         }
-        let strings = fields.bytes(length)?;
+        let strings = Bytes::new(fields.bytes(length)?);
         Ok(Self {
             address,
             strings,
@@ -289,7 +295,7 @@ impl<'a> AnnotationStrings<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u16(self.count)?;
-        out.bytes(self.strings)
+        out.bytes(&self.strings)
     }
 
     /// Return the number of strings.
@@ -306,8 +312,8 @@ impl<'a> AnnotationStrings<'a> {
 
     /// Return an iterator over the strings, without their terminators.
     #[must_use]
-    pub fn iter(&self) -> AnnotationStringsIter<'a> {
-        let strings = self.strings;
+    pub fn iter(&self) -> AnnotationStringsIter<'_> {
+        let strings: &[u8] = &self.strings;
         AnnotationStringsIter {
             rest: Some(strings.strip_suffix(&[0]).unwrap_or(strings)),
             left: usize::from(self.count),
@@ -315,16 +321,7 @@ impl<'a> AnnotationStrings<'a> {
     }
 }
 
-impl<'a> IntoIterator for AnnotationStrings<'a> {
-    type Item = &'a [u8];
-    type IntoIter = AnnotationStringsIter<'a>;
-
-    fn into_iter(self) -> AnnotationStringsIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &AnnotationStrings<'a> {
+impl<'a> IntoIterator for &'a AnnotationStrings<'_> {
     type Item = &'a [u8];
     type IntoIter = AnnotationStringsIter<'a>;
 
@@ -370,27 +367,29 @@ impl<'a> Iterator for AnnotationStringsIter<'a> {
 impl core::iter::FusedIterator for AnnotationStringsIter<'_> {}
 
 /// A hot-patch function record ([`S_HOTPATCHFUNC`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct HotPatchFunction<'a> {
     /// The ID index of the function in the IPI stream.
     pub function: IdIndex,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct HotPatchFunction { name; function });
 
 impl<'a> HotPatchFunction<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let function = fields.id_index()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self { function, name })
     }
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.id_index(self.function)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 

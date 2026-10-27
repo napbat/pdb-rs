@@ -24,8 +24,9 @@
 use super::super::super::Fields;
 use super::custom_debug_info::CustomDebugInfo;
 use super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::bytes::into_owned;
 use crate::portable::metadata::{IlOffset, MetadataToken};
-use crate::{ErrorKind, Result};
+use crate::{Bytes, ErrorKind, Result};
 
 /// The name of the custom debug information attribute (`MD2`), as UTF-16LE bytes.
 pub const MD2_ATTRIBUTE: &[u8] = b"M\0D\x002\0";
@@ -37,15 +38,17 @@ pub const ASYNC_METHOD_INFO_ATTRIBUTE: &[u8] = b"a\0s\0y\0n\0c\0M\0e\0t\0h\0o\0d
 const STEP_SIZE: usize = 12;
 
 /// A symbol attribute in the user data of an `S_OEM` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SymbolAttribute<'a> {
     /// The name as UTF-16LE bytes, without the NUL code unit. The bytes are
     /// not converted to text.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The value bytes, with the zero padding of the record.
-    pub value: &'a [u8],
+    pub value: Bytes<'a>,
 }
+
+into_owned!(struct SymbolAttribute { name, value; });
 
 impl<'a> SymbolAttribute<'a> {
     /// Split the user data of an `S_OEM` record into the name and the value.
@@ -57,12 +60,15 @@ impl<'a> SymbolAttribute<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         let (name, value) = split_utf16(data)
             .ok_or_else(|| invalid("symbol attribute name has no NUL code unit"))?;
-        Ok(Self { name, value })
+        Ok(Self {
+            name: Bytes::new(name),
+            value: Bytes::new(value),
+        })
     }
 
     /// Return the UTF-16 code units of the name.
     #[must_use]
-    pub fn name_units(&self) -> NameUnits<'a> {
+    pub fn name_units(&self) -> NameUnits<'_> {
         NameUnits(self.name.as_chunks::<2>().0.iter())
     }
 
@@ -71,19 +77,19 @@ impl<'a> SymbolAttribute<'a> {
     /// # Errors
     ///
     /// The errors of [`CustomDebugInfo::parse`] and [`AsyncMethodInfo::parse`].
-    pub fn decode(&self) -> Result<AttributeValue<'a>> {
-        Ok(match self.name {
-            MD2_ATTRIBUTE => AttributeValue::CustomDebugInfo(CustomDebugInfo::parse(self.value)?),
+    pub fn decode(&self) -> Result<AttributeValue<'_>> {
+        Ok(match self.name.as_bytes() {
+            MD2_ATTRIBUTE => AttributeValue::CustomDebugInfo(CustomDebugInfo::parse(&self.value)?),
             ASYNC_METHOD_INFO_ATTRIBUTE => {
-                AttributeValue::AsyncMethodInfo(AsyncMethodInfo::parse(self.value)?)
+                AttributeValue::AsyncMethodInfo(AsyncMethodInfo::parse(&self.value)?)
             }
-            _ => AttributeValue::Other(self.value),
+            _ => AttributeValue::Other(Bytes::new(&self.value)),
         })
     }
 }
 
 /// The decoded value of a symbol attribute.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum AttributeValue<'a> {
     /// The `MD2` attribute.
@@ -91,15 +97,17 @@ pub enum AttributeValue<'a> {
     /// The `asyncMethodInfo` attribute.
     AsyncMethodInfo(AsyncMethodInfo<'a>),
     /// Another attribute. The value is raw, with the record padding.
-    Other(&'a [u8]),
+    Other(Bytes<'a>),
 }
+
+into_owned!(enum AttributeValue { CustomDebugInfo, AsyncMethodInfo, Other; ; });
 
 /// The async stepping information of a `MoveNext` method (`asyncMethodInfo`).
 ///
 /// The layout is `u32` kickoff method token, `u32` catch handler IL offset,
 /// `u32` step count and the steps. Roslyn writes the catch handler offset
 /// only if it is not negative; the native writer then stores `0xffffffff`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AsyncMethodInfo<'a> {
     /// The metadata token of the kickoff method: the `async` method that
@@ -111,6 +119,8 @@ pub struct AsyncMethodInfo<'a> {
     /// The steps.
     pub steps: AsyncSteps<'a>,
 }
+
+into_owned!(struct AsyncMethodInfo { steps; kickoff_method, catch_handler_offset });
 
 impl<'a> AsyncMethodInfo<'a> {
     /// Decode an `asyncMethodInfo` value.
@@ -135,7 +145,9 @@ impl<'a> AsyncMethodInfo<'a> {
         Ok(Self {
             kickoff_method,
             catch_handler_offset,
-            steps: AsyncSteps { bytes },
+            steps: AsyncSteps {
+                bytes: Bytes::new(bytes),
+            },
         })
     }
 }
@@ -153,29 +165,31 @@ pub struct AsyncStep {
 }
 
 /// The steps of an [`AsyncMethodInfo`], 12 bytes each.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct AsyncSteps<'a> {
     /// The step bytes. The length is a multiple of 12.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
 
-impl<'a> AsyncSteps<'a> {
+into_owned!(struct AsyncSteps { bytes; });
+
+impl AsyncSteps<'_> {
     /// Return the number of steps.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() / STEP_SIZE
     }
 
     /// Return `true` if there are no steps.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the steps.
     #[must_use]
-    pub fn iter(&self) -> AsyncStepsIter<'a> {
-        AsyncStepsIter::new(self.bytes)
+    pub fn iter(&self) -> AsyncStepsIter<'_> {
+        AsyncStepsIter::new(&self.bytes)
     }
 }
 

@@ -3,7 +3,6 @@
 //! register variables, file statics, subfield def-ranges, frame registers,
 //! trampolines, FASTLINK references and Edit and Continue temporaries.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{NameOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
@@ -12,6 +11,7 @@ use pdbrs::native::codeview::symbol::{
     S_REGREL32, S_REGREL32_ENCTMP, S_TRAMPOLINE, Symbol, SymbolData, TrampolineKind,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
+use pdbrs::{Bytes, ErrorKind};
 
 /// A builder for little-endian symbol payloads.
 #[derive(Default)]
@@ -147,12 +147,12 @@ fn decodes_thread_storage_of_both_kinds() {
             .u16(2)
             .bytes(b"tls_wide\0");
         decode(kind, &payload, |symbol| {
-            let SymbolData::ThreadData(value) = *symbol.data() else {
+            let SymbolData::ThreadData(value) = symbol.data().clone() else {
                 panic!("expected thread storage");
             };
             assert_eq!(value.name, b"tls_wide");
             assert_eq!(symbol.kind(), kind);
-            assert_eq!(symbol.name(), Some(&b"tls_wide"[..]));
+            assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"tls_wide"[..]));
             assert_eq!(symbol.type_index(), Some(TypeIndex(0x23)));
             let address = SectionOffset {
                 section: 2,
@@ -173,11 +173,11 @@ fn decodes_frame_relative_variable_at_offset_limits() {
             .u32(0x1110)
             .bytes(b"record\0");
         decode(S_BPREL32, &payload, |symbol| {
-            let SymbolData::BasePointerRelative(value) = *symbol.data() else {
+            let SymbolData::BasePointerRelative(value) = symbol.data().clone() else {
                 panic!("expected S_BPREL32");
             };
             assert_eq!(value.offset, offset);
-            assert_eq!(symbol.name(), Some(&b"record"[..]));
+            assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"record"[..]));
             assert_eq!(symbol.type_index(), Some(TypeIndex(0x1110)));
         });
     }
@@ -189,11 +189,11 @@ fn decodes_frame_relative_variable_at_offset_limits() {
 fn decodes_register_variable() {
     let payload = Payload::default().u32(0x17d7).u16(18).bytes(b"this\0");
     decode(S_REGISTER, &payload, |symbol| {
-        let SymbolData::Register(value) = *symbol.data() else {
+        let SymbolData::Register(value) = symbol.data().clone() else {
             panic!("expected S_REGISTER");
         };
         assert_eq!(value.register, 18);
-        assert_eq!(symbol.name(), Some(&b"this"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"this"[..]));
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x17d7)));
     });
     // A non-zero byte after the name is not padding.
@@ -209,13 +209,13 @@ fn decodes_file_static_with_name_offset() {
         .u16(0x600)
         .bytes(b"s_c_calls\0");
     decode(S_FILESTATIC, &payload, |symbol| {
-        let SymbolData::FileStatic(value) = *symbol.data() else {
+        let SymbolData::FileStatic(value) = symbol.data().clone() else {
             panic!("expected S_FILESTATIC");
         };
         assert_eq!(value.module_name_offset, NameOffset(u32::MAX));
         assert!(value.flags.contains(LocalFlags::ENREGISTERED_GLOBAL));
         assert!(value.flags.contains(LocalFlags::ENREGISTERED_STATIC));
-        assert_eq!(symbol.name(), Some(&b"s_c_calls"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"s_c_calls"[..]));
         assert_eq!(symbol.type_index(), Some(TypeIndex(0x74)));
     });
     let short = Payload::default().u32(0x74).u32(5297).u8(0);
@@ -239,7 +239,7 @@ fn decodes_subfield_register_def_range_with_gaps() {
         S_DEFRANGE_SUBFIELD_REGISTER,
         &subfield(8, &[4, 0, 2, 0, 9, 0, 1, 0]),
         |symbol| {
-            let SymbolData::DefRangeSubfieldRegister(value) = *symbol.data() else {
+            let SymbolData::DefRangeSubfieldRegister(value) = symbol.data().clone() else {
                 panic!("expected S_DEFRANGE_SUBFIELD_REGISTER");
             };
             assert_eq!(value.register, 330);
@@ -263,7 +263,7 @@ fn subfield_offset_keeps_twelve_bits_and_the_raw_field() {
         S_DEFRANGE_SUBFIELD_REGISTER,
         &subfield(0xffff_f123, &[]),
         |symbol| {
-            let SymbolData::DefRangeSubfieldRegister(value) = *symbol.data() else {
+            let SymbolData::DefRangeSubfieldRegister(value) = symbol.data().clone() else {
                 panic!("expected S_DEFRANGE_SUBFIELD_REGISTER");
             };
             assert_eq!(value.offset_in_parent(), 0x123);
@@ -345,19 +345,19 @@ fn decodes_trampoline_with_offsets_before_sections() {
 fn decodes_fastlink_references() {
     let udt = Payload::default().u32(0x1087).u16(0x4).bytes(b"c_mode\0");
     decode(S_FASTLINK, &udt, |symbol| {
-        let SymbolData::FastLink(value) = *symbol.data() else {
+        let SymbolData::FastLink(value) = symbol.data().clone() else {
             panic!("expected S_FASTLINK");
         };
         assert!(value.flags.contains(FastLinkFlags::UDT));
         assert_eq!(value.type_index(), Some(TypeIndex(0x1087)));
         assert_eq!(value.section(), None);
-        assert_eq!(symbol.name(), Some(&b"c_mode"[..]));
+        assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"c_mode"[..]));
         // The type index refers to the object file, not to the TPI stream.
         assert_eq!(symbol.type_index(), None);
     });
     let local_data = Payload::default().u32(2).u16(0x3).bytes(b"s_c_calls\0");
     decode(S_FASTLINK, &local_data, |symbol| {
-        let SymbolData::FastLink(value) = *symbol.data() else {
+        let SymbolData::FastLink(value) = symbol.data().clone() else {
             panic!("expected S_FASTLINK");
         };
         let flags = FastLinkFlags(FastLinkFlags::LOCAL.0 | FastLinkFlags::DATA.0);
@@ -366,7 +366,7 @@ fn decodes_fastlink_references() {
     });
     let namespace = Payload::default().u32(2).u16(0x40).bytes(b"std\0");
     decode(S_FASTLINK, &namespace, |symbol| {
-        let SymbolData::FastLink(value) = *symbol.data() else {
+        let SymbolData::FastLink(value) = symbol.data().clone() else {
             panic!("expected S_FASTLINK");
         };
         assert!(value.flags.contains(FastLinkFlags::NAMESPACE));
@@ -380,10 +380,13 @@ fn decodes_empty_fastlink_record_and_rejects_bad_ones() {
     let empty = Payload::default().u32(0).u16(0).bytes(b"\0\0");
     let bytes = unpadded(S_FASTLINK, &empty.0);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    let SymbolData::FastLink(value) = *Symbol::decode(record).unwrap().data() else {
+    let SymbolData::FastLink(value) = Symbol::decode(record).unwrap().data().clone() else {
         panic!("expected S_FASTLINK");
     };
-    assert_eq!((value.value, value.flags.0, value.name), (0, 0, &b""[..]));
+    assert_eq!(
+        (value.value, value.flags.0, &value.name[..]),
+        (0, 0, &b""[..])
+    );
     let unterminated = Payload::default().u32(2).u16(0).bytes(b"std");
     assert_eq!(error(S_FASTLINK, &unterminated), ErrorKind::InvalidFormat);
     let short = Payload::default().u32(2).u8(0);
@@ -399,12 +402,15 @@ fn decodes_edit_and_continue_temporary_like_register_relative() {
         .bytes(b"$initVBases\0");
     for kind in [S_REGREL32, S_REGREL32_ENCTMP] {
         decode(kind, &payload, |symbol| {
-            let SymbolData::RegisterRelative(value) = *symbol.data() else {
+            let SymbolData::RegisterRelative(value) = symbol.data().clone() else {
                 panic!("expected a register-relative variable");
             };
             assert_eq!(symbol.kind(), kind);
             assert_eq!((value.offset, value.register), (104, 334));
-            assert_eq!(symbol.name(), Some(&b"$initVBases"[..]));
+            assert_eq!(
+                symbol.name().map(Bytes::as_bytes),
+                Some(&b"$initVBases"[..])
+            );
             assert_eq!(symbol.type_index(), Some(TypeIndex(0x75)));
         });
     }

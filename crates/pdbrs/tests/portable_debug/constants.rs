@@ -1,11 +1,11 @@
 //! Local constant signatures: every type code, enums, general values, custom modifiers and
 //! the encoder.
 
-use pdbrs::ErrorKind;
 use pdbrs::portable::debug::{
     ConstantValue, CustomModifier, Decimal, GeneralValue, LocalConstantSignature, PrimitiveConstant,
 };
 use pdbrs::portable::metadata::{MetadataToken, TableId};
+use pdbrs::{Bytes, ErrorKind};
 
 use crate::{encoded, every_prefix_fails, expect};
 
@@ -25,12 +25,12 @@ fn modifier(required: bool, modifier: MetadataToken) -> CustomModifier {
 ///
 /// For a fixed-size value, each strict prefix of the blob is truncated. An enum or general
 /// value has optional trailing parts, so a prefix can be a valid signature.
-fn round_trip(blob: &[u8], value: ConstantValue<'_>) {
+fn round_trip(blob: &[u8], value: &ConstantValue<'_>) {
     let signature = LocalConstantSignature::parse(blob).unwrap();
     assert_eq!(signature.value(), value, "{blob:02x?}");
     let modifiers: Vec<_> = signature.modifiers().collect();
     assert_eq!(
-        encoded(|out| LocalConstantSignature::encode_parts(&modifiers, &value, out)).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&modifiers, value, out)).unwrap(),
         blob
     );
     if matches!(value, ConstantValue::Primitive(_) | ConstantValue::Object) {
@@ -64,7 +64,7 @@ fn every_primitive_type_code_round_trips() {
         ),
     ];
     for (blob, value) in cases {
-        round_trip(blob, ConstantValue::Primitive(value));
+        round_trip(blob, &ConstantValue::Primitive(value));
     }
 }
 
@@ -73,25 +73,25 @@ fn strings_round_trip_with_null_and_empty_values() {
     let null = LocalConstantSignature::parse(&[0x0e, 0xff]).unwrap();
     assert_eq!(
         null.value(),
-        ConstantValue::Primitive(PrimitiveConstant::String(None))
+        &ConstantValue::Primitive(PrimitiveConstant::String(None))
     );
     let blob = [0x0e, b'h', 0, b'i', 0];
     let text = LocalConstantSignature::parse(&blob).unwrap();
     assert_eq!(
         text.value(),
-        ConstantValue::Primitive(PrimitiveConstant::String(Some(&blob[1..])))
+        &ConstantValue::Primitive(PrimitiveConstant::String(Some(Bytes::new(&blob[1..]))))
     );
     assert_eq!(
-        encoded(|out| LocalConstantSignature::encode_parts(&[], &text.value(), out)).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&[], text.value(), out)).unwrap(),
         blob
     );
     let empty = LocalConstantSignature::parse(&[0x0e]).unwrap();
     assert_eq!(
         empty.value(),
-        ConstantValue::Primitive(PrimitiveConstant::String(Some(&[])))
+        &ConstantValue::Primitive(PrimitiveConstant::String(Some(Bytes::new(&[]))))
     );
     assert_eq!(
-        encoded(|out| LocalConstantSignature::encode_parts(&[], &null.value(), out)).unwrap(),
+        encoded(|out| LocalConstantSignature::encode_parts(&[], null.value(), out)).unwrap(),
         [0x0e, 0xff]
     );
     expect(
@@ -106,7 +106,7 @@ fn enum_constants_have_an_external_type() {
     // I4 5 with the enum type TypeRef 7 (7 << 2 | 1 = 0x1d).
     round_trip(
         &[0x08, 0x05, 0x00, 0x00, 0x00, 0x1d],
-        ConstantValue::Enum {
+        &ConstantValue::Enum {
             value: PrimitiveConstant::I4(5),
             enum_type: token(TableId::TYPE_REF, 7),
         },
@@ -114,7 +114,7 @@ fn enum_constants_have_an_external_type() {
     // U1 with the enum type TypeDef 0x100 (0x100 << 2 = 0x400: 0x84 0x00).
     round_trip(
         &[0x05, 0x09, 0x84, 0x00],
-        ConstantValue::Enum {
+        &ConstantValue::Enum {
             value: PrimitiveConstant::U1(9),
             enum_type: token(TableId::TYPE_DEF, 0x100),
         },
@@ -141,7 +141,7 @@ fn general_constants_decode_by_value_size() {
     // CLASS TypeRef 2 with no value: a null reference.
     round_trip(
         &[0x12, 0x09],
-        ConstantValue::General {
+        &ConstantValue::General {
             value_type: false,
             constant_type: token(TableId::TYPE_REF, 2),
             value: GeneralValue::Default,
@@ -152,7 +152,7 @@ fn general_constants_decode_by_value_size() {
     blob.extend_from_slice(&638_397_504_000_000_000_i64.to_le_bytes());
     round_trip(
         &blob,
-        ConstantValue::General {
+        &ConstantValue::General {
             value_type: true,
             constant_type: token(TableId::TYPE_SPEC, 1),
             value: GeneralValue::DateTime(638_397_504_000_000_000),
@@ -166,7 +166,7 @@ fn general_constants_decode_by_value_size() {
     decimal.low = 1275;
     round_trip(
         &blob,
-        ConstantValue::General {
+        &ConstantValue::General {
             value_type: true,
             constant_type: token(TableId::TYPE_REF, 3),
             value: GeneralValue::Decimal(decimal),
@@ -184,7 +184,7 @@ fn general_constants_decode_by_value_size() {
         ErrorKind::InvalidFormat,
         "general value",
     );
-    round_trip(&[0x1c], ConstantValue::Object);
+    round_trip(&[0x1c], &ConstantValue::Object);
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn custom_modifiers_come_before_the_value() {
             modifier(false, token(TableId::TYPE_DEF, 2)),
         ]
     );
-    round_trip(&blob, ConstantValue::Primitive(PrimitiveConstant::I2(7)));
+    round_trip(&blob, &ConstantValue::Primitive(PrimitiveConstant::I2(7)));
 }
 
 #[test]

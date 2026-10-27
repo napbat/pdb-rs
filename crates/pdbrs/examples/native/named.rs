@@ -49,7 +49,7 @@ pub(crate) fn info_and_names(
     let mut streams: Vec<_> = info.named_streams().collect();
     streams.sort_by_key(|named| named.name_offset);
     for named in &streams {
-        model.set_named_stream(named.name, named.stream)?;
+        model.set_named_stream(&named.name, named.stream)?;
     }
     model.set_next_name_index(info.next_name_index());
     let features: Vec<Feature> = info.features().collect();
@@ -99,7 +99,7 @@ pub(crate) fn named_streams(
     for named in info.named_streams() {
         report.claim(named.stream);
         let bytes = pdb.stream_bytes(named.stream)?;
-        match NamedStreamKind::classify(named.name) {
+        match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::Names | NamedStreamKind::SourceFile { .. } => {}
             NamedStreamKind::LinkInfo => {
                 let parsed = LinkInfo::parse(&bytes, named.stream);
@@ -195,13 +195,13 @@ pub(crate) fn named_streams(
             }
             _ => report.undecoded(format!(
                 "named stream {}",
-                String::from_utf8_lossy(named.name)
+                String::from_utf8_lossy(&named.name)
             )),
         }
     }
     for named in info.named_streams() {
         let content = matches!(
-            NamedStreamKind::classify(named.name),
+            NamedStreamKind::classify(&named.name),
             NamedStreamKind::SourceFile { .. }
         );
         if content && !handled.contains(&named.stream) {
@@ -227,7 +227,7 @@ fn injected_source(
     let mut encoded = Vec::new();
     document.encode(&mut encoded)?;
     report.reencoded(".NET document records", content, &encoded);
-    let Some(embedded) = document.embedded else {
+    let Some(embedded) = &document.embedded else {
         report.add(".NET document records without embedded source", 1);
         return Ok(());
     };

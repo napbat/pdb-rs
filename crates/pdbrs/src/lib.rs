@@ -46,6 +46,7 @@
 
 extern crate alloc;
 
+mod bytes;
 mod compression;
 mod crypto;
 mod error;
@@ -56,5 +57,6 @@ pub mod portable;
 #[cfg(test)]
 mod test_support;
 
+pub use bytes::Bytes;
 pub use error::{Error, ErrorKind, PortableLocation, Result};
 pub use format::{ContainerKind, Format, PROBE_LEN, Pdb, probe};

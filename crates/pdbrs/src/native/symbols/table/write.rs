@@ -24,7 +24,7 @@ use super::super::{BucketCount, SymbolOffset};
 use super::{HEADER_SIZE, HashRecord, MAX_SIGNED, OFFSET_SCALE, RECORD_SIZE, SIGNATURE, VERSION};
 use crate::native::Producer;
 use crate::native::codeview::symbol::Symbol;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// One record to put in a symbol hash table.
 ///
@@ -177,6 +177,7 @@ pub(in crate::native::symbols) fn append_table(
 pub fn indexed_name(symbol_records: &[u8], symbol: SymbolOffset) -> Result<&[u8]> {
     Symbol::decode(symbol.record(symbol_records)?)?
         .name()
+        .and_then(Bytes::as_borrowed)
         .ok_or_else(|| {
             Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("indexed symbol record has no name")

@@ -43,16 +43,13 @@ pub use module::{
     GlobalRefs, GlobalRefsIter, ModuleRegionSizes, ModuleStream, ModuleStreamParts, Subsection,
     Subsections,
 };
-pub use module_info::{Module, Modules, OwnedModule};
+pub use module_info::{Module, Modules};
 pub use section_contribution::{
     SECTION_CONTRIBUTION_V2, SECTION_CONTRIBUTION_V60, SectionContribution,
     SectionContributionVersion, SectionContributions, SectionContributionsIter,
 };
-pub use section_map::{OwnedSectionMap, SectionMap, SectionMapEntry, SectionMapIter, SegmentFlags};
-pub use sources::{
-    FileNames, ModuleSourceIter, ModuleSources, NameOffsets, OwnedModuleSources, OwnedSourceInfo,
-    SourceInfo,
-};
+pub use section_map::{SectionMap, SectionMapEntry, SegmentFlags};
+pub use sources::{FileNames, ModuleSources, SourceInfo};
 pub use type_server::TypeServer;
 
 /// The fixed MSF stream index of the DBI stream.
@@ -206,6 +203,7 @@ impl Dbi {
             base: range.start,
             position: 0,
             index: 0,
+            failed: false,
         }
     }
 
@@ -263,7 +261,7 @@ impl Dbi {
     ///
     /// Returns the errors of [`SectionMap::parse`], located at the start of
     /// the substream in stream 3.
-    pub fn section_map(&self) -> Result<Option<SectionMap<'_>>> {
+    pub fn section_map(&self) -> Result<Option<SectionMap>> {
         self.decode(Substream::SectionMap, SectionMap::parse)
     }
 
@@ -287,7 +285,7 @@ impl Dbi {
             module?;
             modules += 1;
         }
-        if modules != info.module_count() {
+        if modules != info.modules.len() {
             return Err(dbi_error(
                 ErrorKind::InvalidFormat,
                 self.substream_offset(Substream::SourceInfo),

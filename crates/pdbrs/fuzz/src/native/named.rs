@@ -183,7 +183,7 @@ fn document(bytes: &[u8]) {
 
 /// Decode the embedded source of a .NET document record and verify its checksum.
 fn embedded(document: &DotNetDocument<'_>) {
-    let _ = document.verify_checksum(document.checksum);
+    let _ = document.verify_checksum(&document.checksum);
     let Some(source) = &document.embedded else {
         return;
     };

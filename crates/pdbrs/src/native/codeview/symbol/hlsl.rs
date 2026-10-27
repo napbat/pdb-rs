@@ -10,8 +10,9 @@
 use super::super::index::TypeIndex;
 use super::super::{Fields, SymbolKind};
 use super::{AddressGaps, AddressRange, LocalFlags};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of an HLSL def-range (`S_DEFRANGE_HLSL`).
 pub const S_DEFRANGE_HLSL: SymbolKind = SymbolKind(0x1150);
@@ -36,7 +37,7 @@ pub const S_LDATA_HLSL32_EX: SymbolKind = SymbolKind(0x1165);
 
 /// An HLSL or DPC pointer tag def-range ([`S_DEFRANGE_HLSL`] and
 /// [`S_DEFRANGE_DPC_PTR_TAG`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeHlsl<'a> {
     /// The register type (`CV_HLSLREG_e`).
@@ -55,8 +56,13 @@ pub struct DefRangeHlsl<'a> {
     pub gaps: AddressGaps<'a>,
     /// The offsets of the variable in the register space: one
     /// little-endian `u32` for each register index.
-    offsets: &'a [[u8; 4]],
+    offsets: Bytes<'a>,
 }
+
+into_owned!(struct DefRangeHlsl {
+    gaps, offsets;
+    register_type, flags, parent_offset, size_in_parent, range
+});
 
 impl<'a> DefRangeHlsl<'a> {
     /// Read the fields.
@@ -79,7 +85,7 @@ impl<'a> DefRangeHlsl<'a> {
                     .with_context("HLSL def-range is too short for its register offsets")
             })?;
         let gaps = AddressGaps::parse(fields.bytes(gap_bytes)?)?;
-        let (offsets, _) = fields.bytes(offset_bytes)?.as_chunks();
+        let offsets = Bytes::new(fields.bytes(offset_bytes)?);
         Ok(Self {
             register_type,
             flags,
@@ -96,7 +102,7 @@ impl<'a> DefRangeHlsl<'a> {
     /// The number of offsets must equal the register index count in
     /// [`DefRangeHlsl::flags`].
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        if self.offsets.len() != usize::from(self.flags & 0b11) {
+        if self.offsets.len() != usize::from(self.flags & 0b11) * 4 {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("HLSL def-range offset count does not match its flags"));
         }
@@ -106,10 +112,7 @@ impl<'a> DefRangeHlsl<'a> {
         out.u16(self.size_in_parent)?;
         self.range.write(out)?;
         self.gaps.write(out)?;
-        for offset in self.offsets {
-            out.bytes(offset)?;
-        }
-        Ok(())
+        out.bytes(&self.offsets)
     }
 
     /// Return the number of register indices (bits 0 and 1 of the flags).
@@ -132,8 +135,8 @@ impl<'a> DefRangeHlsl<'a> {
 
     /// Return the offsets in the register space.
     #[must_use]
-    pub fn offsets(&self) -> DefRangeHlslOffsets<'a> {
-        DefRangeHlslOffsets(self.offsets.iter())
+    pub fn offsets(&self) -> DefRangeHlslOffsets<'_> {
+        DefRangeHlslOffsets(self.offsets.as_chunks().0.iter())
     }
 }
 
@@ -142,7 +145,7 @@ impl<'a> DefRangeHlsl<'a> {
 /// [`S_GDATA_HLSL`] and [`S_LDATA_HLSL`] store 16-bit slots.
 /// [`S_GDATA_HLSL32`] and [`S_LDATA_HLSL32`] store 32-bit slots and put the
 /// register type after them. The value keeps the slots as `u32`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct HlslData<'a> {
     /// The type index in the TPI stream.
@@ -160,8 +163,13 @@ pub struct HlslData<'a> {
     /// The first unordered access view slot.
     pub uav_slot: u32,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct HlslData {
+    name;
+    type_index, register_type, data_slot, data_offset, texture_slot, sampler_slot, uav_slot
+});
 
 impl<'a> HlslData<'a> {
     /// Read the fields. Set `wide` for the 32-bit kinds.
@@ -182,7 +190,7 @@ impl<'a> HlslData<'a> {
         if wide {
             register_type = fields.u16()?;
         }
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         let [data_slot, data_offset, texture_slot, sampler_slot, uav_slot] = slots;
         Ok(Self {
             type_index,
@@ -221,13 +229,13 @@ impl<'a> HlslData<'a> {
         if wide {
             out.u16(self.register_type)?;
         }
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// An HLSL data symbol with a binding space ([`S_GDATA_HLSL32_EX`] and
 /// [`S_LDATA_HLSL32_EX`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct HlslDataEx<'a> {
     /// The type index in the TPI stream.
@@ -243,8 +251,13 @@ pub struct HlslDataEx<'a> {
     /// The register type (`CV_HLSLREG_e`).
     pub register_type: u16,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct HlslDataEx {
+    name;
+    type_index, register_id, data_offset, bind_space, bind_slot, register_type
+});
 
 impl<'a> HlslDataEx<'a> {
     /// Read the fields.
@@ -255,7 +268,7 @@ impl<'a> HlslDataEx<'a> {
         let bind_space = fields.u32()?;
         let bind_slot = fields.u32()?;
         let register_type = fields.u16()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             register_id,
@@ -275,12 +288,12 @@ impl<'a> HlslDataEx<'a> {
         out.u32(self.bind_space)?;
         out.u32(self.bind_slot)?;
         out.u16(self.register_type)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A DPC group-shared local variable ([`S_LOCAL_DPC_GROUPSHARED`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DpcGroupSharedLocal<'a> {
     /// The type index in the TPI stream.
@@ -292,8 +305,10 @@ pub struct DpcGroupSharedLocal<'a> {
     /// The byte offset in the base data.
     pub data_offset: u16,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct DpcGroupSharedLocal { name; type_index, flags, data_slot, data_offset });
 
 impl<'a> DpcGroupSharedLocal<'a> {
     /// Read the fields.
@@ -302,7 +317,7 @@ impl<'a> DpcGroupSharedLocal<'a> {
         let flags = LocalFlags(fields.u16()?);
         let data_slot = fields.u16()?;
         let data_offset = fields.u16()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             flags,
@@ -318,16 +333,18 @@ impl<'a> DpcGroupSharedLocal<'a> {
         out.u16(self.flags.0)?;
         out.u16(self.data_slot)?;
         out.u16(self.data_offset)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A map from DPC pointer tag values to symbol records ([`S_DPC_SYM_TAG_MAP`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct DpcTagMap<'a> {
     /// The 8-byte entries.
-    entries: &'a [[u8; 8]],
+    entries: Bytes<'a>,
 }
+
+into_owned!(struct DpcTagMap { entries; });
 
 /// One entry of a [`DpcTagMap`] (`CV_DPC_SYM_TAG_MAP_ENTRY`).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -347,9 +364,9 @@ impl<'a> DpcTagMap<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 8.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let (entries, rest) = bytes.as_chunks();
-        if !rest.is_empty() {
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let entries = bytes.into();
+        if !entries.len().is_multiple_of(8) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("S_DPC_SYM_TAG_MAP is not a multiple of 8 bytes"));
         }
@@ -363,29 +380,26 @@ impl<'a> DpcTagMap<'a> {
 
     /// Write the entries.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        for entry in self.entries {
-            out.bytes(entry)?;
-        }
-        Ok(())
+        out.bytes(&self.entries)
     }
 
     /// Return the number of entries.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.entries.len()
+    pub fn len(&self) -> usize {
+        self.entries.len() / 8
     }
 
     /// Return `true` if the map has no entries.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub fn iter(&self) -> DpcTagMapIter<'a> {
+    pub fn iter(&self) -> DpcTagMapIter<'_> {
         DpcTagMapIter {
-            entries: self.entries.iter(),
+            entries: self.entries.as_chunks().0.iter(),
         }
     }
 }
@@ -418,16 +432,7 @@ impl ExactSizeIterator for DpcTagMapIter<'_> {}
 
 impl core::iter::FusedIterator for DpcTagMapIter<'_> {}
 
-impl<'a> IntoIterator for DpcTagMap<'a> {
-    type Item = DpcTag;
-    type IntoIter = DpcTagMapIter<'a>;
-
-    fn into_iter(self) -> DpcTagMapIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &DpcTagMap<'a> {
+impl<'a> IntoIterator for &'a DpcTagMap<'_> {
     type Item = DpcTag;
     type IntoIter = DpcTagMapIter<'a>;
 

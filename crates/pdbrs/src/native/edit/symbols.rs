@@ -29,7 +29,7 @@ use crate::native::symbols::{
     GlobalSymbolIndex, HashEntry, HashTable, PublicSymbolIndex, RecordOffsets, SymbolOffset,
     ThunkTable, indexed_name,
 };
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The new offset of each source record, in source offset order.
 pub(super) struct OffsetMap {
@@ -89,23 +89,32 @@ pub(super) fn check(report: &ValidationReport) -> Result<()> {
 fn renamed<'a>(
     data: &SymbolData<'a>,
     index: SymbolIndex,
-    name: &'a [u8],
+    name: Bytes<'a>,
 ) -> Option<SymbolData<'a>> {
-    match (index, *data) {
-        (SymbolIndex::Public, SymbolData::Public(public)) => {
-            Some(SymbolData::Public(Public { name, ..public }))
-        }
-        (SymbolIndex::Global, SymbolData::Data(data)) => {
-            Some(SymbolData::Data(Data { name, ..data }))
-        }
-        (SymbolIndex::Global, SymbolData::ThreadData(data)) => {
-            Some(SymbolData::ThreadData(Data { name, ..data }))
-        }
+    match (index, data) {
+        (SymbolIndex::Public, SymbolData::Public(public)) => Some(SymbolData::Public(Public {
+            name,
+            ..public.clone()
+        })),
+        (SymbolIndex::Global, SymbolData::Data(data)) => Some(SymbolData::Data(Data {
+            name,
+            ..data.clone()
+        })),
+        (SymbolIndex::Global, SymbolData::ThreadData(data)) => Some(SymbolData::ThreadData(Data {
+            name,
+            ..data.clone()
+        })),
         (SymbolIndex::Global, SymbolData::Constant(constant)) => {
-            Some(SymbolData::Constant(Constant { name, ..constant }))
+            Some(SymbolData::Constant(Constant {
+                name,
+                ..constant.clone()
+            }))
         }
         (SymbolIndex::Global, SymbolData::UserDefinedType(udt)) => {
-            Some(SymbolData::UserDefinedType(UserDefinedType { name, ..udt }))
+            Some(SymbolData::UserDefinedType(UserDefinedType {
+                name,
+                ..udt.clone()
+            }))
         }
         _ => None,
     }
@@ -165,7 +174,7 @@ fn resolve<'r>(
     for rename in renames {
         let offset = find(records, indexes.table(rename.index)?, &rename.old)?;
         let symbol = Symbol::decode(offset.record(records)?)?;
-        if renamed(symbol.data(), rename.index, &rename.new).is_none() {
+        if renamed(symbol.data(), rename.index, Bytes::new(&rename.new)).is_none() {
             return Err(unsupported(
                 "the editor renames only public, data, thread data, constant and UDT records",
             ));
@@ -200,7 +209,7 @@ fn rewrite(
         match targets.get(&record.offset) {
             Some(&(index, name)) => {
                 let symbol = Symbol::decode(record)?;
-                let data = renamed(symbol.data(), index, name)
+                let data = renamed(symbol.data(), index, Bytes::new(name))
                     .ok_or_else(|| unsupported("renamed record has no name field"))?;
                 data.encode(symbol.kind(), &mut out)?;
             }
@@ -361,7 +370,7 @@ fn move_global_refs<S: ReadAt>(
     changes: &mut Changes,
 ) -> Result<()> {
     for module in context.dbi.modules() {
-        let module = module?;
+        let (_, module) = module?;
         let Some(stream) = pdb.load_module(&module)? else {
             continue;
         };

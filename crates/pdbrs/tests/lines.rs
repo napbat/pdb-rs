@@ -331,14 +331,14 @@ fn classifier_names_kinds_and_keeps_unknown_layouts_raw() {
         LineSubsection::decode(DEBUG_S_INLINEE_MDTOKEN_MAP, &data).unwrap(),
         LineSubsection::Unsupported {
             kind: DEBUG_S_INLINEE_MDTOKEN_MAP,
-            data: &data,
+            data: (&data).into(),
         }
     );
     assert_eq!(
         LineSubsection::decode(SubsectionKind(0x42), &data).unwrap(),
         LineSubsection::Unsupported {
             kind: SubsectionKind(0x42),
-            data: &data,
+            data: (&data).into(),
         }
     );
     // The ignore bit keeps even a known kind raw, also with malformed data.
@@ -346,7 +346,7 @@ fn classifier_names_kinds_and_keeps_unknown_layouts_raw() {
         LineSubsection::decode(ignored, &data).unwrap(),
         LineSubsection::Ignored {
             kind: ignored,
-            data: &data,
+            data: (&data).into(),
         }
     );
     assert!(matches!(
@@ -419,7 +419,7 @@ fn module_dbi(c13_size: u32) -> Dbi {
 /// Build a module stream with an 8-byte symbol region and `c13`.
 fn module_stream(c13: &[u8]) -> ModuleStream {
     let dbi = module_dbi(u32::try_from(c13.len()).unwrap());
-    let module = dbi.modules().next().unwrap().unwrap();
+    let (_, module) = dbi.modules().next().unwrap().unwrap();
     let mut bytes = u32s(&[4, 0x0002_0002]);
     bytes.extend_from_slice(c13);
     bytes.extend_from_slice(&0_u32.to_le_bytes());

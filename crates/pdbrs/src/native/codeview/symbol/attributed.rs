@@ -13,8 +13,9 @@
 use super::super::index::TypeIndex;
 use super::super::{Fields, SymbolKind};
 use super::{LocalFlags, SectionOffset};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of a managed type reference (`S_MANTYPREF`).
 pub const S_MANTYPREF: SymbolKind = SymbolKind(0x1028);
@@ -79,13 +80,15 @@ impl VariableAttributes {
 /// The 8-bit kinds store a `u8` count and `u8` registers. The 16-bit kinds
 /// store a `u16` count and `u16` registers. The most significant register
 /// is first.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct RegisterList<'a> {
     /// The register bytes.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// `true` for 16-bit register numbers.
     wide: bool,
 }
+
+into_owned!(struct RegisterList { bytes; wide });
 
 impl<'a> RegisterList<'a> {
     /// Create a list from register bytes: one byte for each register, or two
@@ -96,7 +99,8 @@ impl<'a> RegisterList<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] if `wide` is set and the length is
     /// odd. Returns [`ErrorKind::LimitExceeded`] if the count does not fit the
     /// count field.
-    pub fn parse(bytes: &'a [u8], wide: bool) -> Result<Self> {
+    pub fn parse(bytes: impl Into<Bytes<'a>>, wide: bool) -> Result<Self> {
+        let bytes = bytes.into();
         if wide && !bytes.len().is_multiple_of(2) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("16-bit register list has an odd length"));
@@ -114,7 +118,7 @@ impl<'a> RegisterList<'a> {
             usize::from(fields.u8()?)
         };
         Ok(Self {
-            bytes: fields.bytes(length)?,
+            bytes: Bytes::new(fields.bytes(length)?),
             wide,
         })
     }
@@ -141,7 +145,7 @@ impl<'a> RegisterList<'a> {
             // The count fits in a `u8` for an 8-bit list.
             out.u8(count.to_le_bytes()[0])?;
         }
-        out.bytes(self.bytes)
+        out.bytes(&self.bytes)
     }
 
     /// Return `true` for 16-bit register numbers.
@@ -152,7 +156,7 @@ impl<'a> RegisterList<'a> {
 
     /// Return the number of registers.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         if self.wide {
             self.bytes.len() / 2
         } else {
@@ -162,13 +166,13 @@ impl<'a> RegisterList<'a> {
 
     /// Return `true` if the list has no registers.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the register numbers.
     #[must_use]
-    pub fn iter(&self) -> RegisterListIter<'a> {
+    pub fn iter(&self) -> RegisterListIter<'_> {
         let step = if self.wide { 2 } else { 1 };
         RegisterListIter {
             chunks: self.bytes.chunks_exact(step),
@@ -203,16 +207,7 @@ impl ExactSizeIterator for RegisterListIter<'_> {}
 
 impl core::iter::FusedIterator for RegisterListIter<'_> {}
 
-impl<'a> IntoIterator for RegisterList<'a> {
-    type Item = u16;
-    type IntoIter = RegisterListIter<'a>;
-
-    fn into_iter(self) -> RegisterListIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &RegisterList<'a> {
+impl<'a> IntoIterator for &'a RegisterList<'_> {
     type Item = u16;
     type IntoIter = RegisterListIter<'a>;
 
@@ -225,7 +220,7 @@ impl<'a> IntoIterator for &RegisterList<'a> {
 ///
 /// The kinds are [`S_MANYREG`], [`S_MANYREG2`], [`S_MANMANYREG`],
 /// [`S_MANMANYREG2`] and [`S_ATTR_MANYREG`].
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ManyRegisters<'a> {
     /// The type index, or a metadata token for the managed kinds.
@@ -235,8 +230,10 @@ pub struct ManyRegisters<'a> {
     /// The registers.
     pub registers: RegisterList<'a>,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ManyRegisters { registers, name; type_index, attributes });
 
 impl<'a> ManyRegisters<'a> {
     /// Read the fields. Set `with_attributes` for the kinds with attributes
@@ -249,7 +246,7 @@ impl<'a> ManyRegisters<'a> {
             None
         };
         let registers = RegisterList::read(fields, wide)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             attributes,
@@ -265,12 +262,12 @@ impl<'a> ManyRegisters<'a> {
             attributes.write(out)?;
         }
         self.registers.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A variable in an IL slot ([`S_LOCALSLOT`] and [`S_PARAMSLOT`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Slot<'a> {
     /// The slot index.
@@ -278,15 +275,17 @@ pub struct Slot<'a> {
     /// A type index or a metadata token.
     pub type_or_token: u32,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Slot { name; slot, type_or_token });
 
 impl<'a> Slot<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let slot = fields.u32()?;
         let type_or_token = fields.u32()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             slot,
             type_or_token,
@@ -298,13 +297,13 @@ impl<'a> Slot<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.slot)?;
         out.u32(self.type_or_token)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A frame-relative variable with attributes ([`S_MANFRAMEREL`] and
 /// [`S_ATTR_FRAMEREL`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AttributedFrameRelative<'a> {
     /// The offset from the frame. `cvinfo.h` gives a signed `CV_off32_t`.
@@ -314,8 +313,10 @@ pub struct AttributedFrameRelative<'a> {
     /// The attributes.
     pub attributes: VariableAttributes,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct AttributedFrameRelative { name; offset, type_index, attributes });
 
 impl<'a> AttributedFrameRelative<'a> {
     /// Read the fields.
@@ -323,7 +324,7 @@ impl<'a> AttributedFrameRelative<'a> {
         let offset = fields.i32()?;
         let type_index = fields.type_index()?;
         let attributes = VariableAttributes::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             offset,
             type_index,
@@ -337,13 +338,13 @@ impl<'a> AttributedFrameRelative<'a> {
         out.i32(self.offset)?;
         out.type_index(self.type_index)?;
         self.attributes.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A register variable with attributes ([`S_MANREGISTER`] and
 /// [`S_ATTR_REGISTER`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AttributedRegister<'a> {
     /// The type index, or a metadata token for [`S_MANREGISTER`].
@@ -353,8 +354,10 @@ pub struct AttributedRegister<'a> {
     /// The register, as a `CV_HREG_e` number for the CPU of the module.
     pub register: u16,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct AttributedRegister { name; type_index, attributes, register });
 
 impl<'a> AttributedRegister<'a> {
     /// Read the fields.
@@ -362,7 +365,7 @@ impl<'a> AttributedRegister<'a> {
         let type_index = fields.type_index()?;
         let attributes = VariableAttributes::read(fields)?;
         let register = fields.u16()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             attributes,
@@ -376,13 +379,13 @@ impl<'a> AttributedRegister<'a> {
         out.type_index(self.type_index)?;
         self.attributes.write(out)?;
         out.u16(self.register)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A register-relative variable with attributes ([`S_MANREGREL`] and
 /// [`S_ATTR_REGREL`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AttributedRegisterRelative<'a> {
     /// The offset from the register.
@@ -394,8 +397,10 @@ pub struct AttributedRegisterRelative<'a> {
     /// The attributes.
     pub attributes: VariableAttributes,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct AttributedRegisterRelative { name; offset, type_index, register, attributes });
 
 impl<'a> AttributedRegisterRelative<'a> {
     /// Read the fields.
@@ -404,7 +409,7 @@ impl<'a> AttributedRegisterRelative<'a> {
         let type_index = fields.type_index()?;
         let register = fields.u16()?;
         let attributes = VariableAttributes::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             offset,
             type_index,
@@ -420,6 +425,6 @@ impl<'a> AttributedRegisterRelative<'a> {
         out.type_index(self.type_index)?;
         out.u16(self.register)?;
         self.attributes.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }

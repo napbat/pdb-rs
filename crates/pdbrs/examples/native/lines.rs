@@ -28,23 +28,23 @@ pub(crate) fn cross_scope(
     let mut modules = CrossScopeModules::new();
     let mut streams = Vec::new();
     for module in dbi.modules() {
-        let module = module?;
-        let Some(stream) = pdb.module(module.index)? else {
-            modules.add(module.name, module.object_file, None)?;
+        let (index, module) = module?;
+        let Some(stream) = pdb.module(index)? else {
+            modules.add(&module.name, &module.object_file, None)?;
             continue;
         };
         let Ok(lines) = ModuleLines::parse(&stream) else {
-            modules.add(module.name, module.object_file, None)?;
+            modules.add(&module.name, &module.object_file, None)?;
             continue;
         };
         let exports = lines
             .subsections()
             .iter()
             .find_map(|subsection| match &subsection.data {
-                LineSubsection::CrossScopeExports(exports) => Some(*exports),
+                LineSubsection::CrossScopeExports(exports) => Some(exports),
                 _ => None,
             });
-        modules.add(module.name, module.object_file, exports.as_ref())?;
+        modules.add(&module.name, &module.object_file, exports)?;
         streams.push(stream);
     }
     let info = pdb.info();
@@ -162,8 +162,8 @@ pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Rep
     let mut regions = (0usize, 0usize);
     let mut streams = (0usize, 0usize);
     for module in dbi.modules() {
-        let module = module?;
-        let Some(stream) = pdb.module(module.index)? else {
+        let (index, module) = module?;
+        let Some(stream) = pdb.module(index)? else {
             continue;
         };
         let refs = stream.global_refs()?;
@@ -180,7 +180,7 @@ pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Rep
                 let mut data = Vec::new();
                 decoded.data.encode(&mut data)?;
                 subsections.0 += 1;
-                subsections.1 += usize::from(data != framed?.data);
+                subsections.1 += usize::from(data != *framed?.data);
             }
             let mut c13 = Vec::new();
             lines.encode(&mut c13)?;

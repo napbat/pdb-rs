@@ -14,7 +14,8 @@
 
 use core::iter::FusedIterator;
 
-use crate::{Error, ErrorKind, Result};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 pub mod field_list;
 pub mod id_record;
@@ -64,6 +65,48 @@ impl<'a> Record<'a> {
         Self { offset, kind, data }
     }
 }
+
+/// A record of a kind that this crate does not decode.
+///
+/// The value keeps the offset, the kind and the payload of the framed
+/// record. It owns its payload or borrows it.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct RawRecord<'a> {
+    /// The byte offset of the length field in the framed sequence. See
+    /// [`Record::offset`].
+    pub offset: u32,
+    /// The record kind.
+    pub kind: u16,
+    /// The payload after the kind field, with the padding at the end.
+    pub data: Bytes<'a>,
+}
+
+impl<'a> RawRecord<'a> {
+    /// Make a raw record with an offset, a kind and a payload.
+    #[must_use]
+    pub fn new(offset: u32, kind: u16, data: impl Into<Bytes<'a>>) -> Self {
+        Self {
+            offset,
+            kind,
+            data: data.into(),
+        }
+    }
+
+    /// Return a framed record that borrows the payload.
+    #[must_use]
+    pub fn record(&self) -> Record<'_> {
+        Record::new(self.offset, self.kind, &self.data)
+    }
+}
+
+impl<'a> From<Record<'a>> for RawRecord<'a> {
+    fn from(record: Record<'a>) -> Self {
+        Self::new(record.offset, record.kind, Bytes::new(record.data))
+    }
+}
+
+into_owned!(struct RawRecord { data; offset, kind });
 
 /// An iterator that frames a byte sequence into `CodeView` records.
 ///

@@ -82,10 +82,10 @@ pub(crate) fn modules(
     report: &mut Report,
 ) -> Outcome<Procedures> {
     let mut procedures = Procedures::default();
-    for (index, module) in dbi.modules().enumerate() {
-        let module = module?;
-        let index = u16::try_from(index)?;
-        let Some(stream) = pdb.module(module.index)? else {
+    for module in dbi.modules() {
+        let (module_index, _) = module?;
+        let index = u16::try_from(module_index.0)?;
+        let Some(stream) = pdb.module(module_index)? else {
             continue;
         };
         report.claim(stream.stream());
@@ -239,7 +239,7 @@ fn module_lines(lines: &ModuleLines<'_>, context: &Context<'_>, report: &mut Rep
                         }
                     }
                     file_name(entry.checksum_offset)?;
-                    for extra in entry.extra_files {
+                    for extra in &entry.extra_files {
                         file_name(extra)?;
                     }
                     report.add("inlinee lines", 1);

@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use super::blob::{Reader, Writer, invalid, too_large, truncated};
 use super::{Entries, count_to_end};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 use crate::portable::metadata::{IlOffset, MethodDefId};
 
 /// The first value that a hoisted scope offset or length cannot have.
@@ -23,12 +24,12 @@ const SCOPE_SIZE: usize = 8;
 ///
 /// The blob is a `u32` catch handler offset plus 1 (0 for no handler), and
 /// then one step for each `await`, to the end of the blob.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AsyncMethodSteppingInformation<'a> {
     /// The catch handler IL offset.
     catch_handler_offset: Option<IlOffset>,
     /// The steps. [`AsyncMethodSteppingInformation::parse`] checked them.
-    steps: &'a [u8],
+    steps: Bytes<'a>,
     /// The number of steps.
     len: usize,
 }
@@ -44,6 +45,8 @@ pub struct AsyncStep {
     /// The method that has the resume point. It is not nil.
     pub move_next_method: MethodDefId,
 }
+
+into_owned!(struct AsyncMethodSteppingInformation { steps; catch_handler_offset, len });
 
 impl<'a> AsyncMethodSteppingInformation<'a> {
     /// Decode an async method stepping information blob.
@@ -61,7 +64,7 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
         let len = count_to_end(steps, 0, read_step)?;
         Ok(Self {
             catch_handler_offset: catch.checked_sub(1).map(IlOffset),
-            steps,
+            steps: Bytes::new(steps),
             len,
         })
     }
@@ -86,8 +89,8 @@ impl<'a> AsyncMethodSteppingInformation<'a> {
 
     /// Return an iterator over the steps.
     #[must_use]
-    pub const fn iter(&self) -> AsyncMethodSteppingInformationIter<'a> {
-        AsyncMethodSteppingInformationIter(Entries::new(self.steps, self.len, 0, read_step))
+    pub fn iter(&self) -> AsyncMethodSteppingInformationIter<'_> {
+        AsyncMethodSteppingInformationIter(Entries::new(&self.steps, self.len, 0, read_step))
     }
 
     /// Encode an async method stepping information blob, and append it to `out`.
@@ -148,11 +151,13 @@ fn read_step(reader: &mut Reader<'_>, _: i32) -> Result<AsyncStep> {
 
 /// The scopes of the local variables that a state machine hoists to fields,
 /// one for each hoisted variable slot.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct HoistedLocalScopes<'a> {
     /// The 8-byte scopes. [`HoistedLocalScopes::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct HoistedLocalScopes { bytes; });
 
 /// The IL range of a hoisted local variable: `start..start + length`.
 ///
@@ -181,31 +186,33 @@ impl<'a> HoistedLocalScopes<'a> {
             return Err(truncated("hoisted local scope is truncated"));
         }
         count_to_end(blob, 0, read_scope)?;
-        Ok(Self { bytes: blob })
+        Ok(Self {
+            bytes: Bytes::new(blob),
+        })
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of scopes.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() / SCOPE_SIZE
     }
 
     /// Return `true` if there are no scopes.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the scopes.
     #[must_use]
-    pub const fn iter(&self) -> HoistedLocalScopesIter<'a> {
-        HoistedLocalScopesIter(Entries::new(self.bytes, self.len(), 0, read_scope))
+    pub fn iter(&self) -> HoistedLocalScopesIter<'_> {
+        HoistedLocalScopesIter(Entries::new(&self.bytes, self.len(), 0, read_scope))
     }
 
     /// Encode a hoisted local scopes blob, and append it to `out`.

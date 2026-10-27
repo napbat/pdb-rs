@@ -8,9 +8,10 @@
 use alloc::vec::Vec;
 
 use super::invalid;
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::codeview::{Record, Records};
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// The size of the length field and the kind field of a record.
 const PREFIX_SIZE: usize = 4;
@@ -20,13 +21,15 @@ const PREFIX_SIZE: usize = 4;
 /// [`SymbolsSubsection::parse`] frames all records. Use
 /// [`Symbol::decode`](crate::native::codeview::symbol::Symbol::decode) to
 /// decode the payload of a record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SymbolsSubsection<'a> {
     /// The framed records.
-    data: &'a [u8],
+    data: Bytes<'a>,
     /// The number of records.
     count: usize,
 }
+
+into_owned!(struct SymbolsSubsection { data; count });
 
 impl<'a> SymbolsSubsection<'a> {
     /// Frame the records of a `DEBUG_S_SYMBOLS` subsection.
@@ -47,7 +50,10 @@ impl<'a> SymbolsSubsection<'a> {
             record?;
             count += 1;
         }
-        Ok(Self { data, count })
+        Ok(Self {
+            data: Bytes::new(data),
+            count,
+        })
     }
 
     /// Return the number of records.
@@ -68,8 +74,8 @@ impl<'a> SymbolsSubsection<'a> {
     /// [`SymbolsSubsection::parse`] framed the records, so the iterator does
     /// not return an error.
     #[must_use]
-    pub const fn records(&self) -> Records<'a> {
-        Records::new(self.data)
+    pub fn records(&self) -> Records<'_> {
+        Records::new(&self.data)
     }
 
     /// Append the subsection data to `out`: each record with its length

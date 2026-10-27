@@ -102,7 +102,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeS
     claim(header.symbol_stream);
     let mut module_types = Vec::new();
     for module in dbi.modules() {
-        let module = module?;
+        let (_, module) = module?;
         claim(module.stream);
         let Some(stream) = pdb.load_module(&module)? else {
             continue;
@@ -122,7 +122,7 @@ fn check_streams<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<TypeS
     }
     for named in pdb.info().named_streams() {
         claim(Some(named.stream));
-        match NamedStreamKind::classify(named.name) {
+        match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::Other => {
                 return Err(opaque(
                     "the edit changes offsets or indices, and a named stream of an unknown kind can refer to them",
@@ -178,7 +178,7 @@ fn check_records<S: ReadAt>(pdb: &Pdb<S>, context: &Context<'_>) -> Result<()> {
         }
     }
     for module in context.dbi.modules() {
-        let module = module?;
+        let (_, module) = module?;
         let Some(stream) = pdb.load_module(&module)? else {
             continue;
         };

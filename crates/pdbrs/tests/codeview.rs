@@ -117,7 +117,10 @@ fn decodes_public_name_without_padding() {
     let symbol = Symbol::decode(record).unwrap();
 
     assert_eq!(symbol.kind(), S_PUB32);
-    assert_eq!(symbol.name(), Some(&b"main"[..]));
+    assert_eq!(
+        symbol.name().map(pdbrs::Bytes::as_bytes),
+        Some(&b"main"[..])
+    );
     let address = SectionOffset {
         section: 1,
         offset: 0x1234,
@@ -143,7 +146,10 @@ fn keeps_four_or_more_zero_padding_bytes() {
     // The HLSL compiler fxc writes more zero bytes than the alignment needs.
     let bytes = record(S_PUB32.0, &public_payload(b"main\0\0\0\0\0"));
     let symbol = Symbol::decode(Records::new(&bytes).next().unwrap().unwrap()).unwrap();
-    assert_eq!(symbol.name(), Some(&b"main"[..]));
+    assert_eq!(
+        symbol.name().map(pdbrs::Bytes::as_bytes),
+        Some(&b"main"[..])
+    );
     assert!(symbol.trailing_zeros() >= 4);
     let mut out = Vec::new();
     symbol.encode(&mut out).unwrap();
@@ -194,7 +200,10 @@ fn decodes_data_symbols() {
         let symbol = Symbol::decode(record).unwrap();
 
         assert_eq!(symbol.kind(), kind);
-        assert_eq!(symbol.name(), Some(&b"GLOBAL"[..]));
+        assert_eq!(
+            symbol.name().map(pdbrs::Bytes::as_bytes),
+            Some(&b"GLOBAL"[..])
+        );
         let address = SectionOffset {
             section: 3,
             offset: 0x40,
@@ -223,7 +232,7 @@ fn decodes_procedure_fields() {
         let symbol = Symbol::decode(record).unwrap();
 
         assert_eq!(
-            symbol.name(),
+            symbol.name().map(pdbrs::Bytes::as_bytes),
             Some(&b"_ZN4core3fmt5write17h0123456789abcdefE"[..])
         );
         let SymbolData::Procedure(procedure) = symbol.data() else {
@@ -270,7 +279,7 @@ fn keeps_unsupported_kinds_raw() {
     assert_eq!(symbol.kind(), SymbolKind(0x1181));
     assert_eq!(
         *symbol.data(),
-        SymbolData::Unsupported(&[0x10, 0x10, 0, 0, 0xff, b'T', 0, 0])
+        SymbolData::Unsupported(pdbrs::Bytes::new(&[0x10, 0x10, 0, 0, 0xff, b'T', 0, 0]))
     );
     assert_eq!(symbol.name(), None);
     assert_eq!(symbol.address(), None);
@@ -308,5 +317,11 @@ fn rejects_payload_shorter_than_fixed_fields() {
 fn accepts_empty_name() {
     let bytes = record(S_GDATA32.0, &[0; 11]);
     let record = Records::new(&bytes).next().unwrap().unwrap();
-    assert_eq!(Symbol::decode(record).unwrap().name(), Some(&b""[..]));
+    assert_eq!(
+        Symbol::decode(record)
+            .unwrap()
+            .name()
+            .map(pdbrs::Bytes::as_bytes),
+        Some(&b""[..])
+    );
 }

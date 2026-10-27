@@ -24,7 +24,9 @@ pub(super) mod code;
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
-use crate::{Error, ErrorKind, Result};
+use super::truncate;
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// One decoded binary annotation.
 ///
@@ -164,11 +166,13 @@ fn encode_signed(value: i32) -> Result<u32> {
 }
 
 /// A validated sequence of binary annotations.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct BinaryAnnotations<'a> {
     /// The annotation bytes without the trailing padding.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct BinaryAnnotations { bytes; });
 
 impl<'a> BinaryAnnotations<'a> {
     /// Validate the annotations in `bytes`.
@@ -181,8 +185,9 @@ impl<'a> BinaryAnnotations<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] for an opcode that is not known,
     /// a compressed integer with an invalid first byte, a truncated
     /// annotation, or zero bytes that are not valid padding.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let mut rest = bytes;
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let bytes = bytes.into();
+        let mut rest: &[u8] = &bytes;
         while let Some(&first) = rest.first() {
             if first == 0 {
                 if rest.len() >= 4 || rest.iter().any(|&byte| byte != 0) {
@@ -193,38 +198,30 @@ impl<'a> BinaryAnnotations<'a> {
             }
             decode(&mut rest)?;
         }
+        let len = bytes.len() - rest.len();
         Ok(Self {
-            bytes: &bytes[..bytes.len() - rest.len()],
+            bytes: truncate(bytes, len),
         })
     }
 
     /// Return the annotation bytes without the trailing padding.
     #[must_use]
-    pub const fn bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return an iterator over the annotations.
     #[must_use]
-    pub const fn iter(&self) -> BinaryAnnotationsIter<'a> {
-        BinaryAnnotationsIter { bytes: self.bytes }
+    pub fn iter(&self) -> BinaryAnnotationsIter<'_> {
+        BinaryAnnotationsIter { bytes: &self.bytes }
     }
 }
 
-impl<'a> IntoIterator for BinaryAnnotations<'a> {
+impl<'b> IntoIterator for &'b BinaryAnnotations<'_> {
     type Item = Annotation;
-    type IntoIter = BinaryAnnotationsIter<'a>;
+    type IntoIter = BinaryAnnotationsIter<'b>;
 
-    fn into_iter(self) -> BinaryAnnotationsIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &BinaryAnnotations<'a> {
-    type Item = Annotation;
-    type IntoIter = BinaryAnnotationsIter<'a>;
-
-    fn into_iter(self) -> BinaryAnnotationsIter<'a> {
+    fn into_iter(self) -> BinaryAnnotationsIter<'b> {
         self.iter()
     }
 }

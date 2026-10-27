@@ -7,10 +7,11 @@
 use core::iter::FusedIterator;
 
 use super::{MemberAttributes, TRUNCATED, VtableSlotKind, fields};
+use crate::bytes::into_owned;
 use crate::native::codeview::Fields;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The size of one type index in bytes.
 const INDEX_SIZE: usize = 4;
@@ -24,11 +25,11 @@ fn too_long() -> Error {
         .with_context("type record list is longer than its count field allows")
 }
 
-/// A borrowed list of serialized `u32` type indices.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+/// A list of serialized `u32` type indices.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TypeIndexList<'a> {
     /// The serialized type indices.
-    indices: &'a [u8],
+    indices: Bytes<'a>,
 }
 
 impl<'a> TypeIndexList<'a> {
@@ -38,7 +39,8 @@ impl<'a> TypeIndexList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length is not a multiple
     /// of 4.
-    pub fn parse(indices: &'a [u8]) -> Result<Self> {
+    pub fn parse(indices: impl Into<Bytes<'a>>) -> Result<Self> {
+        let indices = indices.into();
         if indices.len().is_multiple_of(INDEX_SIZE) {
             Ok(Self { indices })
         } else {
@@ -60,31 +62,31 @@ impl<'a> TypeIndexList<'a> {
             .and_then(|count| count.checked_mul(INDEX_SIZE))
             .ok_or_else(|| Error::new(ErrorKind::InvalidFormat, None).with_context(TRUNCATED))?;
         Ok(Self {
-            indices: fields.bytes(length)?,
+            indices: Bytes::new(fields.bytes(length)?),
         })
     }
 
     /// Return the serialized indices.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.indices
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.indices
     }
 
     /// Return the number of indices.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.indices.len() / INDEX_SIZE
     }
 
     /// Return `true` if the list has no indices.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
 
     /// Return an iterator over the type indices.
     #[must_use]
-    pub fn iter(&self) -> TypeIndexListIter<'a> {
+    pub fn iter(&self) -> TypeIndexListIter<'_> {
         TypeIndexListIter {
             indices: self.indices.as_chunks::<INDEX_SIZE>().0.iter(),
         }
@@ -98,12 +100,14 @@ impl<'a> TypeIndexList<'a> {
     /// Append a `u32` count and the indices.
     pub(crate) fn encode_counted(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u32(self.count()?)?;
-        writer.bytes(self.indices)
+        writer.bytes(&self.indices)
     }
 }
 
+into_owned!(struct TypeIndexList { indices; });
+
 /// An `LF_ARGLIST` record: the parameter types of a procedure type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ArgumentList<'a> {
     /// The type indices.
     list: TypeIndexList<'a>,
@@ -115,7 +119,7 @@ impl<'a> ArgumentList<'a> {
     /// # Errors
     ///
     /// Returns the errors of [`TypeIndexList::parse`].
-    pub fn parse(indices: &'a [u8]) -> Result<Self> {
+    pub fn parse(indices: impl Into<Bytes<'a>>) -> Result<Self> {
         Ok(Self {
             list: TypeIndexList::parse(indices)?,
         })
@@ -138,28 +142,30 @@ impl<'a> ArgumentList<'a> {
 
     /// Return the list of type indices.
     #[must_use]
-    pub const fn list(&self) -> TypeIndexList<'a> {
-        self.list
+    pub const fn list(&self) -> &TypeIndexList<'a> {
+        &self.list
     }
 
     /// Return the number of arguments.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.list.len()
     }
 
     /// Return `true` if the list has no arguments.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.list.is_empty()
     }
 
     /// Return an iterator over the argument types.
     #[must_use]
-    pub fn iter(&self) -> ArgumentListIter<'a> {
+    pub fn iter(&self) -> ArgumentListIter<'_> {
         ArgumentListIter(self.list.iter())
     }
 }
+
+into_owned!(struct ArgumentList { list; });
 
 /// An iterator over the type indices of a [`TypeIndexList`].
 #[derive(Clone, Debug)]
@@ -206,38 +212,20 @@ impl ExactSizeIterator for ArgumentListIter<'_> {}
 
 impl core::iter::FusedIterator for ArgumentListIter<'_> {}
 
-impl<'a> IntoIterator for TypeIndexList<'a> {
+impl<'b> IntoIterator for &'b TypeIndexList<'_> {
     type Item = TypeIndex;
-    type IntoIter = TypeIndexListIter<'a>;
+    type IntoIter = TypeIndexListIter<'b>;
 
-    fn into_iter(self) -> TypeIndexListIter<'a> {
+    fn into_iter(self) -> TypeIndexListIter<'b> {
         self.iter()
     }
 }
 
-impl<'a> IntoIterator for &TypeIndexList<'a> {
+impl<'b> IntoIterator for &'b ArgumentList<'_> {
     type Item = TypeIndex;
-    type IntoIter = TypeIndexListIter<'a>;
+    type IntoIter = ArgumentListIter<'b>;
 
-    fn into_iter(self) -> TypeIndexListIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for ArgumentList<'a> {
-    type Item = TypeIndex;
-    type IntoIter = ArgumentListIter<'a>;
-
-    fn into_iter(self) -> ArgumentListIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &ArgumentList<'a> {
-    type Item = TypeIndex;
-    type IntoIter = ArgumentListIter<'a>;
-
-    fn into_iter(self) -> ArgumentListIter<'a> {
+    fn into_iter(self) -> ArgumentListIter<'b> {
         self.iter()
     }
 }
@@ -294,10 +282,10 @@ pub(crate) fn encode_vtable_offset(
 /// Each entry has a `u16` attribute word, a `u16` padding field that must be
 /// zero, a type index and, for an introducing virtual method, an `i32`
 /// virtual table offset (`MapOneMethodRecord` in LLVM).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MethodList<'a> {
     /// The serialized entries and the record padding.
-    data: &'a [u8],
+    data: Bytes<'a>,
 }
 
 impl<'a> MethodList<'a> {
@@ -307,8 +295,8 @@ impl<'a> MethodList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] for a malformed entry or
     /// invalid padding.
-    pub fn parse(data: &'a [u8]) -> Result<Self> {
-        let list = Self { data };
+    pub fn parse(data: impl Into<Bytes<'a>>) -> Result<Self> {
+        let list = Self { data: data.into() };
         for entry in list.entries() {
             entry?;
         }
@@ -328,13 +316,15 @@ impl<'a> MethodList<'a> {
     /// [`MethodList::parse`] validates all entries before it returns the
     /// list, so the iterator does not give errors for a decoded list.
     #[must_use]
-    pub const fn entries(&self) -> MethodListIter<'a> {
+    pub fn entries(&self) -> MethodListIter<'_> {
         MethodListIter {
-            data: self.data,
+            data: &self.data,
             done: false,
         }
     }
 }
+
+into_owned!(struct MethodList { data; });
 
 /// An iterator over the entries of a [`MethodList`].
 #[derive(Clone, Debug)]
@@ -395,12 +385,12 @@ impl FusedIterator for MethodListIter<'_> {}
 /// The record has a `u16` slot count and then one 4-bit descriptor for each
 /// slot. The first slot of each byte is in the high 4 bits. For an odd
 /// count, the low 4 bits of the last byte must be zero.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct VtableShape<'a> {
     /// The number of slots.
     count: u16,
     /// The descriptor bytes.
-    descriptors: &'a [u8],
+    descriptors: Bytes<'a>,
 }
 
 impl<'a> VtableShape<'a> {
@@ -411,7 +401,8 @@ impl<'a> VtableShape<'a> {
     /// Returns [`ErrorKind::InvalidFormat`] if the byte count does not match
     /// the slot count, if a descriptor is unknown, or if the unused low
     /// 4 bits of an odd count are not zero.
-    pub fn new(count: u16, descriptors: &'a [u8]) -> Result<Self> {
+    pub fn new(count: u16, descriptors: impl Into<Bytes<'a>>) -> Result<Self> {
+        let descriptors = descriptors.into();
         if descriptors.len() != usize::from(count).div_ceil(2) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("virtual table shape byte count does not match its slots"));
@@ -435,13 +426,13 @@ impl<'a> VtableShape<'a> {
         let count = fields.u16()?;
         let descriptors = fields.bytes(usize::from(count).div_ceil(2))?;
         fields.finish_type_padding()?;
-        Self::new(count, descriptors)
+        Self::new(count, Bytes::new(descriptors))
     }
 
     /// Append the payload fields.
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.u16(self.count)?;
-        writer.bytes(self.descriptors)
+        writer.bytes(&self.descriptors)
     }
 
     /// Return the number of slots.
@@ -458,15 +449,15 @@ impl<'a> VtableShape<'a> {
 
     /// Return the raw descriptor bytes.
     #[must_use]
-    pub const fn descriptors(&self) -> &'a [u8] {
-        self.descriptors
+    pub fn descriptors(&self) -> &[u8] {
+        &self.descriptors
     }
 
     /// Return an iterator over the slot kinds.
     #[must_use]
-    pub fn slots(&self) -> VtableSlots<'a> {
+    pub fn slots(&self) -> VtableSlots<'_> {
         VtableSlots {
-            descriptors: self.descriptors,
+            descriptors: &self.descriptors,
             slots: 0..usize::from(self.count),
         }
     }
@@ -485,13 +476,15 @@ impl<'a> VtableShape<'a> {
     }
 }
 
+into_owned!(struct VtableShape { descriptors; count });
+
 /// An `LF_VFTABLE` record: a virtual function table and its method names.
 ///
 /// The payload has the complete class, the overridden table, the offset of
 /// the table pointer, a `u32` byte length and then that many bytes of
 /// NUL-terminated names (`lfVftable` in `cvinfo.h`, `VFTableRecord` in
 /// LLVM). The first name is the table name; the others are method names.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct VirtualFunctionTable<'a> {
     /// The class or structure that owns the table.
@@ -501,7 +494,7 @@ pub struct VirtualFunctionTable<'a> {
     /// The offset of the table pointer in the object layout.
     pub table_pointer_offset: u32,
     /// The names, each with its NUL terminator.
-    names: &'a [u8],
+    names: Bytes<'a>,
 }
 
 impl<'a> VirtualFunctionTable<'a> {
@@ -518,8 +511,9 @@ impl<'a> VirtualFunctionTable<'a> {
         complete_class: TypeIndex,
         overridden_table: Option<TypeIndex>,
         table_pointer_offset: u32,
-        names: &'a [u8],
+        names: impl Into<Bytes<'a>>,
     ) -> Result<Self> {
+        let names = names.into();
         if names.last() != Some(&0) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("virtual function table names do not end with a NUL byte"));
@@ -549,7 +543,7 @@ impl<'a> VirtualFunctionTable<'a> {
             complete_class,
             (overridden != TypeIndex::NONE).then_some(overridden),
             table_pointer_offset,
-            names,
+            Bytes::new(names),
         )
     }
 
@@ -559,38 +553,40 @@ impl<'a> VirtualFunctionTable<'a> {
         writer.type_index(self.overridden_table.unwrap_or(TypeIndex::NONE))?;
         writer.u32(self.table_pointer_offset)?;
         writer.u32(u32::try_from(self.names.len()).map_err(|_| too_long())?)?;
-        writer.bytes(self.names)
+        writer.bytes(&self.names)
     }
 
     /// Return the serialized names, each with its NUL terminator.
     #[must_use]
-    pub const fn names(&self) -> &'a [u8] {
-        self.names
+    pub fn names(&self) -> &[u8] {
+        &self.names
     }
 
     /// Return the name of the table.
     #[must_use]
-    pub fn table_name(&self) -> &'a [u8] {
+    pub fn table_name(&self) -> &[u8] {
         self.all_names().next().unwrap_or_default()
     }
 
     /// Return an iterator over the method names, in table order.
     #[must_use]
-    pub fn method_names(&self) -> MethodNames<'a> {
+    pub fn method_names(&self) -> MethodNames<'_> {
         let mut names = self.all_names();
         names.next();
         names
     }
 
     /// Return all names, the table name first.
-    fn all_names(&self) -> MethodNames<'a> {
+    fn all_names(&self) -> MethodNames<'_> {
         // `new` makes sure that the bytes end with a NUL byte.
-        let names = self.names;
+        let names: &[u8] = &self.names;
         MethodNames {
             rest: Some(&names[..names.len() - 1]),
         }
     }
 }
+
+into_owned!(struct VirtualFunctionTable { names; complete_class, overridden_table, table_pointer_offset });
 
 /// An iterator over the slot kinds of a [`VtableShape`].
 #[derive(Clone, Debug)]

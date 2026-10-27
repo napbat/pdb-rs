@@ -102,8 +102,8 @@ fn decodes_checksum_only_records() {
 fn decodes_raw_embedded_sources() {
     let content = record(CHECKSUM_SHA256, &SOURCE_SHA256, &blob(0, SOURCE));
     let document = document(&content);
-    let embedded = document.embedded.unwrap();
-    assert_eq!(embedded, EmbeddedSource::Raw(SOURCE));
+    let embedded = document.embedded.clone().unwrap();
+    assert_eq!(embedded, EmbeddedSource::Raw(SOURCE.into()));
     assert_eq!(embedded.format(), EmbeddedFormat::Raw);
     let source = embedded.decode(SOURCE.len()).unwrap();
     assert!(matches!(source, Cow::Borrowed(_)));
@@ -117,7 +117,7 @@ fn decodes_raw_embedded_sources() {
 fn decodes_deflate_embedded_sources() {
     let content = record(CHECKSUM_SHA256, &SOURCE_SHA256, &blob(3, &SOURCE_DEFLATE));
     let document = document(&content);
-    let embedded = document.embedded.unwrap();
+    let embedded = document.embedded.clone().unwrap();
     assert_eq!(embedded.format(), EmbeddedFormat::Deflate);
     assert_eq!(embedded.decoded_size(), 3);
     let source = embedded.decode(3).unwrap();

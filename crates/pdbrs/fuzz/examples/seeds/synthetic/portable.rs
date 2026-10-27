@@ -10,7 +10,7 @@ use pdbrs::portable::custom::{
     CompilationOptions, CustomDebugKind, DynamicLocalVariables, EncLambdaAndClosureMap,
     EncLocalSlotMap, EncStateMachineStateMap, HoistedLocalScope, HoistedLocalScopes, Lambda,
     LambdaClosure, LocalSlot, MetadataReference, StateMachineState, TupleElementNames,
-    TypeDefinitionDocuments, Utf8Bytes,
+    TypeDefinitionDocuments,
 };
 use pdbrs::portable::debug::{
     ConstantValue, HashAlgorithm, Language, LocalConstantSignature, LocalSignatureForm,
@@ -165,7 +165,7 @@ fn scopes(builder: &mut PdbBuilder) -> Outcome {
         (b"Pi", ConstantValue::Primitive(PrimitiveConstant::R8(3.25))),
         (
             b"Name",
-            ConstantValue::Primitive(PrimitiveConstant::String(Some(b"h\0i\0"))),
+            ConstantValue::Primitive(PrimitiveConstant::String(Some(b"h\0i\0".into()))),
         ),
     ] {
         let mut constant = LocalConstantInfo::default();
@@ -210,12 +210,12 @@ fn method_values(builder: &mut PdbBuilder, document: DocumentId) -> Outcome {
     state.syntax_offset = 30;
     let option = |name: &'static [u8], value: &'static [u8]| {
         let mut option = CompilationOption::default();
-        option.name = Utf8Bytes::new(name);
-        option.value = Utf8Bytes::new(value);
+        option.name = pdbrs::Bytes::new(name);
+        option.value = pdbrs::Bytes::new(value);
         option
     };
     let mut reference = MetadataReference::default();
-    reference.file_name = Utf8Bytes::new(b"System.Runtime.dll");
+    reference.file_name = pdbrs::Bytes::new(b"System.Runtime.dll");
     reference.flags = MetadataReference::ASSEMBLY;
     reference.time_stamp = 0x1234_5678;
     reference.file_size = 0x2000;

@@ -30,7 +30,7 @@ use crate::Result;
 ///
 /// Returns [`crate::ErrorKind::LimitExceeded`] if an allocation fails.
 pub(super) fn site_ranges(
-    annotations: BinaryAnnotations<'_>,
+    annotations: &BinaryAnnotations<'_>,
     out: &mut Vec<ChunkRange>,
 ) -> Result<bool> {
     let first = out.len();
@@ -43,9 +43,9 @@ pub(super) fn site_ranges(
 }
 
 /// Run the code opcodes and append the ranges to `out`.
-fn collect(annotations: BinaryAnnotations<'_>, out: &mut Vec<ChunkRange>) -> Result<bool> {
+fn collect(annotations: &BinaryAnnotations<'_>, out: &mut Vec<ChunkRange>) -> Result<bool> {
     let mut state = CodeState::default();
-    for annotation in &annotations {
+    for annotation in annotations {
         let Ok(step) = state.step(annotation) else {
             return Ok(false);
         };
@@ -100,7 +100,7 @@ pub(super) fn absolute(
 /// Returns [`crate::ErrorKind::LimitExceeded`] if an allocation fails.
 pub(super) fn parts(
     range: AddressRange,
-    gaps: Option<AddressGaps<'_>>,
+    gaps: Option<&AddressGaps<'_>>,
     out: &mut Vec<CodeRange>,
 ) -> Result<()> {
     let section = range.start.section;

@@ -17,8 +17,8 @@ use crate::native::codeview::index::NameOffset;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
 use crate::native::codeview::type_record::TypeLeaf;
 use crate::native::dbi::{
-    DbiHeader, DebugStream, OwnedModule, OwnedSectionMap, SectionContribution,
-    SectionContributionVersion, TypeServer,
+    DbiHeader, DebugStream, Module, SectionContribution, SectionContributionVersion, SectionMap,
+    TypeServer,
 };
 use crate::native::info::{Feature, InfoBuilder};
 use crate::native::names::{HashVersion, StringTableBuilder};
@@ -125,7 +125,7 @@ struct DbiParts {
     /// The section contributions.
     contributions: Vec<SectionContribution>,
     /// The section map.
-    section_map: Option<OwnedSectionMap>,
+    section_map: Option<SectionMap>,
     /// The type server map.
     type_servers: Vec<TypeServer>,
     /// The EC names.
@@ -521,7 +521,7 @@ impl<'a> PdbBuilder<'a> {
     }
 
     /// Set the section map. `None` writes an empty substream.
-    pub fn set_section_map(&mut self, map: Option<OwnedSectionMap>) {
+    pub fn set_section_map(&mut self, map: Option<SectionMap>) {
         self.dbi.section_map = map;
     }
 
@@ -568,7 +568,7 @@ impl<'a> PdbBuilder<'a> {
     /// Returns [`ErrorKind::LimitExceeded`] if the module count does not fit
     /// in 32 bits or an allocation fails. The plan rejects more than 65535
     /// modules.
-    pub fn add_module(&mut self, record: OwnedModule) -> Result<&mut ModuleBuilder<'a>> {
+    pub fn add_module(&mut self, record: Module<'static>) -> Result<&mut ModuleBuilder<'a>> {
         let index = position(self.modules.len(), "PDB has too many modules")?;
         self.modules.try_reserve(1).map_err(|_| no_memory())?;
         self.modules.push(ModuleBuilder::new(index, record));

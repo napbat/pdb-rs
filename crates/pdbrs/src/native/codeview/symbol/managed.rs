@@ -46,19 +46,10 @@ macro_rules! chunk_iter {
     };
 }
 
-/// Implement `IntoIterator` for a list type and its reference through its `iter` method.
+/// Implement `IntoIterator` for a reference to a list type through its `iter` method.
 macro_rules! iterable {
     ($list:ident, $iter:ident) => {
-        impl<'a> IntoIterator for $list<'a> {
-            type Item = <$iter<'a> as Iterator>::Item;
-            type IntoIter = $iter<'a>;
-
-            fn into_iter(self) -> $iter<'a> {
-                self.iter()
-            }
-        }
-
-        impl<'a> IntoIterator for &$list<'a> {
+        impl<'a> IntoIterator for &'a $list<'_> {
             type Item = <$iter<'a> as Iterator>::Item;
             type IntoIter = $iter<'a>;
 
@@ -89,9 +80,10 @@ use super::super::SymbolKind;
 use super::super::index::{ModuleSymbolOffset, TypeIndex};
 use super::super::numeric::Numeric;
 use super::{LocalFlags, ProcedureFlags, SectionOffset};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
 use crate::portable::metadata::MetadataToken;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of an OEM-defined record (`S_OEM`).
 pub const S_OEM: SymbolKind = SymbolKind(0x0404);
@@ -118,7 +110,7 @@ pub const MANAGED_ATTRIBUTE_OEM_ID: [u8; 16] = [
 ];
 
 /// A managed procedure start record (`S_GMANPROC` and `S_LMANPROC`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ManagedProcedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
@@ -143,8 +135,14 @@ pub struct ManagedProcedure<'a> {
     /// The register of the return value. It can be 0.
     pub return_register: u16,
     /// The name. It can be empty: the metadata has the method name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ManagedProcedure {
+    name;
+    parent, end, next, code_length, debug_start, debug_end, token, address, flags,
+    return_register
+});
 
 impl<'a> ManagedProcedure<'a> {
     /// Read the fields.
@@ -159,7 +157,7 @@ impl<'a> ManagedProcedure<'a> {
         let address = SectionOffset::read(fields)?;
         let flags = ProcedureFlags(fields.u8()?);
         let return_register = fields.u16()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             parent,
             end,
@@ -187,12 +185,12 @@ impl<'a> ManagedProcedure<'a> {
         self.address.write(out)?;
         out.u8(self.flags.0)?;
         out.u16(self.return_register)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A managed local variable in an IL slot (`S_MANSLOT`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ManagedSlot<'a> {
     /// The index of the local variable slot in the method body.
@@ -206,8 +204,10 @@ pub struct ManagedSlot<'a> {
     /// The flags.
     pub flags: LocalFlags,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ManagedSlot { name; slot, type_or_token, address, flags });
 
 impl<'a> ManagedSlot<'a> {
     /// Read the fields.
@@ -216,7 +216,7 @@ impl<'a> ManagedSlot<'a> {
         let type_or_token = fields.u32()?;
         let address = SectionOffset::read(fields)?;
         let flags = LocalFlags(fields.u16()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             slot,
             type_or_token,
@@ -232,12 +232,12 @@ impl<'a> ManagedSlot<'a> {
         out.u32(self.type_or_token)?;
         self.address.write(out)?;
         out.u16(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A managed constant record (`S_MANCONSTANT`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ManagedConstant<'a> {
     /// A type index or a metadata token. Roslyn writes the token of the
@@ -249,15 +249,17 @@ pub struct ManagedConstant<'a> {
     /// .NET tick count ([`Numeric::date_ticks`]).
     pub value: Numeric<'a>,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ManagedConstant { value, name; type_or_token });
 
 impl<'a> ManagedConstant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_or_token = fields.u32()?;
         let value = fields.numeric()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_or_token,
             value,
@@ -269,12 +271,12 @@ impl<'a> ManagedConstant<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.type_or_token)?;
         self.value.encode(out.out())?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// An OEM-defined record (`S_OEM`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Oem<'a> {
     /// The OEM ID: GUID bytes in serialized order, for example
@@ -285,8 +287,10 @@ pub struct Oem<'a> {
     /// The OEM data after the type index, raw, with the record padding.
     ///
     /// For [`MANAGED_ATTRIBUTE_OEM_ID`], [`Oem::attribute`] decodes it.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
+
+into_owned!(struct Oem { data; id, type_index });
 
 impl<'a> Oem<'a> {
     /// Read the fields and all remaining bytes.
@@ -294,7 +298,7 @@ impl<'a> Oem<'a> {
         let mut id = [0; 16];
         id.copy_from_slice(fields.bytes(16)?);
         let type_index = fields.type_index()?;
-        let data = fields.bytes(fields.rest().len())?;
+        let data = Bytes::new(fields.bytes(fields.rest().len())?);
         Ok(Self {
             id,
             type_index,
@@ -309,9 +313,9 @@ impl<'a> Oem<'a> {
     /// # Errors
     ///
     /// The errors of [`SymbolAttribute::parse`].
-    pub fn attribute(&self) -> Result<Option<SymbolAttribute<'a>>> {
+    pub fn attribute(&self) -> Result<Option<SymbolAttribute<'_>>> {
         if self.id == MANAGED_ATTRIBUTE_OEM_ID {
-            SymbolAttribute::parse(self.data).map(Some)
+            SymbolAttribute::parse(&self.data).map(Some)
         } else {
             Ok(None)
         }
@@ -321,7 +325,7 @@ impl<'a> Oem<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.bytes(&self.id)?;
         out.type_index(self.type_index)?;
-        out.bytes(self.data)
+        out.bytes(&self.data)
     }
 }
 

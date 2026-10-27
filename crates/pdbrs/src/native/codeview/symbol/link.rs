@@ -15,8 +15,9 @@
 use super::super::index::TypeIndex;
 use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// The kind of a reference to a record in a mini PDB (`S_REF_MINIPDB`).
 pub const S_REF_MINIPDB: SymbolKind = SymbolKind(0x1160);
@@ -110,7 +111,7 @@ flags! {
 ///
 /// A FASTLINK PDB keeps the full records in the object files. This record
 /// gives the name and the place of the full record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FastLink<'a> {
     /// The raw value (`isectCoff` or `typind` in `REFMINIPDB`).
@@ -128,8 +129,10 @@ pub struct FastLink<'a> {
     /// The flags.
     pub flags: FastLinkFlags,
     /// The name. The first record of a module has an empty name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct FastLink { name; value, module, flags });
 
 impl<'a> FastLink<'a> {
     /// Read the fields. Set `module` for [`S_REF_MINIPDB`].
@@ -137,7 +140,7 @@ impl<'a> FastLink<'a> {
         let value = fields.u32()?;
         let module = if module { Some(fields.u16()?) } else { None };
         let flags = FastLinkFlags(fields.u16()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             value,
             module,
@@ -174,6 +177,6 @@ impl<'a> FastLink<'a> {
             out.u16(module)?;
         }
         out.u16(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }

@@ -51,7 +51,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_module_encode` | as `native_module` | `ModuleStream::encode`, `ModuleLines::encode`, `ModuleStreamParts::encode` |
 | `native_info_encode` | as `native_info` | `Info::encode`, `InfoBuilder::from_info` and `encode` |
 | `native_names_encode` | as `native_names` | `StringTable::encode`, `StringTableBuilder` |
-| `native_dbi_encode` | as `native_dbi` | `Dbi::encode`, `encode_substream`, module records, `OwnedModule`, `DbiBuilder::from_dbi` |
+| `native_dbi_encode` | as `native_dbi` | `Dbi::encode`, `encode_substream`, module records, `Module::into_owned`, `DbiBuilder::from_dbi` |
 | `native_debug_stream_encode` | kind selector, stream | FPO, frame data, fixup, function entry, token map, section header, OMAP and `RvaVaBlob` encoders |
 | `native_named_encode` | kind selector, stream | `LinkInfo`, `TmCache` and `TmCacheBuilder`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceServer`, `SourceHeaderBlock` and its builder, `DotNetDocument` |
 

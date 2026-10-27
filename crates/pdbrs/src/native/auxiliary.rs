@@ -31,6 +31,7 @@ pub use type_map::{
 pub use udt_source_line_undone::{TypeIndices, UdtSourceLineUndone};
 
 use super::injected_source::{HEADER_BLOCK_STREAM_NAME, SOURCE_FILE_STREAM_PREFIX};
+use crate::Bytes;
 
 /// The name of the linker information stream.
 pub const LINK_INFO_STREAM_NAME: &[u8] = b"/LinkInfo";
@@ -52,7 +53,7 @@ pub const NUMBERED_SOURCE_LINK_PREFIX: &[u8] = b"sourcelink$";
 pub const SOURCE_SERVER_STREAM_NAME: &[u8] = b"srcsrv";
 
 /// The decoder that a named stream needs, from its exact name bytes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum NamedStreamKind<'a> {
     /// The `/names` string table.
@@ -68,7 +69,7 @@ pub enum NamedStreamKind<'a> {
     /// A `/src/files/` stream that holds the contents of an injected source file.
     SourceFile {
         /// The virtual file name after the prefix, as bytes.
-        virtual_file_name: &'a [u8],
+        virtual_file_name: Bytes<'a>,
     },
     /// The `sourcelink` stream: [`SourceLink`].
     SourceLink,
@@ -86,6 +87,35 @@ pub enum NamedStreamKind<'a> {
     Other,
 }
 
+impl NamedStreamKind<'_> {
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> NamedStreamKind<'static> {
+        match self {
+            Self::Names => NamedStreamKind::Names,
+            Self::LinkInfo => NamedStreamKind::LinkInfo,
+            Self::TmCache => NamedStreamKind::TmCache,
+            Self::UdtSourceLineUndone => NamedStreamKind::UdtSourceLineUndone,
+            Self::SourceHeaderBlock => NamedStreamKind::SourceHeaderBlock,
+            Self::SourceFile { virtual_file_name } => NamedStreamKind::SourceFile {
+                virtual_file_name: virtual_file_name.into_owned(),
+            },
+            Self::SourceLink => NamedStreamKind::SourceLink,
+            Self::NumberedSourceLink { number } => NamedStreamKind::NumberedSourceLink { number },
+            Self::SourceServer => NamedStreamKind::SourceServer,
+            Self::Other => NamedStreamKind::Other,
+        }
+    }
+}
+
+impl crate::bytes::IntoOwned for NamedStreamKind<'_> {
+    type Owned = NamedStreamKind<'static>;
+
+    fn to_static(self) -> NamedStreamKind<'static> {
+        self.into_owned()
+    }
+}
+
 impl<'a> NamedStreamKind<'a> {
     /// Classify a named stream by its exact name bytes.
     ///
@@ -93,7 +123,9 @@ impl<'a> NamedStreamKind<'a> {
     #[must_use]
     pub fn classify(name: &'a [u8]) -> Self {
         if let Some(virtual_file_name) = name.strip_prefix(SOURCE_FILE_STREAM_PREFIX) {
-            return Self::SourceFile { virtual_file_name };
+            return Self::SourceFile {
+                virtual_file_name: Bytes::new(virtual_file_name),
+            };
         }
         if let Some(number) = name
             .strip_prefix(NUMBERED_SOURCE_LINK_PREFIX)

@@ -244,13 +244,13 @@ impl<'a> Types<'_, 'a> {
         }
         let next = depth + 1;
         Ok(match self.leaf(index)? {
-            TypeLeaf::Class(class) => join(&text(class.name), inner),
-            TypeLeaf::WideClass(class) => join(&text(class.name), inner),
-            TypeLeaf::Union(union) => join(&text(union.name), inner),
-            TypeLeaf::WideUnion(union) => join(&text(union.name), inner),
-            TypeLeaf::Enum(value) => join(&text(value.name), inner),
-            TypeLeaf::Alias(alias) => join(&text(alias.name), inner),
-            TypeLeaf::Managed(name) => join(&text(name), inner),
+            TypeLeaf::Class(class) => join(&text(&class.name), inner),
+            TypeLeaf::WideClass(class) => join(&text(&class.name), inner),
+            TypeLeaf::Union(union) => join(&text(&union.name), inner),
+            TypeLeaf::WideUnion(union) => join(&text(&union.name), inner),
+            TypeLeaf::Enum(value) => join(&text(&value.name), inner),
+            TypeLeaf::Alias(alias) => join(&text(&alias.name), inner),
+            TypeLeaf::Managed(name) => join(&text(&name), inner),
             TypeLeaf::Modifier(modifier) => {
                 let qualifiers = modifier_qualifiers(modifier.options);
                 if self.is_pointer(modifier.modified_type)? {

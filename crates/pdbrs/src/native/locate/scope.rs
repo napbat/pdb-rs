@@ -10,7 +10,7 @@ use crate::native::address::{AddressMap, Rva, SectionOffset};
 use crate::native::codeview::Records;
 use crate::native::codeview::index::{IdIndex, ModuleSymbolOffset};
 use crate::native::codeview::symbol::{Symbol, SymbolData, separated_chunks};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// A code chunk of a procedure.
 ///
@@ -93,7 +93,11 @@ impl SymbolLocator {
             module: key.module,
             offset: key.offset,
             kind: symbol.kind(),
-            name: symbol.name().unwrap_or_default(),
+            // The locator decodes its own buffers, so the bytes are borrowed.
+            name: symbol
+                .name()
+                .and_then(Bytes::as_borrowed)
+                .unwrap_or_default(),
             address,
             start: optional_rva(&self.address_map()?, address)?,
             length,
@@ -197,7 +201,7 @@ impl SymbolLocator {
                 SymbolData::Block(block) => match optional_rva(&map, block.address)? {
                     Some(start) => ScopeKind::Block(BlockInfo {
                         offset,
-                        name: block.name,
+                        name: block.name.as_borrowed().unwrap_or_default(),
                         start,
                         length: block.code_length,
                     }),

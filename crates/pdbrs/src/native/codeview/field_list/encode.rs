@@ -107,49 +107,49 @@ impl Member<'_> {
             Self::FriendFunction(value) => {
                 writer.u16(0)?;
                 writer.type_index(value.function_type)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::Enumerator(value) => {
                 writer.u16(value.attributes.raw())?;
                 value.value.encode(writer.out())?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::DataMember(value) => {
                 writer.u16(value.attributes.raw())?;
                 writer.type_index(value.member_type)?;
                 value.offset.encode(writer.out())?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::StaticMember(value) => {
                 writer.u16(value.attributes.raw())?;
                 writer.type_index(value.member_type)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::OverloadedMethod(value) => {
                 writer.u16(value.overload_count)?;
                 writer.type_index(value.method_list)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::NestedType(value) => {
                 writer.u16(0)?;
                 writer.type_index(value.nested_type)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::NestedTypeEx(value) => {
                 writer.u16(value.attributes.raw())?;
                 writer.type_index(value.nested_type)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::MemberModify(value) => {
                 writer.u16(value.attributes.raw())?;
                 writer.type_index(value.base_type)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
             Self::OneMethod(value) => {
                 writer.u16(value.attributes.raw())?;
                 writer.type_index(value.method_type)?;
                 encode_vtable_offset(writer, value.attributes, value.vtable_offset)?;
-                writer.c_string(value.name)
+                writer.c_string(&value.name)
             }
         }
     }

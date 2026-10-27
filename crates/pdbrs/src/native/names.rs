@@ -37,7 +37,8 @@ use super::codeview::Fields;
 use super::codeview::index::NameOffset;
 use super::hash::{hash_string_v1, hash_string_v2};
 use super::output::{Output, to_u32};
-use crate::{Error, ErrorKind, Result};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The signature at the start of a string table.
 pub const SIGNATURE: u32 = 0xeffe_effe;
@@ -77,7 +78,7 @@ impl HashVersion {
 }
 
 /// A name in a non-empty bucket of a string table.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct StringEntry<'a> {
     /// The zero-based index of the bucket.
@@ -85,8 +86,10 @@ pub struct StringEntry<'a> {
     /// The byte offset of the name in the string buffer.
     pub offset: NameOffset,
     /// The name without its terminating NUL. It is not decoded as text.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct StringEntry { name; bucket, offset });
 
 /// The bucket positions of the names in a version 1 string table.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -438,7 +441,7 @@ impl<'a> Iterator for StringEntries<'a> {
             name_at(strings, offset).map(|name| StringEntry {
                 bucket,
                 offset: NameOffset(offset),
-                name,
+                name: Bytes::new(name),
             })
         })
     }

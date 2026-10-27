@@ -24,8 +24,9 @@
 use core::iter::FusedIterator;
 
 use super::index::{IdIndex, ModuleIndex, NameOffset, TypeIndex};
-use super::{Fields, LeafKind, Record};
-use crate::{Error, ErrorKind, Result};
+use super::{Fields, LeafKind, RawRecord, Record};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 mod encode;
 mod table;
@@ -57,7 +58,7 @@ const ID_SIZE: usize = 4;
 const SHORT_PAYLOAD: &str = "IPI record payload is too short for its fields";
 
 /// One decoded IPI record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum IdRecord<'a> {
     /// An `LF_FUNC_ID` record.
@@ -78,8 +79,13 @@ pub enum IdRecord<'a> {
     ///
     /// The record stays raw. This includes type leaf kinds, because the IPI
     /// stream must not contain them.
-    Unsupported(Record<'a>),
+    Unsupported(RawRecord<'a>),
 }
+
+into_owned!(enum IdRecord {
+    Function, MemberFunction, BuildInfo, SubstringList, String, Unsupported;
+    UdtSourceLine, UdtModuleSourceLine;
+});
 
 impl<'a> IdRecord<'a> {
     /// Decode a framed IPI record.
@@ -99,13 +105,13 @@ impl<'a> IdRecord<'a> {
             LF_FUNC_ID => Self::Function(FunctionId {
                 scope: optional_id(fields.id_index()?),
                 function_type: fields.type_index()?,
-                name: fields.name()?,
+                name: Bytes::new(fields.name()?),
                 decorated_name_hash: name_hash(&mut fields)?,
             }),
             LF_MFUNC_ID => Self::MemberFunction(MemberFunctionId {
                 parent_type: fields.type_index()?,
                 function_type: fields.type_index()?,
-                name: fields.name()?,
+                name: Bytes::new(fields.name()?),
                 decorated_name_hash: name_hash(&mut fields)?,
             }),
             LF_BUILDINFO => {
@@ -120,7 +126,7 @@ impl<'a> IdRecord<'a> {
             }
             LF_STRING_ID => Self::String(StringId {
                 substrings: optional_id(fields.id_index()?),
-                string: fields.name()?,
+                string: Bytes::new(fields.name()?),
             }),
             LF_UDT_SRC_LINE => Self::UdtSourceLine(UdtSourceLine {
                 udt: fields.type_index()?,
@@ -134,7 +140,7 @@ impl<'a> IdRecord<'a> {
                 module: module_from_disk(fields.u16()?),
                 padded: !fields.rest().is_empty(),
             }),
-            _ => return Ok(Self::Unsupported(record)),
+            _ => return Ok(Self::Unsupported(RawRecord::from(record))),
         };
         fields.finish_type_padding()?;
         Ok(decoded)
@@ -142,7 +148,7 @@ impl<'a> IdRecord<'a> {
 }
 
 /// An `LF_FUNC_ID` record: a function that is not a member function.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FunctionId<'a> {
     /// The parent scope, or `None` for the global scope.
@@ -153,15 +159,17 @@ pub struct FunctionId<'a> {
     /// The function type in the TPI stream.
     pub function_type: TypeIndex,
     /// The undecorated function name, without its NUL terminator.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The hash of the decorated name, if the record contains it.
     ///
     /// The hash is present if at least 8 bytes follow the name.
     pub decorated_name_hash: Option<u64>,
 }
 
+into_owned!(struct FunctionId { name; scope, function_type, decorated_name_hash });
+
 /// An `LF_MFUNC_ID` record: a member function.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MemberFunctionId<'a> {
     /// The type of the parent class, structure, union or enum in the TPI
@@ -170,12 +178,14 @@ pub struct MemberFunctionId<'a> {
     /// The member function type in the TPI stream.
     pub function_type: TypeIndex,
     /// The undecorated function name, without its NUL terminator.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The hash of the decorated name, if the record contains it.
     ///
     /// The hash is present if at least 8 bytes follow the name.
     pub decorated_name_hash: Option<u64>,
 }
+
+into_owned!(struct MemberFunctionId { name; parent_type, function_type, decorated_name_hash });
 
 /// The position of an argument in an `LF_BUILDINFO` record
 /// (`CV_BuildInfo_e`).
@@ -212,7 +222,7 @@ impl BuildInfoArgument {
 ///
 /// A record can have fewer or more arguments than [`BuildInfoArgument`]
 /// names.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct BuildInfo<'a> {
     /// The arguments in their serialized order.
@@ -221,6 +231,8 @@ pub struct BuildInfo<'a> {
     /// that the argument has no value.
     pub arguments: IdList<'a>,
 }
+
+into_owned!(struct BuildInfo { arguments; });
 
 impl BuildInfo<'_> {
     /// Return one argument, or `None` if the record does not contain it.
@@ -231,7 +243,7 @@ impl BuildInfo<'_> {
 }
 
 /// An `LF_STRING_ID` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct StringId<'a> {
     /// The `LF_SUBSTR_LIST` record with the leading parts of the string, if
@@ -241,8 +253,10 @@ pub struct StringId<'a> {
     /// puts the substrings before [`StringId::string`].
     pub substrings: Option<IdIndex>,
     /// The string bytes, without the NUL terminator.
-    pub string: &'a [u8],
+    pub string: Bytes<'a>,
 }
+
+into_owned!(struct StringId { string; substrings });
 
 /// An `LF_UDT_SRC_LINE` record: the source location of a UDT.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -277,53 +291,51 @@ pub struct UdtModuleSourceLine {
     pub padded: bool,
 }
 
-/// A borrowed list of serialized ID indices.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+/// A list of serialized ID indices.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct IdList<'a> {
-    /// The serialized indices.
-    entries: &'a [[u8; ID_SIZE]],
+    /// The serialized indices, 4 bytes each.
+    entries: Bytes<'a>,
 }
 
-impl<'a> IdList<'a> {
+impl IdList<'_> {
+    /// Return the serialized indices.
+    fn chunks(&self) -> &[[u8; ID_SIZE]] {
+        self.entries.as_chunks::<ID_SIZE>().0
+    }
+
     /// Return the number of indices.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.entries.len()
+    pub fn len(&self) -> usize {
+        self.entries.len() / ID_SIZE
     }
 
     /// Return `true` if the list has no indices.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Return the index at `position`, or `None` past the end.
     #[must_use]
     pub fn get(&self, position: usize) -> Option<IdIndex> {
-        self.entries.get(position).copied().map(index_from_bytes)
+        self.chunks().get(position).copied().map(index_from_bytes)
     }
 
     /// Return an iterator over the indices.
     #[must_use]
-    pub fn iter(&self) -> IdListIter<'a> {
+    pub fn iter(&self) -> IdListIter<'_> {
         IdListIter {
-            entries: self.entries.iter(),
+            entries: self.chunks().iter(),
         }
     }
 }
 
-impl<'a> IntoIterator for IdList<'a> {
-    type Item = IdIndex;
-    type IntoIter = IdListIter<'a>;
+into_owned!(struct IdList { entries; });
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &IdList<'a> {
+impl<'b> IntoIterator for &'b IdList<'_> {
     type Item = IdIndex;
-    type IntoIter = IdListIter<'a>;
+    type IntoIter = IdListIter<'b>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -388,8 +400,9 @@ fn name_hash(fields: &mut Fields<'_>) -> Result<Option<u64>> {
 /// Read `count` ID indices.
 fn id_list<'a>(fields: &mut Fields<'a>, count: usize) -> Result<IdList<'a>> {
     let size = count.checked_mul(ID_SIZE).ok_or_else(too_many)?;
-    let (entries, _) = fields.bytes(size)?.as_chunks::<ID_SIZE>();
-    Ok(IdList { entries })
+    Ok(IdList {
+        entries: Bytes::new(fields.bytes(size)?),
+    })
 }
 
 /// Return the error for a list count that does not fit in memory.

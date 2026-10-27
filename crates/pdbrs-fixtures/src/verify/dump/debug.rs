@@ -131,16 +131,21 @@ fn signature(signature: &LocalConstantSignature<'_>) -> String {
         let _ = write!(text, "modifier={kind}:{:#010x} ", modifier.modifier.raw());
     }
     match signature.value() {
-        ConstantValue::Primitive(value) => text.push_str(&primitive(value)),
+        ConstantValue::Primitive(value) => text.push_str(&primitive(value.clone())),
         ConstantValue::Enum { value, enum_type } => {
-            let _ = write!(text, "{} enum={:#010x}", primitive(value), enum_type.raw());
+            let _ = write!(
+                text,
+                "{} enum={:#010x}",
+                primitive(value.clone()),
+                enum_type.raw()
+            );
         }
         ConstantValue::General {
             value_type,
             constant_type,
             value,
         } => {
-            let kind = if value_type { "valuetype" } else { "class" };
+            let kind = if *value_type { "valuetype" } else { "class" };
             let _ = write!(text, "{kind}={:#010x} ", constant_type.raw());
             match value {
                 GeneralValue::Default => text.push_str("default"),

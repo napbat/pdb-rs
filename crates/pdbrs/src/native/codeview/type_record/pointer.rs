@@ -12,10 +12,11 @@
 //! - `CV_PTR_BASE_SELF`: no data.
 
 use super::{MemberPointerRepresentation, PointerAttributes, PointerKind, fields};
+use crate::bytes::{IntoOwned, into_owned};
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::{Fields, Record, Records};
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The containing class of a pointer to member.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -40,7 +41,7 @@ impl MemberPointer {
 }
 
 /// The base of a based pointer (`lfPointer::pbase`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum BasedPointer<'a> {
     /// `CV_PTR_BASE_SEG`: the pointer is based on a segment.
     Segment(u16),
@@ -49,13 +50,13 @@ pub enum BasedPointer<'a> {
     ///
     /// The pointer kinds `CV_PTR_BASE_VAL`, `CV_PTR_BASE_SEGVAL`,
     /// `CV_PTR_BASE_ADDR` and `CV_PTR_BASE_SEGADDR` have this data.
-    Symbol(&'a [u8]),
+    Symbol(Bytes<'a>),
     /// `CV_PTR_BASE_TYPE`: the pointer is based on a type.
     Type {
         /// The base type.
         base_type: TypeIndex,
         /// The name of the base type.
-        name: &'a [u8],
+        name: Bytes<'a>,
     },
     /// `CV_PTR_BASE_SELF`: the pointer is based on itself.
     SelfBased,
@@ -75,11 +76,11 @@ impl<'a> BasedPointer<'a> {
                     Error::new(ErrorKind::InvalidFormat, None)
                         .with_context("based pointer has no base symbol record")
                 })??;
-                Self::Symbol(fields.bytes(4 + record.data.len())?)
+                Self::Symbol(Bytes::new(fields.bytes(4 + record.data.len())?))
             }
             PointerKind::BasedOnType => Self::Type {
                 base_type: fields.type_index()?,
-                name: fields.name()?,
+                name: Bytes::new(fields.name()?),
             },
             PointerKind::BasedOnSelf => Self::SelfBased,
             _ => return Ok(None),
@@ -90,10 +91,24 @@ impl<'a> BasedPointer<'a> {
     ///
     /// [`Record::offset`] is 0.
     #[must_use]
-    pub fn symbol_record(&self) -> Option<Record<'a>> {
+    pub fn symbol_record(&self) -> Option<Record<'_>> {
         match self {
             Self::Symbol(bytes) => Records::new(bytes).next()?.ok(),
             _ => None,
+        }
+    }
+
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> BasedPointer<'static> {
+        match self {
+            Self::Segment(segment) => BasedPointer::Segment(segment),
+            Self::Symbol(bytes) => BasedPointer::Symbol(bytes.into_owned()),
+            Self::Type { base_type, name } => BasedPointer::Type {
+                base_type,
+                name: name.into_owned(),
+            },
+            Self::SelfBased => BasedPointer::SelfBased,
         }
     }
 
@@ -135,8 +150,16 @@ impl<'a> BasedPointer<'a> {
     }
 }
 
+impl IntoOwned for BasedPointer<'_> {
+    type Owned = BasedPointer<'static>;
+
+    fn to_static(self) -> BasedPointer<'static> {
+        self.into_owned()
+    }
+}
+
 /// An `LF_POINTER` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Pointer<'a> {
     /// The type that the pointer refers to.
@@ -194,7 +217,7 @@ impl<'a> Pointer<'a> {
         let member_mode = self.attributes.mode().is_member_pointer();
         let based_kind = !member_mode && self.attributes.kind().is_based();
         let valid = member_mode == self.member.is_some()
-            && match self.based {
+            && match &self.based {
                 Some(based) => based.matches(self.attributes.kind()) && !member_mode,
                 None => !based_kind,
             };
@@ -208,7 +231,7 @@ impl<'a> Pointer<'a> {
             writer.type_index(member.containing_type)?;
             writer.u16(member.representation.raw())?;
         }
-        if let Some(based) = self.based {
+        if let Some(based) = &self.based {
             based.encode(writer)?;
         }
         for _ in 0..self.trailing_zeros {
@@ -217,3 +240,5 @@ impl<'a> Pointer<'a> {
         Ok(())
     }
 }
+
+into_owned!(struct Pointer { based; referent_type, attributes, member, trailing_zeros });

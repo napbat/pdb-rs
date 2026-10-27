@@ -374,9 +374,9 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
     /// - [`ErrorKind::LimitExceeded`] if the record is too long or an
     ///   allocation fails.
     pub fn add_public(&mut self, public: &Public<'_>) -> Result<()> {
-        check_name(public.name)?;
+        check_name(&public.name)?;
         let mut record = Vec::new();
-        SymbolData::Public(*public).encode(S_PUB32, &mut record)?;
+        SymbolData::Public(public.clone()).encode(S_PUB32, &mut record)?;
         push(
             &mut self.symbols,
             AddedSymbol {

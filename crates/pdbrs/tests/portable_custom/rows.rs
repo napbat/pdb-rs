@@ -1,9 +1,9 @@
 //! Tests for the `CustomDebugInformation` rows of a synthetic Portable PDB.
 
-use pdbrs::ErrorKind;
 use pdbrs::portable::Pdb;
 use pdbrs::portable::custom::{CustomDebugKind, CustomDebugValue};
 use pdbrs::portable::metadata::{CustomDebugInformationId, MetadataStream, MetadataToken, TableId};
+use pdbrs::{Bytes, ErrorKind};
 
 use super::builder::{Builder, row, value};
 
@@ -85,7 +85,7 @@ fn reads_and_decodes_custom_debug_information_rows() {
         third.decode().unwrap(),
         CustomDebugValue::Unknown {
             kind: CustomDebugKind([0x55; 16]),
-            value: b"abc"
+            value: Bytes::new(b"abc")
         }
     );
     let fourth = rows[3].as_ref().unwrap();
@@ -94,7 +94,7 @@ fn reads_and_decodes_custom_debug_information_rows() {
         fourth.decode().unwrap(),
         CustomDebugValue::Unknown {
             kind: CustomDebugKind([0; 16]),
-            value: &[]
+            value: Bytes::new(&[])
         }
     );
 }

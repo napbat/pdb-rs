@@ -57,7 +57,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 mod assembly_input;
 mod blocks;
@@ -273,15 +273,57 @@ pub enum LineSubsection<'a> {
         /// The kind, with the [`DEBUG_S_IGNORE`] bit.
         kind: SubsectionKind,
         /// The raw subsection data.
-        data: &'a [u8],
+        data: Bytes<'a>,
     },
     /// A subsection of a kind that this crate does not decode.
     Unsupported {
         /// The kind.
         kind: SubsectionKind,
         /// The raw subsection data.
-        data: &'a [u8],
+        data: Bytes<'a>,
     },
+}
+
+impl LineSubsection<'_> {
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> LineSubsection<'static> {
+        match self {
+            Self::Symbols(value) => LineSubsection::Symbols(value.into_owned()),
+            Self::Lines(value) => LineSubsection::Lines(value.into_owned()),
+            Self::StringTable(value) => LineSubsection::StringTable(value.into_owned()),
+            Self::FileChecksums(value) => LineSubsection::FileChecksums(value.into_owned()),
+            Self::FrameData(value) => LineSubsection::FrameData(value.into_owned()),
+            Self::InlineeLines(value) => LineSubsection::InlineeLines(value.into_owned()),
+            Self::CrossScopeImports(value) => LineSubsection::CrossScopeImports(value.into_owned()),
+            Self::CrossScopeExports(value) => LineSubsection::CrossScopeExports(value.into_owned()),
+            Self::IlLines(value) => LineSubsection::IlLines(value.into_owned()),
+            Self::FunctionTokenMap(value) => LineSubsection::FunctionTokenMap(value.into_owned()),
+            Self::TypeTokenMap(value) => LineSubsection::TypeTokenMap(value.into_owned()),
+            Self::MergedAssemblyInput(value) => {
+                LineSubsection::MergedAssemblyInput(value.into_owned())
+            }
+            Self::CoffSymbolRvas(value) => LineSubsection::CoffSymbolRvas(value.into_owned()),
+            Self::XfgTypeHashes(value) => LineSubsection::XfgTypeHashes(value.into_owned()),
+            Self::XfgVirtualHashes(value) => LineSubsection::XfgVirtualHashes(value.into_owned()),
+            Self::Ignored { kind, data } => LineSubsection::Ignored {
+                kind,
+                data: data.into_owned(),
+            },
+            Self::Unsupported { kind, data } => LineSubsection::Unsupported {
+                kind,
+                data: data.into_owned(),
+            },
+        }
+    }
+}
+
+impl crate::bytes::IntoOwned for LineSubsection<'_> {
+    type Owned = LineSubsection<'static>;
+
+    fn to_static(self) -> LineSubsection<'static> {
+        self.into_owned()
+    }
 }
 
 impl<'a> LineSubsection<'a> {
@@ -317,8 +359,14 @@ impl<'a> LineSubsection<'a> {
             DEBUG_S_COFF_SYMBOL_RVA => Self::CoffSymbolRvas(CoffSymbolRvas::parse(data)?),
             DEBUG_S_XFGHASH_TYPE => Self::XfgTypeHashes(XfgTypeHashes::parse(data)?),
             DEBUG_S_XFGHASH_VIRTUAL => Self::XfgVirtualHashes(XfgVirtualHashes::parse(data)?),
-            _ if kind.is_ignored() => Self::Ignored { kind, data },
-            _ => Self::Unsupported { kind, data },
+            _ if kind.is_ignored() => Self::Ignored {
+                kind,
+                data: Bytes::new(data),
+            },
+            _ => Self::Unsupported {
+                kind,
+                data: Bytes::new(data),
+            },
         })
     }
 
@@ -416,59 +464,58 @@ macro_rules! entry_list {
         $parse:expr
     ) => {
         $(#[$list_meta])*
-        #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+        #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
         pub struct $list<'a> {
-            /// The serialized entries.
-            entries: &'a [[u8; $size]],
+            /// The serialized entries, without a partial entry at the end.
+            entries: $crate::Bytes<'a>,
         }
+
+        $crate::bytes::into_owned!(struct $list { entries; });
 
         impl<'a> $list<'a> {
             /// Wrap serialized entries. Ignore a partial entry at the end.
-            pub(super) const fn new(bytes: &'a [u8]) -> Self {
+            pub(super) fn new(bytes: &'a [u8]) -> Self {
+                let whole = bytes.len() - bytes.len() % $size;
                 Self {
-                    entries: bytes.as_chunks::<{ $size }>().0,
+                    entries: $crate::Bytes::new(&bytes[..whole]),
                 }
+            }
+
+            /// Return the serialized entries.
+            fn chunks(&self) -> &[[u8; $size]] {
+                self.entries.as_chunks::<{ $size }>().0
             }
 
             /// Return the number of entries.
             #[must_use]
-            pub const fn len(&self) -> usize {
-                self.entries.len()
+            pub fn len(&self) -> usize {
+                self.entries.len() / $size
             }
 
             /// Return `true` if the list has no entries.
             #[must_use]
-            pub const fn is_empty(&self) -> bool {
+            pub fn is_empty(&self) -> bool {
                 self.entries.is_empty()
             }
 
             /// Return the entry at `position`, or `None` past the end.
             #[must_use]
             pub fn get(&self, position: usize) -> Option<$entry> {
-                self.entries.get(position).copied().map($parse)
+                self.chunks().get(position).copied().map($parse)
             }
 
             /// Return an iterator over the entries.
             #[must_use]
-            pub fn iter(&self) -> $iter<'a> {
+            pub fn iter(&self) -> $iter<'_> {
                 $iter {
-                    entries: self.entries.iter(),
+                    entries: self.chunks().iter(),
                 }
             }
         }
 
-        impl<'a> IntoIterator for $list<'a> {
+        impl<'s> IntoIterator for &'s $list<'_> {
             type Item = $entry;
-            type IntoIter = $iter<'a>;
-
-            fn into_iter(self) -> Self::IntoIter {
-                self.iter()
-            }
-        }
-
-        impl<'a> IntoIterator for &$list<'a> {
-            type Item = $entry;
-            type IntoIter = $iter<'a>;
+            type IntoIter = $iter<'s>;
 
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()

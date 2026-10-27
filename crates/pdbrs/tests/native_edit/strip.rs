@@ -1,6 +1,5 @@
 //! Tests of `PdbEditor::strip_private` (#34).
 
-use pdbrs::ErrorKind;
 use pdbrs::native::address::SectionOffset;
 use pdbrs::native::codeview::index::{ModuleIndex, ModuleSymbolOffset, TypeIndex};
 use pdbrs::native::codeview::symbol::{
@@ -9,8 +8,9 @@ use pdbrs::native::codeview::symbol::{
     SymbolData,
 };
 use pdbrs::native::codeview::{Records, SymbolKind};
-use pdbrs::native::dbi::OwnedModule;
+use pdbrs::native::dbi::Module;
 use pdbrs::native::{EditOptions, IdentityPolicy, Pdb, PdbBuilder};
+use pdbrs::{Bytes, ErrorKind};
 
 use super::{T_INT4, build, differing_streams, symbols, synthetic};
 
@@ -30,7 +30,7 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     contribution.data_crc = Some(0x1234);
     contribution.reloc_crc = Some(0);
     contribution.coff_section = None;
-    let mut record = OwnedModule::default();
+    let mut record = Module::default();
     record.unused1 = 0;
     record.section_contribution = contribution;
     record.flags = 0;
@@ -43,8 +43,8 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     record.file_name_offset = 0;
     record.source_file_name_index = 0;
     record.pdb_file_path_index = 0;
-    record.name = b"C:\\synthetic\\local.obj".to_vec();
-    record.object_file = b"C:\\synthetic\\local.obj".to_vec();
+    record.name = Bytes::new(b"C:\\synthetic\\local.obj");
+    record.object_file = Bytes::new(b"C:\\synthetic\\local.obj");
     record.name_padding = [0; 3];
     let module = builder.add_module(record)?;
     let mut local = Procedure::new(ProcedureType::Type(T_INT4));
@@ -60,7 +60,7 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
     };
     local.flags = ProcedureFlags(0);
     local.extended_flags = None;
-    local.name = LOCAL;
+    local.name = Bytes::new(LOCAL);
     let procedure = module.push_symbol_fields(S_LPROC32, SymbolData::Procedure(local))?;
     let mut frame = FrameProcedure::default();
     frame.frame_size = 0;
@@ -79,7 +79,7 @@ fn add_local_procedure(builder: &mut PdbBuilder<'static>) -> pdbrs::Result<()> {
         reference.name_checksum = 0;
         reference.offset = resolver.module_symbol_offset(procedure)?;
         reference.module = Some(resolver.module_index(procedure.module())?);
-        reference.name = LOCAL;
+        reference.name = Bytes::new(LOCAL);
         SymbolData::ProcedureReference(reference).encode(S_LPROCREF, out)
     })?;
     builder.index_global(reference, 1)
@@ -107,13 +107,13 @@ fn strip_keeps_publics_and_local_procedures() {
     assert!(dbi.header().stripped());
     let modules: Vec<_> = dbi
         .modules()
-        .map(|module| module.expect("module"))
+        .map(|module| module.expect("module").1)
         .collect();
     // The first module has only global procedures: no module stream.
     assert_eq!(modules[0].stream, None);
     assert_eq!(modules[1].section_contribution.data_crc, Some(0));
     let stream = stripped
-        .module(modules[1].index)
+        .module(ModuleIndex(1))
         .expect("module stream")
         .expect("present");
     let kinds: Vec<_> = stream
@@ -122,12 +122,13 @@ fn strip_keeps_publics_and_local_procedures() {
         .collect();
     assert_eq!(kinds, [S_LPROC32, S_END]);
     let first = stream.symbols().next().expect("record").expect("framed");
-    let SymbolData::Procedure(procedure) = *Symbol::decode(first).expect("decoded").data() else {
+    let SymbolData::Procedure(procedure) = Symbol::decode(first).expect("decoded").data().clone()
+    else {
         panic!("procedure");
     };
     assert_eq!(procedure.signature, ProcedureType::Type(TypeIndex::NONE));
     assert_eq!(
-        (procedure.end, procedure.name),
+        (procedure.end, &procedure.name[..]),
         (
             ModuleSymbolOffset(8 + u32::try_from(first.data.len()).expect("record size")),
             LOCAL
@@ -145,7 +146,7 @@ fn strip_keeps_publics_and_local_procedures() {
         .find(|record| SymbolKind(record.kind) == S_LPROCREF)
         .expect("S_LPROCREF");
     let SymbolData::ProcedureReference(reference) =
-        *Symbol::decode(reference).expect("decoded").data()
+        Symbol::decode(reference).expect("decoded").data().clone()
     else {
         panic!("reference");
     };
@@ -189,7 +190,7 @@ fn strip_with_another_edit_is_unsupported() {
                 section: 2,
                 offset: 0,
             };
-            public.name = b"added";
+            public.name = Bytes::new(b"added");
             public
         })
         .expect("recorded");

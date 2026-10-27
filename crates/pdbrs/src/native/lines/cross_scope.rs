@@ -14,9 +14,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::NameOffset;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 pub use validate::{
     CrossScopeContext, CrossScopeModules, CrossScopeRule, CrossScopeViolation, validate_cross_scope,
@@ -43,7 +44,7 @@ entry_list!(
 
 /// The item IDs that a module uses from one other module
 /// (`CrossScopeReferences`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CrossScopeImport<'a> {
     /// The byte offset of the name of the other module: the object file
@@ -56,17 +57,21 @@ pub struct CrossScopeImport<'a> {
     pub ids: CrossScopeIds<'a>,
 }
 
+into_owned!(struct CrossScopeImport { ids; module_name_offset });
+
 /// A decoded `DEBUG_S_CROSSSCOPEIMPORTS` subsection.
 ///
 /// [`CrossScopeImports::parse`] validates all entries. The entry iterator
 /// then cannot fail.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CrossScopeImports<'a> {
     /// The validated entries.
-    data: &'a [u8],
+    data: Bytes<'a>,
     /// The number of entries.
     count: usize,
 }
+
+into_owned!(struct CrossScopeImports { data; count });
 
 impl<'a> CrossScopeImports<'a> {
     /// Parse the data of a `DEBUG_S_CROSSSCOPEIMPORTS` subsection.
@@ -88,7 +93,10 @@ impl<'a> CrossScopeImports<'a> {
             rest = split_import(rest)?.1;
             count += 1;
         }
-        Ok(Self { data, count })
+        Ok(Self {
+            data: Bytes::new(data),
+            count,
+        })
     }
 
     /// Return the number of entries.
@@ -105,9 +113,9 @@ impl<'a> CrossScopeImports<'a> {
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub const fn iter(&self) -> CrossScopeImportsIter<'a> {
+    pub fn iter(&self) -> CrossScopeImportsIter<'_> {
         CrossScopeImportsIter {
-            bytes: self.data,
+            bytes: &self.data,
             left: self.count,
         }
     }
@@ -125,18 +133,9 @@ impl<'a> CrossScopeImports<'a> {
     }
 }
 
-impl<'a> IntoIterator for CrossScopeImports<'a> {
-    type Item = CrossScopeImport<'a>;
-    type IntoIter = CrossScopeImportsIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &CrossScopeImports<'a> {
-    type Item = CrossScopeImport<'a>;
-    type IntoIter = CrossScopeImportsIter<'a>;
+impl<'s> IntoIterator for &'s CrossScopeImports<'_> {
+    type Item = CrossScopeImport<'s>;
+    type IntoIter = CrossScopeImportsIter<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()

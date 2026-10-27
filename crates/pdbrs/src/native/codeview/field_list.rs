@@ -20,7 +20,8 @@ use super::index::TypeIndex;
 use super::numeric::Numeric;
 use super::type_record::MemberAttributes;
 use super::{Fields, LeafKind};
-use crate::{Error, ErrorKind, Result};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 mod encode;
 
@@ -71,7 +72,7 @@ fn invalid(context: &'static str) -> Error {
 
 /// An `LF_BCLASS` or `LF_BINTERFACE` member: a non-virtual base class or a
 /// base interface.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct BaseClass<'a> {
     /// The access of the base class.
@@ -82,8 +83,10 @@ pub struct BaseClass<'a> {
     pub offset: Numeric<'a>,
 }
 
+into_owned!(struct BaseClass { offset; attributes, base_type });
+
 /// An `LF_VBCLASS` or `LF_IVBCLASS` member: a virtual base class.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct VirtualBaseClass<'a> {
     /// `true` for `LF_IVBCLASS`, `false` for `LF_VBCLASS`.
@@ -100,8 +103,13 @@ pub struct VirtualBaseClass<'a> {
     pub vbtable_index: Numeric<'a>,
 }
 
+into_owned!(struct VirtualBaseClass {
+    vbptr_offset, vbtable_index;
+    indirect, attributes, base_type, vbptr_type
+});
+
 /// An `LF_ENUMERATE` member: one enumerator.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Enumerator<'a> {
     /// The access of the enumerator.
@@ -109,11 +117,13 @@ pub struct Enumerator<'a> {
     /// The value.
     pub value: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct Enumerator { value, name; attributes });
+
 /// An `LF_MEMBER` member: a non-static data member.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DataMember<'a> {
     /// The access of the member.
@@ -123,11 +133,13 @@ pub struct DataMember<'a> {
     /// The offset of the member in the type, in bytes.
     pub offset: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct DataMember { offset, name; attributes, member_type });
+
 /// An `LF_STMEMBER` member: a static data member.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct StaticMember<'a> {
     /// The access of the member.
@@ -135,11 +147,13 @@ pub struct StaticMember<'a> {
     /// The member type.
     pub member_type: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct StaticMember { name; attributes, member_type });
+
 /// An `LF_METHOD` member: a method name with an overload list.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct OverloadedMethod<'a> {
     /// The number of overloads.
@@ -147,21 +161,25 @@ pub struct OverloadedMethod<'a> {
     /// The `LF_METHODLIST` record with the overloads.
     pub method_list: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct OverloadedMethod { name; overload_count, method_list });
+
 /// An `LF_NESTTYPE` member: a nested type.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct NestedType<'a> {
     /// The nested type.
     pub nested_type: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct NestedType { name; nested_type });
+
 /// An `LF_NESTTYPEEX` member: a nested type with member attributes.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct NestedTypeEx<'a> {
     /// The access of the nested type.
@@ -169,11 +187,13 @@ pub struct NestedTypeEx<'a> {
     /// The nested type.
     pub nested_type: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct NestedTypeEx { name; attributes, nested_type });
+
 /// An `LF_MEMBERMODIFY` member: new attributes of an inherited member.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MemberModify<'a> {
     /// The new attributes.
@@ -181,18 +201,22 @@ pub struct MemberModify<'a> {
     /// The base class that declares the member.
     pub base_type: TypeIndex,
     /// The member name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct MemberModify { name; attributes, base_type });
+
 /// An `LF_FRIENDFCN` member: a friend function.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FriendFunction<'a> {
     /// The type of the friend function.
     pub function_type: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct FriendFunction { name; function_type });
 
 /// An `LF_VFUNCOFF` member: a virtual function table pointer at an offset.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -205,7 +229,7 @@ pub struct VirtualFunctionOffset {
 }
 
 /// An `LF_ONEMETHOD` member: a method without overloads.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct OneMethod<'a> {
     /// The access and the method properties.
@@ -217,11 +241,13 @@ pub struct OneMethod<'a> {
     /// This value is present only if the method introduces a virtual slot.
     pub vtable_offset: Option<i32>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
+into_owned!(struct OneMethod { name; attributes, method_type, vtable_offset });
+
 /// One decoded field-list member.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Member<'a> {
     /// `LF_BCLASS`.
@@ -258,11 +284,17 @@ pub enum Member<'a> {
     OneMethod(OneMethod<'a>),
 }
 
+into_owned!(enum Member {
+    BaseClass, BaseInterface, VirtualBaseClass, FriendFunction, Enumerator, DataMember,
+    StaticMember, OverloadedMethod, NestedType, NestedTypeEx, MemberModify, OneMethod;
+    Continuation, VirtualFunctionTable, VirtualFunctionOffset, FriendClass;
+});
+
 /// The payload of an `LF_FIELDLIST` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FieldList<'a> {
     /// The serialized members and their padding.
-    data: &'a [u8],
+    data: Bytes<'a>,
     /// The index in the last `LF_INDEX` member, if present.
     continuation: Option<TypeIndex>,
 }
@@ -277,9 +309,10 @@ impl<'a> FieldList<'a> {
     ///   member follows an `LF_INDEX` member.
     /// - [`ErrorKind::UnsupportedVersion`] for a member kind without a
     ///   decoder or a numeric leaf with an unknown tag.
-    pub fn parse(data: &'a [u8]) -> Result<Self> {
+    pub fn parse(data: impl Into<Bytes<'a>>) -> Result<Self> {
+        let data = data.into();
         let mut continuation = None;
-        for member in Members::new(data) {
+        for member in Members::new(&data) {
             if let Member::Continuation(index) = member? {
                 continuation = Some(index);
             }
@@ -289,8 +322,8 @@ impl<'a> FieldList<'a> {
 
     /// Return the raw payload.
     #[must_use]
-    pub const fn data(&self) -> &'a [u8] {
-        self.data
+    pub fn data(&self) -> &[u8] {
+        &self.data
     }
 
     /// Return the index in the final `LF_INDEX` member, if present.
@@ -305,10 +338,12 @@ impl<'a> FieldList<'a> {
     /// It does not follow the continuation. [`FieldList::parse`] validates
     /// all members, so the iterator does not give errors for a decoded list.
     #[must_use]
-    pub const fn members(&self) -> Members<'a> {
-        Members::new(self.data)
+    pub fn members(&self) -> Members<'_> {
+        Members::new(&self.data)
     }
 }
+
+into_owned!(struct FieldList { data; continuation });
 
 /// An iterator over the members of one `LF_FIELDLIST` record.
 #[derive(Clone, Debug)]
@@ -323,7 +358,7 @@ pub struct Members<'a> {
 
 impl<'a> Members<'a> {
     /// Create an iterator over serialized members.
-    const fn new(data: &'a [u8]) -> Self {
+    pub(crate) const fn new(data: &'a [u8]) -> Self {
         Self {
             data,
             continued: false,
@@ -444,46 +479,46 @@ fn decode_member<'a>(fields: &mut Fields<'a>) -> Result<Member<'a>> {
             reserved(fields)?;
             Member::FriendFunction(FriendFunction {
                 function_type: fields.type_index()?,
-                name: fields.name()?,
+                name: Bytes::new(fields.name()?),
             })
         }
         LF_ENUMERATE => Member::Enumerator(Enumerator {
             attributes: attributes(fields)?,
             value: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_MEMBER => Member::DataMember(DataMember {
             attributes: attributes(fields)?,
             member_type: fields.type_index()?,
             offset: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_STMEMBER => Member::StaticMember(StaticMember {
             attributes: attributes(fields)?,
             member_type: fields.type_index()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_METHOD => Member::OverloadedMethod(OverloadedMethod {
             overload_count: fields.u16()?,
             method_list: fields.type_index()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_NESTTYPE => {
             reserved(fields)?;
             Member::NestedType(NestedType {
                 nested_type: fields.type_index()?,
-                name: fields.name()?,
+                name: Bytes::new(fields.name()?),
             })
         }
         LF_NESTTYPEEX => Member::NestedTypeEx(NestedTypeEx {
             attributes: attributes(fields)?,
             nested_type: fields.type_index()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_MEMBERMODIFY => Member::MemberModify(MemberModify {
             attributes: attributes(fields)?,
             base_type: fields.type_index()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         }),
         LF_ONEMETHOD => Member::OneMethod(one_method(fields)?),
         _ => {
@@ -506,6 +541,6 @@ fn one_method<'a>(fields: &mut Fields<'a>) -> Result<OneMethod<'a>> {
         attributes,
         method_type,
         vtable_offset,
-        name: fields.name()?,
+        name: Bytes::new(fields.name()?),
     })
 }

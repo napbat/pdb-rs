@@ -63,7 +63,10 @@ pub fn find_line(lines: &LinesSubsection<'_>, offset: u32) -> Option<LineMatch> 
             found = Some(LineMatch {
                 checksum_offset: block.checksum_offset,
                 entry,
-                column: block.columns.and_then(|columns| columns.get(position)),
+                column: block
+                    .columns
+                    .as_ref()
+                    .and_then(|columns| columns.get(position)),
                 length: 0,
             });
         }

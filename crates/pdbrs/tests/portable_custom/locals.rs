@@ -67,7 +67,7 @@ fn decodes_tuple_element_names() {
     };
     assert_eq!(names.len(), 3);
     assert_eq!(names.as_bytes(), blob);
-    let names: Vec<_> = names.iter().map(|name| name.as_bytes()).collect();
+    let names: Vec<_> = names.iter().map(|name| name.to_vec()).collect();
     // An empty name is an element without a name.
     assert_eq!(names, [&b"a"[..], b"", b"bc"]);
     assert!(TupleElementNames::parse(&[]).unwrap().is_empty());

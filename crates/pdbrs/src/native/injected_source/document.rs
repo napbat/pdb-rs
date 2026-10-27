@@ -19,11 +19,12 @@
 
 use alloc::vec::Vec;
 
+use crate::bytes::into_owned;
 use crate::crypto::sha256;
 use crate::native::codeview::Fields;
 use crate::native::output::{Output, to_u32};
 use crate::portable::embedded::EmbeddedSource;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The language GUID of C# (`3f5162f8-07c6-11d3-9053-00c04fa302a1`).
 pub const LANGUAGE_CSHARP: [u8; 16] = [
@@ -64,7 +65,7 @@ pub enum ChecksumCheck {
 }
 
 /// A decoded .NET document record, borrowed from the stream bytes.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DotNetDocument<'a> {
     /// The language GUID, for example [`LANGUAGE_CSHARP`].
@@ -76,10 +77,15 @@ pub struct DotNetDocument<'a> {
     /// The checksum algorithm GUID, for example [`CHECKSUM_SHA256`].
     pub checksum_algorithm: [u8; 16],
     /// The checksum bytes.
-    pub checksum: &'a [u8],
+    pub checksum: Bytes<'a>,
     /// The embedded source, if the record has one.
     pub embedded: Option<EmbeddedSource<'a>>,
 }
+
+into_owned!(struct DotNetDocument {
+    checksum, embedded;
+    language, language_vendor, document_type, checksum_algorithm
+});
 
 impl<'a> DotNetDocument<'a> {
     /// Append the record, the full stream contents, to `out`.
@@ -92,10 +98,10 @@ impl<'a> DotNetDocument<'a> {
     /// Returns [`ErrorKind::LimitExceeded`] if a size does not fit in `u32` or the output
     /// cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let (format, data) = match self.embedded {
-            None => (None, &[][..]),
+        let (format, data): (Option<u32>, &[u8]) = match &self.embedded {
+            None => (None, &[]),
             Some(EmbeddedSource::Raw(data)) => (Some(0), data),
-            Some(EmbeddedSource::Deflate { size, data }) => (Some(size), data),
+            Some(EmbeddedSource::Deflate { size, data }) => (Some(*size), data),
         };
         let source_size = match format {
             None => 0,
@@ -117,7 +123,7 @@ impl<'a> DotNetDocument<'a> {
         }
         output.u32(to_u32(self.checksum.len(), ".NET document checksum size")?)?;
         output.u32(source_size)?;
-        output.bytes(self.checksum)?;
+        output.bytes(&self.checksum)?;
         if let Some(format) = format {
             output.u32(format)?;
             output.bytes(data)?;
@@ -163,7 +169,7 @@ impl<'a> DotNetDocument<'a> {
             language_vendor,
             document_type,
             checksum_algorithm,
-            checksum,
+            checksum: Bytes::new(checksum),
             embedded,
         })
     }
@@ -182,7 +188,7 @@ impl<'a> DotNetDocument<'a> {
         if self.checksum_algorithm != CHECKSUM_SHA256 {
             return Ok(ChecksumCheck::NotVerified);
         }
-        if self.checksum != sha256(source).as_slice() {
+        if self.checksum != *sha256(source).as_slice() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context(".NET document SHA-256 checksum differs from the source"));
         }

@@ -138,7 +138,7 @@ impl<S: ReadAt> Pdb<S> {
             let Some(module) = records.next() else {
                 break;
             };
-            if let Some(reference) = module?.stream {
+            if let Some(reference) = module?.1.stream {
                 require_stream(&self.container, reference)?;
             }
             modules.try_reserve(1).map_err(|_| no_memory())?;
@@ -343,7 +343,7 @@ impl<S: ReadAt> Pdb<S> {
             .ok()
             .and_then(|position| cached.modules.get(position))
             .ok_or_else(outside)?;
-        let module = cached
+        let (_, module) = cached
             .dbi
             .modules_at(*position, index.0)
             .next()

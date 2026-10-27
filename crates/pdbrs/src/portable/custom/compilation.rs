@@ -11,30 +11,34 @@ use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use super::blob::{Reader, Writer, invalid};
-use super::{Entries, Utf8Bytes, count_to_end};
+use super::{Entries, count_to_end};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 
 /// The compilation options of a module.
 ///
 /// The blob is a list of NUL-terminated UTF-8 name and value pairs. The names
 /// are unique. Their order has no meaning.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CompilationOptions<'a> {
     /// The pairs. [`CompilationOptions::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of pairs.
     len: usize,
 }
 
 /// One compilation option.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CompilationOption<'a> {
     /// The name, for example `language`.
-    pub name: Utf8Bytes<'a>,
+    pub name: Bytes<'a>,
     /// The value.
-    pub value: Utf8Bytes<'a>,
+    pub value: Bytes<'a>,
 }
+
+into_owned!(struct CompilationOptions { bytes; len });
+into_owned!(struct CompilationOption { name, value; });
 
 impl<'a> CompilationOptions<'a> {
     /// Decode a compilation options blob.
@@ -48,15 +52,18 @@ impl<'a> CompilationOptions<'a> {
     ///   options have the same name.
     pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let len = count_to_end(blob, 0, read_option)?;
-        let options = Self { bytes: blob, len };
+        let options = Self {
+            bytes: Bytes::new(blob),
+            len,
+        };
         unique_names(options.iter())?;
         Ok(options)
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of options.
@@ -73,15 +80,15 @@ impl<'a> CompilationOptions<'a> {
 
     /// Return an iterator over the options in blob order.
     #[must_use]
-    pub const fn iter(&self) -> CompilationOptionsIter<'a> {
-        CompilationOptionsIter(Entries::new(self.bytes, self.len, 0, read_option))
+    pub fn iter(&self) -> CompilationOptionsIter<'_> {
+        CompilationOptionsIter(Entries::new(&self.bytes, self.len, 0, read_option))
     }
 
     /// Return the value of the option `name`.
     #[must_use]
-    pub fn get(&self, name: &[u8]) -> Option<Utf8Bytes<'a>> {
+    pub fn get(&self, name: &[u8]) -> Option<Bytes<'_>> {
         self.iter()
-            .find(|option| option.name.as_bytes() == name)
+            .find(|option| option.name == name)
             .map(|option| option.value)
     }
 
@@ -103,14 +110,8 @@ impl<'a> CompilationOptions<'a> {
         unique_names(options.clone())?;
         let mut writer = Writer::append(out);
         for option in options {
-            writer.c_string(
-                option.name.as_bytes(),
-                "compilation option name has a NUL byte",
-            )?;
-            writer.c_string(
-                option.value.as_bytes(),
-                "compilation option value has a NUL byte",
-            )?;
+            writer.c_string(&option.name, "compilation option name has a NUL byte")?;
+            writer.c_string(&option.value, "compilation option value has a NUL byte")?;
         }
         writer.finish();
         Ok(())
@@ -124,8 +125,8 @@ fn read_option<'a>(reader: &mut Reader<'a>, _: i32) -> Result<CompilationOption<
     let name = reader.c_string("compilation option name has no NUL terminator")?;
     let value = reader.c_string("compilation option value has no NUL terminator")?;
     Ok(CompilationOption {
-        name: Utf8Bytes::new(name),
-        value: Utf8Bytes::new(value),
+        name: Bytes::new(name),
+        value: Bytes::new(value),
     })
 }
 
@@ -133,7 +134,7 @@ fn read_option<'a>(reader: &mut Reader<'a>, _: i32) -> Result<CompilationOption<
 fn unique_names<'o>(options: impl Iterator<Item = CompilationOption<'o>>) -> Result<()> {
     let mut names = BTreeSet::new();
     for option in options {
-        if !names.insert(option.name.as_bytes()) {
+        if !names.insert(option.name) {
             return Err(invalid("two compilation options have the same name"));
         }
     }
@@ -143,22 +144,22 @@ fn unique_names<'o>(options: impl Iterator<Item = CompilationOption<'o>>) -> Res
 /// The metadata references that the compiler used for a module.
 ///
 /// The blob is a list of [`MetadataReference`] entries to the end of the blob.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CompilationMetadataReferences<'a> {
     /// The entries. [`CompilationMetadataReferences::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of entries.
     len: usize,
 }
 
 /// One metadata reference of a compilation.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MetadataReference<'a> {
     /// The file name of the reference, with its extension.
-    pub file_name: Utf8Bytes<'a>,
+    pub file_name: Bytes<'a>,
     /// The external aliases, separated by commas. The list can be empty.
-    pub aliases: Utf8Bytes<'a>,
+    pub aliases: Bytes<'a>,
     /// The flags: [`MetadataReference::ASSEMBLY`] and
     /// [`MetadataReference::EMBED_INTEROP_TYPES`]. The other bits have no
     /// meaning yet; the codec keeps them.
@@ -170,6 +171,9 @@ pub struct MetadataReference<'a> {
     /// The module version ID (MVID) of the reference, in serialized GUID order.
     pub mvid: [u8; 16],
 }
+
+into_owned!(struct CompilationMetadataReferences { bytes; len });
+into_owned!(struct MetadataReference { file_name, aliases; flags, time_stamp, file_size, mvid });
 
 impl MetadataReference<'_> {
     /// The flag of an assembly reference. A clear flag means a module.
@@ -187,13 +191,16 @@ impl<'a> CompilationMetadataReferences<'a> {
     /// the blob ends inside an entry.
     pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let len = count_to_end(blob, 0, read_reference)?;
-        Ok(Self { bytes: blob, len })
+        Ok(Self {
+            bytes: Bytes::new(blob),
+            len,
+        })
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of references.
@@ -210,8 +217,8 @@ impl<'a> CompilationMetadataReferences<'a> {
 
     /// Return an iterator over the references.
     #[must_use]
-    pub const fn iter(&self) -> CompilationMetadataReferencesIter<'a> {
-        CompilationMetadataReferencesIter(Entries::new(self.bytes, self.len, 0, read_reference))
+    pub fn iter(&self) -> CompilationMetadataReferencesIter<'_> {
+        CompilationMetadataReferencesIter(Entries::new(&self.bytes, self.len, 0, read_reference))
     }
 
     /// Encode a compilation metadata references blob, and append it to `out`.
@@ -231,11 +238,11 @@ impl<'a> CompilationMetadataReferences<'a> {
         let mut writer = Writer::append(out);
         for reference in references {
             writer.c_string(
-                reference.file_name.as_bytes(),
+                &reference.file_name,
                 "metadata reference file name has a NUL byte",
             )?;
             writer.c_string(
-                reference.aliases.as_bytes(),
+                &reference.aliases,
                 "metadata reference aliases have a NUL byte",
             )?;
             writer.u8(reference.flags)?;
@@ -256,8 +263,8 @@ fn read_reference<'a>(reader: &mut Reader<'a>, _: i32) -> Result<MetadataReferen
     let file_name = reader.c_string("metadata reference file name has no NUL terminator")?;
     let aliases = reader.c_string("metadata reference aliases have no NUL terminator")?;
     Ok(MetadataReference {
-        file_name: Utf8Bytes::new(file_name),
-        aliases: Utf8Bytes::new(aliases),
+        file_name: Bytes::new(file_name),
+        aliases: Bytes::new(aliases),
         flags: reader.u8(SHORT)?,
         time_stamp: reader.u32(SHORT)?,
         file_size: reader.u32(SHORT)?,

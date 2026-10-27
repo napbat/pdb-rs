@@ -1,6 +1,5 @@
 //! Tests for the module symbol writer and the symbol record stream writer.
 
-use pdbrs::ErrorKind;
 use pdbrs::native::codeview::Records;
 use pdbrs::native::codeview::SymbolKind;
 use pdbrs::native::codeview::index::ModuleSymbolOffset;
@@ -10,6 +9,7 @@ use pdbrs::native::codeview::symbol::{
 };
 use pdbrs::native::msf::StreamId;
 use pdbrs::native::symbols::{SymbolOffset, SymbolRecordWriter};
+use pdbrs::{Bytes, ErrorKind};
 
 /// Frame one record with zero padding.
 fn record(kind: SymbolKind, payload: &[u8]) -> Vec<u8> {
@@ -137,9 +137,10 @@ fn record_writer_returns_the_record_offsets() {
     let stream = writer.finish();
     assert_eq!(stream.offsets, [SymbolOffset(0), second]);
     assert_eq!(stream.bytes, [public.clone(), public].concat());
-    let SymbolData::Public(value) = *Symbol::decode(second.record(&stream.bytes).unwrap())
+    let SymbolData::Public(value) = Symbol::decode(second.record(&stream.bytes).unwrap())
         .unwrap()
         .data()
+        .clone()
     else {
         panic!("expected a public");
     };
@@ -162,7 +163,7 @@ fn fxc_local() -> Vec<u8> {
 fn long_zero_padding_of_fxc_is_kept() {
     let bytes = fxc_local();
     let symbol = decode(&bytes);
-    assert_eq!(symbol.name(), Some(&b"input"[..]));
+    assert_eq!(symbol.name().map(Bytes::as_bytes), Some(&b"input"[..]));
     assert_eq!(symbol.trailing_zeros(), 32);
     let mut out = Vec::new();
     symbol.encode(&mut out).unwrap();
