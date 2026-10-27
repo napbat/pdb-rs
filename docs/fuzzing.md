@@ -109,7 +109,7 @@ The generator splits each PDB into the inputs of the targets: streams, records, 
 blobs and values. It caps the seeds of one PDB to 48 for each target.
 
 A fixture path argument adds the `.pdb` and `.mpdb` files below it in the same way. The
-recorded runs used the local fixtures of `target/fixtures/` in the primary checkout (58 files,
+recorded runs used the local fixtures of `target/fixtures/` in the main checkout (58 files,
 with the native fixture variants of #27). The fixtures and the corpora are local inputs: do not
 commit them. The compiler PDBs (`obj/compile.pdb`) have no DBI stream, so the generator prints
 "skipped" for them after it adds their other streams.
@@ -119,7 +119,7 @@ commit them. The compiler PDBs (`obj/compile.pdb`) have no DBI stream, so the ge
 Run the commands in `crates/pdbrs/fuzz/` with the nightly toolchain.
 
 ```sh
-cargo +nightly run --release --example seeds -- C:/Users/dev/Documents/Git/napbat/pdbrs/target/fixtures
+cargo +nightly run --release --example seeds -- ../../../target/fixtures
 cargo +nightly fuzz build
 cargo +nightly fuzz run <target> -- -max_total_time=900 -rss_limit_mb=2048 -timeout=10 -print_final_stats=1
 ```
@@ -210,7 +210,7 @@ inputs and the 52 PDZ fixtures of the native fixtures of `main` 8dc001c (`msfz`:
 `msfz_chunks` run used the library before that fix, which does not change its inputs.
 
 The `msfz_convert` target ran on commit 193301c (#38, based on `main` ceff177) on
-2026-10-26, with 419 seeds from the synthetic inputs and the fixtures of the primary checkout
+2026-10-26, with 419 seeds from the synthetic inputs and the fixtures of the main checkout
 (the MSF 7.0 PDBs and the 63 PDZ files). Most seeds are whole PDB files, and libFuzzer took the
 limit of 1 MiB for new inputs. Each run compresses every chunk three times, so the target runs
 about 8 inputs each second.

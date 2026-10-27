@@ -23,9 +23,9 @@ Run the bench of [README.md](README.md) again on a quiet machine to replace the 
 - Order: 7 rounds. Each round ran the before build and the after build one after the other. The
   order changed in each round (before first in rounds 1, 3, 5 and 7). The tables give the median
   of the 7 rounds.
-- Load: other agents built and tested in other worktrees at the same time. The processor load
-  at the start of a round was from 2 % to 91 %, with 1 to 26 `rustc`, `cargo` and `link`
-  processes.
+- Load: other processes loaded the machine during the measurement, because other builds and
+  tests ran at the same time. The processor load at the start of a round was from 2 % to 91 %,
+  with 1 to 26 `rustc`, `cargo` and `link` processes.
 
 ## Results
 
