@@ -109,7 +109,7 @@ its times are not comparable.
 | `native/rebuild` | native | `Pdb::contents`, `PdbContents::to_builder(IdentityPolicy::Preserve)`, `PdbBuilder::plan(contents.build_options())`, `to_vec`. | Output bytes |
 | `portable/read` | Portable | `portable::Pdb::parse`, every row of the eight debug tables with its heap values, the custom debug information values, the document sources, the sequence points, the local variables and constants, the imports, the state machine methods and `validate_debug`. | Rows and decoded values |
 | `portable/rebuild` | Portable | `Pdb::to_parts`, `PdbParts::plan(IdentityPolicy::ContentDerived)`, `to_vec`. | Output bytes |
-| `portable/edit` | Portable | `Pdb::edit`, a line shift of all sequence points and a rename of document 1, `plan(IdentityPolicy::ContentDerived)`, `to_vec`. | Output bytes |
+| `portable/edit` | Portable | `Pdb::edit(IdentityPolicy::ContentDerived)`, a line shift of all sequence points and a rename of document 1, `plan(EditOptions::default())`, `to_vec`. Before #42 stage 7: `Pdb::edit()` and `plan(IdentityPolicy::ContentDerived)`. | Output bytes |
 | `msfz/open` | MSFZ | `Pdb::open` of the MSFZ file. | Streams |
 | `msfz/full-read` | MSFZ | The full read of `native/full-read` on the MSFZ file. | Decoded records and streams |
 | `msfz/write-default` | `msvc-x64-large` | `Container::to_msfz(MsfzWriteOptions::default(), OldDirectoryPolicy::Empty)` and `to_vec`. `verify-msfz` and `pdbtool pdz-encode` use the same stream 0 policy. | Output bytes |

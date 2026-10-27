@@ -35,8 +35,11 @@ Slice reads, signature probing and fixed-buffer cursor operations do not allocat
 - `portable::Identity` encodes the 20-byte ID and checks GUID, stamp and age fields from a portable PE reference.
 - `portable::custom` decodes and encodes the custom debug information blobs of all kinds in the Portable PDB specification and Roslyn (#24).
   It keeps unknown kinds as raw bytes. The native `MD2` Edit and Continue records (kinds 6, 7 and 9) use the same codecs.
-  `portable::Pdb::custom_debug_information` reads a row with its kind GUID and its value blob.
-- `portable::debug` has the typed rows of the debug tables and the codecs of their blobs: document names, sequence points, local constant signatures and imports (#23).
+  `portable::Pdb::custom_debug_information` reads a row as a `CustomDebugInformation` record: its parent, its kind GUID and its value blob.
+- `portable::debug` has the records of the debug tables and the codecs of their blobs: document names, sequence points, local constant signatures and imports (#23).
+  A record has public fields and no stream position. The reader returns it next to its row ID, and `portable::PdbEditor` holds it (#42).
+  A blob with `#Blob` offsets is decoded (the document name, the imports). The other blobs stay `Bytes`, and the `decode` function of the record decodes them on request.
+  The raw rows and the heap offsets of `portable::metadata` stay the table layer.
   Each codec has an encoder that takes resolved heap offsets and row IDs, for the writer (#26). `Pdb::validate_debug` checks the ordering and reference rules.
 
 Run signature inspection on Unix or Windows with:
@@ -173,7 +176,7 @@ It does not read rows or heap values. `Pdb::row` and `Pdb::rows` read one row at
 | `#Pdb` | PDB ID, entry point (nil or an external `MethodDef` row), referenced type-system tables and their row counts, exact stream size | — |
 | `#~` | Version 2.0, `HeapSizes`, `Valid` and `Sorted` masks, row counts up to `0xFFFFFF`, heap, table and coded index widths from local and external row counts, row extents. A table outside the debug schema with rows gives `InvalidFormat`; `#-` and delta `HeapSizes` flags give `UnsupportedVersion` | Uncompressed `#-` tables |
 | Heaps | `#Strings` termination, `#Blob` and `#US` length prefixes, `#GUID` indexes, the empty first entry and 16-byte GUID boundaries | — |
-| Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked. `portable::debug` (#23): typed rows of seven tables (`CustomDebugInformation` in `portable::custom`, #24); document names, languages and hash algorithms; sequence points (hidden points, document records, signed deltas, IL offset and line and column bounds); local constant signatures (all type codes, enums, general values, custom modifiers); imports of the nine kinds; an encoder for each blob in the Roslyn form; `Pdb::validate_debug` | Instruction boundaries and the IL size of the first scope of a method: they need the method bodies of the assembly |
+| Debug tables | Raw rows of all eight tables with typed row IDs, heap handles and `HasCustomDebugInformation` tokens; heap and row references checked. `portable::debug` (#23, #42): records of seven tables (`CustomDebugInformation` in `portable::custom`, #24); document names, languages and hash algorithms; sequence points (hidden points, document records, signed deltas, IL offset and line and column bounds); local constant signatures (all type codes, enums, general values, custom modifiers); imports of the nine kinds; an encoder for each blob in the Roslyn form; `Pdb::validate_debug` | Instruction boundaries and the IL size of the first scope of a method: they need the method bodies of the assembly |
 | Dispatch | `pdbrs::Pdb` and `pdbrs::Format`: native MSF 7.0 and Portable PDB by contents; ordinary CLI metadata without `#Pdb` is rejected with `MissingStream`; `MPDB` payloads need `portable::embedded::decode_embedded` | Legacy MSF 2.0 (`UnsupportedVersion`) |
 | Embedded data (#25) | `portable::embedded::decode_embedded` and `encode_embedded` for `MPDB` payloads (signature, reserved sizes, limit before allocation, exact output length); `Pdb::document_source` decodes the embedded source of a document and checks it against the document hash; `Document::verify_source` | Hash algorithms other than SHA-256 give `SourceCheck::NotVerified` |
 
@@ -212,14 +215,14 @@ A nil `VariableList` or `ConstantList` is an empty run if its table has no rows 
 
 ## Implemented Portable PDB writing
 
-The `portable::write` and `portable::build` modules write Portable PDBs through these operations ([#26](https://github.com/napbat/pdbrs/issues/26)):
+The `portable::write` module and `portable::PdbEditor` write Portable PDBs through these operations ([#26](https://github.com/napbat/pdbrs/issues/26), [#42](https://github.com/napbat/pdbrs/issues/42)):
 
 | Operation | API | Guarantee |
 | --- | --- | --- |
 | Exact copy | `io::copy_exact(pdb.source(), ..)`, `io::copy_exact_file` | Every source byte, through one buffer of at most 64 KiB |
 | New layout | `PdbParts::plan`, then `portable::PdbWritePlan::write_to`, `to_vec`, `to_embedded` or `write_file` | A checked Portable PDB with the given raw rows and heaps |
-| Semantic build | `PdbBuilder::plan` | A checked Portable PDB from records with typed handles, in new heaps |
-| Semantic edit | `Pdb::edit`, then `PdbEditor::plan` | The source records with the changes; each source heap entry keeps its offset |
+| Build | `PdbEditor::new(external, policy)`, then `PdbEditor::plan(EditOptions)` | A checked Portable PDB from records with handles, in new heaps |
+| Edit | `Pdb::edit(policy)`, then `PdbEditor::plan(EditOptions)` | The source records with the changes; each source heap entry keeps its offset |
 
 `PdbParts` holds the version string, the entry point, the external row counts, the four heaps and the raw rows of the eight debug tables.
 The heap builders remove duplicates. `#Blob`, `#US` and `#GUID` offsets follow the insertion order.
@@ -227,16 +230,20 @@ The heap builders remove duplicates. `#Blob`, `#US` and `#GUID` offsets follow t
 `Pdb::to_parts` reads all rows and re-adds the heap entries. It keeps the row IDs and the row order.
 If a `#Blob` offset changes, it decodes the document name and imports blobs with the codecs of [#23](https://github.com/napbat/pdbrs/issues/23), gives them the new offsets and adds the encoded blobs.
 
-`PdbBuilder` holds owned records: documents, the sequence points of each method, local scopes with variables and constants, import scopes, state machine methods and custom debug information.
-Documents and import scopes keep the order of addition, so their handles are `DocumentId` and `ImportScopeId`.
-Local scopes, variables, constants and custom debug information have opaque handles; the plan gives them their rows.
+`PdbEditor` is the one editor type for builds and edits. It holds the records of `portable::debug` and `portable::custom` with `'static`.
+The identity policy is an argument of the entry (`PdbEditor::new` or `Pdb::edit`); the plan computes a content-derived ID from the output.
+An editor of a source borrows the source and decodes a table on the first `*_mut` call of that table (`documents_mut`, `methods_mut`, `local_scopes_mut`, `import_scopes_mut`, `state_machine_methods_mut`, `custom_debug_information_mut`, or `decode_all`).
+The plan reads a table that no `*_mut` call decoded, so the output does not depend on the calls. Copy of unchanged table bytes is [#49](https://github.com/napbat/pdbrs/issues/49).
+Documents and import scopes keep the order of addition, so their IDs are `DocumentId` and `ImportScopeId`.
+Local scopes hold their variables and constants. Local scopes and custom debug information have handles (`LocalScopeHandle`, `CustomDebugHandle`); a variable or a constant has the handle of its scope and its position. The plan gives them their rows.
 The plan sorts the local scopes, gives each scope one variable run and one constant run, and sorts state machine methods and custom debug information.
-It splits document names as Roslyn does and encodes the blobs with the codecs of #23. Index widths follow the final heap sizes and row counts.
+It splits document names as Roslyn does and encodes the names and the imports with the codecs of #23. The other blobs keep the bytes of the record. Index widths follow the final heap sizes and row counts.
 
-`Pdb::edit` makes a `PdbEditor`: a builder with the source records whose heaps start with the source heap bytes.
+With a source, the heaps of the output start with the source heap bytes.
 Without a change, the output has the source bytes. Documents and import scopes keep their row IDs.
 Custom debug information of an unknown kind keeps its bytes. If a change gives a source local scope, local variable or local constant a new row ID, such a value can contain the old row ID.
 `PdbEditor::plan` then fails with `InvalidReference` before output. The parent of a known kind follows its record to the new row.
+`PdbWritePlan::report` gives a `PlanReport`: each output stream is `Copied` (the source bytes), `Edited`, `Rebuilt(RebuildReason::Identity)` (only the PDB ID changed) or `Added` (no source stream, or no source).
 
 The plan checks every heap and row reference, the `#Pdb` fields and the required row order before it writes a byte.
 It uses the layout of `System.Reflection.Metadata`: the stream order, the `Valid` and `Sorted` masks, the index width rules and the trailing zero byte of `#~`.
