@@ -678,6 +678,7 @@ The `native::msfz` module writes MSFZ containers, and `native::container::Contai
 - Padding to 16 KiB (`with_pad_16k`): a workaround for the first MSVC PDZ decoder.
 - The chunk codec: zstd (the default) or raw DEFLATE, through `compression.rs`.
 - `MsfzLimits`: the plan rejects a chunk, a directory or a Chunk Table that a reader with these limits does not open.
+- The kept chunk limit (`with_max_kept_chunk_bytes`): the memory for compressed chunks that the plan keeps for `write_to`, 256 MiB by default (#50). It does not change the output.
 
 The plan computes and checks the full layout before output. The layout is deterministic:
 
@@ -687,8 +688,9 @@ The plan computes and checks the full layout before output. The layout is determ
 4. A fragment never crosses a chunk boundary: the `ms-pdb-msfz` reader (`pdbtool compare`) reads a fragment from one chunk only. The writer writes no uncompressed fragments.
 
 The header holds the offsets of the directory and the Chunk Table, and these depend on the compressed chunk sizes. Thus planning reads all stream bytes and compresses each chunk once to get its size.
-`MsfzWritePlan::write_to` compresses each chunk again and fails with `InvalidFormat` if a size changed (the source changed).
-The memory is one chunk buffer, its compressed bytes, the directory and the Chunk Table. `write_to`, `to_vec` and `write_file` have the contract of the MSF writer: a planning error writes nothing, and `write_file` leaves no partial file.
+The plan keeps the compressed chunks in Chunk Table order up to the kept chunk limit, and stops at the first chunk that does not fit (#50).
+`MsfzWritePlan::write_to` writes the kept chunks. It compresses the other chunks again and fails with `InvalidFormat` if a size changed (the source changed).
+The memory is the kept chunks (at most the limit), one chunk buffer, its compressed bytes, the directory and the Chunk Table. `write_to`, `to_vec` and `write_file` have the contract of the MSF writer: a planning error writes nothing, and `write_file` leaves no partial file.
 
 Write a PDZ file, convert it back and compare the streams:
 

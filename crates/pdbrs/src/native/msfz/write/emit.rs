@@ -2,6 +2,8 @@
 //!
 //! The writer keeps one chunk buffer. It fills the buffer from the streams in stream ID order,
 //! compresses it and writes the compressed bytes. Then it reuses the buffer for the next chunk.
+//! The plan keeps the compressed chunks up to a limit, so the writer compresses only the chunks
+//! after the kept chunks again.
 
 use alloc::vec::Vec;
 
@@ -16,7 +18,20 @@ use crate::{Error, ErrorKind, Result};
 /// The size of the zero buffer for gaps and padding.
 const ZERO_BLOCK: usize = 512;
 
-/// Compress each chunk of `layout` and return the compressed sizes.
+/// The compressed chunks of a plan.
+pub(super) struct Compressed {
+    /// The stored size of each chunk, in Chunk Table order.
+    pub(super) sizes: Vec<u32>,
+    /// The stored bytes of the first `kept_count` chunks, one after the other.
+    kept: Vec<u8>,
+    /// The number of chunks in `kept`.
+    kept_count: usize,
+}
+
+/// Compress each chunk of `layout`, and return the compressed sizes and the kept chunks.
+///
+/// The function keeps the compressed chunks in Chunk Table order up to the limit of `options`.
+/// It stops at the first chunk that does not fit.
 ///
 /// # Errors
 ///
@@ -27,13 +42,15 @@ pub(super) fn measure(
     layout: &Layout,
     source: &dyn StreamSource,
     options: &MsfzWriteOptions,
-) -> Result<Vec<u32>> {
+) -> Result<Compressed> {
     let limit = options.limits().max_chunk_bytes();
     let mut sizes = Vec::new();
     sizes
         .try_reserve_exact(layout.chunks.len())
         .map_err(|_| plan_allocation_failed())?;
-    let mut chunks = ChunkReader::new(layout, source)?;
+    let mut kept = Vec::new();
+    let mut kept_count = 0;
+    let mut chunks = ChunkReader::new(layout, source, 0)?;
     for index in 0..layout.chunks.len() {
         let stored = options.codec().encode(chunks.next_chunk(index)?)?;
         let size = u32::try_from(stored.len())
@@ -44,39 +61,75 @@ pub(super) fn measure(
                     .with_context("compressed MSFZ chunk is larger than the chunk limit")
             })?;
         sizes.push(size);
+        if kept_count == index && keep(&mut kept, &stored, options.max_kept_chunk_bytes()) {
+            kept_count += 1;
+        }
     }
-    Ok(sizes)
+    Ok(Compressed {
+        sizes,
+        kept,
+        kept_count,
+    })
+}
+
+/// Append `stored` to `kept` if the length of `kept` stays at most `max` bytes.
+///
+/// The capacity of `kept` grows to `max` bytes at most. Return `false` if `stored` does not fit
+/// or the allocation fails.
+fn keep(kept: &mut Vec<u8>, stored: &[u8], max: usize) -> bool {
+    let Some(length) = kept
+        .len()
+        .checked_add(stored.len())
+        .filter(|&length| length <= max)
+    else {
+        return false;
+    };
+    if length > kept.capacity() {
+        let capacity = kept.capacity().saturating_mul(2).clamp(length, max);
+        if kept.try_reserve_exact(capacity - kept.len()).is_err() {
+            return false;
+        }
+    }
+    kept.extend_from_slice(stored);
+    true
 }
 
 /// Write all parts of `plan` to `output` in file order.
 pub(super) fn write<W: Write + ?Sized>(plan: &MsfzWritePlan<'_>, output: &mut W) -> Result<()> {
     let mut sink = Sink { output, offset: 0 };
     sink.put(&header(plan))?;
-    let mut chunks = ChunkReader::new(&plan.layout, plan.source)?;
+    let planned_chunks = &plan.chunks;
+    let kept_count = planned_chunks.kept_count;
+    let mut chunks = ChunkReader::new(&plan.layout, plan.source, kept_count)?;
     let mut table = Vec::new();
     table
         .try_reserve_exact(usize::try_from(plan.layout.chunk_table_size()).unwrap_or(usize::MAX))
         .map_err(|_| plan_allocation_failed())?;
-    for (index, (chunk, &planned)) in plan
-        .layout
-        .chunks
-        .iter()
-        .zip(&plan.stored_sizes)
-        .enumerate()
-    {
-        let stored = plan.options.codec().encode(chunks.next_chunk(index)?)?;
-        if u32::try_from(stored.len()).ok() != Some(planned) {
-            return Err(
-                Error::new(ErrorKind::InvalidFormat, Some(sink.offset)).with_context(
-                    "MSFZ chunk compresses to another size than in the plan; the source changed",
-                ),
-            );
-        }
+    let mut kept = planned_chunks.kept.as_slice();
+    let sizes = &planned_chunks.sizes;
+    for (index, (chunk, &planned)) in plan.layout.chunks.iter().zip(sizes).enumerate() {
+        let compressed;
+        let stored = if index < kept_count {
+            // `measure` keeps the chunks with their planned sizes one after the other.
+            let (head, tail) = kept.split_at(usize::try_from(planned).unwrap_or(usize::MAX));
+            kept = tail;
+            head
+        } else {
+            compressed = plan.options.codec().encode(chunks.next_chunk(index)?)?;
+            if u32::try_from(compressed.len()).ok() != Some(planned) {
+                return Err(
+                    Error::new(ErrorKind::InvalidFormat, Some(sink.offset)).with_context(
+                        "MSFZ chunk compresses to another size than in the plan; the source changed",
+                    ),
+                );
+            }
+            compressed.as_slice()
+        };
         table.extend_from_slice(&sink.offset.to_le_bytes());
         table.extend_from_slice(&plan.options.codec().code().to_le_bytes());
         table.extend_from_slice(&planned.to_le_bytes());
         table.extend_from_slice(&chunk.size.to_le_bytes());
-        sink.put(&stored)?;
+        sink.put(stored)?;
     }
     sink.zeros_to(plan.directory_offset)?;
     sink.put(&plan.directory)?;
@@ -150,14 +203,12 @@ struct ChunkReader<'a> {
 }
 
 impl<'a> ChunkReader<'a> {
-    /// Make a reader with a buffer for the largest chunk of `layout`.
-    fn new(layout: &'a Layout, source: &'a dyn StreamSource) -> Result<Self> {
-        let largest = layout
-            .chunks
-            .iter()
-            .map(|chunk| chunk.size)
-            .max()
-            .unwrap_or(0);
+    /// Make a reader that starts at chunk `first` of `layout`.
+    ///
+    /// The buffer has the size of the largest chunk from `first`.
+    fn new(layout: &'a Layout, source: &'a dyn StreamSource, first: usize) -> Result<Self> {
+        let rest = layout.chunks.get(first..).unwrap_or_default();
+        let largest = rest.iter().map(|chunk| chunk.size).max().unwrap_or(0);
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(usize::try_from(largest).unwrap_or(usize::MAX))
@@ -165,12 +216,25 @@ impl<'a> ChunkReader<'a> {
                 Error::new(ErrorKind::LimitExceeded, None)
                     .with_context("MSFZ chunk buffer allocation failed")
             })?;
+        // Start at the stream that holds the first byte of chunk `first`.
+        let start = rest.first().map_or(0, |chunk| chunk.start);
+        let stream = layout
+            .streams
+            .iter()
+            .position(|span| span.is_some_and(|span| span.end() > start))
+            .unwrap_or(layout.streams.len());
+        let done = layout
+            .streams
+            .get(stream)
+            .copied()
+            .flatten()
+            .map_or(0, |span| start - span.start);
         Ok(Self {
             layout,
             source,
             buffer,
-            stream: 0,
-            done: 0,
+            stream,
+            done,
         })
     }
 
