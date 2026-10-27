@@ -323,7 +323,7 @@ fn the_list_form_of_an_empty_table_is_kept() {
     assert_eq!(row.variable_list.0, 1);
     assert_eq!(row.constant_list.0, 0);
     let (_, scope) = pdb.local_scopes().next().unwrap().unwrap();
-    assert!(scope.constants.is_empty());
+    assert_eq!(scope.constants, []);
 
     let mut edit = pdb.edit(IdentityPolicy::ContentDerived);
     let scopes = edit.local_scopes_mut().unwrap();
