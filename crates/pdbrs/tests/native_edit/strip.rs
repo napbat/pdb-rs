@@ -109,7 +109,7 @@ fn strip_keeps_publics_and_local_procedures() {
     assert_eq!(modules[0].stream, None);
     assert_eq!(modules[1].section_contribution.data_crc, Some(0));
     let stream = stripped
-        .module_stream(&modules[1])
+        .module(ModuleIndex(1))
         .expect("module stream")
         .expect("present");
     let kinds: Vec<_> = stream

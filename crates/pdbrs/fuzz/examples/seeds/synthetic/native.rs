@@ -609,11 +609,11 @@ pub fn native_pdb() -> Outcome<Vec<u8>> {
     pdb.ids()?.ok_or("synthetic PDB has no IPI")?;
     let dbi = pdb.debug_info()?.ok_or("synthetic PDB has no DBI")?;
     for module in dbi.modules() {
-        pdb.module_stream(&module?.1)?;
+        pdb.module(module?.0)?;
     }
     for (what, result) in [
-        ("GSI", pdb.global_symbols(&dbi).map(|_| ())),
-        ("PSI", pdb.public_symbols(&dbi).map(|_| ())),
+        ("GSI", pdb.globals().map(|_| ())),
+        ("PSI", pdb.publics().map(|_| ())),
     ] {
         if let Err(error) = result {
             println!("synthetic native PDB: {what} does not read: {error}");

@@ -28,8 +28,8 @@ pub(crate) fn cross_scope(
     let mut modules = CrossScopeModules::new();
     let mut streams = Vec::new();
     for module in dbi.modules() {
-        let (_, module) = module?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let (index, module) = module?;
+        let Some(stream) = pdb.module(index)? else {
             modules.add(&module.name, &module.object_file, None)?;
             continue;
         };
@@ -154,16 +154,16 @@ pub(crate) fn other_subsection(
 /// not equal to the source bytes, or if the region sizes are not equal to
 /// the sizes of the module record.
 pub(crate) fn module_streams(pdb: &Pdb<impl ReadAt>, dbi: &Dbi, report: &mut Report) -> Outcome {
-    let records = match dbi.header().symbol_stream {
-        Some(id) => Some(RecordOffsets::frame(&pdb.stream_bytes(id)?, id)?),
-        None => None,
+    let records = match (dbi.header().symbol_stream, pdb.symbol_records()?) {
+        (Some(id), Some(bytes)) => Some(RecordOffsets::frame(bytes, id)?),
+        _ => None,
     };
     let mut subsections = (0usize, 0usize);
     let mut regions = (0usize, 0usize);
     let mut streams = (0usize, 0usize);
     for module in dbi.modules() {
-        let (_, module) = module?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let (index, module) = module?;
+        let Some(stream) = pdb.module(index)? else {
             continue;
         };
         let refs = stream.global_refs()?;

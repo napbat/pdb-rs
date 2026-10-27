@@ -1,32 +1,40 @@
-//! Native PDB stream discovery and bounded typed loading.
+//! Native PDB stream discovery, the reader session and bounded typed loading.
 //!
 //! [`Pdb`] reads streams through a [`Container`], so all accessors work on MSF 7.00 and MSFZ
 //! input.
+//!
+//! The reader is a session. It keeps the small navigation structures in once-cells and lends
+//! them from `&self`: the DBI stream, `/names`, the global and public symbol indexes, the
+//! symbol record stream, and the TPI and IPI headers with their index offsets. Bulk data stays
+//! an owned load that the caller controls: the module streams, the TPI and IPI records and the
+//! other debug streams.
 
 use alloc::vec::Vec;
 
-use super::address::AddressTables;
 use super::container::{Container, ContainerLimits, Stream};
-use super::dbi::{Dbi, DebugStream, Module, ModuleStream};
-use super::debug_stream::{
-    DebugRecord, FixupStream, FunctionEntryStream, OmapStream, RecordStream, RvaVaBlob, TokenRidMap,
-};
-use super::fpo::{FpoStream, FrameDataStream};
 use super::info::Info;
 use super::msf::{Msf, MsfWriteOptions, StreamId};
-use super::section::SectionHeaderStream;
-use super::symbols::{BucketCount, GlobalSymbolIndex, PublicSymbolIndex};
+use super::symbols::BucketCount;
 use super::types::TypeStream;
 use crate::io::ReadAt;
 use crate::{Error, ErrorKind, Result};
 
-/// Resource limits for native container metadata and explicitly loaded streams.
+mod cache;
+mod debug;
+mod session;
+
+use session::Session;
+
+/// Resource limits for native container metadata, explicitly loaded streams and the session
+/// cache.
 ///
-/// The default uses [`ContainerLimits::default`] and a stream limit of 64 MiB.
+/// The default uses [`ContainerLimits::default`], a stream limit of 64 MiB and a cache limit
+/// of 256 MiB.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ReadOptions {
     limits: ContainerLimits,
     max_stream_bytes: usize,
+    max_cached_bytes: usize,
 }
 
 impl Default for ReadOptions {
@@ -34,6 +42,7 @@ impl Default for ReadOptions {
         Self {
             limits: ContainerLimits::default(),
             max_stream_bytes: 64 * 1024 * 1024,
+            max_cached_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -64,21 +73,44 @@ impl ReadOptions {
         self.max_stream_bytes = max_stream_bytes;
         self
     }
+
+    /// Return the maximum stream bytes that the session cache of a [`Pdb`] holds.
+    ///
+    /// The limit counts the bytes of the DBI, `/names`, global symbol index, public symbol
+    /// index and symbol record streams, and the header and the index offset buffer of the TPI
+    /// and IPI streams. An accessor that goes above the limit returns
+    /// [`ErrorKind::LimitExceeded`] and caches nothing. The cache does not evict.
+    #[must_use]
+    pub const fn max_cached_bytes(self) -> usize {
+        self.max_cached_bytes
+    }
+
+    /// Set the maximum stream bytes that the session cache of a [`Pdb`] holds.
+    #[must_use]
+    pub const fn with_max_cached_bytes(mut self, max_cached_bytes: usize) -> Self {
+        self.max_cached_bytes = max_cached_bytes;
+        self
+    }
 }
 
-/// A native PDB with a validated stream directory and decoded Info stream.
+/// A native PDB with a validated stream directory, a decoded Info stream and a session cache.
 ///
-/// The container is MSF 7.00 or MSFZ. Opening does not decode all streams. Accessors load and
-/// validate the requested stream. Raw access remains available for data without a semantic
-/// decoder.
+/// The container is MSF 7.00 or MSFZ. Opening does not decode all streams. The first call of
+/// a cached accessor ([`Pdb::debug_info`], [`Pdb::names`], [`Pdb::symbol_records`],
+/// [`Pdb::globals`], [`Pdb::publics`], [`Pdb::type_offsets`], [`Pdb::id_offsets`]) loads and
+/// validates its structure. Later calls lend the same value. The other accessors load and
+/// validate the requested stream on each call. Raw access remains available for data without
+/// a semantic decoder.
 ///
-/// With the `std` feature, `Pdb<S>` is `Sync` if `S` is `Sync`. Without `std`, the MSFZ chunk
-/// cache uses a `RefCell`, so the value is not `Sync`.
+/// With the `std` feature, `Pdb<S>` is `Sync` if `S` is `Sync`: the cells are `OnceLock`
+/// values. Without `std`, the cells are `OnceCell` values and the MSFZ chunk cache uses a
+/// `RefCell`, so the value is not `Sync`.
 #[derive(Debug)]
 pub struct Pdb<S> {
     container: Container<S>,
     info: Info,
     options: ReadOptions,
+    session: Session,
 }
 
 impl<S: ReadAt> Pdb<S> {
@@ -113,6 +145,7 @@ impl<S: ReadAt> Pdb<S> {
             container,
             info,
             options,
+            session: Session::new(options.max_cached_bytes),
         })
     }
 
@@ -181,56 +214,6 @@ impl<S: ReadAt> Pdb<S> {
         BucketCount::from_features(self.info.features())
     }
 
-    /// Load the global symbol index that the DBI header names, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`GlobalSymbolIndex::parse`].
-    pub fn global_symbols(&self, dbi: &Dbi) -> Result<Option<GlobalSymbolIndex>> {
-        dbi.header()
-            .global_stream
-            .map(|id| {
-                GlobalSymbolIndex::parse(self.stream_bytes(id)?, id, self.symbol_bucket_count())
-            })
-            .transpose()
-    }
-
-    /// Load the public symbol index that the DBI header names, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`PublicSymbolIndex::parse`].
-    pub fn public_symbols(&self, dbi: &Dbi) -> Result<Option<PublicSymbolIndex>> {
-        dbi.header()
-            .public_stream
-            .map(|id| {
-                PublicSymbolIndex::parse(self.stream_bytes(id)?, id, self.symbol_bucket_count())
-            })
-            .transpose()
-    }
-
-    /// Load the FPO stream that the [`DebugStream::Fpo`] slot of `dbi` names, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`FpoStream::parse`].
-    pub fn fpo(&self, dbi: &Dbi) -> Result<Option<FpoStream>> {
-        dbi.debug_stream(DebugStream::Fpo)
-            .map(|id| FpoStream::parse(self.stream_bytes(id)?, id))
-            .transpose()
-    }
-
-    /// Load the new FPO stream that the [`DebugStream::NewFpo`] slot of `dbi` names, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`FrameDataStream::parse`].
-    pub fn frame_data(&self, dbi: &Dbi) -> Result<Option<FrameDataStream>> {
-        dbi.debug_stream(DebugStream::NewFpo)
-            .map(|id| FrameDataStream::parse(self.stream_bytes(id)?, id))
-            .transpose()
-    }
-
     /// Load the TPI stream, if present.
     ///
     /// # Errors
@@ -264,184 +247,11 @@ impl<S: ReadAt> Pdb<S> {
         Ok(Some(types))
     }
 
-    /// Load DBI metadata and check its age and referenced stream IDs.
-    ///
-    /// The DBI age must not be larger than the PDB Info age. Writers that change only
-    /// named streams, for example `pdbstr -w`, increment the Info age and keep the DBI
-    /// age. Image matching uses the DBI age.
-    ///
-    /// # Errors
-    ///
-    /// Returns errors for I/O, limits, malformed DBI, a DBI age that is larger
-    /// than the Info age or invalid references. Module payloads are checked
-    /// only when explicitly loaded.
-    pub fn debug_info(&self) -> Result<Option<Dbi>> {
-        let Some(stream) = self.optional_stream(StreamId(3))? else {
-            return Ok(None);
-        };
-        let dbi = Dbi::parse(stream.read_all(self.options.max_stream_bytes)?)?;
-        if dbi.header().age > self.info.identity().age() {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("DBI age is larger than the PDB Info age")
-                .with_stream(StreamId(3), 8));
-        }
-        let header = dbi.header();
-        for reference in [
-            header.global_stream,
-            header.public_stream,
-            header.symbol_stream,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            require_stream(&self.container, reference)?;
-        }
-        for reference in dbi.debug_streams().flatten() {
-            require_stream(&self.container, reference)?;
-        }
-        for module in dbi.modules() {
-            if let Some(reference) = module?.1.stream {
-                require_stream(&self.container, reference)?;
-            }
-        }
-        Ok(Some(dbi))
-    }
-
-    /// Load the symbols and line-data regions of a DBI module.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a missing referenced stream, exceeded limits,
-    /// malformed module regions or failed I/O.
-    pub fn module_stream(&self, module: &Module<'_>) -> Result<Option<ModuleStream>> {
-        let Some(id) = module.stream else {
-            return Ok(None);
-        };
-        let stream = require_stream(&self.container, id)?;
-        ModuleStream::parse(stream.read_all(self.options.max_stream_bytes)?, module).map(Some)
-    }
-
     fn optional_stream(&self, id: StreamId) -> Result<Option<Stream<'_, S>>> {
         if id.0 >= self.container.stream_count() {
             return Ok(None);
         }
         self.container.stream(id)
-    }
-
-    /// Load the exception data stream of the [`DebugStream::Exception`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
-    pub fn exception_data(&self, dbi: &Dbi) -> Result<Option<FunctionEntryStream>> {
-        self.debug_records(dbi, DebugStream::Exception)
-    }
-
-    /// Load the fixup stream of the [`DebugStream::Fixup`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
-    pub fn fixups(&self, dbi: &Dbi) -> Result<Option<FixupStream>> {
-        self.debug_records(dbi, DebugStream::Fixup)
-    }
-
-    /// Load the OMAP table of the [`DebugStream::OmapToSource`] or
-    /// [`DebugStream::OmapFromSource`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidFormat`] if `kind` is not an OMAP slot.
-    /// - The errors of [`Pdb::stream_bytes`] and [`OmapStream::parse`].
-    pub fn omap(&self, dbi: &Dbi, kind: DebugStream) -> Result<Option<OmapStream>> {
-        if !matches!(
-            kind,
-            DebugStream::OmapToSource | DebugStream::OmapFromSource
-        ) {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("the debug stream slot is not an OMAP slot"));
-        }
-        dbi.debug_stream(kind)
-            .map(|id| OmapStream::parse(self.stream_bytes(id)?, id))
-            .transpose()
-    }
-
-    /// Load the section headers of the [`DebugStream::SectionHeader`] or
-    /// [`DebugStream::OriginalSectionHeader`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidFormat`] if `kind` is not a section header slot.
-    /// - The errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
-    pub fn section_headers(
-        &self,
-        dbi: &Dbi,
-        kind: DebugStream,
-    ) -> Result<Option<SectionHeaderStream>> {
-        if !matches!(
-            kind,
-            DebugStream::SectionHeader | DebugStream::OriginalSectionHeader
-        ) {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("the debug stream slot is not a section header slot"));
-        }
-        self.debug_records(dbi, kind)
-    }
-
-    /// Load the token to RID map of the [`DebugStream::TokenRidMap`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::stream_bytes`] and [`RecordStream::parse`].
-    pub fn token_rid_map(&self, dbi: &Dbi) -> Result<Option<TokenRidMap>> {
-        self.debug_records(dbi, DebugStream::TokenRidMap)
-    }
-
-    /// Load the blob of the [`DebugStream::Xdata`] or [`DebugStream::Pdata`] slot, if any.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidFormat`] if `kind` is not a blob slot.
-    /// - The errors of [`Pdb::stream_bytes`] and [`RvaVaBlob::parse`].
-    pub fn debug_blob(&self, dbi: &Dbi, kind: DebugStream) -> Result<Option<RvaVaBlob>> {
-        if !matches!(kind, DebugStream::Xdata | DebugStream::Pdata) {
-            return Err(Error::new(ErrorKind::InvalidFormat, None)
-                .with_context("the debug stream slot is not a blob slot"));
-        }
-        dbi.debug_stream(kind)
-            .map(|id| RvaVaBlob::parse(self.stream_bytes(id)?, id))
-            .transpose()
-    }
-
-    /// Load the section headers and OMAP tables for address translation.
-    ///
-    /// Return `None` if the DBI stream names no [`DebugStream::SectionHeader`]
-    /// stream. Use [`AddressTables::map`] for the translation.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Pdb::section_headers`] and [`Pdb::omap`].
-    pub fn address_tables(&self, dbi: &Dbi) -> Result<Option<AddressTables>> {
-        let Some(sections) = self.section_headers(dbi, DebugStream::SectionHeader)? else {
-            return Ok(None);
-        };
-        Ok(Some(AddressTables {
-            sections,
-            original: self.section_headers(dbi, DebugStream::OriginalSectionHeader)?,
-            to_source: self.omap(dbi, DebugStream::OmapToSource)?,
-            from_source: self.omap(dbi, DebugStream::OmapFromSource)?,
-        }))
-    }
-
-    /// Load the record stream of the `kind` slot of `dbi`, if any.
-    fn debug_records<R: DebugRecord>(
-        &self,
-        dbi: &Dbi,
-        kind: DebugStream,
-    ) -> Result<Option<RecordStream<R>>> {
-        dbi.debug_stream(kind)
-            .map(|id| RecordStream::parse(self.stream_bytes(id)?, id))
-            .transpose()
     }
 }
 
