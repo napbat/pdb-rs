@@ -1142,7 +1142,11 @@ writes the output of `RemovedCode::Drop` to
 6. DIA2Dump on the clean output must give the answers of the OMAP output of the same set. The
    OMAP output keeps the source section and offset, so the command compares the RVA of each
    address only. It also ignores the DIA symbol IDs (`SymIndex` and the properties that end
-   with `Id`) and the PDB name in the `Executable (Global)` line of `-sym`.
+   with `Id`) and the PDB name in the `Executable (Global)` line of `-sym`. `-sym` prints the
+   exception handler of a procedure and the parent of an `S_SEPCODE` scope as a section
+   property and an offset property without an RVA. The command replaces each pair with the
+   new RVA: for the OMAP output, the new RVA of the source address; for the clean output, the
+   RVA in the section headers of the set.
    - `-s` line by line, `-p` and `-g` as sorted lists (their order follows the hash tables).
      An OMAP line with RVA 0 in a section has no clean line: the clean output removed the
      record. In `-s`, the child lines of such a symbol (up to the next empty line or the next
@@ -1170,10 +1174,37 @@ the compared, removed and explained items of checks 6 and 7. The lines
 - A `FuncDebugEnd` line at the end of its procedure. The OMAP output translates the address
   after the procedure through OMAP, so it gets the RVA of the next range (or 0). The clean
   record keeps the offset in the procedure, so DIA gives the new end of the procedure.
+- A `FuncDebugStart` or `FuncDebugEnd` line of a split procedure whose old address is outside
+  the first part. Decision 4 limits the debug start and end to the length of the first part,
+  so the clean line must give the end of the first part. The OMAP line must give the new RVA
+  of an old address in a later part of the procedure.
+- `-sym` at an address in a later part of a split procedure. DIA finds the procedure in the
+  OMAP output, and the `S_SEPCODE` block of the part in the clean output. The clean block must
+  hold the address, the address must be outside the first part, and the parent of the block
+  must be the procedure of the OMAP answer with the length of the first part. The procedure
+  lines of both answers must agree, with the other explained classes.
 - In a PDB without type merging (`NOTM`), DIA stops the `-s` list of a module at the first
   symbol that it cannot read, for example a procedure whose type is in the object file. If the
   clean output removed that symbol, DIA lists more symbols of the module. The extra clean
   lines must end the list of the same module.
+- `-sym` at the address of procedures that share their code (identical COMDAT folding, for
+  example four `scalar deleting destructor` procedures in `msvc-x64-release`). DIA selects one
+  of them, and the selection changes with the record order. The two answers must name two
+  procedures that the OMAP `-s` dump lists at that RVA.
+- DIA gives the length 0 to the public symbol with the highest RVA. The linker PDBs show the
+  same behavior: `-sym` gives the length 0 for `__arm64x_redirection_metadata` in
+  `msvc-arm64ec-debug` and for `__dyn_tls_init_callback` in `msvc-x64-lazy`, although their
+  section contributions have 16 and 8 bytes. A section shift moves `.text` to the end of the
+  image, so in `clang-lld-x64-release` and `clang-flang-lld-x64-primitives` the import thunk
+  `terminate` becomes the last public symbol. The section headers, the section map and the
+  section contribution (6 bytes) of the clean output are correct. The clean answer must be a
+  public symbol (`SymTag` 0xA) at the highest public RVA of the clean `-p` dump.
+- A PGO phase line (`Phase Name: <phase>`, and its `-sym` property) of one output only. DIA
+  takes the phase from the COFF group `<section>$lp<phase>` that holds the procedure. A COFF
+  group is a point (decision 4): the clean group keeps its start and length, so after a
+  reorder it holds other procedures (`msvc-x64-pgo`). The source group must hold the old start
+  of the procedure exactly if the OMAP output prints the line. The clean group must hold the
+  new start exactly if the clean output prints it.
 
 The line `clean outputs: ...` ends the clean part. The last line is `result: pass`, or
 `result: FAIL` with the problems of both parts. The command prints the results at the end, in

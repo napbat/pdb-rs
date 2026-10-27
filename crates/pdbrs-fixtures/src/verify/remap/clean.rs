@@ -35,6 +35,8 @@ use std::path::Path;
 
 use pdbrs::ErrorKind;
 use pdbrs::native::address::{AddressTables, SectionOffset};
+use pdbrs::native::codeview::SymbolKind;
+use pdbrs::native::codeview::symbol::{S_COFFGROUP, Symbol, SymbolData};
 use pdbrs::native::dbi::DebugStream;
 use pdbrs::native::debug_stream::{OmapStream, RvaVaBlob};
 use pdbrs::native::locate::SymbolLocator;
@@ -77,6 +79,8 @@ pub(super) struct Facts {
     frames: Vec<(u32, u32)>,
     /// The code extent of each exception data record, sorted.
     exceptions: Vec<(u32, u32)>,
+    /// The COFF groups (`S_COFFGROUP`), with image RVAs.
+    groups: Vec<Group>,
 }
 
 impl Facts {
@@ -105,6 +109,7 @@ impl Facts {
             procedures: Vec::new(),
             frames: Vec::new(),
             exceptions: Vec::new(),
+            groups: Vec::new(),
         };
         for procedure in locator.procedures() {
             let procedure = procedure.map_err(|error| format!("procedures: {error}"))?;
@@ -128,6 +133,7 @@ impl Facts {
             facts.exceptions = facts.extents(entries);
         }
         facts.procedures.sort_unstable();
+        facts.groups = coff_groups(pdb, |address| facts.section_rva(address))?;
         Ok(facts)
     }
 
@@ -169,6 +175,53 @@ fn covers(extents: &[(u32, u32)], rva: u32) -> bool {
     extents[..end]
         .iter()
         .any(|&(start, length)| rva - start < length)
+}
+
+/// A COFF group (`S_COFFGROUP`): the name, the RVA and the length.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Group {
+    /// The name, for example `.text$lp00demo`.
+    name: Vec<u8>,
+    /// The RVA of the start.
+    start: u32,
+    /// The length in bytes.
+    length: u32,
+}
+
+/// Return the COFF groups of the module symbols of `pdb`. `rva` gives the RVA of a group
+/// address; a group without an RVA does not count.
+fn coff_groups(
+    pdb: &Pdb<&[u8]>,
+    rva: impl Fn(SectionOffset) -> Option<u32>,
+) -> Result<Vec<Group>, String> {
+    let error = |error: pdbrs::Error| format!("pdbrs: {error}");
+    let mut groups = Vec::new();
+    let Some(dbi) = pdb.debug_info().map_err(error)? else {
+        return Ok(groups);
+    };
+    for module in dbi.modules() {
+        let (index, _) = module.map_err(error)?;
+        let Some(stream) = pdb.module(index).map_err(error)? else {
+            continue;
+        };
+        for record in stream.symbols() {
+            let record = record.map_err(error)?;
+            if SymbolKind(record.kind) != S_COFFGROUP {
+                continue;
+            }
+            let symbol = Symbol::decode(record).map_err(error)?;
+            if let SymbolData::CoffGroup(group) = symbol.data()
+                && let Some(start) = rva(group.address)
+            {
+                groups.push(Group {
+                    name: group.name.as_bytes().to_vec(),
+                    start,
+                    length: group.length,
+                });
+            }
+        }
+    }
+    Ok(groups)
 }
 
 /// The results of the consumer tools on the source PDB.
@@ -522,6 +575,15 @@ fn check_tools(tools: &Tools, baseline: &Baseline, path: &Path, result: &mut Set
     }
 }
 
+/// Return the RVA of `address` in the section headers of `set`.
+fn set_rva(set: &RangeSet, address: SectionOffset) -> Option<u32> {
+    let index = usize::from(address.section).checked_sub(1)?;
+    set.sections
+        .get(index)?
+        .virtual_address
+        .checked_add(address.offset)
+}
+
 /// Compare the clean output at `path` with the OMAP output.
 fn compare(
     tools: &Tools,
@@ -541,14 +603,22 @@ fn compare(
             DIA_PROCEDURES,
             &mut Tally::default(),
         );
-        let context = dia::Context {
-            dia2dump: &tools.dia2dump,
-            set,
-            omap: omap.path,
-            lazy: source.lazy,
-            clean: path,
-        };
-        if let Err(error) = dia::compare(&context, dumps, &samples, &source.facts.frames, tally) {
+        let groups = Pdb::parse(clean)
+            .map_err(|error| format!("pdbrs: {error}"))
+            .and_then(|pdb| coff_groups(&pdb, |address| set_rva(set, address)));
+        let compared = groups.and_then(|groups| {
+            let context = dia::Context {
+                dia2dump: &tools.dia2dump,
+                set,
+                omap: omap.path,
+                lazy: source.lazy,
+                clean: path,
+                facts: &source.facts,
+                clean_groups: &groups,
+            };
+            dia::compare(&context, dumps, &samples, &source.facts.frames, tally)
+        });
+        if let Err(error) = compared {
             result.problems.push(error);
         }
     } else {

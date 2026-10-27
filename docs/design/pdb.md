@@ -502,7 +502,7 @@ The opaque checks of the other edits that move records apply too.
 Caution: the new image matches the output only after the caller writes `PdbWritePlan::identity` into the `RSDS` debug entry of the image. The editor does not reject `IdentityPolicy::Preserve`.
 Use `IdentityPolicy::IncrementAge` or `IdentityPolicy::Replace` for a remap: the output describes another image.
 
-`verify-remap` writes the OMAP output of 5 range sets for each native fixture and compares it with DIA2Dump and `pdbtool` (see `fixtures/README.md`). The `native_remap` fuzz target compares OMAP output and clean output on a synthetic PDB (see [Fuzzing](../fuzzing.md)).
+`verify-remap` writes the OMAP output and the clean output of 5 range sets for each native fixture. It compares the OMAP output with DIA2Dump and `pdbtool`. It compares the clean output with the OMAP output through DIA2Dump and `SymbolLocator`, and checks it with `pdbtool` and `llvm-pdbutil` (see `fixtures/README.md`). The `native_remap` fuzz target compares OMAP output and clean output on a synthetic PDB (see [Fuzzing](../fuzzing.md)).
 
 ```sh
 cargo run -p pdbrs-fixtures --release -- verify-remap

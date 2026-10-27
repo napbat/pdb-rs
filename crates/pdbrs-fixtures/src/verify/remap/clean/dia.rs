@@ -21,53 +21,33 @@
 //! which DIA gives in the order of its symbol creation. It replaces the PDB name in the
 //! `Executable (Global)` line, because the two outputs have other file names.
 //!
-//! Explained differences:
+//! `-sym` also prints addresses as a section property and an offset property without an RVA
+//! (the exception handler of a procedure and the parent of an `S_SEPCODE` scope). The check
+//! replaces each pair with the new RVA ([`properties`]). For the OMAP output, that is the new
+//! RVA of the source address; for the clean output, the RVA in the section headers of the
+//! set.
 //!
-//! - [`SEPARATED`]: a `Block` line of the clean output without an OMAP line. DIA shows an
-//!   `S_SEPCODE` scope as a block, and the clean output adds one for each part of a split
-//!   procedure after the first one.
-//! - [`SPLIT`]: the lines are equal except for the length, the clean length is smaller and a
-//!   range boundary cuts the extent of the OMAP line. The clean record describes a part.
-//! - [`DEBUG_END`]: a `FuncDebugEnd` line at the end of its procedure. The OMAP output
-//!   translates the address after the procedure through OMAP, so it gets the RVA of another
-//!   range (or 0). The clean output keeps the offset in the procedure, so it gets the new end
-//!   of the procedure.
-//! - [`LAZY`]: in a PDB without type merging (`NOTM`), DIA stops the `-s` list of a module
-//!   at the first symbol that it cannot read (a procedure whose type is in the object file).
-//!   If the clean output removed that symbol, DIA lists more symbols of the module. The
-//!   extra clean lines must end the list of the same module.
-//!
-//! `DIA2Dump` stops at the first query without an answer (for example `-fpo` at an address
-//! without frame data) and exits with -1. The check then counts that query as one without an
-//! answer and runs the queries after it again.
+//! [`classes`] gives the explained differences, and [`query`] runs the address queries.
+
+mod classes;
+mod properties;
+mod query;
 
 use std::fmt::Write as _;
-use std::iter;
 use std::path::Path;
 
-use super::super::super::native::consumers::dia2dump;
+use pdbrs::native::address::SectionOffset;
+
+use self::classes::{
+    COFF_GROUP, Evidence, FOLDED, LAST_PUBLIC, LAZY, SEPARATED, SEPARATED_PART, SPLIT, Scope,
+    debug_bound, folded, group_phase, is_debug_end, last_public, lazy_extra, separated_part,
+    split_extent,
+};
+use self::properties::normalize_answers;
+use self::query::{Split, query};
 use super::super::dia::{OmapDumps, next_address, run};
 use super::super::ranges::RangeSet;
-use super::{Sample, Tally, covers};
-
-/// The number of queries in one `DIA2Dump` run.
-const QUERY_BATCH: usize = 500;
-
-/// The exit code of `DIA2Dump` after a query without an answer: `wmain` returns -1.
-const STOPPED: i32 = -1;
-
-/// The class of a separated code block of the clean output without an OMAP line.
-pub(super) const SEPARATED: &str = "a separated code block of the clean output has no OMAP line";
-
-/// The class of a split record whose clean line gives the length of a part.
-pub(super) const SPLIT: &str = "the clean output gives the length of a part of a split record";
-
-/// The class of a `FuncDebugEnd` line at the end of its procedure.
-pub(super) const DEBUG_END: &str =
-    "a FuncDebugEnd at the end of its procedure: OMAP translates the address after the procedure";
-
-/// The class of the extra symbols of a module list in a PDB without type merging.
-pub(super) const LAZY: &str = "DIA lists more symbols of a /DEBUG:LAZY (NOTM) module after a removed symbol that it cannot read";
+use super::{Facts, Group, Sample, Tally, covers, set_rva};
 
 /// The tool and the outputs of one comparison.
 #[derive(Clone, Copy, Debug)]
@@ -82,6 +62,10 @@ pub(super) struct Context<'a> {
     pub clean: &'a Path,
     /// `true` for a PDB without type merging (feature `NOTM`, `link /DEBUG:LAZY`).
     pub lazy: bool,
+    /// The facts of the source PDB.
+    pub facts: &'a Facts,
+    /// The COFF groups of the clean output, with new RVAs.
+    pub clean_groups: &'a [Group],
 }
 
 /// An address in a `DIA2Dump` line.
@@ -188,11 +172,6 @@ fn is_function(line: &str) -> bool {
     line.split([' ', ':']).next() == Some("Function")
 }
 
-/// Return `true` for a `FuncDebugEnd` line.
-fn is_debug_end(line: &str) -> bool {
-    line.split([' ', ':']).next() == Some("FuncDebugEnd")
-}
-
 /// Return the new RVA and the length of a normalized `Function` line.
 fn procedure(line: &str) -> Option<(u32, u64)> {
     if !is_function(line) {
@@ -240,46 +219,6 @@ fn length(line: &str) -> Option<(usize, usize, u64)> {
     Some((start, start + digits, value))
 }
 
-/// Return `true` if the normalized lines `omap` and `clean` differ only in a smaller clean
-/// length, and a range boundary cuts the extent of the OMAP line. `start` is the new RVA of
-/// the extent if the line has none.
-fn split_extent(omap: &str, clean: &str, start: Option<u32>, set: &RangeSet) -> bool {
-    let (Some((a0, a1, omap_length)), Some((b0, b1, clean_length))) = (length(omap), length(clean))
-    else {
-        return false;
-    };
-    if clean_length >= omap_length || omap[..a0] != clean[..b0] || omap[a1..] != clean[b1..] {
-        return false;
-    }
-    let Some(old) = first_rva(omap).or(start).and_then(|new| set.old(new)) else {
-        return false;
-    };
-    u32::try_from(omap_length).is_ok_and(|length| set.cuts(old, length))
-}
-
-/// Return `true` if the normalized lines `omap` and `clean` are `FuncDebugEnd` lines at the
-/// end of `procedure` (new RVA and length) that differ only in the RVA. The clean line has
-/// the end of the procedure. The OMAP line has the new RVA of the old address after the
-/// procedure, which another range (or no range, RVA 0) gives.
-fn debug_end(omap: &str, clean: &str, procedure: Option<(u32, u64)>, set: &RangeSet) -> bool {
-    let (Some((start, length)), Some(x), Some(y)) = (procedure, first_rva(omap), first_rva(clean))
-    else {
-        return false;
-    };
-    if !is_debug_end(omap)
-        || omap.replacen(&format!("[{x:08X}]"), "", 1)
-            != clean.replacen(&format!("[{y:08X}]"), "", 1)
-        || u64::from(y) != u64::from(start) + length
-    {
-        return false;
-    }
-    let after = set
-        .old(start)
-        .zip(u32::try_from(length).ok())
-        .and_then(|(old, length)| old.checked_add(length));
-    after.is_some_and(|after| set.map(after).unwrap_or(0) == x)
-}
-
 /// Count an equal line as compared if it has an address.
 fn count(line: &str, tally: &mut Tally) {
     if first_rva(line).is_some() {
@@ -287,38 +226,21 @@ fn count(line: &str, tally: &mut Tally) {
     }
 }
 
-/// Return the number of the lines of `clean` from `j` that [`LAZY`] explains, or `None`.
-///
-/// The OMAP output must end the list of a module at `omap[i]`: an empty line before the next
-/// module or at the end of the output. The clean output must end the same list later, before
-/// the same next line.
-fn lazy_extra(omap: &[String], i: usize, clean: &[String], j: usize) -> Option<usize> {
-    if omap.get(i).is_none_or(|line| !line.is_empty()) {
-        return None;
-    }
-    let next = omap.get(i + 1);
-    if next.is_some_and(|line| !line.starts_with("** Module: ")) {
-        return None;
-    }
-    (j..clean.len())
-        .find(|&k| clean[k].is_empty() && clean.get(k + 1) == next)
-        .map(|k| k - j)
-}
-
-/// Compare the normalized lines of `DIA2Dump -s` in order. `lazy` is `true` for a PDB without
-/// type merging (see [`LAZY`]).
+/// Compare the normalized lines of `DIA2Dump -s` in order.
 fn merge_ordered(
     command: &str,
     omap: &[String],
     clean: &[String],
-    (set, lazy): (&RangeSet, bool),
+    evidence: &Evidence<'_>,
     tally: &mut Tally,
 ) {
+    let set = evidence.set;
     let (mut i, mut j) = (0, 0);
-    // The new RVA and length of the last equal `Function` line.
-    let mut scope = None;
+    // The procedure of the last equal or split `Function` line.
+    let mut scope: Option<Scope> = None;
+    let start = |scope: Option<Scope>| scope.map(|scope| scope.start);
     loop {
-        if lazy
+        if evidence.lazy
             && omap.get(i) != clean.get(j)
             && let Some(extra) = lazy_extra(omap, i, clean, j)
         {
@@ -333,7 +255,7 @@ fn merge_ordered(
             (Some(x), Some(y)) if x == y => {
                 count(x, tally);
                 if is_function(x) {
-                    scope = procedure(x);
+                    scope = classes::scope(x, y);
                 }
                 i += 1;
                 j += 1;
@@ -342,20 +264,31 @@ fn merge_ordered(
                 tally.explain(SEPARATED);
                 j += 1;
             }
+            (Some(x), _) if group_phase(x, start(scope), true, evidence) => {
+                tally.explain(COFF_GROUP);
+                i += 1;
+            }
+            (_, Some(y)) if group_phase(y, start(scope), false, evidence) => {
+                tally.explain(COFF_GROUP);
+                j += 1;
+            }
             (Some(x), Some(y)) => {
                 if split_extent(x, y, None, set) {
                     tally.compared += 1;
                     tally.explain(SPLIT);
-                } else if debug_end(x, y, scope, set) {
+                    if is_function(x) {
+                        scope = classes::scope(x, y);
+                    }
+                } else if let Some(class) = debug_bound(x, y, scope, set) {
                     tally.compared += 1;
-                    tally.explain(DEBUG_END);
+                    tally.explain(class);
                 } else {
                     tally.push(|| {
                         format!("DIA2Dump {command}: the clean output prints `{y}`, the OMAP output `{x}`")
                     });
-                }
-                if is_function(x) {
-                    scope = None;
+                    if is_function(x) {
+                        scope = None;
+                    }
                 }
                 i += 1;
                 j += 1;
@@ -377,7 +310,7 @@ fn merge_sorted(
     command: &str,
     omap: &[String],
     clean: &[String],
-    set: &RangeSet,
+    evidence: &Evidence<'_>,
     tally: &mut Tally,
 ) {
     let (mut left, mut right) = (Vec::new(), Vec::new());
@@ -410,7 +343,7 @@ fn merge_sorted(
     });
     for index in 0..left.len().max(right.len()) {
         match (left.get(index), right.get(index)) {
-            (Some(x), Some(y)) if split_extent(x, y, None, set) => {
+            (Some(x), Some(y)) if split_extent(x, y, None, evidence.set) => {
                 tally.compared += 1;
                 tally.explain(SPLIT);
             }
@@ -421,13 +354,12 @@ fn merge_sorted(
     }
 }
 
-/// Compare one symbol dump command of the OMAP output and the clean output. `lazy` is `true`
-/// for a PDB without type merging.
+/// Compare one symbol dump command of the OMAP output and the clean output.
 fn compare_dump(
     command: &str,
     omap: &[String],
     clean: &[String],
-    (set, lazy): (&RangeSet, bool),
+    evidence: &Evidence<'_>,
     tally: &mut Tally,
 ) {
     let ordered = command == "-s";
@@ -444,7 +376,7 @@ fn compare_dump(
                 continue;
             }
         }
-        // The address after a procedure can have no range; `debug_end` compares that line.
+        // The address after a procedure can have no range; `debug_bound` compares that line.
         if unmapped(line) && !(ordered && is_debug_end(line)) {
             tally.removed += 1;
             if ordered {
@@ -460,115 +392,12 @@ fn compare_dump(
     }
     let mut clean: Vec<String> = clean.iter().filter_map(|line| normalize(line)).collect();
     if ordered {
-        merge_ordered(command, &kept, &clean, (set, lazy), tally);
+        merge_ordered(command, &kept, &clean, evidence, tally);
     } else {
         kept.sort_unstable();
         clean.sort_unstable();
-        merge_sorted(command, &kept, &clean, set, tally);
+        merge_sorted(command, &kept, &clean, evidence, tally);
     }
-}
-
-/// How `DIA2Dump` separates the answers of one query kind.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Split {
-    /// An empty line ends each answer (`-l`, `-fpo`).
-    EmptyLine,
-    /// A `Displacement = ` line starts each answer (`-sym`).
-    Displacement,
-}
-
-/// Split the output of a query run into the complete answers and the lines after them, or
-/// return `None` for an output that does not have the form.
-fn split_answers<'a>(
-    lines: impl Iterator<Item = &'a str>,
-    split: Split,
-) -> Option<(Vec<Vec<String>>, Vec<String>)> {
-    let mut answers = Vec::new();
-    let mut answer: Vec<String> = Vec::new();
-    match split {
-        Split::EmptyLine => {
-            for line in lines {
-                if line.is_empty() {
-                    answers.push(std::mem::take(&mut answer));
-                } else {
-                    answer.push(line.to_owned());
-                }
-            }
-            Some((answers, answer))
-        }
-        Split::Displacement => {
-            let mut started = false;
-            for line in lines {
-                if line.starts_with("Displacement = ") {
-                    if started {
-                        answers.push(std::mem::take(&mut answer));
-                    }
-                    started = true;
-                } else if !started && !line.is_empty() {
-                    return None;
-                }
-                if started {
-                    answer.push(line.to_owned());
-                }
-            }
-            if started {
-                answers.push(answer);
-            }
-            Some((answers, Vec::new()))
-        }
-    }
-}
-
-/// Return the answers of the query `option <rva> extra...` for each RVA of `rvas` on `pdb`
-/// (`None` for a query without an answer).
-///
-/// One `DIA2Dump` run takes up to [`QUERY_BATCH`] queries. A run that stops at a query
-/// without an answer (exit code [`STOPPED`]) gives the complete answers of the queries
-/// before it. The next run starts after that query.
-fn query(
-    context: &Context<'_>,
-    query: (&str, &[&str], Split),
-    rvas: &[u32],
-    pdb: &Path,
-) -> Result<Vec<Option<Vec<String>>>, String> {
-    let (option, extra, split) = query;
-    let mut answers = Vec::with_capacity(rvas.len());
-    while answers.len() < rvas.len() {
-        let start = answers.len();
-        let batch = &rvas[start..rvas.len().min(start + QUERY_BATCH)];
-        let arguments: Vec<String> = batch
-            .iter()
-            .flat_map(|rva| {
-                iter::once(option.to_owned())
-                    .chain(iter::once(format!("0{rva:X}")))
-                    .chain(extra.iter().map(|&argument| argument.to_owned()))
-            })
-            .collect();
-        let run = dia2dump(context.dia2dump, &arguments, pdb)?;
-        match split_answers(run.text.lines(), split) {
-            Some((parts, rest))
-                if run.success() && rest.is_empty() && parts.len() == batch.len() =>
-            {
-                answers.extend(parts.into_iter().map(Some));
-            }
-            // The query after the complete answers has no answer. A stopped `-fpo` query
-            // prints an error line.
-            Some((parts, _)) if run.code == Some(STOPPED) && parts.len() < batch.len() => {
-                answers.extend(parts.into_iter().map(Some));
-                answers.push(None);
-            }
-            _ => {
-                return Err(format!(
-                    "DIA2Dump {option} with {} queries on {} gives an output without the answer form (exit {:?}): {}",
-                    batch.len(),
-                    pdb.display(),
-                    run.code,
-                    crate::step::last_lines(&run.text, 3)
-                ));
-            }
-        }
-    }
-    Ok(answers)
 }
 
 /// Return the new RVA of the record of an answer: the first address, or the RVA property.
@@ -585,62 +414,112 @@ fn answer_rva(lines: &[String]) -> Option<u32> {
     })
 }
 
-/// Return the class of the explained differences of two normalized answers with the same
-/// number of lines, or `None` if a difference has no explanation. [`SPLIT`] goes before
-/// [`DEBUG_END`].
-fn explain_answer(omap: &[String], clean: &[String], set: &RangeSet) -> Option<&'static str> {
+/// Return the classes of the explained differences of two normalized answers, or `None` if
+/// a difference has no explanation.
+fn explain_answer(
+    omap: &[String],
+    clean: &[String],
+    evidence: &Evidence<'_>,
+) -> Option<Vec<&'static str>> {
+    let set = evidence.set;
     let start = answer_rva(omap);
-    // The new RVA and length of the last equal `Function` line.
-    let mut scope = None;
-    let mut class = None;
-    for (x, y) in omap.iter().zip(clean) {
-        if x == y {
-            if is_function(x) {
-                scope = procedure(x);
+    let clean_rva = answer_rva(clean);
+    // The procedure of the answer, for the phase lines of `-sym`.
+    let function = clean
+        .iter()
+        .find_map(|line| procedure(line).map(|(rva, _)| rva));
+    let mut scope: Option<Scope> = None;
+    let mut found = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    loop {
+        match (omap.get(i), clean.get(j)) {
+            (None, None) => break,
+            (Some(x), Some(y)) if x == y => {
+                if is_function(x) {
+                    scope = classes::scope(x, y);
+                }
+                i += 1;
+                j += 1;
             }
-        } else if split_extent(x, y, start, set) {
-            class = Some(SPLIT);
-        } else if debug_end(x, y, scope, set) {
-            class = class.or(Some(DEBUG_END));
-        } else {
-            return None;
+            (_, Some(y)) if is_separated(y) => {
+                found.push(SEPARATED);
+                j += 1;
+            }
+            (Some(x), _) if group_phase(x, function, true, evidence) => {
+                found.push(COFF_GROUP);
+                i += 1;
+            }
+            (_, Some(y)) if group_phase(y, function, false, evidence) => {
+                found.push(COFF_GROUP);
+                j += 1;
+            }
+            (Some(x), Some(y)) => {
+                if split_extent(x, y, start, set) {
+                    found.push(SPLIT);
+                    if is_function(x) {
+                        scope = classes::scope(x, y);
+                    }
+                } else if let Some(class) = debug_bound(x, y, scope, set) {
+                    found.push(class);
+                } else if last_public(x, y, (clean, clean_rva), evidence) {
+                    found.push(LAST_PUBLIC);
+                } else {
+                    return None;
+                }
+                i += 1;
+                j += 1;
+            }
+            _ => return None,
         }
     }
-    class
+    Some(found)
 }
 
-/// Compare the answers of the query `option` at each RVA of `rvas`.
+/// The answers of a query at each RVA (`None` for a query without an answer).
+type Answers = [Option<Vec<String>>];
+
+/// Compare the normalized answers of the query `option` at each RVA of `rvas`.
 fn compare_answers(
     option: &str,
     rvas: &[u32],
-    omap: &[Option<Vec<String>>],
-    clean: &[Option<Vec<String>>],
-    set: &RangeSet,
+    (omap, clean): (&Answers, &Answers),
+    evidence: &Evidence<'_>,
     tally: &mut Tally,
 ) {
-    let normalized = |answer: &Option<Vec<String>>| {
-        answer.as_ref().map(|lines| {
-            lines
-                .iter()
-                .filter_map(|line| normalize(line))
-                .collect::<Vec<_>>()
-        })
-    };
     for ((rva, omap), clean) in rvas.iter().zip(omap).zip(clean) {
         tally.compared += 1;
-        let (omap, clean) = (normalized(omap), normalized(clean));
         if omap == clean {
             continue;
         }
-        if let (Some(x), Some(y)) = (&omap, &clean)
-            && x.len() == y.len()
-            && let Some(class) = explain_answer(x, y, set)
-        {
-            tally.explain(class);
-            continue;
+        if let (Some(x), Some(y)) = (omap, clean) {
+            if folded(x, y, evidence) {
+                tally.explain(FOLDED);
+                continue;
+            }
+            // The procedure lines of both answers (from the `Function` line) must agree.
+            let tail = |answer: &[String]| {
+                let at = answer.iter().position(|line| is_function(line));
+                at.map_or(0, |at| answer.len() - at)
+            };
+            let (x_tail, y_tail) = (&x[x.len() - tail(x)..], &y[y.len() - tail(y)..]);
+            if separated_part(*rva, x, y, evidence.set)
+                && let Some(classes) = explain_answer(x_tail, y_tail, evidence)
+            {
+                tally.explain(SEPARATED_PART);
+                for class in classes {
+                    tally.explain(class);
+                }
+                continue;
+            }
+            if let Some(classes) = explain_answer(x, y, evidence) {
+                for class in classes {
+                    tally.explain(class);
+                }
+                continue;
+            }
         }
         tally.push(|| {
-            let (x, y) = match (&omap, &clean) {
+            let (x, y) = match (omap, clean) {
                 (Some(x), Some(y)) => {
                     let index = x.iter().zip(y).take_while(|(x, y)| x == y).count();
                     (x.get(index).cloned(), y.get(index).cloned())
@@ -655,6 +534,17 @@ fn compare_answers(
             )
         });
     }
+}
+
+/// Return the highest RVA of a public symbol in the lines of `DIA2Dump -p`. The absolute
+/// symbols (RVA `0xFFFFFFFF`) do not count.
+fn last_public_rva(lines: &[String]) -> Option<u32> {
+    lines
+        .iter()
+        .filter(|line| line.starts_with("PublicSymbol:"))
+        .filter_map(|line| addresses(line).first().map(|address| address.rva))
+        .filter(|&rva| rva != 0 && rva != u32::MAX)
+        .max()
 }
 
 /// Compare the `DIA2Dump` answers of the clean output with the OMAP output. `samples` are
@@ -672,10 +562,24 @@ pub(super) fn compare(
     tally: &mut Tally,
 ) -> Result<(), String> {
     let set = context.set;
+    let mut evidence = Evidence::new(set, context.lazy);
+    evidence.source_groups = &context.facts.groups;
+    evidence.clean_groups = context.clean_groups;
     for (command, omap) in &dumps.symbols {
         let clean = run(context.dia2dump, &[(*command).to_owned()], context.clean)?;
-        compare_dump(command, omap, &clean, (set, context.lazy), tally);
+        match *command {
+            "-s" => {
+                let lines: Vec<String> = omap.iter().filter_map(|line| normalize(line)).collect();
+                evidence.add_functions(&lines);
+            }
+            "-p" => evidence.last_public = last_public_rva(&clean),
+            _ => {}
+        }
+        compare_dump(command, omap, &clean, &evidence, tally);
     }
+    let facts = context.facts;
+    let omap_rva = |address: SectionOffset| facts.section_rva(address).and_then(|old| set.map(old));
+    let clean_rva = |address: SectionOffset| set_rva(set, address);
     let lines = ("-l", &["1"][..], Split::EmptyLine);
     let rvas: Vec<u32> = dumps.lines.iter().map(|(rva, _)| *rva).collect();
     let omap: Vec<Option<Vec<String>>> = dumps
@@ -684,12 +588,20 @@ pub(super) fn compare(
         .map(|(_, answer)| Some(answer.clone()))
         .collect();
     let clean = query(context, lines, &rvas, context.clean)?;
-    compare_answers("-l", &rvas, &omap, &clean, set, tally);
+    let answers = (
+        &normalize_answers(&omap, &omap_rva)[..],
+        &normalize_answers(&clean, &clean_rva)[..],
+    );
+    compare_answers("-l", &rvas, answers, &evidence, tally);
     let symbols = ("-sym", &[][..], Split::Displacement);
     let rvas: Vec<u32> = samples.iter().map(|sample| sample.new).collect();
     let omap = query(context, symbols, &rvas, context.omap)?;
     let clean = query(context, symbols, &rvas, context.clean)?;
-    compare_answers("-sym", &rvas, &omap, &clean, set, tally);
+    let answers = (
+        &normalize_answers(&omap, &omap_rva)[..],
+        &normalize_answers(&clean, &clean_rva)[..],
+    );
+    compare_answers("-sym", &rvas, answers, &evidence, tally);
     let frame_data = ("-fpo", &[][..], Split::EmptyLine);
     let rvas: Vec<u32> = samples
         .iter()
@@ -698,13 +610,18 @@ pub(super) fn compare(
         .collect();
     let omap = query(context, frame_data, &rvas, context.omap)?;
     let clean = query(context, frame_data, &rvas, context.clean)?;
-    compare_answers("-fpo", &rvas, &omap, &clean, set, tally);
+    let answers = (
+        &normalize_answers(&omap, &omap_rva)[..],
+        &normalize_answers(&clean, &clean_rva)[..],
+    );
+    compare_answers("-fpo", &rvas, answers, &evidence, tally);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::super::ranges::{Range, SetKind};
+    use super::classes::{DEBUG_END, DEBUG_PART};
     use super::*;
 
     /// 0x1000 to 0x1010 moves to 0x5000; 0x1010 to 0x1020 moves to 0x4000.
@@ -729,6 +646,14 @@ mod tests {
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|&line| line.to_owned()).collect()
+    }
+
+    /// Compare the dump `command` with the evidence of [`set`] and return the tally.
+    fn dump(command: &str, omap: &[String], clean: &[String], lazy: bool) -> Tally {
+        let set = set();
+        let mut tally = Tally::default();
+        compare_dump(command, omap, clean, &Evidence::new(&set, lazy), &mut tally);
+        tally
     }
 
     #[test]
@@ -756,6 +681,10 @@ mod tests {
             normalize("Executable (Global): removal.clean").unwrap(),
             normalize("Executable (Global): removal").unwrap()
         );
+        assert_eq!(
+            answer_rva(&lines(&["   RelativeVirtualAddress:\t 0x5000"])),
+            Some(0x5000)
+        );
     }
 
     #[test]
@@ -765,30 +694,14 @@ mod tests {
             "PublicSymbol: [00000000][0000:00000000] absolute"
         ));
         assert!(!unmapped("PublicSymbol: [00005000][0001:00000000] f"));
-    }
-
-    #[test]
-    fn a_shorter_clean_length_of_a_split_record_is_explained() {
-        let omap = "Function       : static, [00005000], len = 00000020, f";
-        let clean = "Function       : static, [00005000], len = 00000010, f";
-        assert!(split_extent(omap, clean, None, &set()));
-        // A longer clean length or another name is a difference.
-        assert!(!split_extent(clean, omap, None, &set()));
-        assert!(!split_extent(
-            omap,
-            &clean.replace(", f", ", g"),
-            None,
-            &set()
-        ));
-        // The record at 0x4000 (old 0x1010) is not split.
-        let omap = "Block : static, [00004000], len = 00000010, (none)";
-        let clean = "Block : static, [00004000], len = 00000008, (none)";
-        assert!(!split_extent(omap, clean, None, &set()));
-        // A property length takes the start from the answer.
-        let omap = "                          Length:\t 0x20";
-        let clean = "                          Length:\t 0x10";
-        assert!(split_extent(omap, clean, Some(0x5000), &set()));
-        assert!(!split_extent(omap, clean, None, &set()));
+        assert_eq!(
+            last_public_rva(&lines(&[
+                "PublicSymbol: [00005000][0001:00000000] a",
+                "PublicSymbol: [FFFFFFFF][0003:00000100] absolute",
+                "PublicSymbol: [00004000][0002:00000000] b",
+            ])),
+            Some(0x5000)
+        );
     }
 
     #[test]
@@ -808,8 +721,7 @@ mod tests {
             "Block          :   static, [00006000][0002:00002000], len = 00000004, (none)",
             "",
         ]);
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), false), &mut tally);
+        let tally = dump("-s", &omap, &clean, false);
         assert_eq!(tally.removed, 3);
         assert_eq!(tally.compared, 1);
         assert_eq!(tally.explained.get(SEPARATED), Some(&1));
@@ -851,8 +763,7 @@ mod tests {
             "Data           :   rsp Relative, [00000008], Param, Type: int, x",
             "Data           : static, [00004100][0003:00000000], Global, Type: int, z",
         ]);
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), false), &mut tally);
+        let tally = dump("-s", &omap, &clean, false);
         assert_eq!(tally.differences, 0, "{:?}", tally.shown);
         // The kept function and the lines `[00000008]` and `[00004100]` have an address.
         assert_eq!((tally.removed, tally.compared), (6, 3));
@@ -875,23 +786,18 @@ mod tests {
             "Data           : static, [00004100][0003:00000000], Global, z".to_owned(),
         );
         clean.insert(5, "Typedef        : size_t".to_owned());
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), true), &mut tally);
+        let tally = dump("-s", &omap, &clean, true);
         assert_eq!(tally.differences, 0, "{:?}", tally.shown);
         assert_eq!(tally.explained.get(LAZY), Some(&2));
         // Only a PDB without type merging has the class.
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), false), &mut tally);
-        assert!(tally.differences > 0);
+        assert!(dump("-s", &omap, &clean, false).differences > 0);
         // Extra lines inside the list of a module are a difference.
         clean.swap(3, 5);
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), true), &mut tally);
-        assert!(tally.differences > 0);
+        assert!(dump("-s", &omap, &clean, true).differences > 0);
     }
 
     #[test]
-    fn a_debug_end_after_the_procedure_is_explained() {
+    fn debug_bounds_of_a_procedure_are_explained() {
         // The procedure at old 0x1010 (new 0x4000) has 0x10 bytes. The old address after it,
         // 0x1020, has no range.
         let function = "Function       : static, [00004000][0001:00000010], len = 00000010, f";
@@ -905,39 +811,99 @@ mod tests {
             function,
             "FuncDebugEnd   :   static, [00004010][0002:00000010]",
         ]);
-        let mut tally = Tally::default();
-        compare_dump("-s", &omap, &clean, (&set(), false), &mut tally);
+        let tally = dump("-s", &omap, &clean, false);
         assert_eq!(tally.differences, 0, "{:?}", tally.shown);
         assert_eq!(tally.explained.get(DEBUG_END), Some(&1));
-        // The old address after the procedure at old 0x1000 (new 0x5000) is 0x1010, which
-        // has the new RVA 0x4000.
-        let scope = Some((0x5000, 0x10));
-        let omap = "FuncDebugEnd   :   static, [00004000]";
-        assert!(debug_end(
-            omap,
-            "FuncDebugEnd   :   static, [00005010]",
-            scope,
-            &set()
-        ));
-        // Another RVA in the clean output is a difference.
-        assert!(!debug_end(
-            omap,
-            "FuncDebugEnd   :   static, [0000500F]",
-            scope,
-            &set()
-        ));
-        assert!(!debug_end(
-            omap,
-            "FuncDebugStart :   static, [00005010]",
-            scope,
-            &set()
-        ));
-        assert!(!debug_end(
-            omap,
-            "FuncDebugEnd   :   static, [00005010]",
-            None,
-            &set()
-        ));
+        // The procedure at old 0x1000 has 0x20 bytes and splits: the clean record has the
+        // first part (0x10 bytes at 0x5000). The old debug start 0x1014 is in the second
+        // part.
+        let omap = lines(&[
+            "",
+            "Function       : static, [00005000][0001:00000000], len = 00000020, g",
+            "FuncDebugStart :   static, [00004004][0001:00000014]",
+        ]);
+        let clean = lines(&[
+            "",
+            "Function       : static, [00005000][0002:00000000], len = 00000010, g",
+            "FuncDebugStart :   static, [00005010][0002:00000010]",
+        ]);
+        let tally = dump("-s", &omap, &clean, false);
+        assert_eq!(tally.differences, 0, "{:?}", tally.shown);
+        assert_eq!(tally.explained.get(SPLIT), Some(&1));
+        assert_eq!(tally.explained.get(DEBUG_PART), Some(&1));
+    }
+
+    #[test]
+    fn a_phase_line_of_a_procedure_that_left_its_group_is_explained() {
+        // The source group holds old 0x1000..0x1020; the clean group starts at 0x5000 and
+        // keeps its length, so it does not hold the procedure at new 0x4000.
+        let source = [Group {
+            name: b".text$lp00demo".to_vec(),
+            start: 0x1000,
+            length: 0x20,
+        }];
+        let clean_groups = [Group {
+            name: b".text$lp00demo".to_vec(),
+            start: 0x5000,
+            length: 0x20,
+        }];
+        let set = set();
+        let mut evidence = Evidence::new(&set, false);
+        evidence.source_groups = &source;
+        evidence.clean_groups = &clean_groups;
+        let function = "Function       : static, [00004000][0001:00000010], len = 00000010, f";
+        let omap = lines(&[
+            "",
+            function,
+            "                 Phase Name: 00demo",
+            "FuncDebugStart :   static, [00004000][0001:00000010]",
+        ]);
+        let clean = lines(&[
+            "",
+            function,
+            "FuncDebugStart :   static, [00004000][0002:00000000]",
+        ]);
+        let mut tally = Tally::default();
+        compare_dump("-s", &omap, &clean, &evidence, &mut tally);
+        assert_eq!(tally.differences, 0, "{:?}", tally.shown);
+        assert_eq!(tally.explained.get(COFF_GROUP), Some(&1));
+        // Without the group change, the missing line is a difference.
+        assert!(dump("-s", &omap, &clean, false).differences > 0);
+    }
+
+    #[test]
+    fn answers_explain_folded_procedures_and_the_last_public_symbol() {
+        let set = set();
+        let mut evidence = Evidence::new(&set, false);
+        let f = "Function       : static, [00005000], len = 00000010, f";
+        let g = "Function       : static, [00005000], len = 00000010, g";
+        evidence.add_functions(&lines(&[f, g]));
+        evidence.last_public = Some(0x5000);
+        let rvas = [0x5000, 0x5000, 0x5000];
+        let public = |length: &str| {
+            Some(lines(&[
+                "Displacement = 0x0",
+                "                          SymTag:\t 0xA",
+                "          RelativeVirtualAddress:\t 0x5000",
+                &format!("                          Length:\t {length}"),
+            ]))
+        };
+        let omap = [
+            Some(lines(&["Displacement = 0x1", f])),
+            public("0x6"),
+            public("0x6"),
+        ];
+        let clean = [
+            Some(lines(&["Displacement = 0x1", g])),
+            public("0x0"),
+            public("0x2"),
+        ];
+        let mut tally = Tally::default();
+        compare_answers("-sym", &rvas, (&omap, &clean), &evidence, &mut tally);
+        assert_eq!(tally.explained.get(FOLDED), Some(&1));
+        assert_eq!(tally.explained.get(LAST_PUBLIC), Some(&1));
+        // Only the length 0 has the explanation.
+        assert_eq!(tally.differences, 1, "{:?}", tally.shown);
     }
 
     #[test]
@@ -951,43 +917,10 @@ mod tests {
             "PublicSymbol: [00005000][0002:00001000] a",
             "PublicSymbol: [00004004][0002:00000004] b",
         ]);
-        let mut tally = Tally::default();
-        compare_dump("-p", &omap, &clean, (&set(), false), &mut tally);
+        let tally = dump("-p", &omap, &clean, false);
         assert_eq!(
             (tally.compared, tally.removed, tally.differences),
             (1, 1, 1)
-        );
-    }
-
-    #[test]
-    fn answers_split_at_their_separators() {
-        let text = "\tline 1 at [00001000][0001:00000000]\n\n\tline 2\n\tline 3\n\n";
-        let (answers, rest) = split_answers(text.lines(), Split::EmptyLine).unwrap();
-        assert_eq!(
-            answers,
-            [
-                lines(&["\tline 1 at [00001000][0001:00000000]"]),
-                lines(&["\tline 2", "\tline 3"])
-            ]
-        );
-        assert_eq!(rest.len(), 0);
-        // A stopped `-fpo` query prints an error line after the complete answers.
-        let text = "\tframe 1\n\nERROR - DumpFPO() frameByRVA invalid RVA: 0x00001000\n";
-        let (answers, rest) = split_answers(text.lines(), Split::EmptyLine).unwrap();
-        assert_eq!(answers, [lines(&["\tframe 1"])]);
-        assert_eq!(rest.len(), 1);
-        let text = "Displacement = 0x1\nFunction\n\nParent\nDisplacement = 0x0\nData\n";
-        let (answers, rest) = split_answers(text.lines(), Split::Displacement).unwrap();
-        assert_eq!(answers.len(), 2);
-        assert_eq!(answers[0].len(), 4);
-        assert_eq!(rest.len(), 0);
-        assert_eq!(
-            split_answers("Function\n".lines(), Split::Displacement),
-            None
-        );
-        assert_eq!(
-            answer_rva(&lines(&["   RelativeVirtualAddress:\t 0x5000"])),
-            Some(0x5000)
         );
     }
 }
