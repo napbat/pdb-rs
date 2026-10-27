@@ -2,7 +2,12 @@
 name = "pdb-rs"
 version.workspace = true
 edition.workspace = true
-description = "Native PDB reading, MSF 7.0 writing and shared I/O primitives for native and Portable PDBs"
+license.workspace = true
+repository.workspace = true
+description = "Read, write and edit native PDB, PDZ (MSFZ) and Portable PDB debug information files"
+readme = "../../README.md"
+keywords = ["pdb", "msf", "codeview", "debuginfo", "portable-pdb"]
+categories = ["parser-implementations", "development-tools::debugging", "encoding", "no-std"]
 
 [features]
 default = ["std"]
