@@ -32,6 +32,7 @@ pub use native::build::verify_native_build;
 pub use native_edit::verify_native_edit;
 pub use rebuild::verify_rebuild;
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,6 +42,7 @@ use pdbrs::portable::metadata::MetadataStream;
 use pdbrs::{ErrorKind, Format, Pdb};
 
 use crate::classify::cli_metadata;
+use crate::jobs::Jobs;
 use crate::json::{self, Value};
 use crate::tools::{self, verifier};
 
@@ -152,7 +154,7 @@ fn comparisons(outputs: &[Output]) -> Result<Vec<Comparison>, String> {
 /// Compare the pdbrs and verifier dumps of each Portable PDB fixture.
 ///
 /// Return `false` if a dump fails or the dumps differ.
-pub fn verify_portable(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_portable(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let assembly = tools::built_tool(workspace, verifier::NAME)?;
     let out = workspace.join("target").join("verify-portable");
     fs::create_dir_all(&out).map_err(|error| format!("cannot make {}: {error}", out.display()))?;
@@ -162,9 +164,30 @@ pub fn verify_portable(workspace: &Path, fixtures: &Path) -> Result<bool, String
             "the fixture manifest has no portable-pdb or embedded-pdb-payload output".to_owned(),
         );
     }
+    let passed = print_in_order(jobs, &comparisons, |comparison, log| {
+        compare(&assembly, comparison, &out, log)
+    });
+    println!("wrote the dumps to {}", out.display());
+    Ok(passed)
+}
+
+/// Run `check` for each comparison on the workers. Then print the log of each comparison in
+/// item order; for an error, also print the line `<fixture>: error: <error>`.
+///
+/// Return `false` if a check fails or gives an error.
+fn print_in_order<F>(jobs: &Jobs, comparisons: &[Comparison], check: F) -> bool
+where
+    F: Fn(&Comparison, &mut String) -> Result<bool, String> + Sync,
+{
+    let results = jobs.map(comparisons, |comparison| {
+        let mut log = String::new();
+        let result = check(comparison, &mut log);
+        (log, result)
+    });
     let mut passed = true;
-    for comparison in &comparisons {
-        match compare(&assembly, comparison, &out) {
+    for (comparison, (log, result)) in comparisons.iter().zip(results) {
+        print!("{log}");
+        match result {
             Ok(true) => {}
             Ok(false) => passed = false,
             Err(error) => {
@@ -173,8 +196,7 @@ pub fn verify_portable(workspace: &Path, fixtures: &Path) -> Result<bool, String
             }
         }
     }
-    println!("wrote the dumps to {}", out.display());
-    Ok(passed)
+    passed
 }
 
 /// Read a file of the fixture manifest.
@@ -182,8 +204,13 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
     fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))
 }
 
-/// Dump one Portable PDB with both readers, write the dumps and print the differences.
-fn compare(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, String> {
+/// Dump one Portable PDB with both readers, write the dumps and write the differences to `log`.
+fn compare(
+    assembly: &Path,
+    comparison: &Comparison,
+    out: &Path,
+    log: &mut String,
+) -> Result<bool, String> {
     let (bytes, mut command) = match &comparison.input {
         Input::Standalone(path) => (read(path)?, verifier::command(assembly, path)),
         Input::Embedded { payload, image } => (
@@ -214,14 +241,18 @@ fn compare(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool,
     }
 
     let differences = differences(&ours, &theirs);
-    println!(
+    let _ = writeln!(
+        log,
         "{}: {} lines, {} different lines",
         comparison.fixture,
         theirs.lines().count(),
         differences.len()
     );
     for (line, ours, theirs) in differences.iter().take(SHOWN_DIFFERENCES) {
-        println!("  line {line}:\n    pdbrs: {ours}\n    srm:   {theirs}");
+        let _ = writeln!(
+            log,
+            "  line {line}:\n    pdbrs: {ours}\n    srm:   {theirs}"
+        );
     }
     Ok(differences.is_empty())
 }
@@ -247,22 +278,25 @@ fn differences<'a>(ours: &'a str, theirs: &'a str) -> Vec<(usize, &'a str, &'a s
 /// Open each fixture output with the format facade and print the result table.
 ///
 /// Return `false` if a result differs from the expected result.
-pub fn detect(fixtures: &Path) -> Result<bool, String> {
+pub fn detect(fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let outputs = outputs(fixtures)?;
     if outputs.is_empty() {
         return Err("the fixture manifest has no outputs".to_owned());
     }
-    println!("| Fixture | Input | Expected | pdbrs::Pdb result | Pass |");
-    println!("| --- | --- | --- | --- | --- |");
-    let mut passed = true;
-    for output in &outputs {
+    let results = jobs.map(&outputs, |output| {
         let bytes = fs::read(&output.path)
             .map_err(|error| format!("cannot read {}: {error}", output.path.display()))?;
         let file = output
             .path
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        for (input, expected, result) in checks(output, &file, &bytes) {
+        Ok::<_, String>(checks(output, &file, &bytes))
+    });
+    println!("| Fixture | Input | Expected | pdbrs::Pdb result | Pass |");
+    println!("| --- | --- | --- | --- | --- |");
+    let mut passed = true;
+    for (output, rows) in outputs.iter().zip(results) {
+        for (input, expected, result) in rows? {
             let pass = expected == result;
             passed &= pass;
             println!(

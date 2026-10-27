@@ -36,6 +36,7 @@ use pdbrs::native::msfz::{Codec, MIN_CHUNK_SIZE, MsfzWriteOptions};
 use super::native::consumers::{Consumers, Run, run};
 use super::native::diff::{Side, line_diff};
 use super::native::native_fixtures;
+use crate::jobs::Jobs;
 use crate::verify::SHOWN_DIFFERENCES;
 
 /// A named option set: a name and a function that gives the options.
@@ -71,7 +72,7 @@ pub(crate) type Streams = Vec<Option<Vec<u8>>>;
 /// Run the three parts of the command.
 ///
 /// Return `false` if a check of the encode or decode part fails.
-pub fn verify_msfz(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_msfz(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let work = workspace.join("target").join("verify-msfz");
     fs::create_dir_all(&work)
         .map_err(|error| format!("cannot make {}: {error}", work.display()))?;
@@ -96,10 +97,11 @@ pub fn verify_msfz(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
     let tools = Tools {
         consumers: &consumers,
         example: example.as_deref(),
+        jobs,
     };
     let encoded = encode::run(&list, fixtures, &tools, &work.join("encode"));
     let pdz = decode::pdz_fixtures(fixtures)?;
-    reference::run(&pdz);
+    reference::run(&pdz, jobs);
     let decoded = decode::run(&pdz, &tools, &work.join("decode"));
     println!("the results are in {}", work.display());
     Ok(encoded && decoded)
@@ -110,6 +112,8 @@ pub(crate) struct Tools<'a> {
     pub consumers: &'a Consumers,
     /// The `native` example of pdbrs.
     pub example: Result<&'a Path, &'a String>,
+    /// The worker budget.
+    pub jobs: &'a Jobs,
 }
 
 /// Build the `native` example of pdbrs and return its path.

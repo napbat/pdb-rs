@@ -10,8 +10,6 @@ use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use crate::json::{self, Value};
@@ -397,47 +395,10 @@ pub(crate) fn mask_pointers(text: &str) -> String {
     masked
 }
 
-/// Apply `function` to each item on all processors and return the results in item order.
-pub(crate) fn parallel_map<T, R, F>(items: &[T], function: F) -> Vec<R>
-where
-    T: Sync,
-    R: Send,
-    F: Fn(&T) -> R + Sync,
-{
-    let workers = thread::available_parallelism()
-        .map_or(4, std::num::NonZero::get)
-        .min(items.len());
-    let next = AtomicUsize::new(0);
-    let results: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
-    thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(item) = items.get(index) else {
-                        break;
-                    };
-                    let result = function(item);
-                    results
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)[index] = Some(result);
-                }
-            });
-        }
-    });
-    results
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .into_iter()
-        .flatten()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        StreamDifferences, check_errors, mask_pointers, normalize_pdbutil, parallel_map,
-        stream_differences,
+        StreamDifferences, check_errors, mask_pointers, normalize_pdbutil, stream_differences,
     };
 
     #[test]
@@ -503,13 +464,5 @@ ERROR pdbtool::compare: Stream 7 differs at byte offset 8 (0x8)
             }
         );
         assert_eq!(stream_differences(""), StreamDifferences::default());
-    }
-
-    #[test]
-    fn parallel_map_keeps_the_item_order() {
-        let items: Vec<u32> = (0..100).collect();
-        let doubled = parallel_map(&items, |item| item * 2);
-        assert_eq!(doubled, (0..100).map(|item| item * 2).collect::<Vec<_>>());
-        assert_eq!(parallel_map(&[] as &[u32], |item| *item), Vec::<u32>::new());
     }
 }

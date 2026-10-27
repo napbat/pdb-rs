@@ -1,18 +1,19 @@
 //! Command-line arguments.
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 /// The usage text.
 pub const USAGE: &str = "\
 usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
        cargo run -p pdbrs-fixtures -- tools
-       cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- verify-native-build [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- verify-native-edit [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- verify-msfz [--fixtures <dir>]
-       cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
+       cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-native-build [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-native-edit [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- verify-msfz [--fixtures <dir>] [--jobs <n>]
+       cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>] [--jobs <n>]
 
   --out <dir>    Write the fixtures and manifest.json to <dir>.
                  The default is target/fixtures/ below the workspace root.
@@ -62,7 +63,11 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
 
   --fixtures <dir>
                  Read manifest.json and the outputs in <dir>. The default is
-                 target/fixtures/ below the workspace root.";
+                 target/fixtures/ below the workspace root.
+
+  --jobs <n>     Use <n> worker threads (n > 0) for the fixtures and the consumer tools.
+                 The default is the available parallelism. --jobs 1 runs all work on one
+                 thread. The command prints the results in fixture order.";
 
 /// What the program must do.
 #[derive(Debug, PartialEq, Eq)]
@@ -75,29 +80,33 @@ pub enum Action {
     Build(Options),
     /// Install and build the consumer tools.
     Tools,
-    /// Compare the pdbrs and verifier dumps of the Portable PDB fixtures. The value is the
-    /// fixture root, if the user gave one.
-    VerifyPortable(Option<PathBuf>),
-    /// Open each fixture output with the format facade. The value is the fixture root, if
-    /// the user gave one.
-    Detect(Option<PathBuf>),
+    /// Compare the pdbrs and verifier dumps of the Portable PDB fixtures.
+    VerifyPortable(Check),
+    /// Open each fixture output with the format facade.
+    Detect(Check),
     /// Rebuild each Portable PDB fixture with the pdbrs writer and compare it with the
-    /// original. The value is the fixture root, if the user gave one.
-    VerifyRebuild(Option<PathBuf>),
+    /// original.
+    VerifyRebuild(Check),
     /// Edit and build each Portable PDB fixture and compare the results with the verifier.
-    /// The value is the fixture root, if the user gave one.
-    VerifyEdit(Option<PathBuf>),
+    VerifyEdit(Check),
     /// Rebuild each native PDB fixture with the pdbrs builder and compare it with the
-    /// original through the consumer tools. The value is the fixture root, if the user gave
-    /// one.
-    VerifyNativeBuild(Option<PathBuf>),
+    /// original through the consumer tools.
+    VerifyNativeBuild(Check),
     /// Apply each native edit to each native PDB fixture and check the results through the
-    /// consumer tools. The value is the fixture root, if the user gave one.
-    VerifyNativeEdit(Option<PathBuf>),
+    /// consumer tools.
+    VerifyNativeEdit(Check),
     /// Write MSFZ files from the native PDB fixtures, convert the PDZ fixtures to MSF 7.0 and
-    /// check both through the consumer tools. The value is the fixture root, if the user gave
-    /// one.
-    VerifyMsfz(Option<PathBuf>),
+    /// check both through the consumer tools.
+    VerifyMsfz(Check),
+}
+
+/// The options of a command that reads the fixture manifest.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Check {
+    /// The fixture root, if the user gave one.
+    pub fixtures: Option<PathBuf>,
+    /// The worker count, if the user gave one.
+    pub jobs: Option<NonZeroUsize>,
 }
 
 /// The options of a build.
@@ -134,7 +143,7 @@ where
         ("verify-msfz", Action::VerifyMsfz),
     ] {
         if arguments.next_if(|argument| argument == command).is_some() {
-            return fixture_root(command, &mut arguments).map(action);
+            return check(command, &mut arguments).map(action);
         }
     }
     while let Some(argument) = arguments.next() {
@@ -165,27 +174,35 @@ fn value(arguments: &mut impl Iterator<Item = String>, option: &str) -> Result<S
     }
 }
 
-/// Parse the options of a command that reads the fixture manifest: `[--fixtures <dir>]`.
-fn fixture_root(
-    command: &str,
-    mut arguments: impl Iterator<Item = String>,
-) -> Result<Option<PathBuf>, String> {
-    let mut fixtures = None;
+/// Parse the options of a command that reads the fixture manifest:
+/// `[--fixtures <dir>] [--jobs <n>]`.
+fn check(command: &str, mut arguments: impl Iterator<Item = String>) -> Result<Check, String> {
+    let mut check = Check::default();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
-            "--fixtures" if fixtures.is_none() => {
-                fixtures = Some(PathBuf::from(value(&mut arguments, "--fixtures")?));
+            "--fixtures" if check.fixtures.is_none() => {
+                check.fixtures = Some(PathBuf::from(value(&mut arguments, "--fixtures")?));
             }
-            "--fixtures" => return Err("--fixtures is given more than once".to_owned()),
+            "--jobs" if check.jobs.is_none() => {
+                let text = value(&mut arguments, "--jobs")?;
+                let jobs = text.parse().map_err(|_| {
+                    format!("--jobs needs a whole number greater than 0; found `{text}`")
+                })?;
+                check.jobs = Some(jobs);
+            }
+            option @ ("--fixtures" | "--jobs") => {
+                return Err(format!("{option} is given more than once"));
+            }
             other => return Err(format!("`{command}` does not take `{other}`")),
         }
     }
-    Ok(fixtures)
+    Ok(check)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Options, parse};
+    use super::{Action, Check, Options, parse};
+    use std::num::NonZeroUsize;
     use std::path::PathBuf;
 
     fn run(arguments: &[&str]) -> Result<Action, String> {
@@ -236,23 +253,41 @@ mod tests {
         );
     }
 
+    fn fixtures(path: &str) -> Check {
+        Check {
+            fixtures: Some(PathBuf::from(path)),
+            jobs: None,
+        }
+    }
+
+    fn jobs(count: usize) -> Option<NonZeroUsize> {
+        NonZeroUsize::new(count)
+    }
+
     #[test]
     fn fixture_commands_take_an_optional_fixture_root() {
-        assert_eq!(run(&["verify-portable"]), Ok(Action::VerifyPortable(None)));
-        assert_eq!(run(&["verify-rebuild"]), Ok(Action::VerifyRebuild(None)));
-        assert_eq!(run(&["verify-edit"]), Ok(Action::VerifyEdit(None)));
+        let default = Check::default;
+        assert_eq!(
+            run(&["verify-portable"]),
+            Ok(Action::VerifyPortable(default()))
+        );
+        assert_eq!(
+            run(&["verify-rebuild"]),
+            Ok(Action::VerifyRebuild(default()))
+        );
+        assert_eq!(run(&["verify-edit"]), Ok(Action::VerifyEdit(default())));
         assert_eq!(
             run(&["verify-native-build", "--fixtures", "D:/f"]),
-            Ok(Action::VerifyNativeBuild(Some(PathBuf::from("D:/f"))))
+            Ok(Action::VerifyNativeBuild(fixtures("D:/f")))
         );
         assert_eq!(
             run(&["verify-native-edit"]),
-            Ok(Action::VerifyNativeEdit(None))
+            Ok(Action::VerifyNativeEdit(default()))
         );
-        assert_eq!(run(&["verify-msfz"]), Ok(Action::VerifyMsfz(None)));
+        assert_eq!(run(&["verify-msfz"]), Ok(Action::VerifyMsfz(default())));
         assert_eq!(
             run(&["detect", "--fixtures", "D:/f"]),
-            Ok(Action::Detect(Some(PathBuf::from("D:/f"))))
+            Ok(Action::Detect(fixtures("D:/f")))
         );
         assert_eq!(
             run(&["detect", "--fixtures", "a", "--fixtures", "b"]),
@@ -261,6 +296,61 @@ mod tests {
         assert_eq!(
             run(&["verify-portable", "--out", "x"]),
             Err("`verify-portable` does not take `--out`".to_owned())
+        );
+    }
+
+    #[test]
+    fn fixture_commands_take_a_worker_count() {
+        let with = |count| Check {
+            fixtures: None,
+            jobs: jobs(count),
+        };
+        for (command, action) in [
+            ("verify-portable", Action::VerifyPortable as fn(_) -> _),
+            ("detect", Action::Detect),
+            ("verify-rebuild", Action::VerifyRebuild),
+            ("verify-edit", Action::VerifyEdit),
+            ("verify-native-build", Action::VerifyNativeBuild),
+            ("verify-native-edit", Action::VerifyNativeEdit),
+            ("verify-msfz", Action::VerifyMsfz),
+        ] {
+            assert_eq!(run(&[command, "--jobs", "1"]), Ok(action(with(1))));
+            assert_eq!(run(&[command, "--jobs", "12"]), Ok(action(with(12))));
+        }
+        assert_eq!(
+            run(&["verify-msfz", "--jobs", "3", "--fixtures", "D:/f"]),
+            Ok(Action::VerifyMsfz(Check {
+                fixtures: Some(PathBuf::from("D:/f")),
+                jobs: jobs(3),
+            }))
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_worker_count() {
+        let error = |text: &str| {
+            Err(format!(
+                "--jobs needs a whole number greater than 0; found `{text}`"
+            ))
+        };
+        for text in ["0", "-1", "two", "1.5", ""] {
+            assert_eq!(run(&["detect", "--jobs", text]), error(text));
+        }
+        assert_eq!(
+            run(&["detect", "--jobs"]),
+            Err("--jobs needs a value".to_owned())
+        );
+        assert_eq!(
+            run(&["detect", "--jobs", "--fixtures", "a"]),
+            Err("--jobs needs a value".to_owned())
+        );
+        assert_eq!(
+            run(&["detect", "--jobs", "2", "--jobs", "2"]),
+            Err("--jobs is given more than once".to_owned())
+        );
+        assert_eq!(
+            run(&["--jobs", "2"]),
+            Err("unknown argument `--jobs`".to_owned())
         );
     }
 

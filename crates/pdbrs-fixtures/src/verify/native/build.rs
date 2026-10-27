@@ -23,19 +23,19 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
 
 use pdbrs::native::IdentityPolicy;
 use pdbrs::native::Pdb;
 
 use super::consumers::{
-    Consumers, Run, StreamDifferences, dia2dump, normalize_pdbutil, parallel_map, pdbtool_check,
-    pdbtool_compare, pdbutil_dump,
+    Consumers, Run, StreamDifferences, dia2dump, normalize_pdbutil, pdbtool_check, pdbtool_compare,
+    pdbutil_dump,
 };
 use super::diff::{Comparison, Dump, Exits};
 use super::sample::{Sample, separated_addresses};
 use super::symbolize::{self, Frames};
 use super::{NativeFixture, native_fixtures};
+use crate::jobs::Jobs;
 use crate::verify::SHOWN_DIFFERENCES;
 
 /// Rebuild each native PDB fixture and compare it with the original through the consumer
@@ -43,7 +43,7 @@ use crate::verify::SHOWN_DIFFERENCES;
 ///
 /// Return `false` if a rebuild fails, a check cannot run or a check finds an unexplained
 /// difference.
-pub fn verify_native_build(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_native_build(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let work = workspace.join("target").join("verify-native-build");
     fs::create_dir_all(&work)
         .map_err(|error| format!("cannot make {}: {error}", work.display()))?;
@@ -61,10 +61,11 @@ pub fn verify_native_build(workspace: &Path, fixtures: &Path) -> Result<bool, St
     for entry in &skipped {
         println!("{}: skipped: {}", entry.fixture, entry.reason);
     }
+    let reports = jobs.map(&list, |fixture| {
+        check(fixture, &consumers, &fixture.work_directory(&work), jobs)
+    });
     let mut passed = 0;
-    for fixture in &list {
-        let directory = fixture.work_directory(&work);
-        let report = check(fixture, &consumers, &directory);
+    for (fixture, report) in list.iter().zip(&reports) {
         let pass = report.passed();
         println!(
             "{}: {}; {}",
@@ -296,7 +297,7 @@ fn available(tool: &Result<PathBuf, String>) -> Result<&Path, String> {
 }
 
 /// Rebuild one PDB and run all checks.
-fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path) -> Report {
+fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path, jobs: &Jobs) -> Report {
     if directory.exists()
         && let Err(error) = fs::remove_dir_all(directory)
     {
@@ -312,30 +313,32 @@ fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path) -> Re
     };
     let original = fixture.pdb.as_path();
     let path = rebuilt.path.as_path();
-    let (pdbtool, compare, pdbutil, dia_all) = thread::scope(|scope| {
-        let pdbtool = scope
-            .spawn(|| available(&consumers.pdbtool).and_then(|tool| pdbtool_check(tool, path)));
-        let compare = scope.spawn(|| {
-            available(&consumers.pdbtool).and_then(|tool| pdbtool_compare(tool, original, path))
-        });
-        let pdbutil = scope.spawn(|| {
-            available(&consumers.pdbutil).and_then(|tool| both(tool, original, path, pdbutil_dump))
-        });
-        let dia_all = scope.spawn(|| {
-            available(&consumers.dia2dump).and_then(|tool| {
-                both(tool, original, path, |tool, pdb| {
-                    dia2dump(tool, ["-all"], pdb)
-                })
-            })
-        });
-        let join = |error| format!("a check thread failed: {error:?}");
-        (
-            pdbtool.join().map_err(join).and_then(|result| result),
-            compare.join().map_err(join).and_then(|result| result),
-            pdbutil.join().map_err(join).and_then(|result| result),
-            dia_all.join().map_err(join).and_then(|result| result),
-        )
-    });
+    let ((pdbtool, compare), (pdbutil, dia_all)) = jobs.join(
+        || {
+            jobs.join(
+                || available(&consumers.pdbtool).and_then(|tool| pdbtool_check(tool, path)),
+                || {
+                    available(&consumers.pdbtool)
+                        .and_then(|tool| pdbtool_compare(tool, original, path))
+                },
+            )
+        },
+        || {
+            jobs.join(
+                || {
+                    available(&consumers.pdbutil)
+                        .and_then(|tool| both(tool, original, path, pdbutil_dump))
+                },
+                || {
+                    available(&consumers.dia2dump).and_then(|tool| {
+                        both(tool, original, path, |tool, pdb| {
+                            dia2dump(tool, ["-all"], pdb)
+                        })
+                    })
+                },
+            )
+        },
+    );
     let pdbutil = pdbutil.and_then(|runs| {
         let runs = runs.map(|run| Run {
             code: run.code,
@@ -352,7 +355,7 @@ fn check(fixture: &NativeFixture, consumers: &Consumers, directory: &Path) -> Re
         Err(error) => (Err(error.clone()), Err(error)),
     };
     let queries = match (&sample, available(&consumers.dia2dump)) {
-        (Ok(sample), Ok(tool)) => query(tool, original, path, sample, directory),
+        (Ok(sample), Ok(tool)) => query(tool, original, path, sample, directory, jobs),
         (Err(error), _) => Err(error.clone()),
         (_, Err(error)) => Err(error),
     };
@@ -459,14 +462,15 @@ enum Query<'a> {
     Type(&'a str),
 }
 
-/// Run the DIA queries of the sample on both PDBs in parallel and count the mismatches. Write
-/// the mismatches to `queries.diff`.
+/// Run the DIA queries of the sample on both PDBs on the workers and count the mismatches.
+/// Write the mismatches to `queries.diff`.
 fn query(
     tool: &Path,
     original: &Path,
     rebuilt: &Path,
     sample: &Sample,
     directory: &Path,
+    jobs: &Jobs,
 ) -> Result<Queries, String> {
     let mut list: Vec<Query<'_>> = Vec::new();
     for &rva in &sample.rvas {
@@ -474,7 +478,7 @@ fn query(
         list.push(Query::Address("-lines", rva));
     }
     list.extend(sample.types.iter().map(|name| Query::Type(name)));
-    let results = parallel_map(&list, |query| {
+    let results = jobs.map(&list, |query| {
         let (option, argument) = match query {
             Query::Address(option, rva) => (*option, format!("0x{rva:x}")),
             Query::Type(name) => ("-type", (*name).to_owned()),

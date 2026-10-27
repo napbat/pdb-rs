@@ -15,9 +15,7 @@ use pdbrs::native::container::Container;
 use pdbrs::native::msfz::{Codec, MsfzWriteOptions};
 
 use super::super::native::NativeFixture;
-use super::super::native::consumers::{
-    Run, StreamDifferences, dia2dump, parallel_map, pdbtool_compare,
-};
+use super::super::native::consumers::{Run, StreamDifferences, dia2dump, pdbtool_compare};
 use super::{
     OPTION_SETS, POLICY, Streams, Tools, available, describe, empty_stream_0, native_output,
     not_run, read_streams, same_output, stream_differences, write_file,
@@ -126,11 +124,13 @@ pub(super) fn run(list: &[NativeFixture], fixtures: &Path, tools: &Tools<'_>, wo
         list.len(),
         OPTION_SETS.len()
     );
-    let sources = parallel_map(list, |fixture| source(fixture, fixtures, tools));
+    let sources = tools
+        .jobs
+        .map(list, |fixture| source(fixture, fixtures, tools));
     let pairs: Vec<(usize, usize)> = (0..list.len())
         .flat_map(|fixture| (0..OPTION_SETS.len()).map(move |set| (fixture, set)))
         .collect();
-    let reports = parallel_map(&pairs, |&(fixture, set)| {
+    let reports = tools.jobs.map(&pairs, |&(fixture, set)| {
         let directory = list[fixture].work_directory(work).join(OPTION_SETS[set].0);
         match &sources[fixture] {
             Ok(source) => check(

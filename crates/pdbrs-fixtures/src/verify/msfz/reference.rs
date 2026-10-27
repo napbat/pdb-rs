@@ -7,10 +7,10 @@ use std::fs;
 
 use pdbrs::native::container::Container;
 
-use super::super::native::consumers::parallel_map;
 use super::decode::PdzFixture;
 use super::encode::encode;
 use super::{OPTION_SETS, read_streams, stream_differences};
+use crate::jobs::Jobs;
 
 /// The reasons why the bytes of pdbrs and of `pdbtool pdz-encode` differ.
 const REASONS: &str = "\
@@ -25,7 +25,7 @@ ruzstd (the \"Fastest\" level), so the pdbrs files are larger.
 
 /// Write the source of each `pdz-*` fixture with the matching pdbrs options and compare the
 /// bytes. The part skips the other PDZ fixtures, because `pdz-encode` did not write them.
-pub(super) fn run(all: &[PdzFixture]) {
+pub(super) fn run(all: &[PdzFixture], jobs: &Jobs) {
     let list: Vec<PdzFixture> = all
         .iter()
         .filter(|fixture| fixture.fixture.starts_with("pdz-"))
@@ -35,7 +35,7 @@ pub(super) fn run(all: &[PdzFixture]) {
         "== reference: pdbrs and pdbtool pdz-encode for {} PDZ fixtures",
         list.len()
     );
-    let results = parallel_map(&list, compare);
+    let results = jobs.map(&list, compare);
     let mut identical = 0;
     let mut compared = 0;
     for (fixture, result) in list.iter().zip(&results) {

@@ -18,8 +18,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::native::consumers::{Consumers, parallel_map};
+use super::native::consumers::Consumers;
 use super::native::{NativeFixture, native_fixtures};
+use crate::jobs::Jobs;
 use edits::{Edit, Outcome};
 
 /// The fixture with the `link /PDBSTRIPPED` output.
@@ -217,7 +218,7 @@ fn compare_stripped(tools: &Tools, list: &[NativeFixture], work: &Path) -> usize
 ///
 /// Returns an error if the manifest cannot be read, a tool is missing or the work directory
 /// cannot be made.
-pub fn verify_native_edit(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_native_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let work = workspace.join("target").join("verify-native-edit");
     fs::create_dir_all(&work)
         .map_err(|error| format!("cannot make {}: {error}", work.display()))?;
@@ -232,7 +233,7 @@ pub fn verify_native_edit(workspace: &Path, fixtures: &Path) -> Result<bool, Str
     for entry in &skipped {
         println!("{}: skipped, {}", entry.fixture, entry.reason);
     }
-    let results = parallel_map(&list, |fixture| check_fixture(&tools, fixture, &work));
+    let results = jobs.map(&list, |fixture| check_fixture(&tools, fixture, &work));
     let mut problems = 0;
     let mut classes = BTreeMap::<(&str, &str), usize>::new();
     let mut edits = 0;

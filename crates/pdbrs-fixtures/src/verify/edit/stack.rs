@@ -4,6 +4,7 @@
 //! the assembly and checks its PDB ID against the `CodeView` entry, so each PDB uses the
 //! original PDB ID.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -69,14 +70,16 @@ fn copy_directory(source: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Run the program of `fixture` with each PDB and compare the traces. Return `true` if the
-/// built PDB gives the original trace and the moved PDB gives the moved trace.
+/// Run the program of `fixture` with each PDB, compare the traces and write the results to
+/// `log`. Return `true` if the built PDB gives the original trace and the moved PDB gives the
+/// moved trace.
 pub(super) fn check(
     fixture: &str,
     outputs: &[Output],
     pdb: &Path,
     out: &Path,
     pdbs: &Pdbs<'_>,
+    log: &mut String,
 ) -> Result<bool, String> {
     let image = outputs
         .iter()
@@ -127,12 +130,17 @@ pub(super) fn check(
         .filter(|(expected, original)| expected.as_str() != *original)
         .count();
     let moved_same = moved_lines == expected && moved_frames > 0;
-    println!("  stack trace: {frames} frames with a line number, {moved_frames} in the PDB");
-    println!(
+    let _ = writeln!(
+        log,
+        "  stack trace: {frames} frames with a line number, {moved_frames} in the PDB"
+    );
+    let _ = writeln!(
+        log,
         "  stack trace with the built PDB is the same: {}",
         yes(built_same)
     );
-    println!(
+    let _ = writeln!(
+        log,
         "  stack trace with the moved PDB has each line of the PDB plus {LINE_SHIFT}: {}",
         yes(moved_same)
     );

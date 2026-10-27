@@ -437,6 +437,35 @@ target/tools/bin/msfz-encode --chunk-codec deflate target/fixtures/msvc-x64-debu
 `Number of PDBs with errors` of its output. Give an MSFZ file a name that ends in `.pdb`.
 Otherwise DIA2Dump reads the file as an executable. `llvm-pdbutil` does not read MSFZ files.
 
+## Worker threads
+
+The commands `detect`, `verify-portable`, `verify-rebuild`, `verify-edit`,
+`verify-native-build`, `verify-native-edit` and `verify-msfz` do their work on worker threads
+(#45). The option `--jobs <n>` sets the number of workers:
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-native-build --jobs 8
+```
+
+- `<n>` must be a whole number greater than 0.
+- The default is the available parallelism of the machine (`std::thread::available_parallelism`).
+- `--jobs 1` runs all work on one thread, one item after the other, and starts no worker
+  thread. Use it to find a defect that occurs only in parallel runs.
+
+All levels of work in one command share the same `<n>` workers. For example,
+`verify-native-build` runs the fixtures, the four consumer runs of one fixture and the DIA
+queries of one fixture on the same workers. At most `<n>` threads do work at the same time.
+
+Each work item writes only to the paths of its own fixture (and of its PDB file stem or option
+set), so two workers never write the same file. A worker does not print. The command prints the
+results in fixture order after the workers finish, so the output does not depend on the
+schedule. The output of `--jobs 1` and of the default is the same, line for line.
+
+All consumer tools (`pdbtool`, `DIA2Dump`, `llvm-pdbutil`, `llvm-symbolizer`, `pdbstr`, the
+Portable PDB verifier and the fixture programs) run as separate processes with their own input
+and output files. They accept parallel runs, also on the same input PDB, so no tool is limited
+to one worker.
+
 ## Portable PDB verifier
 
 `PortableVerifier` reads a Portable PDB with `System.Reflection.Metadata` (SRM) and prints a
@@ -444,7 +473,7 @@ canonical text dump. pdbrs prints the same format. Compare the two dumps of each
 and each `embedded-pdb-payload` output of `manifest.json` with this command:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>]
+cargo run -p pdbrs-fixtures -- verify-portable [--fixtures <dir>] [--jobs <n>]
 ```
 
 For an `embedded-pdb-payload` output, pdbrs decodes the `.mpdb` file with
@@ -472,7 +501,7 @@ them against the SRM views of the same data. A failed check stops the verifier w
 The `verify-rebuild` command checks the Portable PDB writer of pdbrs with the same inputs:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>]
+cargo run -p pdbrs-fixtures -- verify-rebuild [--fixtures <dir>] [--jobs <n>]
 ```
 
 For each input, the command checks these items and prints `yes` or `NO` for each one:
@@ -495,7 +524,7 @@ The `verify-edit` command checks the Portable PDB builder and editor of pdbrs wi
 inputs:
 
 ```sh
-cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>]
+cargo run -p pdbrs-fixtures -- verify-edit [--fixtures <dir>] [--jobs <n>]
 ```
 
 For each input, the command checks these items:
@@ -623,7 +652,7 @@ and increase the version only if an existing line changes.
 Open each output of `manifest.json` with the format facade `pdbrs::Pdb` with this command:
 
 ```sh
-cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>]
+cargo run -p pdbrs-fixtures -- detect [--fixtures <dir>] [--jobs <n>]
 ```
 
 It prints a Markdown table. A native PDB must open as `native`, and a Portable PDB as
@@ -693,7 +722,7 @@ The `verify-native-build` command checks the native PDB builder of pdbrs (#33) w
 `native-pdb` output of `manifest.json`:
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-native-build [--fixtures <dir>]
+cargo run -p pdbrs-fixtures --release -- verify-native-build [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, because `pdbtool`, `llvm-pdbutil` and `DIA2Dump` reject
@@ -717,7 +746,8 @@ its original PDBs. For each other PDB, it does these steps:
    with a fixed seed adds one address in each range. The sample keeps a maximum of 600
    addresses. The type names come from the `UserDefinedType:` lines, with a maximum of 250.
 6. Run `DIA2Dump -sym 0x<rva>` and `-lines 0x<rva>` for each address and `-type <name>` for
-   each type name on both PDBs, in parallel. The masked outputs must be the same.
+   each type name on both PDBs, on the workers (see [Worker threads](#worker-threads)). The
+   masked outputs must be the same.
 7. For a fixture with an `image` output, run `llvm-symbolizer --inlines --relative-address
    --functions=linkage` with the sample addresses for each PDB. The command copies the PDB and
    the image into one directory for each PDB. It replaces the PDB path of the `RSDS` record of
@@ -753,7 +783,7 @@ The `verify-native-edit` command checks the native PDB editor of pdbrs (#34) wit
 `native-pdb` output of `manifest.json`:
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-native-edit [--fixtures <dir>]
+cargo run -p pdbrs-fixtures --release -- verify-native-edit [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It applies each edit to
@@ -810,7 +840,7 @@ classes are:
 The `verify-msfz` command checks the MSFZ writer and the conversions of pdbrs (#38):
 
 ```sh
-cargo run -p pdbrs-fixtures --release -- verify-msfz [--fixtures <dir>]
+cargo run -p pdbrs-fixtures --release -- verify-msfz [--fixtures <dir>] [--jobs <n>]
 ```
 
 The command skips `hlsl-dxc-debug`, as `verify-native-build` does. It builds the `native`

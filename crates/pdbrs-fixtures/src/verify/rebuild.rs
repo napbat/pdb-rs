@@ -22,14 +22,16 @@ use pdbrs::portable::write::ChecksumAlgorithm;
 use pdbrs::portable::{IdentityPolicy, Pdb};
 
 use super::{
-    Comparison, EMBEDDED_LIMIT, Input, SHOWN_DIFFERENCES, comparisons, differences, outputs, read,
+    Comparison, EMBEDDED_LIMIT, Input, SHOWN_DIFFERENCES, comparisons, differences, outputs,
+    print_in_order, read,
 };
+use crate::jobs::Jobs;
 use crate::tools::{self, verifier};
 
 /// Rebuild each Portable PDB fixture and compare it with the original.
 ///
 /// Return `false` if a check fails.
-pub fn verify_rebuild(workspace: &Path, fixtures: &Path) -> Result<bool, String> {
+pub fn verify_rebuild(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<bool, String> {
     let assembly = tools::built_tool(workspace, verifier::NAME)?;
     let out = workspace.join("target").join("verify-rebuild");
     fs::create_dir_all(&out).map_err(|error| format!("cannot make {}: {error}", out.display()))?;
@@ -39,17 +41,9 @@ pub fn verify_rebuild(workspace: &Path, fixtures: &Path) -> Result<bool, String>
             "the fixture manifest has no portable-pdb or embedded-pdb-payload output".to_owned(),
         );
     }
-    let mut passed = true;
-    for comparison in &comparisons {
-        match check(&assembly, comparison, &out) {
-            Ok(true) => {}
-            Ok(false) => passed = false,
-            Err(error) => {
-                println!("{}: error: {error}", comparison.fixture);
-                passed = false;
-            }
-        }
-    }
+    let passed = print_in_order(jobs, &comparisons, |comparison, log| {
+        check(&assembly, comparison, &out, log)
+    });
     println!("wrote the rebuilt files to {}", out.display());
     Ok(passed)
 }
@@ -67,8 +61,13 @@ pub(super) const fn yes(value: bool) -> &'static str {
     if value { "yes" } else { "NO" }
 }
 
-/// Rebuild one Portable PDB and print the result of each check.
-fn check(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, String> {
+/// Rebuild one Portable PDB and write the result of each check to `log`.
+fn check(
+    assembly: &Path,
+    comparison: &Comparison,
+    out: &Path,
+    log: &mut String,
+) -> Result<bool, String> {
     let pdbrs = |error: pdbrs::Error| format!("pdbrs: {error}");
     let (original, mut command) = match &comparison.input {
         Input::Standalone(path) => (read(path)?, verifier::command(assembly, path)),
@@ -117,7 +116,8 @@ fn check(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, S
         ),
         ("MPDB payload decodes to the rebuild", embedded == rebuilt),
     ];
-    println!(
+    let _ = writeln!(
+        log,
         "{}: {} bytes, ID {}, SHA256 checksum {}",
         comparison.fixture,
         rebuilt.len(),
@@ -126,10 +126,10 @@ fn check(assembly: &Path, comparison: &Comparison, out: &Path) -> Result<bool, S
     );
     let mut passed = true;
     for (name, result) in checks {
-        println!("  {name}: {}", yes(result));
+        let _ = writeln!(log, "  {name}: {}", yes(result));
         passed &= result;
     }
-    passed &= compare_dumps(assembly, &mut command, &path, &comparison.fixture, out)?;
+    passed &= compare_dumps(assembly, &mut command, &path, &comparison.fixture, out, log)?;
     Ok(passed)
 }
 
@@ -140,6 +140,7 @@ fn compare_dumps(
     rebuilt: &Path,
     fixture: &str,
     out: &Path,
+    log: &mut String,
 ) -> Result<bool, String> {
     let mut texts = Vec::new();
     for command in [original, &mut verifier::command(assembly, rebuilt)] {
@@ -164,13 +165,17 @@ fn compare_dumps(
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     }
     let differences = differences(&texts[0], &texts[1]);
-    println!(
+    let _ = writeln!(
+        log,
         "  verifier dump: {} lines, {} different lines",
         texts[0].lines().count(),
         differences.len()
     );
     for (line, original, rebuilt) in differences.iter().take(SHOWN_DIFFERENCES) {
-        println!("    line {line}:\n      original: {original}\n      rebuilt:  {rebuilt}");
+        let _ = writeln!(
+            log,
+            "    line {line}:\n      original: {original}\n      rebuilt:  {rebuilt}"
+        );
     }
     Ok(differences.is_empty())
 }
