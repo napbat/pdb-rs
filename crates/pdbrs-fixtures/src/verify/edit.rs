@@ -19,11 +19,14 @@
 //!    in each case of [`cases`] and checks the output with the verifier and the plan report.
 //! 6. The section `task cases:` applies the editing tasks of #41 (see [`tasks`]) with the same
 //!    checks.
+//! 7. The section `remap cases:` remaps the document names with the source path remap of #46
+//!    (see [`remap`]) and checks the names, the unchanged sequence points and the report.
 //!
 //! The command writes the PDBs, the dumps and the traces to `target/verify-edit/`.
 
 mod cases;
 mod expect;
+mod remap;
 mod stack;
 mod tasks;
 
@@ -83,11 +86,12 @@ pub fn verify_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<boo
     });
     let new_cases = cases::run(jobs, &assembly, &comparisons, &out);
     let task_cases = tasks::run(jobs, &assembly, workspace, &comparisons, &out);
+    let remap_cases = remap::run(jobs, &assembly, fixtures, &comparisons, &out);
     println!(
         "wrote the PDBs, the dumps and the traces to {}",
         out.display()
     );
-    Ok(passed && new_cases && task_cases)
+    Ok(passed && new_cases && task_cases && remap_cases)
 }
 
 /// Format a pdbrs error.

@@ -216,7 +216,7 @@ fn edited<S: ReadAt>(pdb: &Pdb<S>, task: Task, dotnet: &Path) -> Result<Option<E
 }
 
 /// Return `text` in the quoted form of the verifier.
-fn quote(text: &[u8]) -> String {
+pub(super) fn quote(text: &[u8]) -> String {
     let mut quoted = String::from("\"");
     for &value in text {
         if (0x20..0x7f).contains(&value) && value != b'"' && value != b'\\' {
