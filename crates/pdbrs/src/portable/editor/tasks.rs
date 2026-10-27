@@ -30,8 +30,7 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     ///
     /// # #[cfg(feature = "std")]
     /// # fn main() -> pdbrs::Result<()> {
-    /// let bytes = std::fs::read("app.pdb")?;
-    /// let pdb = Pdb::parse(&bytes[..])?;
+    /// let pdb = Pdb::open("app.pdb")?;
     /// let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
     /// let json = br#"{"documents":{"C:\\src\\*":"https://example.com/src/*"}}"#;
     /// editor.set_source_link(json.to_vec())?;
@@ -80,9 +79,8 @@ impl<S: ReadAt> PdbEditor<'_, S> {
     /// use pdbrs::portable::{EditOptions, IdentityPolicy, Pdb};
     ///
     /// # #[cfg(feature = "std")]
-    /// # fn main() -> pdbrs::Result<()> {
-    /// let bytes = std::fs::read("app.pdb")?;
-    /// let pdb = Pdb::parse(&bytes[..])?;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let pdb = Pdb::open("app.pdb")?;
     /// let mut editor = pdb.edit(IdentityPolicy::ContentDerived);
     /// let source = std::fs::read("Program.cs")?;
     /// editor.embed_source(DocumentId(1), &source, EmbeddedFormat::Deflate)?;
