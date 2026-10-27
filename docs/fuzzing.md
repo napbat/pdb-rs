@@ -54,6 +54,7 @@ to the same value. It does not check that other readers accept the output.
 | `native_dbi_encode` | as `native_dbi` | `Dbi::encode`, `encode_substream`, module records, `Module::into_owned`, `DbiBuilder::from_dbi` |
 | `native_debug_stream_encode` | kind selector, stream | FPO, frame data, fixup, function entry, token map, section header, OMAP and `RvaVaBlob` encoders |
 | `native_named_encode` | kind selector, stream | `LinkInfo`, `TmCache` and `TmCacheBuilder`, `TypeMapStream`, `UdtSourceLineUndone`, `SourceLink`, `SourceServer`, `SourceHeaderBlock` and its builder, `DotNetDocument` |
+| `native_editor` | PDB part, edit bytes | `native::PdbEditor` (#42): each edit byte inserts, replaces or removes a named stream; renames, removes or pushes a public or global symbol; pushes an `LF_ARGLIST` of earlier type indices; changes or removes a module symbol; changes a line number; calls `decode_all`; or switches the strip option. A plan error ends the run. Else: a second plan gives the same bytes; the output parses with `Pdb::parse`; its Info identity and its DBI age agree with `plan.identity()`; each inserted named stream has its bytes and each removed one is absent; the report has one entry for each output stream |
 
 The MSFZ targets (#37, #38) use 16 MiB chunks and a 32 MiB chunk cache (`pdbrs_fuzz::msfz::limits`);
 `native_pdb` uses the same MSFZ limits. `msfz` does not compare reads without the cache: for
@@ -95,6 +96,10 @@ It builds these inputs with the public API of `pdbrs`:
   `msfz` and `native_pdb` and each chunk of its Chunk Table to `msfz_chunks`.
 - `msfz_convert` gets each MSF 7.0 and MSFZ fixture with three selectors (`0x00`, `0x1d`,
   `0xe6`) that together select each option, and the small synthetic MSF containers.
+- `native_editor` gets each native PDB (the synthetic PDB and each fixture) with eight edit
+  sequences: no edit, a strip with a new named stream, a new and a removed named stream, and
+  edits of symbols, types and lines, each with and without `decode_all` first. The editor
+  uses `IdentityPolicy::IncrementAge`.
 
 The generator splits each PDB into the inputs of the targets: streams, records, subsections,
 blobs and values. It caps the seeds of one PDB to 48 for each target.
@@ -217,6 +222,17 @@ No run reported a sanitizer error, a timeout or memory use above the limit.
 After the merge of `main` 1f8fd09 into `fuzzing`, each reader target ran once over its whole
 corpus (`-runs=0`) without a finding. These replays are not new fuzzing time. After the last
 build, each crash input in `artifacts/` runs without a finding.
+
+The `native_editor` target ran on branch `redesign-s6-editor` (#42) on 2026-10-27, with 1512
+seeds from the synthetic PDB and 188 native fixture PDBs of the worktree. Two runs took
+901 s together, with 23,703 executions, no finding and a peak RSS of 920 MiB. The corpus grew
+to 2077 inputs. Between the two runs, each of the 1504 fixture seeds ran once without a cut to
+1 MiB. 1059 of them gave a plan and passed all checks. 24 seeds of `hlsl-dxc-debug` do not
+parse, and the other seeds ended with a plan error. A plan error is a valid result: for
+example, a PDB without a DBI stream, a strip after `decode_all`, or a `/LinkInfo` stream with
+bytes that the decoder rejects. With the AddressSanitizer build, the seed of
+`msvc-x64-large/demo.pdb` (21 MiB) with `decode_all` takes 66 s. libFuzzer does not make
+inputs above 1 MiB, so this time is not a timeout of the target.
 
 ## Findings
 

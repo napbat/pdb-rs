@@ -19,6 +19,26 @@ use crate::{Corpus, Outcome};
 /// The most records of one kind that one PDB gives to the record targets.
 const MAX_PER_KIND: usize = 3;
 
+/// The edit bytes of the `native_editor` seeds (see `pdbrs_fuzz::native::editor`).
+///
+/// The sequences are: no edit; a strip with a new named stream; a new named stream and the
+/// removal of a named stream; edits of symbols, types and lines. Each sequence also gives a
+/// seed that starts with `decode_all`.
+const EDITOR_EDITS: [&[u8]; 4] = [
+    &[],
+    &[14, 0, 0, 4, 0, 0, 0, b'd', b'a', b't', b'a'],
+    &[0, 0, 4, 0, 0, 0, b'd', b'a', b't', b'a', 2, 0, 0],
+    // Rename a public symbol, push a global `S_UDT`, push an `LF_ARGLIST`, change the type of
+    // a module symbol and change a line number.
+    &[
+        3, 0, 0, 4, b'r', b'e', b'n', b'1', 8, 0, 0x74, 0, 0, 0, 3, b'u', b'd', b't', 1, 9, 2,
+        0xe8, 1, 0, 0, 10, 0, 0, 1, 0, 1, 0x74, 0, 0, 0, 12, 0, 0, 0, 0, 5, 0, 0, 0,
+    ],
+];
+
+/// The edit byte of `decode_all` in `pdbrs_fuzz::native::editor`.
+const DECODE_ALL: u8 = 13;
+
 /// The record kinds seen in the current PDB, with their counts.
 #[derive(Default)]
 struct Kinds(BTreeMap<(u8, u32), usize>);
@@ -48,6 +68,15 @@ pub fn seeds(bytes: &[u8], corpus: &mut Corpus) -> Outcome {
         corpus.add_parts("msfz_convert", &[selector], &[], bytes)?;
     }
     corpus.add("native_pdb", bytes)?;
+    for edits in EDITOR_EDITS {
+        corpus.add_parts("native_editor", &[], &[bytes], edits)?;
+        corpus.add_parts(
+            "native_editor",
+            &[],
+            &[bytes],
+            &[&[DECODE_ALL], edits].concat(),
+        )?;
+    }
     let pdb = Pdb::parse(bytes)?;
     let mut kinds = Kinds::default();
     let info = pdb.stream_bytes(StreamId(1))?;

@@ -305,3 +305,10 @@ path = "fuzz_targets/native_named_encode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "native_editor"
+path = "fuzz_targets/native_editor.rs"
+test = false
+doc = false
+bench = false
