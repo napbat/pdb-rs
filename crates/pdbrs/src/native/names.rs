@@ -31,6 +31,7 @@ pub use builder::StringTableBuilder;
 
 use alloc::vec::Vec;
 use core::iter::FusedIterator;
+use core::ops::Range;
 
 use super::codeview::Fields;
 use super::codeview::index::NameOffset;
@@ -111,6 +112,55 @@ pub struct StringTable<'a> {
     buckets: &'a [[u8; 4]],
     /// The name count from the end of the table.
     name_count: u32,
+}
+
+/// The validated positions of a string table in its serialized bytes.
+///
+/// A cache keeps the bytes and this value, and makes a [`StringTable`] view of the same bytes
+/// without a second validation.
+#[derive(Clone, Debug)]
+pub(crate) struct StringTableLayout {
+    /// The hash function version.
+    hash_version: HashVersion,
+    /// The range of the string buffer.
+    strings: Range<usize>,
+    /// The range of the bucket array.
+    buckets: Range<usize>,
+    /// The name count from the end of the table.
+    name_count: u32,
+}
+
+impl StringTableLayout {
+    /// Validate the table in `bytes` with [`StringTable::parse`] and keep its positions.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`StringTable::parse`].
+    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
+        let table = StringTable::parse(bytes)?;
+        // The header has the signature, the version and the string buffer size.
+        let strings = 12..12 + table.strings.len();
+        // The bucket count comes after the string buffer.
+        let buckets = strings.end + 4;
+        Ok(Self {
+            hash_version: table.hash_version,
+            buckets: buckets..buckets + table.buckets.len() * 4,
+            strings,
+            name_count: table.name_count,
+        })
+    }
+
+    /// Return the view of the table in `bytes`.
+    ///
+    /// `bytes` must be the bytes that [`StringTableLayout::parse`] validated.
+    pub(crate) fn view<'a>(&self, bytes: &'a [u8]) -> StringTable<'a> {
+        StringTable {
+            hash_version: self.hash_version,
+            strings: &bytes[self.strings.clone()],
+            buckets: bytes[self.buckets.clone()].as_chunks::<4>().0,
+            name_count: self.name_count,
+        }
+    }
 }
 
 impl<'a> StringTable<'a> {

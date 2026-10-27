@@ -250,11 +250,11 @@ impl<S: ReadAt> PdbEditPlan<'_, S> {
 }
 
 /// The source streams that most edits read, and the producer conventions.
-pub(super) struct Context {
+pub(super) struct Context<'p> {
     /// The TPI stream.
     pub(super) tpi: TypeStream,
     /// The DBI stream.
-    pub(super) dbi: Dbi,
+    pub(super) dbi: &'p Dbi,
     /// The conventions of the symbol indexes.
     pub(super) index_producer: Producer,
 }
@@ -353,7 +353,7 @@ impl<'p, S: ReadAt> PdbEditor<'p, S> {
             )?;
         }
         if dbi_builder.is_none() && dbi_age != context.dbi.header().age {
-            dbi_builder = Some(DbiBuilder::from_dbi(&context.dbi)?);
+            dbi_builder = Some(DbiBuilder::from_dbi(context.dbi)?);
         }
         if let Some(mut builder) = dbi_builder {
             builder.header.age = dbi_age;

@@ -144,22 +144,26 @@ impl ExternalDependencies {
 impl<S: ReadAt> Pdb<S> {
     /// List the external dependencies that the module streams and the Info stream name.
     ///
-    /// The function reads each module stream once. It does not open external files.
+    /// The function reads each module stream once. It does not open external files. Without a
+    /// DBI stream, the list has only the Info stream features.
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`Dbi::type_server_map`], [`Dbi::modules`], [`Pdb::module_stream`]
-    /// and of the decoding of
+    /// Returns the errors of [`Pdb::debug_info`], [`Dbi::type_server_map`], [`Dbi::modules`],
+    /// [`Pdb::module`] and of the decoding of
     /// `S_OBJNAME` records, [`crate::ErrorKind::InvalidReference`] if an `S_MOD_TYPEREF` record
     /// names a missing owner module, and [`crate::ErrorKind::LimitExceeded`] if an allocation
     /// fails.
-    pub fn external_dependencies(&self, dbi: &Dbi) -> Result<ExternalDependencies> {
+    pub fn external_dependencies(&self) -> Result<ExternalDependencies> {
         let mut dependencies = ExternalDependencies {
             mini_pdb: self.info().has_feature(Feature::MINIMAL_DEBUG_INFO),
             no_type_merge: self.info().has_feature(Feature::NO_TYPE_MERGE),
-            type_servers: dbi.type_server_map()?,
             ..ExternalDependencies::default()
         };
+        let Some(dbi) = self.debug_info()? else {
+            return Ok(dependencies);
+        };
+        dependencies.type_servers = dbi.type_server_map()?;
         for module in dbi.modules() {
             let (index, module) = module?;
             let type_server = module.type_server_index();
@@ -171,7 +175,7 @@ impl<S: ReadAt> Pdb<S> {
                     type_server,
                 });
             }
-            let Some(stream) = self.module_stream(&module)? else {
+            let Some(stream) = self.load_module(&module)? else {
                 continue;
             };
             let mut signature = 0;

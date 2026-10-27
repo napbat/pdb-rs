@@ -115,7 +115,8 @@ fn module_record_across_pages_decodes_like_one_buffer() {
     let expected: Vec<Module<'_>> = expected.modules().map(|module| module.unwrap().1).collect();
     for order in ORDERS {
         let bytes = Streams::new().container(order);
-        let dbi = open(&bytes).debug_info().unwrap().unwrap();
+        let pdb = open(&bytes);
+        let dbi = pdb.debug_info().unwrap().unwrap();
         let modules: Vec<Module<'_>> = dbi.modules().map(|module| module.unwrap().1).collect();
         assert_eq!(modules, expected, "{order:?}");
         // The module info substream starts after the 64-byte DBI header.
@@ -156,8 +157,7 @@ fn module_symbol_and_checksum_across_pages_decode_like_one_buffer() {
     for order in ORDERS {
         let bytes = Streams::new().container(order);
         let pdb = open(&bytes);
-        let dbi = pdb.debug_info().unwrap().unwrap();
-        let stream = pdb.module_stream(&target_module(&dbi)).unwrap().unwrap();
+        let stream = pdb.module(ModuleIndex(4)).unwrap().unwrap();
 
         let records: Vec<_> = stream.symbols().map(Result::unwrap).collect();
         assert_eq!(
@@ -195,8 +195,7 @@ fn truncated_checksum_subsection_across_pages_is_eof() {
     streams.dbi = dbi_stream(sizes, None);
     let bytes = streams.container(Order::Scattered);
     let pdb = open(&bytes);
-    let dbi = pdb.debug_info().unwrap().unwrap();
-    let stream = pdb.module_stream(&target_module(&dbi)).unwrap().unwrap();
+    let stream = pdb.module(ModuleIndex(4)).unwrap().unwrap();
     let error = ModuleLines::parse(&stream).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(error.stream_location(), Some((MODULE, to_u64(c13_end))));
@@ -207,11 +206,12 @@ fn global_symbol_across_pages_resolves_like_one_buffer() {
     for order in ORDERS {
         let bytes = Streams::new().container(order);
         let pdb = open(&bytes);
-        let dbi = pdb.debug_info().unwrap().unwrap();
         let symbols = pdb.stream_bytes(SYMBOLS).unwrap();
         assert_eq!(symbols, Streams::new().symbols, "{order:?}");
         let offsets = RecordOffsets::frame(&symbols, SYMBOLS).unwrap();
-        let index = pdb.global_symbols(&dbi).unwrap().unwrap();
+        let globals = pdb.globals().unwrap().unwrap();
+        assert_eq!(globals.records(), symbols.as_slice());
+        let index = globals.index();
         index.hash_table().check_records(&offsets).unwrap();
         let found: Vec<_> = index.hash_table().lookup(TARGET_SYMBOL).collect();
         let target = SymbolOffset(to_u32(TARGET_SYMBOL_OFFSET));
@@ -246,9 +246,8 @@ fn section_header_across_pages_decodes_like_one_buffer() {
     for order in ORDERS {
         let bytes = Streams::new().container(order);
         let pdb = open(&bytes);
-        let dbi = pdb.debug_info().unwrap().unwrap();
         let headers = pdb
-            .section_headers(&dbi, DebugStream::SectionHeader)
+            .section_headers(DebugStream::SectionHeader)
             .unwrap()
             .unwrap();
         assert_eq!(headers, expected, "{order:?}");
@@ -266,10 +265,7 @@ fn truncated_section_header_across_pages_is_eof() {
     streams.sections.truncate(PAGE + 4);
     let bytes = streams.container(Order::Scattered);
     let pdb = open(&bytes);
-    let dbi = pdb.debug_info().unwrap().unwrap();
-    let error = pdb
-        .section_headers(&dbi, DebugStream::SectionHeader)
-        .unwrap_err();
+    let error = pdb.section_headers(DebugStream::SectionHeader).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(
         error.stream_location(),
@@ -285,13 +281,12 @@ fn omap_table_across_pages_maps_like_one_buffer() {
     for order in ORDERS {
         let bytes = Streams::new().container(order);
         let pdb = open(&bytes);
-        let dbi = pdb.debug_info().unwrap().unwrap();
-        let table = pdb.omap(&dbi, DebugStream::OmapToSource).unwrap().unwrap();
+        let table = pdb.omap(DebugStream::OmapToSource).unwrap().unwrap();
         assert_eq!(table, expected, "{order:?}");
         assert_eq!(table.iter().count(), usize::try_from(OMAP_RECORDS).unwrap());
         assert_eq!(table.record_for(address), Some(omap_record(64)));
         assert_eq!(table.record_for(address - 8), Some(omap_record(63)));
-        let tables = pdb.address_tables(&dbi).unwrap().unwrap();
+        let tables = pdb.address_tables().unwrap().unwrap();
         assert_eq!(tables.to_source, Some(expected.clone()));
         assert_eq!(tables.from_source, None);
     }
@@ -303,8 +298,7 @@ fn truncated_omap_across_pages_is_eof() {
     streams.omap.truncate(PAGE + 4);
     let bytes = streams.container(Order::Scattered);
     let pdb = open(&bytes);
-    let dbi = pdb.debug_info().unwrap().unwrap();
-    let error = pdb.omap(&dbi, DebugStream::OmapToSource).unwrap_err();
+    let error = pdb.omap(DebugStream::OmapToSource).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
     assert_eq!(error.stream_location(), Some((OMAP, to_u64(PAGE))));
 }

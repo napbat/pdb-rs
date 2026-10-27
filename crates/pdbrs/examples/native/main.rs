@@ -159,15 +159,14 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
     let mut report = Report::default();
     container(pdb, &mut report)?;
 
-    let names_bytes = if let Some(bytes) = pdb.named_stream_bytes(b"/names")? {
-        bytes
+    let names = if let Some(names) = pdb.names()? {
+        names
     } else {
         // `link /PDBSTRIPPED` writes no `/names` stream. Use a table without names, so that
         // any reference to a name fails.
         report.add("PDBs without /names (stripped)", 1);
-        EMPTY_NAMES.to_vec()
+        StringTable::parse(&EMPTY_NAMES)?
     };
-    let names = StringTable::parse(&names_bytes)?;
     info_and_names(pdb, &names, &mut report)?;
     if let Some(placement) = report.supported(names.validate_buckets(), "/names hashing")? {
         report.add(
@@ -187,19 +186,19 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
 
     let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
     report.claim(StreamId(3));
-    reencode_dbi(pdb, &dbi, &mut report)?;
+    reencode_dbi(pdb, dbi, &mut report)?;
     let info_age = pdb.info().identity().age();
     if dbi.header().age != info_age {
         // `pdbstr -w` increments only the Info age; the image matches the DBI age.
         report.add("PDB Info age above the DBI age", 1);
         println!("PDB Info age: {info_age}, DBI age: {}", dbi.header().age);
     }
-    section_header_bytes(pdb, &dbi, &mut report)?;
+    section_header_bytes(pdb, dbi, &mut report)?;
     // The tables hold the section headers and, if the DBI stream names them, the OMAP tables
     // and the original section headers.
-    let tables = pdb.address_tables(&dbi)?;
+    let tables = pdb.address_tables()?;
     let addresses = tables.as_ref().map(AddressTables::map);
-    let module_count = debug_info_tables(&dbi, addresses.as_ref(), &mut report)?;
+    let module_count = debug_info_tables(dbi, addresses.as_ref(), &mut report)?;
     let type_table = TypeTable::new(&tpi)?;
     let forward = ForwardRefs::new(&type_table, None)?;
     let size_of_type = |index| type_size(&type_table, Some(&forward), index).ok().flatten();
@@ -212,12 +211,12 @@ fn run(pdb: &Pdb<impl ReadAt>) -> Outcome {
         module_count,
         type_size: &size_of_type,
     };
-    frame_data(pdb, &dbi, &context, &mut report)?;
-    let procedures = modules(pdb, &dbi, &context, &mut report)?;
-    lines::module_streams(pdb, &dbi, &mut report)?;
-    lines::cross_scope(pdb, &dbi, &context, &mut report)?;
-    shared_symbols(pdb, &dbi, &context, &procedures, &mut report)?;
-    external_dependencies(pdb, &dbi, &mut report)?;
+    frame_data(pdb, &context, &mut report)?;
+    let procedures = modules(pdb, dbi, &context, &mut report)?;
+    lines::module_streams(pdb, dbi, &mut report)?;
+    lines::cross_scope(pdb, dbi, &context, &mut report)?;
+    shared_symbols(pdb, dbi, &context, &procedures, &mut report)?;
+    external_dependencies(pdb, &mut report)?;
     unclaimed_streams(pdb, &mut report)?;
     print(&report);
     let undecoded: usize = report.undecoded.values().sum();

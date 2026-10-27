@@ -65,6 +65,19 @@ Raw `container::Stream` reads join fragmented MSF blocks or MSFZ chunks without 
 The default limits are 64 MiB for the directory and 64 MiB for each typed stream load.
 Callers can change these limits through `native::ReadOptions` (`with_limits` and `with_max_stream_bytes`). Allocation failures return `LimitExceeded`.
 
+The reader is a session (#42). The first call of a cached accessor loads and checks its structure. Later calls lend the same value from `&self`:
+
+- `Pdb::debug_info`: the DBI stream and the position of each module record;
+- `Pdb::names`: the `/names` string table;
+- `Pdb::symbol_records`: the symbol record stream;
+- `Pdb::globals` and `Pdb::publics`: views of the global or public symbol index with the symbol record stream;
+- `Pdb::type_offsets` and `Pdb::id_offsets`: the TPI or IPI header with the index offset pairs of its hash stream.
+
+The other accessors load bulk data on each call and return an owned value: `Pdb::module` (one module stream), `Pdb::types`, `Pdb::ids` and the debug streams.
+No accessor takes a `&Dbi` argument; each uses the cached DBI stream.
+`ReadOptions::with_max_cached_bytes` limits the stream bytes in the cache (default 256 MiB). An accessor that goes above the limit returns `LimitExceeded` and caches nothing. The cache does not evict.
+With `std`, the cells are `OnceLock` values, so `Pdb<S>` is `Sync` if `S` is `Sync`. Without `std`, the cells are `OnceCell` values.
+
 | Area | Implemented | Not yet implemented |
 | --- | --- | --- |
 | MSF 7.0 | Directory, nil and empty streams, fragmented reads, reserved and duplicate page checks, active free-page-map consistency and the stream 0 snapshot. Writing: exact copies, stream-preserving repacks and new layouts for page sizes 512 to 32768 (see [MSF writing](#implemented-msf-writing)) | Edits in place and incremental commits (not planned); writing 65536-byte pages (consumers reject them) |
@@ -140,7 +153,7 @@ The comment on #1 lists each difference class with its count.
 The decoded records keep their bytes in `pdbrs::Bytes`. A decoder gives records that borrow the stream bytes.
 `into_owned` gives the same record with its own bytes and the `'static` lifetime ([#42](https://github.com/napbat/pdbrs/issues/42)).
 Iterators, the record frames (`codeview::Record`) and the stream-level tables keep borrowed slices.
-`Pdb::global_symbols` and `Pdb::public_symbols` load the symbol indexes that the DBI header names.
+`Pdb::globals` and `Pdb::publics` lend the symbol indexes that the DBI header names.
 `Pdb::fpo` and `Pdb::frame_data` load the FPO and new-FPO streams that the DBI optional debug header names.
 GitHub issues #1 to #14, #29 to #34, #37 and #38 record the implementation and the evidence for each area.
 

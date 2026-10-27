@@ -83,13 +83,13 @@ pub(crate) fn modules(
 ) -> Outcome<Procedures> {
     let mut procedures = Procedures::default();
     for module in dbi.modules() {
-        let (index, module) = module?;
-        let index = u16::try_from(index.0)?;
-        let Some(stream) = pdb.module_stream(&module)? else {
+        let (module_index, _) = module?;
+        let index = u16::try_from(module_index.0)?;
+        let Some(stream) = pdb.module(module_index)? else {
             continue;
         };
         report.claim(stream.stream());
-        match crate::module_types::streams(pdb, dbi, &stream, report)? {
+        match crate::module_types::streams(pdb, &stream, report)? {
             Some(types) => crate::module_types::with_context(&types, context, |context| {
                 module_symbols(&stream, index, context, &mut procedures, report)
             })?,
@@ -265,11 +265,13 @@ pub(crate) fn shared_symbols(
         return Ok(());
     };
     report.claim(id);
-    let bytes = pdb.stream_bytes(id)?;
-    let offsets = RecordOffsets::frame(&bytes, id)?;
-    crate::symbol_validation::shared(&bytes, id, context, &procedures.records, report)?;
+    let bytes = pdb
+        .symbol_records()?
+        .ok_or("missing symbol record stream")?;
+    let offsets = RecordOffsets::frame(bytes, id)?;
+    crate::symbol_validation::shared(bytes, id, context, &procedures.records, report)?;
     let mut writer = SymbolRecordWriter::new();
-    for record in Records::new(&bytes) {
+    for record in Records::new(bytes) {
         let record = record?;
         let symbol = Symbol::decode(record)
             .map_err(|error| error.with_stream(id, u64::from(record.offset)))?;
@@ -296,28 +298,28 @@ pub(crate) fn shared_symbols(
         report.add("shared symbols", 1);
     }
     let mut indexed = HashSet::new();
-    let globals = report.supported(pdb.global_symbols(dbi), "global symbol index")?;
-    if let Some(globals) = globals.flatten() {
+    let globals = report.supported(pdb.globals(), "global symbol index")?;
+    if let Some(globals) = globals.flatten().map(|globals| globals.index()) {
         report.claim(dbi.header().global_stream.ok_or("missing global stream")?);
         globals.hash_table().check_records(&offsets)?;
-        check_lookup("global", globals.hash_table(), &bytes, &mut indexed, report)?;
+        check_lookup("global", globals.hash_table(), bytes, &mut indexed, report)?;
         report.add("global index records", globals.hash_table().len());
     }
-    let publics = report.supported(pdb.public_symbols(dbi), "public symbol index")?;
-    if let Some(publics) = publics.flatten() {
+    let publics = report.supported(pdb.publics(), "public symbol index")?;
+    if let Some(publics) = publics.flatten().map(|publics| publics.index()) {
         report.claim(dbi.header().public_stream.ok_or("missing public stream")?);
         publics.check_records(&offsets)?;
         publics.check_address_order(|offset| {
-            let symbol = Symbol::decode(offset.record(&bytes)?)?;
+            let symbol = Symbol::decode(offset.record(bytes)?)?;
             let address = symbol.address().ok_or_else(|| {
                 pdbrs::Error::new(ErrorKind::InvalidReference, None)
                     .with_context("public address map names a symbol without an address")
             })?;
             Ok((address.section, address.offset))
         })?;
-        check_lookup("public", publics.hash_table(), &bytes, &mut indexed, report)?;
+        check_lookup("public", publics.hash_table(), bytes, &mut indexed, report)?;
         report.add("public index records", publics.hash_table().len());
-        join_trampolines(&publics, &procedures.trampolines, report);
+        join_trampolines(publics, &procedures.trampolines, report);
     }
     report.add(
         "shared symbols outside both indexes",

@@ -64,16 +64,13 @@ pub(crate) fn named_stream(path: &Path, bench: &mut Bench) -> Outcome {
 /// Return the name of the public symbol with the smallest record offset whose name is unique
 /// in the public index.
 fn unique_public(pdb: &Pdb<&[u8]>) -> Outcome<Vec<u8>> {
-    let dbi = pdb.debug_info()?.ok_or("missing DBI stream")?;
-    let id = dbi
-        .header()
-        .symbol_stream
-        .ok_or("missing symbol record stream")?;
-    let records = pdb.stream_bytes(id)?;
-    let publics = pdb.public_symbols(&dbi)?.ok_or("missing public index")?;
+    let publics = pdb.publics()?.ok_or("missing public index")?;
+    if publics.records().is_empty() {
+        return Err("missing symbol record stream".into());
+    }
     let mut names = BTreeMap::<&[u8], (usize, u32)>::new();
-    for entry in publics.hash_table().records() {
-        let name = indexed_name(&records, entry.symbol)?;
+    for entry in publics.index().hash_table().records() {
+        let name = indexed_name(publics.records(), entry.symbol)?;
         let value = names.entry(name).or_insert((0, entry.symbol.0));
         value.0 += 1;
         value.1 = value.1.min(entry.symbol.0);

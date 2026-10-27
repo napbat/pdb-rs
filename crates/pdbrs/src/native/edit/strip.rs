@@ -175,7 +175,7 @@ struct ModuleRegions {
 /// Build the stripped symbol region of each module.
 fn module_regions<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     records: &[u8],
     kept: &BTreeMap<u32, Kept>,
 ) -> Result<ModuleRegions> {
@@ -205,7 +205,7 @@ fn module_regions<S: ReadAt>(
         list.sort_unstable();
         list.dedup();
         let stream = pdb
-            .module_stream(&module)?
+            .load_module(&module)?
             .ok_or_else(|| unresolved("S_LPROCREF record names a module without a stream"))?;
         let base = u32::try_from(stream.symbol_offset()).unwrap_or(u32::MAX);
         let mut writer = ModuleSymbolWriter::new(SYMBOL_BASE);
@@ -305,7 +305,7 @@ fn shared_records(
 /// encodes the stream.
 pub(super) fn plan<S: ReadAt>(
     pdb: &Pdb<S>,
-    context: &Context,
+    context: &Context<'_>,
     info: &mut InfoBuilder,
     changes: &mut Changes,
 ) -> Result<DbiBuilder> {
@@ -331,17 +331,18 @@ pub(super) fn plan<S: ReadAt>(
     if let Some(ipi) = pdb.ids()? {
         strip_types(IPI_STREAM, ipi.header(), changes)?;
     }
-    let dbi = &context.dbi;
-    let header = dbi.header();
+    let header = context.dbi.header();
     let symbol_stream = header
         .symbol_stream
         .ok_or_else(|| missing("PDB has no symbol record stream"))?;
-    let records = pdb.stream_bytes(symbol_stream)?;
-    let globals = pdb.global_symbols(dbi)?;
-    let publics = pdb.public_symbols(dbi)?;
-    let kept = kept_records(&records, globals.as_ref(), publics.as_ref())?;
-    let modules = module_regions(pdb, context, &records, &kept)?;
-    let mut shared = shared_records(&records, &kept, &modules)?;
+    let records = pdb
+        .symbol_records()?
+        .ok_or_else(|| missing("PDB has no symbol record stream"))?;
+    let globals = pdb.globals()?.map(|globals| globals.index());
+    let publics = pdb.publics()?.map(|publics| publics.index());
+    let kept = kept_records(records, globals, publics)?;
+    let modules = module_regions(pdb, context, records, &kept)?;
+    let mut shared = shared_records(records, &kept, &modules)?;
     let buckets = pdb.symbol_bucket_count();
     if let Some(id) = header.global_stream {
         let mut bytes = Vec::new();
@@ -354,7 +355,7 @@ pub(super) fn plan<S: ReadAt>(
         )?;
         changes.replace(id, bytes)?;
     }
-    if let (Some(id), Some(publics)) = (header.public_stream, &publics) {
+    if let (Some(id), Some(publics)) = (header.public_stream, publics) {
         let targets: Vec<u32> = publics.thunk_map().collect();
         let starts: Vec<_> = publics.section_starts().collect();
         let source = publics.header();
@@ -376,7 +377,7 @@ pub(super) fn plan<S: ReadAt>(
         )?;
         changes.replace(id, bytes)?;
     }
-    let mut builder = DbiBuilder::from_dbi(dbi)?;
+    let mut builder = DbiBuilder::from_dbi(context.dbi)?;
     builder.header.flags |= STRIPPED_FLAG;
     for ((index, record), region) in (0_u16..).zip(&mut builder.modules).zip(modules.regions) {
         let source = record.stream;
@@ -421,7 +422,7 @@ pub(super) fn plan<S: ReadAt>(
     changes.replace(symbol_stream, shared.bytes)?;
     strip_named(
         pdb,
-        dbi.debug_stream(DebugStream::NewFpo).is_some(),
+        context.dbi.debug_stream(DebugStream::NewFpo).is_some(),
         info,
         changes,
     )?;

@@ -117,8 +117,7 @@ fn pdb() -> Vec<u8> {
 fn lists_type_servers_precompiled_types_and_fastlink_objects() {
     let bytes = pdb();
     let pdb = Pdb::parse(&bytes).unwrap();
-    let dbi = pdb.debug_info().unwrap().unwrap();
-    let dependencies = pdb.external_dependencies(&dbi).unwrap();
+    let dependencies = pdb.external_dependencies().unwrap();
     assert!(dependencies.mini_pdb);
     assert!(!dependencies.is_empty());
     assert_eq!(dependencies.type_servers.len(), 1);

@@ -16,7 +16,6 @@ use crate::native::codeview::symbol::{ModuleSymbols, ModuleTypeSource, Symbol, S
 use crate::native::dbi::{DebugStream, Module};
 use crate::native::info::Feature;
 use crate::native::lines::{LineSubsection, ModuleLines};
-use crate::native::names::StringTable;
 use crate::native::section::SectionHeaders;
 use crate::native::symbols::PublicSymbolIndex;
 use crate::{Error, ErrorKind, Result};
@@ -74,10 +73,10 @@ impl SymbolLocator {
             .ok_or_else(|| missing("section header"))?;
         let section_headers = pdb.stream_bytes(headers_stream)?;
         let strings = pdb
-            .named_stream_bytes(b"/names")?
-            .map(|bytes| copy(StringTable::parse(&bytes)?.strings()))
+            .names()?
+            .map(|table| copy(table.strings()))
             .transpose()?;
-        let map = AddressMap::new(SectionHeaders::parse(&section_headers)?, &dbi);
+        let map = AddressMap::new(SectionHeaders::parse(&section_headers)?, dbi);
         let no_type_merge = pdb.info().has_feature(Feature::NO_TYPE_MERGE);
         let mut lists = Lists {
             no_type_merge,
@@ -105,14 +104,9 @@ impl SymbolLocator {
             }
         }
         let inlinees = inlinee_names(pdb, &mut lists.inlinees, &lists.sources)?;
-        let symbol_records = dbi
-            .header()
-            .symbol_stream
-            .map(|id| pdb.stream_bytes(id))
-            .transpose()?
-            .unwrap_or_default();
-        let global_index = pdb.global_symbols(&dbi)?;
-        let public_index = pdb.public_symbols(&dbi)?;
+        let symbol_records = copy(pdb.symbol_records()?.unwrap_or_default())?;
+        let global_index = pdb.globals()?.map(|globals| globals.index().clone());
+        let public_index = pdb.publics()?.map(|publics| publics.index().clone());
         let publics = match &public_index {
             Some(index) => public_spans(index, &symbol_records, &map)?,
             None => Vec::new(),
@@ -123,7 +117,7 @@ impl SymbolLocator {
             lines: RangeIndex::new(lists.lines)?,
             contributions: RangeIndex::new(contributions)?,
             publics: RangeIndex::new(publics)?,
-            dbi,
+            dbi: dbi.clone(),
             section_headers,
             strings,
             modules: lists.modules,
@@ -154,7 +148,7 @@ impl Lists {
             walk_end: None,
             separated: Vec::new(),
         };
-        if let Some(stream) = pdb.module_stream(module)? {
+        if let Some(stream) = pdb.load_module(module)? {
             self.lines_of(index, &stream, &mut data, map)?;
             data.walk_end = self.symbols_of(index, &stream, &mut data, map)?;
             data.inlinees.sort_by_key(|&(id, _, _)| id);
