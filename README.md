@@ -55,8 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(dbi) = pdb.debug_info()? {
         for module in dbi.modules() {
-            let (_, module) = module?;
-            let Some(stream) = pdb.module_stream(&module)? else { continue };
+            let (index, _) = module?;
+            let Some(stream) = pdb.module(index)? else { continue };
             let base = u32::try_from(stream.symbol_offset())?;
             for symbol in ModuleSymbols::new(stream.symbol_data(), stream.stream(), base, 256) {
                 if let Some(name) = symbol?.symbol.name() {

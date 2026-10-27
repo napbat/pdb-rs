@@ -13,7 +13,7 @@
 //! fixtures. The `verify-rebuild` command rebuilds them with the pdbrs writer and compares the
 //! result with the original. The `verify-edit` command edits and builds them with the pdbrs
 //! editor and checks the result with the verifier and the fixture programs. The
-//! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs builder and
+//! `verify-native-build` command rebuilds the native PDB fixtures with the pdbrs editor and
 //! compares each result with the original through the consumer tools. The `verify-msfz`
 //! command writes and converts MSFZ files with pdbrs and checks them through the consumer
 //! tools. The `detect` command opens each fixture output with the format facade of pdbrs.

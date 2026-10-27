@@ -255,6 +255,8 @@ Evidence: `cargo run -p pdbrs-fixtures -- verify-rebuild` rebuilds the four stan
 Each rebuild has the original bytes and the original content-derived ID, and its verifier dump has no differences.
 `cargo run -p pdbrs-fixtures -- verify-edit` edits and builds the same five PDBs and compares the verifier dumps with the expected change.
 It runs each standalone fixture program with a built PDB and with a PDB whose sequence points move 1000 lines (see `fixtures/README.md`).
+Its section `new edit cases:` changes a sequence point line, a document name or a local variable name, or removes a local constant or a custom debug information value (#42).
+For each case, the verifier dump shows the expected change, and the streams with other bytes are exactly the streams that `PlanReport` does not give as copied.
 
 ## Implemented MSF writing
 
@@ -462,7 +464,7 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `io.rs` | Positional sources, slice adapters and feature-gated file adapters |
 | `compression.rs` | Crate-private raw DEFLATE and zstd decoding and encoding with size limits; the only user of `miniz_oxide` and `ruzstd` |
 | `crypto.rs` | Crate-private SHA-2 digests; the only user of `sha2` |
-| `native.rs` and `native/` | Native reader, editor, builder, identity and capability reporting |
+| `native.rs` and `native/` | Native reader, editor, identity and capability reporting |
 | `native/msf.rs` and `native/msf/` | Superblock, directory, block maps, stream access and container writing |
 | `native/msfz.rs` and `native/msfz/` | MSFZ header, stream directory, Chunk Table, fragment reads, chunk cache and container writing |
 | `native/container.rs` | One stream container type (`Container`) over MSF 7.0 and MSFZ for the native `Pdb` facade |
@@ -474,14 +476,14 @@ Proposed modules, relative to `crates/pdbrs/src/`:
 | `native/symbols.rs` and `native/symbols/` | Shared symbols, global/public indexes and lookup |
 | `native/lines.rs` and `native/lines/` | C13 subsections, checksums, line tables and inline annotations |
 | `native/address.rs` | Section offsets, RVAs and OMAP mappings |
-| `native/build.rs`, `native/build/` and `native/write.rs` | Native builder, write plan, semantic rebuild and builder handles |
-| `native/edit.rs` and `native/edit/` | Native editor and edit plan |
-| `portable.rs` and `portable/` | Portable reader, editor, builder, identity and capability reporting |
+| `native/editor.rs` and `native/editor/` | Native editor model, collections, write plan, plan report and semantic rebuild |
+| `portable.rs` and `portable/` | Portable reader, editor, identity and capability reporting |
+| `portable/editor.rs` and `portable/editor/` | Portable editor model, collections, source table decoding and reference resolution |
 | `portable/metadata.rs` and `portable/metadata/` | Metadata root, tables, heaps, compressed integers and coded indexes |
 | `portable/debug.rs` and `portable/debug/` | Documents, sequence points, scopes, locals, imports and state machines |
 | `portable/custom.rs` and `portable/custom/` | Known custom debug codecs and raw unknown payloads |
 | `portable/embedded.rs` | Embedded PDB envelopes and embedded-source blobs, also used by native .NET document records |
-| `portable/write.rs` and `portable/write/` | Row assignment, table sorting, heap layout and reference rewriting |
+| `portable/write.rs` and `portable/write/` | Write plan, plan report, row assignment, table sorting, heap layout and reference rewriting |
 | `format.rs` | Checked format detection and dispatch to the selected backend |
 | `error.rs` | Error kinds and structured locations |
 | `validation.rs` | Explicit whole-file validation and capability reports |
@@ -689,7 +691,7 @@ Status: the reader is implemented ([#37](https://github.com/napbat/pdbrs/issues/
 
 - `pdbrs::probe` gives `ContainerKind::NativeMsfz`. `pdbrs::Pdb` sends MSFZ input to the native backend (`Format::Native`).
 - `native::msfz::Msfz` checks every invariant above when it opens a file. It decodes stored (code 0), zstd (code 1) and raw DEFLATE (code 2) chunks and stream directories through `compression.rs`. Other codes and versions give `UnsupportedVersion`.
-- `native::container::Container` holds an `Msf` or an `Msfz`. `native::Pdb::container` replaces `Pdb::msf`. All typed accessors and `Pdb::edit` read through it. The builder and the editor write MSF 7.0 output with the default page size (4096) for MSFZ input.
+- `native::container::Container` holds an `Msf` or an `Msfz`. `native::Pdb::container` replaces `Pdb::msf`. All typed accessors and `Pdb::edit` read through it. The editor writes MSF 7.0 output with the default page size (4096) for MSFZ input.
 - The free page map and the stream 0 snapshot are MSF 7.0 structures. `Container::msf` gives them; the `native` example reports them as not applicable for MSFZ.
 - `MsfzLimits` bounds the stream directory (64 MiB), the Chunk Table (64 MiB), one chunk (256 MiB) and the chunk cache (256 MiB). The cache removes the least recently used chunk first; the same reads give the same evictions. The `ContainerLimits` of `ReadOptions::limits` holds the limits.
 - Stream sizes are `u64` values: a stream can be larger than 4 GiB. Nil and empty streams stay distinct.

@@ -1,6 +1,6 @@
 //! The `verify-native-build` command.
 //!
-//! The command rebuilds each native PDB of the fixture manifest with the pdbrs builder and
+//! The command rebuilds each native PDB of the fixture manifest with the pdbrs editor and
 //! compares the original and the rebuilt PDB through the consumer tools:
 //!
 //! 1. `Pdb::edit` with `IdentityPolicy::Preserve`, `PdbEditor::decode_all` and

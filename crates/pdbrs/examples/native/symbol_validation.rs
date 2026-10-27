@@ -47,7 +47,7 @@ fn id_kind(context: &Context<'_>, id: IdIndex) -> Option<LeafKind> {
 /// Make the library context from the example context.
 ///
 /// For a module whose indices refer to records outside the PDB, the library does not check
-/// the type and ID indices, as the builder does.
+/// the type and ID indices, as the editor plan does.
 fn validation_context<'c>(
     context: &'c Context<'_>,
     id_kinds: &'c dyn Fn(IdIndex) -> Option<LeafKind>,

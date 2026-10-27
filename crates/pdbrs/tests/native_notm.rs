@@ -1,8 +1,8 @@
 //! Tests of PDBs without type merging (feature `NOTM`, MSVC `/DEBUG:LAZY`).
 //!
 //! The `S_MOD_TYPEREF` record of a module names the stream with the type
-//! records of the module. The builder checks the module symbols against
-//! these records, the rebuild carries the streams, and the editor treats
+//! records of the module. A plan without a source checks the module symbols
+//! against these records, a rebuild carries the streams, and an edit treats
 //! them as streams of the module (#32, #33, #34).
 
 use pdbrs::native::address::SectionOffset;
@@ -88,7 +88,7 @@ fn type_reference(flags: u32) -> ModuleTypeReference {
 /// Build a PDB like `link /DEBUG:LAZY` writes: empty TPI and IPI, module 0
 /// with two type records in its own stream, and module 1 with the records
 /// of module 0. The local data of the modules has `first` and `second`.
-fn builder(first: TypeIndex, second: TypeIndex) -> PdbEditor<'static> {
+fn editor(first: TypeIndex, second: TypeIndex) -> PdbEditor<'static> {
     let mut editor = PdbEditor::new(7, [7; 16], 1).expect("editor");
     editor
         .set_features(&[Feature::VC140, Feature::NO_TYPE_MERGE])
@@ -162,7 +162,7 @@ fn changes(plan: &PdbWritePlan<'_, &[u8]>, id: StreamId) -> bool {
 
 /// Build the PDB with valid module type indices.
 fn notm() -> Vec<u8> {
-    builder(TypeIndex(0x1000), TypeIndex(0x1001))
+    editor(TypeIndex(0x1000), TypeIndex(0x1001))
         .plan(EditOptions::default())
         .and_then(|plan| plan.to_vec())
         .expect("the NOTM PDB builds")
@@ -220,7 +220,7 @@ fn module_type_index_past_the_module_records_is_rejected() {
         (TypeIndex(0x1002), TypeIndex(0x1000)),
         (TypeIndex(0x1000), TypeIndex(0x1002)),
     ] {
-        let error = builder(first, second)
+        let error = editor(first, second)
             .plan(EditOptions::default())
             .expect_err("module 0 has two type records");
         assert_eq!(error.kind(), ErrorKind::InvalidReference);

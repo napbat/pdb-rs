@@ -13,7 +13,7 @@
 //! `verify-rebuild` (see [`rebuild`]) rebuilds each Portable PDB with the pdbrs writer and
 //! compares the bytes, the ID and the verifier dump with the original.
 //!
-//! `verify-native-build` (see [`native`]) rebuilds each native PDB with the pdbrs builder and
+//! `verify-native-build` (see [`native`]) rebuilds each native PDB with the pdbrs editor and
 //! compares the original and the rebuilt PDB through the consumer tools.
 //!
 //! `verify-msfz` (see [`msfz`]) writes MSFZ files from the native PDBs with the pdbrs writer,
