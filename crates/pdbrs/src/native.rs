@@ -10,6 +10,9 @@
 //! [`PdbBuilder`] builds a new native PDB and [`PdbContents`] reads one for a semantic
 //! rebuild. [`Pdb::edit`] makes a [`PdbEditor`] that changes an existing PDB. Both make a
 //! plan ([`PdbWritePlan`] or [`PdbEditPlan`]) that checks all changes before it writes a byte.
+//!
+//! [`ImageRemap`] maps the addresses of an image to a rewritten image and makes the OMAP
+//! tables of the new image.
 
 pub mod address;
 pub mod auxiliary;
@@ -39,10 +42,12 @@ pub mod write;
 
 mod producer;
 mod reader;
+mod remap;
 pub use build::{BuildOptions, PdbBuilder, PdbContents, PdbWritePlan};
 pub use edit::{EditOptions, PdbEditPlan, PdbEditor};
 pub use producer::Producer;
 pub use reader::{Pdb, ReadOptions};
+pub use remap::{ImageRemap, RemapRange};
 
 /// The matching identity of a native PDB and its PE debug reference.
 ///
