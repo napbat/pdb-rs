@@ -1,4 +1,4 @@
-// Print the decoded debug table sections of the dump (#23): documents, sequence points, local
+// Print the decoded debug table sections of the dump: documents, sequence points, local
 // scopes, import scopes and state machine methods.
 //
 // SRM decodes the document names, the sequence points and the imports. SRM does not decode

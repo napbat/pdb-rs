@@ -1,5 +1,5 @@
 //! The source path remap of the `remap cases:` sections of `verify-native-edit` and
-//! `verify-edit` (#46).
+//! `verify-edit`.
 //!
 //! The build root is the directory that holds the fixture sources (`fixtures\`) and the build
 //! outputs (`target\fixtures\<fixture>\`): the `output_root` of the fixture manifest without

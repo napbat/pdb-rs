@@ -1,4 +1,4 @@
-//! The `DIA2Dump` comparison of the clean output with the OMAP output (decision 12 of #43).
+//! The `DIA2Dump` comparison of the clean output with the OMAP output.
 //!
 //! DIA translates each address of the OMAP output to the new image, and it keeps the source
 //! section and offset. The clean output has the new section and offset in its records. The

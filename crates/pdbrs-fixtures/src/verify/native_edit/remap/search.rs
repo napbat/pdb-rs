@@ -1,6 +1,7 @@
-//! The byte search for the build root in the streams of a remapped PDB (#46).
+//! The byte search for the build root in the streams of a remapped PDB.
 //!
-//! Each occurrence of the root must be in a field that the decision comment of #46 excludes.
+//! The remap does not change some fields that can hold the root. Each occurrence of the root
+//! must be in one of these fields.
 //! The search reads the output with `pdbrs` and puts each occurrence in a class:
 //!
 //! - inside a string of `S_ENVBLOCK` or `LF_STRING_ID`, after its first byte: a command line

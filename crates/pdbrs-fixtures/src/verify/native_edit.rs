@@ -17,13 +17,13 @@
 //! 3. The read count of a named stream change on `msvc-x64-large` (see [`read_count`]).
 //! 4. A summary line of the section.
 //!
-//! Then the command prints the section `task cases:` of #41: each editing task on each PDB,
+//! Then the command prints the section `task cases:`: each editing task on each PDB,
 //! with the same checks and a summary line (see [`tasks`]).
 //!
-//! The section `remap cases:` of #46 remaps the source paths of each PDB and checks the output
+//! The section `remap cases:` remaps the source paths of each PDB and checks the output
 //! (see [`remap`]).
 //!
-//! The last section `type removal cases:` of #47 removes the unreferenced type records and UDT
+//! The last section `type removal cases:` removes the unreferenced type records and UDT
 //! source line records of each PDB, with the same checks, a comparison of the mapped
 //! `llvm-pdbutil` dump and of the `DIA2Dump` output, and a summary line (see [`removal`]).
 //!

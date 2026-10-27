@@ -1,4 +1,4 @@
-//! The `verify-remap` command (#43, OMAP output and clean output).
+//! The `verify-remap` command (OMAP output and clean output).
 //!
 //! For each native PDB of the fixture manifest (see [`super::native::native_fixtures`]), the
 //! command makes the range sets of [`ranges`] from the procedures of the source

@@ -1,4 +1,4 @@
-// Print the decoded custom debug information section of the dump (#24).
+// Print the decoded custom debug information section of the dump.
 //
 // SRM gives the rows, the kind GUIDs and the blobs. SRM does not decode the blobs, so this
 // file decodes them with BlobReader. The layouts come from the Portable PDB specification

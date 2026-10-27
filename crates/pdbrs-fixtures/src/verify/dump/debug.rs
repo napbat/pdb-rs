@@ -1,4 +1,4 @@
-//! The decoded debug table sections of the dump (#23).
+//! The decoded debug table sections of the dump.
 //!
 //! The sections come after the `row` lines and before the `cdi` lines: documents, sequence
 //! points, local scopes with their variables and constants, import scopes with their imports,

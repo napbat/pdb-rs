@@ -1,4 +1,4 @@
-//! The explained differences of the clean `DIA2Dump` comparison (decision 12 of #43).
+//! The explained differences of the clean `DIA2Dump` comparison.
 //!
 //! Each class has a positive condition. The check counts a difference as explained only if
 //! the condition holds, and it prints the count of each class:
@@ -17,9 +17,9 @@
 //!   range (or 0). The clean output keeps the offset in the procedure, so it gets the new end
 //!   of the procedure.
 //! - [`DEBUG_PART`]: a `FuncDebugStart` or `FuncDebugEnd` line of a split procedure whose
-//!   old address is outside the first part. Decision 4 limits the debug start and end to the
-//!   length of the first part, so the clean line gives the end of the first part. The OMAP
-//!   line gives the new RVA of the old address in a later part.
+//!   old address is outside the first part. The clean output limits the debug start and end
+//!   to the length of the first part, so the clean line gives the end of the first part.
+//!   The OMAP line gives the new RVA of the old address in a later part.
 //! - [`LAZY`]: in a PDB without type merging (`NOTM`), DIA stops the `-s` list of a module
 //!   at the first symbol that it cannot read (a procedure whose type is in the object file).
 //!   If the clean output removed that symbol, DIA lists more symbols of the module. The
@@ -33,7 +33,7 @@
 //!   code section to the end of the image makes a code public symbol the last one.
 //! - [`COFF_GROUP`]: a PGO phase line (`Phase Name: <phase>`) of one output only. DIA takes
 //!   the phase from the COFF group `<section>$lp<phase>` that holds the procedure. A COFF
-//!   group is a point (decision 4): the clean group keeps its start and length, so after a
+//!   group is a point: the clean group keeps its start and length, so after a
 //!   reorder it holds other procedures. The source group must hold the old procedure start
 //!   exactly if the OMAP output prints the line, and the clean group must hold the new
 //!   procedure start exactly if the clean output prints it.

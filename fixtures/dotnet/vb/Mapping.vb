@@ -1,4 +1,4 @@
-' A function whose sequence points change documents (#23). Two #ExternalSource blocks map parts
+' A function whose sequence points change documents. Two #ExternalSource blocks map parts
 ' of the body to the documents Mapped.vb and MappedNext.vb. The VB compiler hides the lines of a
 ' file outside its #ExternalSource blocks, so the function is in its own file and has a block for
 ' each document. Compute returns its argument, so the checksum does not change.

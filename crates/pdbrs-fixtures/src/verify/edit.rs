@@ -20,8 +20,8 @@
 //!    plan report.
 //! 6. The section `task cases:` applies the editing tasks (see [`tasks`]) with the same
 //!    checks.
-//! 7. The section `remap cases:` remaps the document names with the source path remap of #46
-//!    (see [`remap`]) and checks the names, the unchanged sequence points and the report.
+//! 7. The section `remap cases:` remaps the document names with the source path remap (see
+//!    [`remap`]) and checks the names, the unchanged sequence points and the report.
 //!
 //! The command writes the PDBs, the dumps and the traces to `target/verify-edit/`.
 

@@ -1,5 +1,4 @@
-//! The `.pdata` and `.xdata` streams of the new image for the clean output of `verify-remap`
-//! (decision 7 of #43).
+//! The `.pdata` and `.xdata` streams of the new image for the clean output of `verify-remap`.
 //!
 //! pdbrs does not decode the unwind information in `.xdata`, so the caller gives the streams
 //! of the new image (`ImageRemap::with_unwind_streams`). The range sets move only code

@@ -503,10 +503,10 @@ pub static FIXTURES: &[Fixture] = &[
         "clang-cl + lld-link",
         "debug, static runtime library",
         // The static runtime has objects from MASM (`ml64`). Some of their `LF_STRUCTURE`
-        // records end with `f1` and two stale bytes instead of the `LF_PAD` run (#29).
+        // records end with `f1` and two stale bytes instead of the `LF_PAD` run.
         clang(Linker::Lld, Arch::X64, &["/Zi", "/Od", "/MTd"], LINK_DEBUG),
     ),
-    // The local producers of #39: each fixture holds record kinds or stream forms that the
+    // The local producers: each fixture holds record kinds or stream forms that the
     // fixtures above do not have.
     native(
         "msvc-x64-amp",

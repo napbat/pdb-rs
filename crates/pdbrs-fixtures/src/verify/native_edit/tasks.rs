@@ -1,4 +1,4 @@
-//! The task cases of `verify-native-edit` (#41).
+//! The task cases of `verify-native-edit`.
 //!
 //! After the section `change and removal cases:`, the command runs each editing task of
 //! `pdbrs::native::PdbEditor`

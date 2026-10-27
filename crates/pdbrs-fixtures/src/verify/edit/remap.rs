@@ -1,4 +1,4 @@
-//! The remap cases of `verify-edit` (#46): `pdbrs::portable::PdbEditor::remap_source_paths`.
+//! The remap cases of `verify-edit`: `pdbrs::portable::PdbEditor::remap_source_paths`.
 //!
 //! The case remaps the document names of each Portable PDB input with the build root of the
 //! fixtures (see [`BuildRoot`]): the root becomes `/_/`. It uses

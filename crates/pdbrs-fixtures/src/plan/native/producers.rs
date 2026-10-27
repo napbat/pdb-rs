@@ -1,4 +1,4 @@
-//! Plans of the native variants for the local producers of #39: C++ AMP, C++20 features,
+//! Plans of the native variants for the local producers: C++ AMP, C++20 features,
 //! MASM, ARM64EC, the primitive types of `clang-cl` and `flang`, and a FASTLINK PDB that
 //! `mspdbcmf` converts to a full PDB.
 

@@ -1,4 +1,4 @@
-//! Run the work of a command on worker threads (#45).
+//! Run the work of a command on worker threads.
 //!
 //! A command makes one [`Jobs`] value with the worker count of `--jobs`. All parallel work of
 //! the command, also nested work, shares its helper tokens: the calling thread always works,

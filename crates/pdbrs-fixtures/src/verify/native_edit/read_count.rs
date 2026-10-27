@@ -1,4 +1,4 @@
-//! The read count of a named stream change (S6c-3 of #42).
+//! The read count of a named stream change.
 //!
 //! The step reads the PDB of [`FIXTURE`] through a counting source. The source records each
 //! read. The step maps each read to the pages of the MSF stream directory, which it parses

@@ -1,4 +1,4 @@
-//! The record removal cases of `verify-native-edit` (#47).
+//! The record removal cases of `verify-native-edit`.
 //!
 //! After the task section, the command removes records from each native PDB in two cases:
 //!

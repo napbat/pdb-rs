@@ -1,4 +1,4 @@
-//! The `verify-msfz` command: MSFZ writing and conversion in both directions (#38).
+//! The `verify-msfz` command: MSFZ writing and conversion in both directions.
 //!
 //! 1. Encode (see [`encode`]): the command writes each native MSF 7.0 PDB of the fixture
 //!    manifest as MSFZ with each option set of [`OPTION_SETS`], twice. Both outputs must be

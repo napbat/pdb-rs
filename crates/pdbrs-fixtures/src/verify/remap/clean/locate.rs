@@ -1,5 +1,4 @@
-//! The `SymbolLocator` comparison of the clean output with the OMAP output (decision 12 of
-//! #43).
+//! The `SymbolLocator` comparison of the clean output with the OMAP output.
 //!
 //! At each sampled new RVA, `SymbolLocator::locate` must give the same answer for both
 //! outputs: the procedure name, the RVA and length of the innermost block, the inline call

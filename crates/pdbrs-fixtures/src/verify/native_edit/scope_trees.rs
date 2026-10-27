@@ -1,4 +1,4 @@
-//! The scope tree step of `verify-native-edit` (S6c-2 of #42).
+//! The scope tree step of `verify-native-edit`.
 //!
 //! For each native PDB, the step decodes each module through `PdbEditor::module_mut`. It
 //! counts the modules with a scope tree, the modules without a symbol region and the opaque

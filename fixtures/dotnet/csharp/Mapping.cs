@@ -1,4 +1,4 @@
-// A method whose sequence points change documents (#23). The #line directive maps part of the
+// A method whose sequence points change documents. The #line directive maps part of the
 // body to the document Mapped.template, #line hidden gives a hidden sequence point and
 // #line default returns to this file. Compute returns its argument, so the checksum does not
 // change.

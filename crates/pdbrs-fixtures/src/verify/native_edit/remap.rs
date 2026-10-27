@@ -1,12 +1,12 @@
-//! The remap cases of `verify-native-edit` (#46).
+//! The remap cases of `verify-native-edit`.
 //!
-//! After the task section of #41, the command runs `PdbEditor::remap_source_paths` on each
+//! After the task section, the command runs `PdbEditor::remap_source_paths` on each
 //! native PDB. The function replaces the build root of the fixtures with `/_/` (see
 //! [`BuildRoot`]). The command writes `target/verify-native-edit/<fixture>/<PDB file stem>/
 //! remap-source-paths.pdb` and checks it:
 //!
 //! 1. The byte search for the root over all streams finds the root only in the fields that
-//!    the decision comment of #46 excludes (see [`search`]).
+//!    the remap does not change (see [`search`]).
 //! 2. The consumer checks of [`super::checks`]: `pdbtool check` and `compare` (the report
 //!    lists exactly the streams that `compare` shows as different), `llvm-pdbutil` and
 //!    `DIA2Dump`, the new `/src/files/` names and `pdbstr -r -s:srcsrv`.

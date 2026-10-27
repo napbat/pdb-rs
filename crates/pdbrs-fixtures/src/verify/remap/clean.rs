@@ -1,4 +1,4 @@
-//! The clean output check of `verify-remap` (decision 12 of #43).
+//! The clean output check of `verify-remap`.
 //!
 //! For each range set, the check remaps the source PDB with `PdbEditor::remap_addresses` and
 //! `RemapMode::Clean`. It writes the output of `RemovedCode::Drop` to
@@ -7,7 +7,7 @@
 //! 1. The policies: the plan with `RemovedCode::Fail` fails exactly if the plan with
 //!    `RemovedCode::Drop` removes records. The error is `UnsupportedEdit`, and its address has
 //!    no range. Without removed records, both policies give the same bytes. If the plan fails
-//!    for a record without a split form (decision 4), a range boundary must cut that record
+//!    for a record without a split form, a range boundary must cut that record
 //!    (see [`explain`]). The check then counts the set as "no split form" and does no other
 //!    check.
 //! 2. The unwind streams: for a source with `.pdata` or `.xdata`, the call without the

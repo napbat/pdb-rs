@@ -1,4 +1,4 @@
-//! The explanation of a clean plan that fails (decisions 4 and 5 of #43).
+//! The explanation of a clean plan that fails.
 //!
 //! A plan with `RemovedCode::Drop` fails with `UnsupportedEdit` for a record without a split
 //! form (for example `S_BLOCK32` or an FPO record) whose code the ranges split, and for a
@@ -24,7 +24,7 @@ use pdbrs::{Error, ErrorKind};
 use super::super::Source;
 use super::super::ranges::RangeSet;
 
-/// The symbol kinds without a split form (decision 4 of #43).
+/// The symbol kinds without a split form.
 const NO_SPLIT_SYMBOLS: [&str; 10] = [
     "S_BLOCK32",
     "S_WITH32",

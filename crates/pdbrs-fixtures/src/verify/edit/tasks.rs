@@ -1,4 +1,4 @@
-//! The task cases of `verify-edit` (#41): the editing tasks of `pdbrs::portable::PdbEditor`.
+//! The task cases of `verify-edit`: the editing tasks of `pdbrs::portable::PdbEditor`.
 //!
 //! Each case edits the source with `IdentityPolicy::ContentDerived`, writes
 //! `<fixture>.task-<case>.pdb` and its verifier dump `<fixture>.task-<case>.srm.txt`, and

@@ -65,7 +65,7 @@ struct Output {
     /// language is C++/CLI (a mixed-mode image).
     managed: bool,
     /// `true` if every consumer rejects the PDBs of the fixture because of a producer defect.
-    /// The `dxc` PDBs use a page beyond the declared page count (#27).
+    /// The `dxc` PDBs use a page beyond the declared page count.
     producer_defect: bool,
     kind: String,
     path: PathBuf,

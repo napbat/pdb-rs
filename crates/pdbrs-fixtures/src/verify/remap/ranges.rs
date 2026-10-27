@@ -1,4 +1,4 @@
-//! The range sets of `verify-remap` (#43): identity, section shift, procedure reorder,
+//! The range sets of `verify-remap`: identity, section shift, procedure reorder,
 //! procedure split and procedure removal.
 //!
 //! Each set gives the section headers of a new image and the ranges from the old image to the
@@ -16,7 +16,7 @@
 //! - Procedure removal: the removable procedures ([`Procedure::removable`]) have no range.
 //!   The other pieces stay.
 //!
-//! OMAP cannot map RVA 0 (decision 1 of #43). A range that starts at the old or the new RVA 0
+//! OMAP cannot map RVA 0. A range that starts at the old or the new RVA 0
 //! thus starts 1 byte later. The HLSL and the .NET fixtures have a section at RVA 0. In the
 //! reorder set of the HLSL fixtures, the procedure moves to RVA 0, so its first byte has no
 //! mapping.
@@ -372,7 +372,7 @@ pub(crate) fn range_set(
         }
     }
     new_sections.sort_by_key(|section| section.virtual_address);
-    // OMAP cannot map RVA 0 (decision 1 of #43), so a range at RVA 0 starts 1 byte later.
+    // OMAP cannot map RVA 0, so a range at RVA 0 starts 1 byte later.
     let mut ranges: Vec<Range> = ranges
         .into_iter()
         .filter_map(|range| {

@@ -1,4 +1,4 @@
-//! The decoded custom debug information section of the dump (#24).
+//! The decoded custom debug information section of the dump.
 //!
 //! Each `CustomDebugInformation` row gives one `cdi` line with its codec name, and then the
 //! detail lines of the decoded value. `fixtures/README.md` lists the lines.
