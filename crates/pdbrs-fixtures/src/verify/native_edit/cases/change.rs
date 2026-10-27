@@ -1,4 +1,4 @@
-//! The changes of the new edit cases (S6c-1 of #42).
+//! The changes of the change and removal cases.
 //!
 //! [`prepare`] finds the first record of a case in the source PDB and changes it in the
 //! editor. It returns the [`Target`]: the place and the new value that the read of the output

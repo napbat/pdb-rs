@@ -1,4 +1,4 @@
-//! The read of the output of a new edit case with `pdbrs`.
+//! The read of the output of a change and removal case with `pdbrs`.
 //!
 //! [`confirm`] opens the output PDB and reads the place of the [`Target`]. It finds the new
 //! value there, or no record for a removal.

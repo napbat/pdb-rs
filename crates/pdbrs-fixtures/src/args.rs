@@ -38,8 +38,8 @@ usage: cargo run -p pdbrs-fixtures -- [--out <dir>] [--only <name>]... [--list]
   verify-edit    Edit and build each Portable PDB fixture with the pdbrs editor, compare
                  the verifier dumps with the expected change, and run each standalone fixture
                  program with the built and the edited PDB. Then apply one field change or
-                 one removal in each new edit case and compare the changed streams with the
-                 plan report. Write the results to target/verify-edit/.
+                 one removal in each change and removal case and compare the changed streams
+                 with the plan report. Write the results to target/verify-edit/.
 
   verify-native-build
                  Rebuild each native PDB fixture with the pdbrs editor, write it to

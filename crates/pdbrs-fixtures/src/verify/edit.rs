@@ -15,9 +15,10 @@
 //! 4. For a standalone fixture, the program prints the `stack` mode trace with the original,
 //!    the built (step 2) and a line-moved PDB. The PDBs use the original PDB ID. The built PDB
 //!    gives the same trace, and the line-moved PDB gives each line number plus 1000.
-//! 5. After these steps, the section `new edit cases:` applies one field change or one removal
-//!    in each case of [`cases`] and checks the output with the verifier and the plan report.
-//! 6. The section `task cases:` applies the editing tasks of #41 (see [`tasks`]) with the same
+//! 5. After these steps, the section `change and removal cases:` applies one field change or
+//!    one removal in each case of [`cases`] and checks the output with the verifier and the
+//!    plan report.
+//! 6. The section `task cases:` applies the editing tasks (see [`tasks`]) with the same
 //!    checks.
 //! 7. The section `remap cases:` remaps the document names with the source path remap of #46
 //!    (see [`remap`]) and checks the names, the unchanged sequence points and the report.
@@ -84,14 +85,14 @@ pub fn verify_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Result<boo
     let passed = print_in_order(jobs, &comparisons, |comparison, log| {
         check(&assembly, comparison, &outputs, &out, log)
     });
-    let new_cases = cases::run(jobs, &assembly, &comparisons, &out);
+    let change_removal_cases = cases::run(jobs, &assembly, &comparisons, &out);
     let task_cases = tasks::run(jobs, &assembly, workspace, &comparisons, &out);
     let remap_cases = remap::run(jobs, &assembly, fixtures, &comparisons, &out);
     println!(
         "wrote the PDBs, the dumps and the traces to {}",
         out.display()
     );
-    Ok(passed && new_cases && task_cases && remap_cases)
+    Ok(passed && change_removal_cases && task_cases && remap_cases)
 }
 
 /// Format a pdbrs error.

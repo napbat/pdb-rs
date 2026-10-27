@@ -1,4 +1,4 @@
-//! The new edit cases of `verify-native-edit` (S6c-1 of #42).
+//! The change and removal cases of `verify-native-edit`.
 //!
 //! The command runs each [`Case`] on each native PDB after the edits of [`super::edits`]. Each
 //! case changes or removes one record with `IdentityPolicy::IncrementAge` and writes
@@ -23,7 +23,7 @@ use super::edits::{self, Outcome};
 use crate::jobs::Jobs;
 use change::Prepared;
 
-/// One new edit case.
+/// One change and removal case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Case {
     /// Add 1 to the address offset of a public symbol.
@@ -197,7 +197,7 @@ fn check_fixture(tools: &Tools, fixture: &NativeFixture, work: &Path) -> Vec<Cas
         .collect()
 }
 
-/// The totals of the new edit cases.
+/// The totals of the change and removal cases.
 #[derive(Debug, Default)]
 pub(super) struct Totals {
     /// The number of cases that ran.
@@ -237,9 +237,10 @@ fn print_results(fixture: &NativeFixture, results: &[CaseResult], totals: &mut T
     }
 }
 
-/// Run the new edit cases on the PDBs of `list`, print the results and return the totals.
+/// Run the change and removal cases on the PDBs of `list`, print the results and return the
+/// totals.
 pub(super) fn run(tools: &Tools, list: &[NativeFixture], work: &Path, jobs: &Jobs) -> Totals {
-    println!("new edit cases:");
+    println!("change and removal cases:");
     let results = jobs.map(list, |fixture| check_fixture(tools, fixture, work));
     let mut totals = Totals::default();
     let mut classes = BTreeMap::<(&str, &str), usize>::new();

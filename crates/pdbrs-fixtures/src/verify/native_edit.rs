@@ -7,11 +7,11 @@
 //! `msvc-x64-stripped` fixture, it also compares the result with the stripped PDB that
 //! `link /PDBSTRIPPED` wrote (see [`stripped`]).
 //!
-//! After the summary line of these edits, the command prints a new section (#42). The section
-//! has these parts:
+//! After the summary line of these edits, the command prints the section
+//! `change and removal cases:`. The section has these parts:
 //!
-//! 1. The new edit cases on each PDB (see [`cases`]), with the same checks and a read of the
-//!    output with `pdbrs`.
+//! 1. The change and removal cases on each PDB (see [`cases`]), with the same checks and a
+//!    read of the output with `pdbrs`.
 //! 2. The scope tree step: each module decodes into a scope tree, and a plan without a change
 //!    changes no stream (see [`scope_trees`]).
 //! 3. The read count of a named stream change on `msvc-x64-large` (see [`read_count`]).
@@ -280,26 +280,31 @@ pub fn verify_native_edit(workspace: &Path, fixtures: &Path, jobs: &Jobs) -> Res
         "native PDBs: {}, edits: {edits}, problems without an explanation: {problems}",
         list.len()
     );
-    let new_problems = new_section(&tools, &list, &work, jobs);
+    let change_removal_problems = change_removal_section(&tools, &list, &work, jobs);
     let task_problems = tasks::run(&tools, &list, &work, jobs);
     let remap_problems = remap::run(&tools, &list, fixtures, &work, jobs);
     let removal_problems = removal::run_section(&tools, &list, &work, jobs);
     Ok(problems == 0
-        && new_problems == 0
+        && change_removal_problems == 0
         && task_problems == 0
         && remap_problems == 0
         && removal_problems == 0)
 }
 
-/// Run the new section: the new edit cases, the scope tree step and the read count. Print a
-/// summary line and return the number of problems.
-fn new_section(tools: &Tools, list: &[NativeFixture], work: &Path, jobs: &Jobs) -> usize {
+/// Run the section `change and removal cases:`: the change and removal cases, the scope tree
+/// step and the read count. Print a summary line and return the number of problems.
+fn change_removal_section(
+    tools: &Tools,
+    list: &[NativeFixture],
+    work: &Path,
+    jobs: &Jobs,
+) -> usize {
     let totals = cases::run(tools, list, work, jobs);
     let (trees, tree_problems) = scope_trees::run(list, jobs);
     let read_problems = read_count::run(list);
     let problems = totals.problems + tree_problems + read_problems;
     println!(
-        "new section: native PDBs: {}, cases: {}, applied: {}, notes: {}, modules: {}, scope trees: {}, problems without an explanation: {problems}",
+        "change and removal section: native PDBs: {}, cases: {}, applied: {}, notes: {}, modules: {}, scope trees: {}, problems without an explanation: {problems}",
         list.len(),
         totals.cases,
         totals.applied,

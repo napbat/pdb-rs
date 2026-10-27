@@ -2,7 +2,7 @@
 //!
 //! Each case edits the source with `IdentityPolicy::ContentDerived`, writes
 //! `<fixture>.task-<case>.pdb` and its verifier dump `<fixture>.task-<case>.srm.txt`, and
-//! checks it as the cases of #42 do (see [`super::cases`]):
+//! checks it as the change and removal cases do (see [`super::cases`]):
 //!
 //! 1. The decoded sections of the verifier dump are the expected change of the source
 //!    sections: the records without custom debug information line for line, and the custom

@@ -1,4 +1,4 @@
-//! The new edit cases of `verify-edit` (#42): one field change or one removal in each case.
+//! The change and removal cases of `verify-edit`: one field change or one removal in each case.
 //!
 //! Each case edits the source with `IdentityPolicy::ContentDerived`, writes
 //! `<fixture>.<case>.pdb` and its verifier dump `<fixture>.<case>.srm.txt`, and checks:
@@ -84,7 +84,7 @@ impl Case {
     }
 }
 
-/// The counts of the new section.
+/// The counts of the section `change and removal cases:`.
 #[derive(Default)]
 struct Counts {
     /// The cases that applied.
@@ -95,11 +95,11 @@ struct Counts {
     problems: usize,
 }
 
-/// Run the cases on each comparison and print the section `new edit cases:`.
+/// Run the cases on each comparison and print the section `change and removal cases:`.
 ///
 /// Return `false` if a check fails or gives an error.
 pub(super) fn run(jobs: &Jobs, assembly: &Path, comparisons: &[Comparison], out: &Path) -> bool {
-    println!("new edit cases:");
+    println!("change and removal cases:");
     let results = jobs.map(comparisons, |comparison| {
         let mut log = String::new();
         let result = fixture(assembly, comparison, out, &mut log);
@@ -121,7 +121,7 @@ pub(super) fn run(jobs: &Jobs, assembly: &Path, comparisons: &[Comparison], out:
         }
     }
     println!(
-        "new section: portable PDBs: {}, cases: {}, applied: {}, notes: {}, problems: {}",
+        "change and removal section: portable PDBs: {}, cases: {}, applied: {}, notes: {}, problems: {}",
         comparisons.len(),
         comparisons.len() * CASES.len(),
         total.applied,

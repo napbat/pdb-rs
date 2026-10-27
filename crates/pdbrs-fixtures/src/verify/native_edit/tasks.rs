@@ -1,6 +1,7 @@
 //! The task cases of `verify-native-edit` (#41).
 //!
-//! After the section of #42, the command runs each editing task of `pdbrs::native::PdbEditor`
+//! After the section `change and removal cases:`, the command runs each editing task of
+//! `pdbrs::native::PdbEditor`
 //! on each native PDB and writes `target/verify-native-edit/<fixture>/<PDB file stem>/
 //! task-<case>.pdb`. Each output gets the consumer checks of [`super::checks`]: `pdbtool check`
 //! and `compare` (the report lists exactly the streams that `compare` shows as different),
