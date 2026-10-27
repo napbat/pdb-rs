@@ -233,13 +233,17 @@ If a `#Blob` offset changes, it decodes the document name and imports blobs with
 `PdbEditor` is the one editor type for builds and edits. It holds the records of `portable::debug` and `portable::custom` with `'static`.
 The identity policy is an argument of the entry (`PdbEditor::new` or `Pdb::edit`); the plan computes a content-derived ID from the output.
 An editor of a source borrows the source and decodes a table on the first `*_mut` call of that table (`documents_mut`, `methods_mut`, `local_scopes_mut`, `import_scopes_mut`, `state_machine_methods_mut`, `custom_debug_information_mut`, or `decode_all`).
-The plan reads a table that no `*_mut` call decoded, so the output does not depend on the calls. Copy of unchanged table bytes is [#49](https://github.com/napbat/pdbrs/issues/49).
+The plan copies the raw rows of a table that no `*_mut` call decoded and does not decode its records or blobs (copy-on-write, [#49](https://github.com/napbat/pdbrs/issues/49)).
+It decodes such a table in two cases: the `MethodDebugInformation` table if the external `MethodDef` count is not its source row count, and the custom debug information if a change gives a source local scope, local variable or local constant a new row ID.
+A source heap gets its value index only on the first addition, so a heap without additions is one copy in the plan.
+After `decode_all`, the plan encodes all records again.
 Documents and import scopes keep the order of addition, so their IDs are `DocumentId` and `ImportScopeId`.
 Local scopes hold their variables and constants. Local scopes and custom debug information have handles (`LocalScopeHandle`, `CustomDebugHandle`); a variable or a constant has the handle of its scope and its position. The plan gives them their rows.
 The plan sorts the local scopes, gives each scope one variable run and one constant run, and sorts state machine methods and custom debug information.
 It splits document names as Roslyn does and encodes the names and the imports with the codecs of #23. The other blobs keep the bytes of the record. Index widths follow the final heap sizes and row counts.
 
-With a source, the heaps of the output start with the source heap bytes.
+With a source, the heaps of the output start with the source heap bytes, so the heap offsets of the copied raw rows stay valid.
+The plan encodes all rows, also the copied raw rows, with the index widths of the output: if a heap size or a row count crosses a width limit, each table with such an index gets the wider index. Otherwise a table without a change keeps its bytes.
 Without a change, the output has the source bytes. Documents and import scopes keep their row IDs.
 Custom debug information of an unknown kind keeps its bytes. If a change gives a source local scope, local variable or local constant a new row ID, such a value can contain the old row ID.
 `PdbEditor::plan` then fails with `InvalidReference` before output. The parent of a known kind follows its record to the new row.
