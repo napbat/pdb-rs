@@ -16,8 +16,9 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{invalid, pad4, truncated};
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// The size of the time stamp and the index.
 const FIXED_SIZE: usize = 8;
@@ -32,7 +33,7 @@ const PDB_BIT: u32 = 0x8000_0000;
 const ALIGNMENT: usize = 4;
 
 /// One input assembly of a merged assembly.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AssemblyInput<'a> {
     /// The time stamp.
@@ -42,10 +43,12 @@ pub struct AssemblyInput<'a> {
     /// `true` if a PDB is present (bit 31 of the index field).
     pub has_pdb: bool,
     /// The version bytes, without the size field.
-    pub version: &'a [u8],
+    pub version: Bytes<'a>,
     /// The name, without its NUL terminator.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct AssemblyInput { version, name; timestamp, index, has_pdb });
 
 impl AssemblyInput<'_> {
     /// Append the entry and its padding to `out`.
@@ -94,8 +97,8 @@ impl AssemblyInput<'_> {
         Output::new(out).u32(self.timestamp)?;
         Output::new(out).u32(self.index | flag)?;
         Output::new(out).u16(version_size)?;
-        Output::new(out).bytes(self.version)?;
-        Output::new(out).bytes(self.name)?;
+        Output::new(out).bytes(&self.version)?;
+        Output::new(out).bytes(&self.name)?;
         Output::new(out).bytes(&[0])?;
         Ok(FIXED_SIZE + usize::from(version_size) + self.name.len() + 1)
     }
@@ -105,13 +108,15 @@ impl AssemblyInput<'_> {
 ///
 /// [`MergedAssemblyInput::parse`] validates all entries. The entry iterator
 /// then cannot fail.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MergedAssemblyInput<'a> {
     /// The validated entries.
-    data: &'a [u8],
+    data: Bytes<'a>,
     /// The number of entries.
     count: usize,
 }
+
+into_owned!(struct MergedAssemblyInput { data; count });
 
 impl<'a> MergedAssemblyInput<'a> {
     /// Parse the data of a `DEBUG_S_MERGED_ASSEMBLYINPUT` subsection.
@@ -139,7 +144,10 @@ impl<'a> MergedAssemblyInput<'a> {
             rest = split_entry(rest)?.2;
             count += 1;
         }
-        Ok(Self { data, count })
+        Ok(Self {
+            data: Bytes::new(data),
+            count,
+        })
     }
 
     /// Return the number of entries.
@@ -156,9 +164,9 @@ impl<'a> MergedAssemblyInput<'a> {
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub const fn iter(&self) -> MergedAssemblyInputIter<'a> {
+    pub fn iter(&self) -> MergedAssemblyInputIter<'_> {
         MergedAssemblyInputIter {
-            bytes: self.data,
+            bytes: &self.data,
             left: self.count,
         }
     }
@@ -172,7 +180,7 @@ impl<'a> MergedAssemblyInput<'a> {
     ///
     /// Returns the errors of [`AssemblyInput::encode`].
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        let mut rest = self.data;
+        let mut rest: &[u8] = &self.data;
         while !rest.is_empty() {
             let (entry, padding, next) = split_entry(rest)?;
             entry.encode(out)?;
@@ -183,18 +191,9 @@ impl<'a> MergedAssemblyInput<'a> {
     }
 }
 
-impl<'a> IntoIterator for MergedAssemblyInput<'a> {
-    type Item = AssemblyInput<'a>;
-    type IntoIter = MergedAssemblyInputIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &MergedAssemblyInput<'a> {
-    type Item = AssemblyInput<'a>;
-    type IntoIter = MergedAssemblyInputIter<'a>;
+impl<'s> IntoIterator for &'s MergedAssemblyInput<'_> {
+    type Item = AssemblyInput<'s>;
+    type IntoIter = MergedAssemblyInputIter<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -271,8 +270,8 @@ fn split_entry(bytes: &[u8]) -> Result<(AssemblyInput<'_>, usize, &[u8])> {
         timestamp: u32::from_le_bytes([t0, t1, t2, t3]),
         index: index & !PDB_BIT,
         has_pdb: index & PDB_BIT != 0,
-        version,
-        name,
+        version: Bytes::new(version),
+        name: Bytes::new(name),
     };
     Ok((entry, padding, &tail[padding..]))
 }

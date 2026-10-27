@@ -7,10 +7,10 @@ use super::{ProcedureInfo, ProcedureKey, PublicMatch, SymbolLocator, push};
 use crate::native::address::Rva;
 use crate::native::codeview::symbol::{ProcedureReference, Public, Symbol, SymbolData};
 use crate::native::symbols::SymbolOffset;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// A symbol with the name of a query.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum NameMatch<'a> {
     /// An `S_PROCREF`, `S_LPROCREF` or `S_TOKENREF` record of the global
@@ -68,14 +68,14 @@ impl SymbolLocator {
             for candidate in index.hash_table().lookup(name) {
                 let offset = candidate.symbol;
                 let symbol = self.shared_symbol(offset)?;
-                if symbol.name() != Some(name) {
+                if symbol.name().map(Bytes::as_bytes) != Some(name) {
                     continue;
                 }
                 let found = match symbol.procedure_reference() {
                     Some(reference) => NameMatch::Procedure {
                         offset,
-                        reference,
-                        procedure: self.referenced_procedure(&reference)?,
+                        procedure: self.referenced_procedure(reference)?,
+                        reference: reference.clone(),
                     },
                     None => NameMatch::Global { offset, symbol },
                 };
@@ -90,10 +90,11 @@ impl SymbolLocator {
                 if public.name != name {
                     continue;
                 }
+                let rva = optional_rva(&map, public.address)?;
                 let found = NameMatch::Public {
                     offset,
                     public,
-                    rva: optional_rva(&map, public.address)?,
+                    rva,
                 };
                 push(&mut matches, found, "name match list cannot be allocated")?;
             }
@@ -143,7 +144,7 @@ impl SymbolLocator {
     /// Decode the `S_PUB32` record at an offset of the symbol record stream.
     fn public(&self, offset: SymbolOffset) -> Result<Public<'_>> {
         match self.shared_symbol(offset)?.data() {
-            SymbolData::Public(public) => Ok(*public),
+            SymbolData::Public(public) => Ok(public.clone()),
             _ => Err(Error::new(ErrorKind::InvalidReference, None)
                 .with_context("public symbol index refers to a record that is not S_PUB32")),
         }

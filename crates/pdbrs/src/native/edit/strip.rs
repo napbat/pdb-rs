@@ -4,6 +4,7 @@
 //! the full PDB of the `msvc-x64-stripped` fixture (#27, #34). The
 //! documentation of [`PdbEditor`](super::PdbEditor) lists them.
 
+use alloc::borrow::Cow;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -19,7 +20,7 @@ use crate::native::codeview::symbol::{
     S_LPROC32_DPC, S_LPROC32_DPC_ID, S_LPROC32_ID, S_LPROCREF, S_PUB32, Symbol, SymbolData,
 };
 use crate::native::codeview::{Records, SymbolKind};
-use crate::native::dbi::{DbiBuilder, DebugStream, ModuleStreamParts, OwnedSourceInfo};
+use crate::native::dbi::{DbiBuilder, DebugStream, ModuleStreamParts, SourceInfo};
 use crate::native::info::{Feature, InfoBuilder};
 use crate::native::msf::StreamId;
 use crate::native::names::{HashVersion, StringTableBuilder};
@@ -28,7 +29,7 @@ use crate::native::symbols::{
     GlobalSymbolIndex, HashEntry, PublicSymbolIndex, SymbolOffset, ThunkTable,
 };
 use crate::native::types::{TypeHeader, TypeStreamOptions, encode_type_stream};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The module stream offset of the first symbol record: after the signature.
 const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
@@ -68,7 +69,7 @@ fn strip_types(id: StreamId, header: &TypeHeader, changes: &mut Changes) -> Resu
 /// Return the local procedure record of a stripped module: type 0, no
 /// links, and the kind without an ID index.
 fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(SymbolKind, SymbolData<'a>)> {
-    match (symbol.kind(), *symbol.data()) {
+    match (symbol.kind(), symbol.data()) {
         (
             S_LPROC32 | S_LPROC32_ID | S_LPROC32_DPC | S_LPROC32_DPC_ID,
             SymbolData::Procedure(procedure),
@@ -85,7 +86,7 @@ fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(SymbolKind, SymbolData
                     end: ModuleSymbolOffset(0),
                     next: ModuleSymbolOffset(0),
                     signature: ProcedureType::Type(TypeIndex::NONE),
-                    ..procedure
+                    ..procedure.clone()
                 }),
             ))
         }
@@ -95,7 +96,7 @@ fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(SymbolKind, SymbolData
                 parent: ModuleSymbolOffset(0),
                 end: ModuleSymbolOffset(0),
                 next: ModuleSymbolOffset(0),
-                ..procedure
+                ..procedure.clone()
             }),
         )),
         _ => Err(unsupported(
@@ -106,8 +107,8 @@ fn stripped_procedure<'a>(symbol: &Symbol<'a>) -> Result<(SymbolKind, SymbolData
 
 /// Return the procedure reference of an `S_LPROCREF` record.
 fn local_reference<'a>(symbol: &Symbol<'a>) -> Option<ProcedureReference<'a>> {
-    match (symbol.kind(), *symbol.data()) {
-        (S_LPROCREF, SymbolData::ProcedureReference(reference)) => Some(reference),
+    match (symbol.kind(), symbol.data()) {
+        (S_LPROCREF, SymbolData::ProcedureReference(reference)) => Some(reference.clone()),
         _ => None,
     }
 }
@@ -194,9 +195,9 @@ fn module_regions<S: ReadAt>(
     let mut regions = Vec::new();
     let mut offsets = BTreeMap::new();
     for module in context.dbi.modules() {
-        let module = module?;
-        let index = u16::try_from(module.index.0)
-            .map_err(|_| unsupported("PDB has more than 65535 modules"))?;
+        let (index, module) = module?;
+        let index =
+            u16::try_from(index.0).map_err(|_| unsupported("PDB has more than 65535 modules"))?;
         let Some(mut list) = targets.remove(&index) else {
             push(&mut regions, None)?;
             continue;
@@ -396,10 +397,10 @@ pub(super) fn plan<S: ReadAt>(
         let refs = shared.module_refs.remove(&index).unwrap_or_default();
         let mut bytes = Vec::new();
         let sizes = ModuleStreamParts {
-            symbols: Some(&region),
-            c11: &[],
-            c13: &[],
-            global_refs: &refs,
+            symbols: Some(Bytes::new(&region)),
+            c11: Bytes::default(),
+            c13: Bytes::default(),
+            global_refs: Cow::Borrowed(&refs),
         }
         .encode(&mut bytes)?;
         record.symbol_bytes = sizes.symbol_bytes;
@@ -409,7 +410,7 @@ pub(super) fn plan<S: ReadAt>(
         zero_crcs(contribution);
     }
     if builder.source_info.is_some() {
-        builder.source_info = Some(OwnedSourceInfo::from_file_names(
+        builder.source_info = Some(SourceInfo::from_file_names(
             builder.modules.iter().map(|_| core::iter::empty::<&[u8]>()),
         )?);
     }
@@ -450,7 +451,7 @@ fn strip_named<S: ReadAt>(
 ) -> Result<()> {
     for named in pdb.info().named_streams() {
         let stream = named.stream;
-        let remove = match NamedStreamKind::classify(named.name) {
+        let remove = match NamedStreamKind::classify(&named.name) {
             NamedStreamKind::Names => !keep_names,
             NamedStreamKind::SourceHeaderBlock | NamedStreamKind::SourceFile { .. } => true,
             NamedStreamKind::TmCache => {
@@ -474,7 +475,7 @@ fn strip_named<S: ReadAt>(
             _ => false,
         };
         if remove {
-            info.remove_named_stream(named.name)?;
+            info.remove_named_stream(&named.name)?;
             changes.remove(stream)?;
         }
     }

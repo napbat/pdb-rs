@@ -84,7 +84,8 @@ impl SymbolLocator {
             ..Lists::default()
         };
         for module in dbi.modules() {
-            lists.module(pdb, &module?, &map)?;
+            let (index, module) = module?;
+            lists.module(pdb, index, &module, &map)?;
         }
         let mut contributions = Vec::new();
         if let Some(table) = dbi.section_contributions()? {
@@ -141,11 +142,12 @@ impl Lists {
     fn module<S: ReadAt>(
         &mut self,
         pdb: &Pdb<S>,
+        index: ModuleIndex,
         module: &Module<'_>,
         map: &AddressMap<'_>,
     ) -> Result<()> {
         let mut data = ModuleData {
-            name: copy(module.name)?,
+            name: copy(&module.name)?,
             stream: None,
             files: Vec::new(),
             inlinees: Vec::new(),
@@ -153,8 +155,8 @@ impl Lists {
             separated: Vec::new(),
         };
         if let Some(stream) = pdb.module_stream(module)? {
-            self.lines_of(module.index, &stream, &mut data, map)?;
-            data.walk_end = self.symbols_of(module.index, &stream, &mut data, map)?;
+            self.lines_of(index, &stream, &mut data, map)?;
+            data.walk_end = self.symbols_of(index, &stream, &mut data, map)?;
             data.inlinees.sort_by_key(|&(id, _, _)| id);
             data.inlinees.dedup_by_key(|&mut (id, _, _)| id);
             data.stream = Some(stream);

@@ -302,7 +302,7 @@ pub struct Location<'a> {
 }
 
 /// A public symbol at or before an address.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct PublicMatch<'a> {
     /// The offset of the record in the symbol record stream.

@@ -5,6 +5,7 @@ use super::{
     ProcedureReference, ProcedureType, S_MANFRAMEREL, S_MANMANYREG, S_MANMANYREG2, S_MANREGISTER,
     S_MANREGREL, ScopeLinks, SectionOffset, Symbol, SymbolData,
 };
+use crate::Bytes;
 
 impl<'a> Symbol<'a> {
     /// Return the name bytes, if the kind has a name.
@@ -14,50 +15,51 @@ impl<'a> Symbol<'a> {
     /// gives the exported name. Compile records have a version string, not a
     /// name, so they give `None`. `S_WITH32` has an expression, not a name.
     #[must_use]
-    pub const fn name(&self) -> Option<&'a [u8]> {
-        Some(match self.data {
-            SymbolData::ObjectName(value) => value.name,
+    pub fn name(&self) -> Option<&Bytes<'a>> {
+        let name = match &self.data {
+            SymbolData::ObjectName(value) => &value.name,
             SymbolData::UsingNamespace(name) => name,
-            SymbolData::Procedure(value) => value.name,
-            SymbolData::MipsProcedure(value) => value.name,
-            SymbolData::Ia64Procedure(value) => value.name,
-            SymbolData::Block(value) => value.name,
-            SymbolData::Label(value) => value.name,
-            SymbolData::Thunk(value) => value.name,
-            SymbolData::HotPatchFunction(value) => value.name,
-            SymbolData::Local(value) => value.name,
-            SymbolData::RegisterRelative(value) => value.name,
-            SymbolData::RegisterRelativeIndirect(value) => value.name,
-            SymbolData::BasePointerRelative(value) => value.name,
-            SymbolData::BasePointerRelativeIndirect(value) => value.name,
-            SymbolData::Register(value) => value.name,
-            SymbolData::ManyRegisters(value) => value.name,
-            SymbolData::AttributedFrameRelative(value) => value.name,
-            SymbolData::AttributedRegister(value) => value.name,
-            SymbolData::AttributedRegisterRelative(value) => value.name,
-            SymbolData::Slot(value) => value.name,
-            SymbolData::FileStatic(value) => value.name,
-            SymbolData::FastLink(value) => value.name,
-            SymbolData::Section(value) => value.name,
-            SymbolData::CoffGroup(value) => value.name,
-            SymbolData::Export(value) => value.name,
-            SymbolData::UserDefinedType(value) => value.name,
+            SymbolData::Procedure(value) => &value.name,
+            SymbolData::MipsProcedure(value) => &value.name,
+            SymbolData::Ia64Procedure(value) => &value.name,
+            SymbolData::Block(value) => &value.name,
+            SymbolData::Label(value) => &value.name,
+            SymbolData::Thunk(value) => &value.name,
+            SymbolData::HotPatchFunction(value) => &value.name,
+            SymbolData::Local(value) => &value.name,
+            SymbolData::RegisterRelative(value) => &value.name,
+            SymbolData::RegisterRelativeIndirect(value) => &value.name,
+            SymbolData::BasePointerRelative(value) => &value.name,
+            SymbolData::BasePointerRelativeIndirect(value) => &value.name,
+            SymbolData::Register(value) => &value.name,
+            SymbolData::ManyRegisters(value) => &value.name,
+            SymbolData::AttributedFrameRelative(value) => &value.name,
+            SymbolData::AttributedRegister(value) => &value.name,
+            SymbolData::AttributedRegisterRelative(value) => &value.name,
+            SymbolData::Slot(value) => &value.name,
+            SymbolData::FileStatic(value) => &value.name,
+            SymbolData::FastLink(value) => &value.name,
+            SymbolData::Section(value) => &value.name,
+            SymbolData::CoffGroup(value) => &value.name,
+            SymbolData::Export(value) => &value.name,
+            SymbolData::UserDefinedType(value) => &value.name,
             SymbolData::Data(value)
             | SymbolData::ThreadData(value)
-            | SymbolData::ManagedData(value) => value.name,
-            SymbolData::HlslData(value) => value.name,
-            SymbolData::HlslDataEx(value) => value.name,
-            SymbolData::DpcGroupSharedLocal(value) => value.name,
-            SymbolData::Constant(value) => value.name,
-            SymbolData::Public(value) => value.name,
+            | SymbolData::ManagedData(value) => &value.name,
+            SymbolData::HlslData(value) => &value.name,
+            SymbolData::HlslDataEx(value) => &value.name,
+            SymbolData::DpcGroupSharedLocal(value) => &value.name,
+            SymbolData::Constant(value) => &value.name,
+            SymbolData::Public(value) => &value.name,
             SymbolData::ProcedureReference(value) | SymbolData::SymbolReference(value) => {
-                value.name
+                &value.name
             }
-            SymbolData::ManagedProcedure(value) => value.name,
-            SymbolData::ManagedSlot(value) => value.name,
-            SymbolData::ManagedConstant(value) => value.name,
+            SymbolData::ManagedProcedure(value) => &value.name,
+            SymbolData::ManagedSlot(value) => &value.name,
+            SymbolData::ManagedConstant(value) => &value.name,
             _ => return None,
-        })
+        };
+        Some(name)
     }
 
     /// Return the start address, if the kind has one address.
@@ -71,7 +73,7 @@ impl<'a> Symbol<'a> {
     /// [`Symbol::data`].
     #[must_use]
     pub const fn address(&self) -> Option<SectionOffset> {
-        Some(match self.data {
+        Some(match &self.data {
             SymbolData::Procedure(value) => value.address,
             SymbolData::MipsProcedure(value) => value.address,
             SymbolData::Ia64Procedure(value) => value.address,
@@ -114,7 +116,7 @@ impl<'a> Symbol<'a> {
             kind,
             S_MANFRAMEREL | S_MANREGISTER | S_MANREGREL | S_MANMANYREG | S_MANMANYREG2
         );
-        let index = match self.data {
+        let index = match &self.data {
             SymbolData::Procedure(value) => value.signature,
             SymbolData::MipsProcedure(value) => value.signature,
             SymbolData::Ia64Procedure(value) => value.signature,
@@ -146,7 +148,7 @@ impl<'a> Symbol<'a> {
             SymbolData::Constant(value) => ProcedureType::Type(value.type_index),
             SymbolData::CallSiteInfo(value) => ProcedureType::Type(value.type_index),
             SymbolData::Oem(value) => ProcedureType::Type(value.type_index),
-            SymbolData::ManagedTypeReference(index) => ProcedureType::Type(index),
+            SymbolData::ManagedTypeReference(index) => ProcedureType::Type(*index),
             _ => return None,
         };
         match index {
@@ -162,12 +164,12 @@ impl<'a> Symbol<'a> {
     /// `S_SOURCELINK` give their ID records.
     #[must_use]
     pub const fn id_index(&self) -> Option<IdIndex> {
-        let signature = match self.data {
+        let signature = match &self.data {
             SymbolData::Procedure(value) => value.signature,
             SymbolData::MipsProcedure(value) => value.signature,
             SymbolData::Ia64Procedure(value) => value.signature,
             SymbolData::BuildInfo(index) | SymbolData::SourceLink(index) => {
-                ProcedureType::Id(index)
+                ProcedureType::Id(*index)
             }
             SymbolData::InlineSite(value) => ProcedureType::Id(value.inlinee),
             SymbolData::HotPatchFunction(value) => ProcedureType::Id(value.function),
@@ -184,8 +186,8 @@ impl<'a> Symbol<'a> {
     /// Only `S_PROCREF`, `S_LPROCREF` and `S_TOKENREF` give a value. Use
     /// [`Symbol::reference`] for all reference kinds.
     #[must_use]
-    pub const fn procedure_reference(&self) -> Option<ProcedureReference<'a>> {
-        match self.data {
+    pub const fn procedure_reference(&self) -> Option<&ProcedureReference<'a>> {
+        match &self.data {
             SymbolData::ProcedureReference(value) => Some(value),
             _ => None,
         }
@@ -196,8 +198,8 @@ impl<'a> Symbol<'a> {
     /// `S_PROCREF`, `S_LPROCREF`, `S_TOKENREF`, `S_DATAREF` and
     /// `S_ANNOTATIONREF` give a value.
     #[must_use]
-    pub const fn reference(&self) -> Option<ProcedureReference<'a>> {
-        match self.data {
+    pub const fn reference(&self) -> Option<&ProcedureReference<'a>> {
+        match &self.data {
             SymbolData::ProcedureReference(value) | SymbolData::SymbolReference(value) => {
                 Some(value)
             }
@@ -221,7 +223,7 @@ impl SymbolData<'_> {
     /// See [`Symbol::scope_links`].
     #[must_use]
     pub const fn scope_links(&self) -> Option<ScopeLinks> {
-        let (parent, end) = match *self {
+        let (parent, end) = match self {
             SymbolData::Procedure(value) => (value.parent, value.end),
             SymbolData::MipsProcedure(value) => (value.header.parent, value.header.end),
             SymbolData::Ia64Procedure(value) => (value.header.parent, value.header.end),

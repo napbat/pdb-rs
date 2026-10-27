@@ -22,9 +22,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 use core::ops::Range;
 
+use crate::bytes::into_owned;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The UTF-8 byte order mark.
 const BOM: &[u8] = b"\xef\xbb\xbf";
@@ -60,35 +61,39 @@ impl SourceServerSection {
 }
 
 /// A `KEY=value` line of the `ini` or `variables` section.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SourceServerVariable<'a> {
     /// The bytes before the first `=`.
-    pub key: &'a [u8],
+    pub key: Bytes<'a>,
     /// The bytes after the first `=`, without the line end.
-    pub value: &'a [u8],
+    pub value: Bytes<'a>,
 }
 
+into_owned!(struct SourceServerVariable { key, value; });
+
 /// A line of the `source files` section.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct SourceServerFile<'a> {
     /// The line without its line end.
-    pub line: &'a [u8],
+    pub line: Bytes<'a>,
 }
 
-impl<'a> SourceServerFile<'a> {
+into_owned!(struct SourceServerFile { line; });
+
+impl SourceServerFile<'_> {
     /// Return the fields of the line: `VAR1`, `VAR2` and so on.
     #[must_use]
-    pub fn fields(&self) -> SourceServerFields<'a> {
+    pub fn fields(&self) -> SourceServerFields<'_> {
         SourceServerFields {
-            rest: Some(self.line),
+            rest: Some(&self.line),
         }
     }
 
     /// Return the first field: the source path in the PDB.
     #[must_use]
-    pub fn path(&self) -> &'a [u8] {
+    pub fn path(&self) -> &[u8] {
         self.fields().next().unwrap_or_default()
     }
 }
@@ -291,8 +296,8 @@ fn marker(line: &[u8]) -> core::result::Result<Option<SourceServerSection>, ()> 
 fn variable(line: &[u8]) -> Option<SourceServerVariable<'_>> {
     let at = line.iter().position(|&byte| byte == b'=')?;
     (at > 0).then(|| SourceServerVariable {
-        key: &line[..at],
-        value: &line[at + 1..],
+        key: Bytes::new(&line[..at]),
+        value: Bytes::new(&line[at + 1..]),
     })
 }
 
@@ -352,7 +357,9 @@ impl<'a> Iterator for SourceServerFiles<'a> {
 
     fn next(&mut self) -> Option<SourceServerFile<'a>> {
         let line = self.0.by_ref().find(|line| !is_blank(line))?;
-        Some(SourceServerFile { line })
+        Some(SourceServerFile {
+            line: Bytes::new(line),
+        })
     }
 }
 

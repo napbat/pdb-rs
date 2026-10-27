@@ -4,9 +4,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{entry_list, invalid, read_u32, to_u32, too_large, truncated};
+use crate::bytes::into_owned;
 use crate::native::codeview::index::ChecksumOffset;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The line number that tells a debugger to always step into the code
 /// (`0xfeefee`).
@@ -87,15 +88,17 @@ impl LinesHeader {
 ///
 /// [`LinesSubsection::parse`] validates all blocks. The block iterator
 /// then cannot fail.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LinesSubsection<'a> {
     /// The subsection header.
     header: LinesHeader,
     /// The validated blocks after the header.
-    blocks: &'a [u8],
+    blocks: Bytes<'a>,
     /// The number of blocks.
     block_count: usize,
 }
+
+into_owned!(struct LinesSubsection { blocks; header, block_count });
 
 impl<'a> LinesSubsection<'a> {
     /// Parse and validate the data of a `DEBUG_S_LINES` subsection.
@@ -144,7 +147,7 @@ impl<'a> LinesSubsection<'a> {
         let mut previous = 0;
         while !rest.is_empty() {
             let (block, next) = split_block(rest, header)?;
-            for line in block.lines {
+            for line in &block.lines {
                 if line.offset >= header.code_size {
                     return Err(invalid("line offset is outside the code contribution"));
                 }
@@ -158,7 +161,7 @@ impl<'a> LinesSubsection<'a> {
         }
         Ok(Self {
             header,
-            blocks,
+            blocks: Bytes::new(blocks),
             block_count,
         })
     }
@@ -177,9 +180,9 @@ impl<'a> LinesSubsection<'a> {
 
     /// Return an iterator over the blocks.
     #[must_use]
-    pub const fn blocks(&self) -> LineBlocks<'a> {
+    pub fn blocks(&self) -> LineBlocks<'_> {
         LineBlocks {
-            bytes: self.blocks,
+            bytes: &self.blocks,
             header: self.header,
             left: self.block_count,
         }
@@ -204,7 +207,7 @@ impl<'a> LinesSubsection<'a> {
 }
 
 /// The lines of one source file in a `DEBUG_S_LINES` subsection.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LineBlock<'a> {
     /// The byte offset of the file entry in the `DEBUG_S_FILECHKSMS`
@@ -218,6 +221,8 @@ pub struct LineBlock<'a> {
     pub columns: Option<ColumnEntries<'a>>,
 }
 
+into_owned!(struct LineBlock { lines, columns; checksum_offset });
+
 impl LineBlock<'_> {
     /// Append the block to `out`: the block header, the line entries and
     /// the column entries.
@@ -229,7 +234,7 @@ impl LineBlock<'_> {
         write_block(
             self.checksum_offset,
             self.lines.iter(),
-            self.columns.map(|columns| columns.iter()),
+            self.columns.as_ref().map(ColumnEntries::iter),
             out,
         )
     }

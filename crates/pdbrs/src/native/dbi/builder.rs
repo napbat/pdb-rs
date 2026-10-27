@@ -11,8 +11,8 @@ use super::debug_header::encode_debug_streams;
 use super::section_contribution::encode_section_contributions;
 use super::write::encode_stream;
 use super::{
-    Dbi, DbiHeader, OwnedModule, OwnedSectionMap, OwnedSourceInfo, SectionContribution,
-    SectionContributionVersion, Substream, TypeServer, to_u16,
+    Dbi, DbiHeader, Module, SectionContribution, SectionContributionVersion, SectionMap,
+    SourceInfo, Substream, TypeServer, to_u16,
 };
 use crate::native::msf::StreamId;
 use crate::native::names::StringTableBuilder;
@@ -30,15 +30,15 @@ pub struct DbiBuilder {
     /// The header fields.
     pub header: DbiHeader,
     /// The module info records, in module order.
-    pub modules: Vec<OwnedModule>,
+    pub modules: Vec<Module<'static>>,
     /// The layout of the section contribution records.
     pub section_contribution_version: SectionContributionVersion,
     /// The section contributions. The fields must match the layout.
     pub section_contributions: Vec<SectionContribution>,
     /// The section map, or `None` for an empty substream.
-    pub section_map: Option<OwnedSectionMap>,
+    pub section_map: Option<SectionMap>,
     /// The source file info, or `None` for an empty substream.
-    pub source_info: Option<OwnedSourceInfo>,
+    pub source_info: Option<SourceInfo<'static>>,
     /// The type server map records.
     pub type_servers: Vec<TypeServer>,
     /// The EC name table, or `None` for an empty substream.
@@ -80,7 +80,7 @@ impl DbiBuilder {
     pub fn from_dbi(dbi: &Dbi) -> Result<Self> {
         let mut builder = Self::new(*dbi.header());
         for module in dbi.modules() {
-            let module = OwnedModule::from_module(&module?)?;
+            let module = module?.1.into_owned();
             builder.modules.try_reserve(1).map_err(|_| no_memory())?;
             builder.modules.push(module);
         }
@@ -93,12 +93,8 @@ impl DbiBuilder {
                 .map_err(|_| no_memory())?;
             builder.section_contributions.extend(contributions.iter());
         }
-        if let Some(map) = dbi.section_map()? {
-            builder.section_map = Some(OwnedSectionMap::from_map(&map)?);
-        }
-        if let Some(info) = dbi.source_info()? {
-            builder.source_info = Some(OwnedSourceInfo::from_info(&info)?);
-        }
+        builder.section_map = dbi.section_map()?;
+        builder.source_info = dbi.source_info()?.map(SourceInfo::into_owned);
         builder.type_servers = dbi.type_server_map()?;
         if let Some(names) = dbi.ec_names()? {
             builder.ec_names = Some(StringTableBuilder::from_table(&names)?);

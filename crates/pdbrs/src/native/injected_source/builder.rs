@@ -21,13 +21,14 @@ use super::{
     HEADER_SIZE, InjectedSource, SourceBlockHeader, SourceCompression, SourceHeaderBlock,
     encode_header,
 };
+use crate::bytes::into_owned;
 use crate::native::Producer;
 use crate::native::codeview::index::NameOffset;
 use crate::native::hash::hash_buffer_v8;
 use crate::native::hash_table::{HashTableKeys, OwnedHashTable};
 use crate::native::names::StringTableBuilder;
 use crate::native::output::to_u32;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The hash of a `/src/headerblock` key: the key truncated to 16 bits.
 #[derive(Clone, Copy, Debug)]
@@ -40,23 +41,28 @@ impl HashTableKeys for SourceKeys {
 }
 
 /// The names and the stream bytes of a file to inject.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InjectedFile<'a> {
     /// The original file name.
-    pub file_name: &'a [u8],
+    pub file_name: Bytes<'a>,
     /// The object file name.
-    pub object_name: &'a [u8],
+    pub object_name: Bytes<'a>,
     /// The virtual file name. `link.exe` and `lld-link` use the lowercase file name.
-    pub virtual_file_name: &'a [u8],
+    pub virtual_file_name: Bytes<'a>,
     /// [`SourceCompression::NONE`] for file contents, or [`SourceCompression::DOT_NET`] for a
     /// [`DotNetDocument`](super::DotNetDocument) record.
     pub compression: SourceCompression,
     /// The `fVirtual` flag.
     pub is_virtual: bool,
     /// The bytes of the content stream.
-    pub stream: &'a [u8],
+    pub stream: Bytes<'a>,
 }
+
+into_owned!(struct InjectedFile {
+    file_name, object_name, virtual_file_name, stream;
+    compression, is_virtual
+});
 
 /// An owned `/src/headerblock` stream.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -169,11 +175,11 @@ impl SourceHeaderBlockBuilder {
                 .with_context("injected source virtual file name is empty"));
         }
         let file_size = to_u32(file.stream.len(), "injected source size")?;
-        let file_name_offset = names.insert(file.file_name)?;
-        let virtual_file_name_offset = names.insert(file.virtual_file_name)?;
-        let object_name_offset = names.insert(file.object_name)?;
+        let file_name_offset = names.insert(&file.file_name)?;
+        let virtual_file_name_offset = names.insert(&file.virtual_file_name)?;
+        let object_name_offset = names.insert(&file.object_name)?;
         let source = InjectedSource {
-            crc: hash_buffer_v8(file.stream),
+            crc: hash_buffer_v8(&file.stream),
             file_size,
             file_name_offset,
             object_name_offset,

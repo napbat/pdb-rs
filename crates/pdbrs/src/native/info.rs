@@ -27,7 +27,8 @@ use super::Identity;
 use super::hash_table::{Cursor, HashTable};
 use super::msf::StreamId;
 use super::names::HashVersion;
-use crate::{Error, ErrorKind, Result};
+use crate::bytes::into_owned;
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The Info stream version that this reader decodes (`PdbImplVC70`).
 pub const VERSION_VC70: u32 = 20_000_404;
@@ -54,11 +55,11 @@ impl Feature {
 }
 
 /// A named stream entry, with its name preserved as bytes.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct NamedStream<'a> {
     /// The name without its terminating NUL.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The byte offset of the name in the string buffer: the hash table key.
     ///
     /// Writers add names to the end of the buffer, so the offsets give the order of the
@@ -67,6 +68,8 @@ pub struct NamedStream<'a> {
     /// The MSF stream index.
     pub stream: StreamId,
 }
+
+into_owned!(struct NamedStream { name; name_offset, stream });
 
 #[derive(Debug)]
 struct Entry {
@@ -322,7 +325,7 @@ impl<'a> Iterator for NamedStreams<'a> {
     fn next(&mut self) -> Option<NamedStream<'a>> {
         let entry = self.entries.next()?;
         Some(NamedStream {
-            name: &self.bytes[entry.name.clone()],
+            name: Bytes::new(&self.bytes[entry.name.clone()]),
             name_offset: entry.offset,
             stream: entry.stream,
         })

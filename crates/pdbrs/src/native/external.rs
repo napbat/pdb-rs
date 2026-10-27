@@ -161,13 +161,13 @@ impl<S: ReadAt> Pdb<S> {
             ..ExternalDependencies::default()
         };
         for module in dbi.modules() {
-            let module = module?;
+            let (index, module) = module?;
             let type_server = module.type_server_index();
             if type_server != 0 {
                 let modules = &mut dependencies.type_server_modules;
                 modules.try_reserve(1).map_err(|_| no_memory())?;
                 modules.push(ModuleTypeServer {
-                    module: module.index,
+                    module: index,
                     type_server,
                 });
             }
@@ -192,13 +192,13 @@ impl<S: ReadAt> Pdb<S> {
                     let modules = &mut dependencies.module_types;
                     modules.try_reserve(1).map_err(|_| no_memory())?;
                     modules.push(ModuleTypeDependency {
-                        module: module.index,
+                        module: index,
                         source: reference.source(),
                     });
                 }
             }
             if signature != 0 {
-                add_precompiled(&mut dependencies.precompiled, signature, module.index)?;
+                add_precompiled(&mut dependencies.precompiled, signature, index)?;
             }
             if references != 0 {
                 dependencies
@@ -206,9 +206,9 @@ impl<S: ReadAt> Pdb<S> {
                     .try_reserve(1)
                     .map_err(|_| no_memory())?;
                 dependencies.fastlink_objects.push(FastLinkObject {
-                    module: module.index,
-                    module_name: copy(module.name)?,
-                    object_file: copy(module.object_file)?,
+                    module: index,
+                    module_name: copy(&module.name)?,
+                    object_file: copy(&module.object_file)?,
                     references,
                 });
             }
@@ -226,7 +226,7 @@ fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) 
             ModuleTypeSource::PrecompiledTypeUser { owner, .. } => owner,
             _ => continue,
         };
-        let object = dbi
+        let (_, object) = dbi
             .modules()
             .nth(usize::try_from(owner.0).unwrap_or(usize::MAX))
             .ok_or_else(|| {
@@ -238,7 +238,7 @@ fn object_precompiled_types(dbi: &Dbi, dependencies: &mut ExternalDependencies) 
         list.push(ObjectPrecompiledTypes {
             module: dependency.module,
             owner,
-            object_file: copy(object.object_file)?,
+            object_file: copy(&object.object_file)?,
         });
     }
     Ok(())

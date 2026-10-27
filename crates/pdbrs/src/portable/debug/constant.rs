@@ -14,6 +14,7 @@ use core::iter::FusedIterator;
 
 use super::rows::{TypedRows, each_row, in_blob};
 use super::type_handle;
+use crate::bytes::{Bytes, into_owned};
 use crate::io::ReadAt;
 use crate::portable::Pdb;
 use crate::portable::custom::blob::{Reader, Writer, invalid};
@@ -99,7 +100,7 @@ impl Iterator for CustomModifiers<'_> {
 impl FusedIterator for CustomModifiers<'_> {}
 
 /// A primitive constant value.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PrimitiveConstant<'a> {
     /// `BOOLEAN`: 0 is false and 1 is true.
     Boolean(bool),
@@ -126,8 +127,13 @@ pub enum PrimitiveConstant<'a> {
     /// `R8`.
     R8(f64),
     /// `STRING`: UTF-16LE bytes (an even count), or `None` for a null string.
-    String(Option<&'a [u8]>),
+    String(Option<Bytes<'a>>),
 }
+
+into_owned!(enum PrimitiveConstant {
+    String;
+    Boolean, Char, I1, U1, I2, U2, I4, U4, I8, U8, R4, R8;
+});
 
 impl PrimitiveConstant<'_> {
     /// Return the type code.
@@ -186,7 +192,7 @@ pub enum GeneralValue {
 }
 
 /// The value of a local constant.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConstantValue<'a> {
     /// A primitive constant.
     Primitive(PrimitiveConstant<'a>),
@@ -210,12 +216,47 @@ pub enum ConstantValue<'a> {
     Object,
 }
 
-/// A checked local constant signature, borrowed from the blob bytes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+impl ConstantValue<'_> {
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> ConstantValue<'static> {
+        match self {
+            Self::Primitive(value) => ConstantValue::Primitive(value.into_owned()),
+            Self::Enum { value, enum_type } => ConstantValue::Enum {
+                value: value.into_owned(),
+                enum_type,
+            },
+            Self::General {
+                value_type,
+                constant_type,
+                value,
+            } => ConstantValue::General {
+                value_type,
+                constant_type,
+                value,
+            },
+            Self::Object => ConstantValue::Object,
+        }
+    }
+}
+
+impl crate::bytes::IntoOwned for ConstantValue<'_> {
+    type Owned = ConstantValue<'static>;
+
+    fn to_static(self) -> Self::Owned {
+        self.into_owned()
+    }
+}
+
+/// A checked local constant signature. It borrows the blob bytes until
+/// [`LocalConstantSignature::into_owned`] copies them.
+#[derive(Clone, Debug, PartialEq)]
 pub struct LocalConstantSignature<'a> {
-    modifiers: &'a [u8],
+    modifiers: Bytes<'a>,
     value: ConstantValue<'a>,
 }
+
+into_owned!(struct LocalConstantSignature { modifiers, value; });
 
 impl<'a> LocalConstantSignature<'a> {
     /// Decode and check a local constant signature.
@@ -235,9 +276,9 @@ impl<'a> LocalConstantSignature<'a> {
         let modifiers = &start[..start.len() - reader.rest().len()];
         let code = reader.u8("local constant signature has no type code")?;
         let value = match code {
-            STRING => {
-                ConstantValue::Primitive(PrimitiveConstant::String(read_string(reader.rest())?))
-            }
+            STRING => ConstantValue::Primitive(PrimitiveConstant::String(
+                read_string(reader.rest())?.map(Bytes::new),
+            )),
             BOOLEAN..=R8 => {
                 let value = read_primitive(&mut reader, code)?;
                 if reader.is_empty() {
@@ -266,21 +307,24 @@ impl<'a> LocalConstantSignature<'a> {
             }
             _ => return Err(invalid("local constant signature has an unknown type code")),
         };
-        Ok(Self { modifiers, value })
+        Ok(Self {
+            modifiers: Bytes::new(modifiers),
+            value,
+        })
     }
 
     /// Return the custom modifiers.
     #[must_use]
-    pub const fn modifiers(&self) -> CustomModifiers<'a> {
+    pub fn modifiers(&self) -> CustomModifiers<'_> {
         CustomModifiers {
-            reader: Reader::new(self.modifiers),
+            reader: Reader::new(&self.modifiers),
         }
     }
 
     /// Return the value.
     #[must_use]
-    pub const fn value(&self) -> ConstantValue<'a> {
-        self.value
+    pub const fn value(&self) -> &ConstantValue<'a> {
+        &self.value
     }
 
     /// Encode a local constant signature in the form that Roslyn writes, and append it to
@@ -423,16 +467,16 @@ fn read_general(bytes: &[u8]) -> Result<GeneralValue> {
 /// Write a type code and a primitive value.
 fn write_primitive(writer: &mut Writer<'_>, value: &PrimitiveConstant<'_>) -> Result<()> {
     writer.u8(value.type_code())?;
-    match *value {
-        PrimitiveConstant::Boolean(value) => writer.u8(u8::from(value)),
-        PrimitiveConstant::Char(value) | PrimitiveConstant::U2(value) => writer.u16(value),
+    match value {
+        PrimitiveConstant::Boolean(value) => writer.u8(u8::from(*value)),
+        PrimitiveConstant::Char(value) | PrimitiveConstant::U2(value) => writer.u16(*value),
         PrimitiveConstant::I1(value) => writer.u8(value.cast_unsigned()),
-        PrimitiveConstant::U1(value) => writer.u8(value),
+        PrimitiveConstant::U1(value) => writer.u8(*value),
         PrimitiveConstant::I2(value) => writer.u16(value.cast_unsigned()),
         PrimitiveConstant::I4(value) => writer.u32(value.cast_unsigned()),
-        PrimitiveConstant::U4(value) => writer.u32(value),
+        PrimitiveConstant::U4(value) => writer.u32(*value),
         PrimitiveConstant::I8(value) => writer.u64(value.cast_unsigned()),
-        PrimitiveConstant::U8(value) => writer.u64(value),
+        PrimitiveConstant::U8(value) => writer.u64(*value),
         PrimitiveConstant::R4(value) => writer.u32(value.to_bits()),
         PrimitiveConstant::R8(value) => writer.u64(value.to_bits()),
         PrimitiveConstant::String(None) => writer.u8(NULL_STRING),

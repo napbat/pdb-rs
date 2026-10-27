@@ -35,9 +35,10 @@ pub use locals::{
 
 use super::super::super::Fields;
 use super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::bytes::into_owned;
 use crate::portable::custom::{EncLambdaAndClosureMap, EncLocalSlotMap, EncStateMachineStateMap};
 use crate::portable::metadata::{IlOffset, MetadataToken};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 values! {
     /// The kind of a custom debug information record (`CustomDebugInfoKind` in Roslyn).
@@ -75,16 +76,18 @@ const RECORD_HEADER_SIZE: usize = 8;
 const LAST_UNALIGNED_KIND: u8 = 5;
 
 /// Decoded custom debug information (`MD2`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CustomDebugInfo<'a> {
     /// The two reserved bytes of the global header, raw. Roslyn writes zeros.
     pub reserved: [u8; 2],
     /// The framed records.
-    records: &'a [u8],
+    records: Bytes<'a>,
     /// The record count.
     count: u8,
 }
+
+into_owned!(struct CustomDebugInfo { records; reserved, count });
 
 impl<'a> CustomDebugInfo<'a> {
     /// Decode the global header and check the frame of each record.
@@ -118,7 +121,7 @@ impl<'a> CustomDebugInfo<'a> {
         zero_padding(rest, "bytes follow the custom debug information records")?;
         Ok(Self {
             reserved,
-            records: &start[..start.len() - rest.len()],
+            records: Bytes::new(&start[..start.len() - rest.len()]),
             count,
         })
     }
@@ -137,15 +140,15 @@ impl<'a> CustomDebugInfo<'a> {
 
     /// Return an iterator over the records.
     #[must_use]
-    pub const fn records(&self) -> CustomDebugInfoRecords<'a> {
+    pub fn records(&self) -> CustomDebugInfoRecords<'_> {
         CustomDebugInfoRecords {
-            bytes: self.records,
+            bytes: &self.records,
         }
     }
 }
 
 /// One framed custom debug information record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CustomDebugInfoRecord<'a> {
     /// The record version. [`CustomDebugInfoRecord::decode`] supports version 4.
@@ -158,8 +161,10 @@ pub struct CustomDebugInfoRecord<'a> {
     pub alignment: u8,
     /// The record data after the header. For kinds after 5, the alignment
     /// bytes are removed.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
+
+into_owned!(struct CustomDebugInfoRecord { data; version, kind, reserved, alignment });
 
 impl<'a> CustomDebugInfoRecord<'a> {
     /// Frame the record at the start of `bytes` and return it with the rest.
@@ -204,7 +209,7 @@ impl<'a> CustomDebugInfoRecord<'a> {
             kind: CustomDebugInfoKind(kind),
             reserved,
             alignment,
-            data,
+            data: Bytes::new(data),
         };
         Ok((record, rest))
     }
@@ -222,12 +227,12 @@ impl<'a> CustomDebugInfoRecord<'a> {
     /// - The errors of [`EncLocalSlotMap::parse`],
     ///   [`EncLambdaAndClosureMap::parse`] and [`EncStateMachineStateMap::parse`]
     ///   for the Edit and Continue kinds.
-    pub fn decode(&self) -> Result<CustomDebugInfoData<'a>> {
+    pub fn decode(&self) -> Result<CustomDebugInfoData<'_>> {
         if self.version != CUSTOM_DEBUG_INFO_VERSION {
             return Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("custom debug information record version is not 4"));
         }
-        let data = self.data;
+        let data: &[u8] = &self.data;
         Ok(match self.kind {
             CustomDebugInfoKind::USING_GROUPS => {
                 CustomDebugInfoData::UsingGroups(UsingGroups::parse(data)?)
@@ -240,7 +245,7 @@ impl<'a> CustomDebugInfoRecord<'a> {
                 )?)
             }
             CustomDebugInfoKind::STATE_MACHINE_TYPE_NAME => {
-                CustomDebugInfoData::StateMachineTypeName(type_name(data)?)
+                CustomDebugInfoData::StateMachineTypeName(Bytes::new(type_name(data)?))
             }
             CustomDebugInfoKind::DYNAMIC_LOCALS => {
                 CustomDebugInfoData::DynamicLocals(DynamicLocals::parse(data)?)
@@ -259,7 +264,7 @@ impl<'a> CustomDebugInfoRecord<'a> {
                     EncStateMachineStateMap::parse(data)?,
                 )
             }
-            _ => CustomDebugInfoData::Unknown(data),
+            _ => CustomDebugInfoData::Unknown(Bytes::new(data)),
         })
     }
 }
@@ -287,7 +292,7 @@ impl FusedIterator for CustomDebugInfoRecords<'_> {}
 ///
 /// The Edit and Continue records use the codecs of the Portable PDB custom
 /// debug information.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CustomDebugInfoData<'a> {
     /// [`CustomDebugInfoKind::USING_GROUPS`].
@@ -300,7 +305,7 @@ pub enum CustomDebugInfoData<'a> {
     StateMachineHoistedLocalScopes(HoistedLocalScopes<'a>),
     /// [`CustomDebugInfoKind::STATE_MACHINE_TYPE_NAME`]: UTF-16LE bytes
     /// without the NUL code unit.
-    StateMachineTypeName(&'a [u8]),
+    StateMachineTypeName(Bytes<'a>),
     /// [`CustomDebugInfoKind::DYNAMIC_LOCALS`].
     DynamicLocals(DynamicLocals<'a>),
     /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_LOCAL_SLOT_MAP`].
@@ -312,8 +317,15 @@ pub enum CustomDebugInfoData<'a> {
     /// [`CustomDebugInfoKind::EDIT_AND_CONTINUE_STATE_MACHINE_STATE_MAP`].
     EditAndContinueStateMachineStateMap(EncStateMachineStateMap<'a>),
     /// A kind that this crate does not decode, raw.
-    Unknown(&'a [u8]),
+    Unknown(Bytes<'a>),
 }
+
+into_owned!(enum CustomDebugInfoData {
+    UsingGroups, StateMachineHoistedLocalScopes, StateMachineTypeName, DynamicLocals,
+    EditAndContinueLocalSlotMap, EditAndContinueLambdaMap, TupleElementNames,
+    EditAndContinueStateMachineStateMap, Unknown;
+    ForwardMethod, ForwardModule;
+});
 
 /// Read a method token and the zero padding.
 fn token(data: &[u8]) -> Result<MetadataToken> {
@@ -339,38 +351,40 @@ fn type_name(data: &[u8]) -> Result<&[u8]> {
 ///
 /// Each value is the number of `S_UNAMESPACE` records of one namespace
 /// declaration, from the innermost declaration to the global namespace.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct UsingGroups<'a> {
     /// The `u16` sizes.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct UsingGroups { bytes; });
 
 impl<'a> UsingGroups<'a> {
     /// Read a `u16` count, the sizes and the zero padding.
     fn parse(data: &'a [u8]) -> Result<Self> {
         let mut fields = Fields::new(data, ErrorKind::InvalidFormat, SHORT_VALUE);
         let len = usize::from(fields.u16()?);
-        let bytes = fields.bytes(len * 2)?;
+        let bytes = Bytes::new(fields.bytes(len * 2)?);
         zero_padding(fields.rest(), "bytes follow the using group sizes")?;
         Ok(Self { bytes })
     }
 
     /// Return the number of groups.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() / 2
     }
 
     /// Return `true` if there are no groups.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the group sizes.
     #[must_use]
-    pub fn iter(&self) -> UsingGroupsIter<'a> {
-        UsingGroupsIter::new(self.bytes)
+    pub fn iter(&self) -> UsingGroupsIter<'_> {
+        UsingGroupsIter::new(&self.bytes)
     }
 }
 
@@ -399,11 +413,13 @@ pub struct HoistedLocalScope {
 
 /// The hoisted local scopes of a state machine method, one for each hoisted
 /// variable slot.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct HoistedLocalScopes<'a> {
     /// The 8-byte scopes.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct HoistedLocalScopes { bytes; });
 
 impl<'a> HoistedLocalScopes<'a> {
     /// Read an `i32` count, the scopes and the zero padding.
@@ -411,27 +427,27 @@ impl<'a> HoistedLocalScopes<'a> {
         let mut fields = Fields::new(data, ErrorKind::InvalidFormat, SHORT_VALUE);
         let len = count(fields.u32()?)?;
         let size = len.checked_mul(8).ok_or_else(|| invalid(SHORT_VALUE))?;
-        let bytes = fields.bytes(size)?;
+        let bytes = Bytes::new(fields.bytes(size)?);
         zero_padding(fields.rest(), "bytes follow the hoisted local scopes")?;
         Ok(Self { bytes })
     }
 
     /// Return the number of scopes.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() / 8
     }
 
     /// Return `true` if there are no scopes.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the scopes.
     #[must_use]
-    pub fn iter(&self) -> HoistedLocalScopesIter<'a> {
-        HoistedLocalScopesIter::new(self.bytes)
+    pub fn iter(&self) -> HoistedLocalScopesIter<'_> {
+        HoistedLocalScopesIter::new(&self.bytes)
     }
 }
 

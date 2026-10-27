@@ -10,7 +10,7 @@ use crate::native::codeview::LeafKind;
 use crate::native::codeview::index::{IdIndex, ModuleIndex};
 use crate::native::codeview::writer::Padding;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// Return the error for a list that is longer than its count field allows.
 fn too_long() -> Error {
@@ -39,9 +39,9 @@ impl<'a> IdList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length is not a multiple
     /// of 4.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let (entries, rest) = bytes.as_chunks::<ID_SIZE>();
-        if rest.is_empty() {
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let entries = bytes.into();
+        if entries.len().is_multiple_of(ID_SIZE) {
             Ok(Self { entries })
         } else {
             Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -51,8 +51,8 @@ impl<'a> IdList<'a> {
 
     /// Return the serialized indices.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.entries.as_flattened()
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.entries
     }
 }
 
@@ -92,7 +92,7 @@ impl IdRecord<'_> {
             Self::Function(value) => {
                 writer.id_index(value.scope.unwrap_or(IdIndex::NONE))?;
                 writer.type_index(value.function_type)?;
-                writer.c_string(value.name)?;
+                writer.c_string(&value.name)?;
                 if let Some(hash) = value.decorated_name_hash {
                     writer.u64(hash)?;
                 }
@@ -101,7 +101,7 @@ impl IdRecord<'_> {
             Self::MemberFunction(value) => {
                 writer.type_index(value.parent_type)?;
                 writer.type_index(value.function_type)?;
-                writer.c_string(value.name)?;
+                writer.c_string(&value.name)?;
                 if let Some(hash) = value.decorated_name_hash {
                     writer.u64(hash)?;
                 }
@@ -119,7 +119,7 @@ impl IdRecord<'_> {
             }
             Self::String(value) => {
                 writer.id_index(value.substrings.unwrap_or(IdIndex::NONE))?;
-                writer.c_string(value.string)?;
+                writer.c_string(&value.string)?;
                 Padding::Type
             }
             Self::UdtSourceLine(value) => {
@@ -140,7 +140,7 @@ impl IdRecord<'_> {
                 }
             }
             Self::Unsupported(record) => {
-                writer.bytes(record.data)?;
+                writer.bytes(&record.data)?;
                 Padding::None
             }
         };

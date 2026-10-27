@@ -20,9 +20,11 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{
-    FIXED_SIZE, SectionContribution, SectionContributionVersion, align4, c_string, copy_bytes,
-    dbi_error, stream_id, stream_index, u16_at, u32_at,
+    FIXED_SIZE, SectionContribution, SectionContributionVersion, align4, c_string, dbi_error,
+    stream_id, stream_index, u16_at, u32_at,
 };
+use crate::Bytes;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::ModuleIndex;
 use crate::native::msf::StreamId;
 use crate::native::output::Output;
@@ -36,13 +38,9 @@ const FLAG_EC_ENABLED: u16 = 1 << 1;
 /// One module info record from the DBI stream.
 ///
 /// Names stay raw bytes. They are often paths in an unspecified code page.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Module<'a> {
-    /// The zero-based position of the record in the module info substream.
-    pub index: ModuleIndex,
-    /// The logical offset of the record in the DBI stream.
-    pub offset: u32,
     /// The `u32` at offset 0. Microsoft writers store a stale pointer here.
     pub unused1: u32,
     /// The first section contribution of the module.
@@ -73,15 +71,22 @@ pub struct Module<'a> {
     /// The index of the compiler PDB path in the EC string table (`niPdbFile`).
     pub pdb_file_path_index: u32,
     /// The module name without its terminating NUL.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The object file name without its terminating NUL.
-    pub object_file: &'a [u8],
+    pub object_file: Bytes<'a>,
     /// The bytes after the object file name up to the next 4-byte boundary.
     ///
     /// The record uses only the first `n` bytes, where `n` makes the record
     /// size a multiple of 4. The other bytes are zero.
     pub name_padding: [u8; 3],
 }
+
+into_owned!(struct Module {
+    name, object_file;
+    unused1, section_contribution, flags, stream, symbol_bytes, c11_bytes, c13_bytes,
+    source_file_count, padding, file_name_offset, source_file_name_index, pdb_file_path_index,
+    name_padding
+});
 
 impl Module<'_> {
     /// Return `true` if bit 0 of the flags (`fWritten`) is set.
@@ -103,8 +108,6 @@ impl Module<'_> {
     }
 
     /// Append the record with its names and padding to `out`.
-    ///
-    /// The function ignores [`Module::index`] and [`Module::offset`].
     ///
     /// # Errors
     ///
@@ -132,107 +135,9 @@ impl Module<'_> {
         output.u32(self.file_name_offset)?;
         output.u32(self.source_file_name_index)?;
         output.u32(self.pdb_file_path_index)?;
-        output.c_string(self.name)?;
-        output.c_string(self.object_file)?;
+        output.c_string(&self.name)?;
+        output.c_string(&self.object_file)?;
         output.bytes(&self.name_padding[..padding])
-    }
-}
-
-/// An owned module info record that a writer can fill.
-///
-/// The fields have the meaning of the [`Module`] fields with the same names.
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct OwnedModule {
-    /// The `u32` at offset 0.
-    pub unused1: u32,
-    /// The first section contribution, with the [`SectionContributionVersion::V60`] fields.
-    pub section_contribution: SectionContribution,
-    /// The module flags.
-    pub flags: u16,
-    /// The module stream, or `None` if the module has no debug data.
-    pub stream: Option<StreamId>,
-    /// The size of the symbol region in the module stream, with its signature.
-    pub symbol_bytes: u32,
-    /// The size of the C11 line region in the module stream.
-    pub c11_bytes: u32,
-    /// The size of the C13 line region in the module stream.
-    pub c13_bytes: u32,
-    /// The number of source files that contributed to the module.
-    pub source_file_count: u16,
-    /// The raw padding `u16` at offset 50.
-    pub padding: u16,
-    /// The `mpifileichFile` value at offset 52.
-    pub file_name_offset: u32,
-    /// The index of the source file name in the EC string table.
-    pub source_file_name_index: u32,
-    /// The index of the compiler PDB path in the EC string table.
-    pub pdb_file_path_index: u32,
-    /// The module name without its terminating NUL.
-    pub name: Vec<u8>,
-    /// The object file name without its terminating NUL.
-    pub object_file: Vec<u8>,
-    /// The bytes after the object file name up to the next 4-byte boundary.
-    pub name_padding: [u8; 3],
-}
-
-impl OwnedModule {
-    /// Copy a decoded module info record.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::LimitExceeded`] if an allocation fails.
-    pub fn from_module(module: &Module<'_>) -> Result<Self> {
-        Ok(Self {
-            unused1: module.unused1,
-            section_contribution: module.section_contribution,
-            flags: module.flags,
-            stream: module.stream,
-            symbol_bytes: module.symbol_bytes,
-            c11_bytes: module.c11_bytes,
-            c13_bytes: module.c13_bytes,
-            source_file_count: module.source_file_count,
-            padding: module.padding,
-            file_name_offset: module.file_name_offset,
-            source_file_name_index: module.source_file_name_index,
-            pdb_file_path_index: module.pdb_file_path_index,
-            name: copy_bytes(module.name)?,
-            object_file: copy_bytes(module.object_file)?,
-            name_padding: module.name_padding,
-        })
-    }
-
-    /// Return a [`Module`] view of the record with index 0 and offset 0.
-    #[must_use]
-    pub fn as_module(&self) -> Module<'_> {
-        Module {
-            index: ModuleIndex(0),
-            offset: 0,
-            unused1: self.unused1,
-            section_contribution: self.section_contribution,
-            flags: self.flags,
-            stream: self.stream,
-            symbol_bytes: self.symbol_bytes,
-            c11_bytes: self.c11_bytes,
-            c13_bytes: self.c13_bytes,
-            source_file_count: self.source_file_count,
-            padding: self.padding,
-            file_name_offset: self.file_name_offset,
-            source_file_name_index: self.source_file_name_index,
-            pdb_file_path_index: self.pdb_file_path_index,
-            name: &self.name,
-            object_file: &self.object_file,
-            name_padding: self.name_padding,
-        }
-    }
-
-    /// Append the record with its names and padding to `out`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the errors of [`Module::encode`].
-    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        self.as_module().encode(out)
     }
 }
 
@@ -249,9 +154,20 @@ pub struct Modules<'a> {
     pub(super) position: usize,
     /// The index of the next record.
     pub(super) index: u32,
+    /// `true` after an error.
+    pub(super) failed: bool,
 }
 
 impl<'a> Modules<'a> {
+    /// Return the offset of the next record in the module info substream.
+    ///
+    /// After an error, the offset identifies the start of the record that
+    /// caused the error. Use this offset to add a location to the error.
+    #[must_use]
+    pub const fn position(&self) -> usize {
+        self.position
+    }
+
     /// Decode the record at the current position.
     fn read(&self) -> Result<(Module<'a>, usize)> {
         let start = self.position;
@@ -275,19 +191,10 @@ impl<'a> Modules<'a> {
         let padded = align4(after_object)
             .filter(|&end| end <= rest.len())
             .ok_or_else(|| truncated("DBI module info padding is truncated"))?;
-        let offset = u32::try_from(location(start)).map_err(|_| {
-            dbi_error(
-                ErrorKind::OffsetOverflow,
-                location(start),
-                "DBI module offset does not fit in 32 bits",
-            )
-        })?;
         let mut name_padding = [0; 3];
         name_padding[..padded - after_object].copy_from_slice(&rest[after_object..padded]);
         let contribution = fixed[4..32].as_chunks::<4>().0;
         let module = Module {
-            index: ModuleIndex(self.index),
-            offset,
             unused1: u32_at(fixed, 0),
             section_contribution: SectionContribution::decode(
                 SectionContributionVersion::V60,
@@ -303,8 +210,8 @@ impl<'a> Modules<'a> {
             file_name_offset: u32_at(fixed, 52),
             source_file_name_index: u32_at(fixed, 56),
             pdb_file_path_index: u32_at(fixed, 60),
-            name,
-            object_file,
+            name: Bytes::new(name),
+            object_file: Bytes::new(object_file),
             name_padding,
         };
         Ok((module, start + padded))
@@ -312,21 +219,22 @@ impl<'a> Modules<'a> {
 }
 
 impl<'a> Iterator for Modules<'a> {
-    type Item = Result<Module<'a>>;
+    type Item = Result<(ModuleIndex, Module<'a>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.bytes.len() {
+        if self.failed || self.position >= self.bytes.len() {
             return None;
         }
         match self.read() {
             Ok((module, next)) => {
+                let index = ModuleIndex(self.index);
                 self.position = next;
                 // Each record has at least 64 bytes, so the count fits when offsets fit.
                 self.index = self.index.saturating_add(1);
-                Some(Ok(module))
+                Some(Ok((index, module)))
             }
             Err(error) => {
-                self.position = self.bytes.len();
+                self.failed = true;
                 Some(Err(error))
             }
         }

@@ -9,8 +9,9 @@
 
 use super::super::{Fields, SymbolKind};
 use super::{AddressGaps, AddressRange, SectionOffset};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of a def-range with a DIA program (`S_DEFRANGE`).
 pub const S_DEFRANGE: SymbolKind = SymbolKind(0x113f);
@@ -24,7 +25,7 @@ pub const S_DEFRANGE_CONSTVAL_ON_ENTRY: SymbolKind = SymbolKind(0x117f);
 pub const S_DEFRANGE_GLOBALSYM_ON_ENTRY: SymbolKind = SymbolKind(0x1180);
 
 /// A def-range with a DIA program ([`S_DEFRANGE`] and [`S_DEFRANGE_SUBFIELD`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeProgram<'a> {
     /// The DIA program that evaluates the value (`program`).
@@ -37,6 +38,8 @@ pub struct DefRangeProgram<'a> {
     /// The parts of the range where the program is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeProgram { gaps; program, parent_offset, range });
 
 impl<'a> DefRangeProgram<'a> {
     /// Read the fields. Set `subfield` for [`S_DEFRANGE_SUBFIELD`].
@@ -68,11 +71,13 @@ impl<'a> DefRangeProgram<'a> {
 ///
 /// No reference describes the meaning of the values. The record stores
 /// little-endian 32-bit words.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct EntryValues<'a> {
     /// The little-endian 32-bit words.
-    words: &'a [[u8; 4]],
+    words: Bytes<'a>,
 }
+
+into_owned!(struct EntryValues { words; });
 
 impl<'a> EntryValues<'a> {
     /// Create a value from little-endian 32-bit words.
@@ -81,13 +86,18 @@ impl<'a> EntryValues<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 4.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let (words, rest) = bytes.as_chunks();
-        if !rest.is_empty() {
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let words = bytes.into();
+        if !words.len().is_multiple_of(4) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("S_DEFRANGE_CONSTVAL_ON_ENTRY is not a multiple of 4 bytes"));
         }
         Ok(Self { words })
+    }
+
+    /// Return the words. [`EntryValues::parse`] checked the length.
+    fn words(&self) -> &[[u8; 4]] {
+        self.words.as_chunks().0
     }
 
     /// Read all remaining bytes as words.
@@ -97,29 +107,26 @@ impl<'a> EntryValues<'a> {
 
     /// Write the words.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        for word in self.words {
-            out.bytes(word)?;
-        }
-        Ok(())
+        out.bytes(&self.words)
     }
 
     /// Return the number of words.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.words.len()
+    pub fn len(&self) -> usize {
+        self.words.len() / 4
     }
 
     /// Return `true` if the record has no words.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.words.is_empty()
     }
 
     /// Return an iterator over the words.
     #[must_use]
-    pub fn iter(&self) -> EntryValuesIter<'a> {
+    pub fn iter(&self) -> EntryValuesIter<'_> {
         EntryValuesIter {
-            words: self.words.iter(),
+            words: self.words().iter(),
         }
     }
 }
@@ -147,16 +154,7 @@ impl ExactSizeIterator for EntryValuesIter<'_> {}
 
 impl core::iter::FusedIterator for EntryValuesIter<'_> {}
 
-impl<'a> IntoIterator for EntryValues<'a> {
-    type Item = u32;
-    type IntoIter = EntryValuesIter<'a>;
-
-    fn into_iter(self) -> EntryValuesIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &EntryValues<'a> {
+impl<'a> IntoIterator for &'a EntryValues<'_> {
     type Item = u32;
     type IntoIter = EntryValuesIter<'a>;
 

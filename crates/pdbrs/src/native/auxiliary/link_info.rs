@@ -26,10 +26,11 @@
 
 use alloc::vec::Vec;
 
+use crate::bytes::into_owned;
 use crate::native::hash_table::Cursor;
 use crate::native::msf::StreamId;
 use crate::native::output::{Output, to_u32};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The record version `vliOne`.
 pub const LINK_INFO_VERSION_ONE: u32 = 1;
@@ -41,7 +42,7 @@ pub const LINK_INFO_VERSION_TWO: u32 = 2;
 const HEADER_SIZE: u32 = 24;
 
 /// A decoded `/LinkInfo` record, borrowed from the stream bytes.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct LinkInfo<'a> {
     /// The record size `cb`.
@@ -49,16 +50,21 @@ pub struct LinkInfo<'a> {
     /// The record version `ver`: [`LINK_INFO_VERSION_ONE`] or [`LINK_INFO_VERSION_TWO`].
     pub version: u32,
     /// The current directory of the link, without its NUL.
-    pub current_directory: &'a [u8],
+    pub current_directory: Bytes<'a>,
     /// The linker command, without its NUL.
-    pub command: &'a [u8],
+    pub command: Bytes<'a>,
     /// The offset of the output file name in [`LinkInfo::command`] (`ichOutfile`).
     pub output_file_offset: u32,
     /// The library bytes from `offszLibs` to `cb`, kept raw.
-    pub libraries: &'a [u8],
+    pub libraries: Bytes<'a>,
     /// The stream bytes after the record, kept raw.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
+
+into_owned!(struct LinkInfo {
+    current_directory, command, libraries, trailing;
+    size, version, output_file_offset
+});
 
 impl<'a> LinkInfo<'a> {
     /// Make a record with the layout of `GetUTF8LinkInfo` and no trailing bytes.
@@ -73,19 +79,19 @@ impl<'a> LinkInfo<'a> {
     /// - [`ErrorKind::LimitExceeded`] if the record size does not fit in `u32`.
     pub fn new(
         version: u32,
-        current_directory: &'a [u8],
-        command: &'a [u8],
+        current_directory: impl Into<Bytes<'a>>,
+        command: impl Into<Bytes<'a>>,
         output_file_offset: u32,
-        libraries: &'a [u8],
+        libraries: impl Into<Bytes<'a>>,
     ) -> Result<Self> {
         let mut record = Self {
             size: 0,
             version,
-            current_directory,
-            command,
+            current_directory: current_directory.into(),
+            command: command.into(),
             output_file_offset,
-            libraries,
-            trailing: &[],
+            libraries: libraries.into(),
+            trailing: Bytes::default(),
         };
         record.size = record.layout()?[3];
         Ok(record)
@@ -149,17 +155,17 @@ impl<'a> LinkInfo<'a> {
         Ok(Some(Self {
             size,
             version,
-            current_directory,
-            command,
+            current_directory: Bytes::new(current_directory),
+            command: Bytes::new(command),
             output_file_offset,
-            libraries,
-            trailing,
+            libraries: Bytes::new(libraries),
+            trailing: Bytes::new(trailing),
         }))
     }
 
     /// Return the output file name: the command bytes from [`LinkInfo::output_file_offset`].
     #[must_use]
-    pub fn output_file(&self) -> &'a [u8] {
+    pub fn output_file(&self) -> &[u8] {
         let start = usize::try_from(self.output_file_offset).unwrap_or(usize::MAX);
         self.command.get(start..).unwrap_or_default()
     }
@@ -200,10 +206,10 @@ impl<'a> LinkInfo<'a> {
         ] {
             output.u32(word)?;
         }
-        output.c_string(self.current_directory)?;
-        output.c_string(self.command)?;
-        output.bytes(self.libraries)?;
-        output.bytes(self.trailing)
+        output.c_string(&self.current_directory)?;
+        output.c_string(&self.command)?;
+        output.bytes(&self.libraries)?;
+        output.bytes(&self.trailing)
     }
 
     /// Check the fields and return the directory, command and library offsets and `cb`.
@@ -223,8 +229,8 @@ impl<'a> LinkInfo<'a> {
             Error::new(ErrorKind::LimitExceeded, None)
                 .with_context("/LinkInfo record size overflows u32")
         };
-        let command = next(HEADER_SIZE, self.current_directory).ok_or_else(too_large)?;
-        let libraries = next(command, self.command).ok_or_else(too_large)?;
+        let command = next(HEADER_SIZE, &self.current_directory).ok_or_else(too_large)?;
+        let libraries = next(command, &self.command).ok_or_else(too_large)?;
         let size = libraries
             .checked_add(to_u32(self.libraries.len(), "/LinkInfo library size")?)
             .ok_or_else(too_large)?;

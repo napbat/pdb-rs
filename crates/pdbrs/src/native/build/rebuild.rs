@@ -37,7 +37,7 @@ use crate::io::ReadAt;
 use crate::native::Pdb;
 use crate::native::auxiliary::{NamedStreamKind, TmCache};
 use crate::native::codeview::symbol::{ModuleTypeReference, ModuleTypeSource};
-use crate::native::dbi::{Dbi, DebugStream, ModuleStream};
+use crate::native::dbi::{Dbi, DebugStream, ModuleStream, SourceInfo};
 use crate::native::info::Info;
 use crate::native::msf::StreamId;
 use crate::native::output::no_memory;
@@ -88,6 +88,8 @@ pub struct PdbContents {
     ipi: Option<(TypeStream, Option<Vec<u8>>)>,
     /// The DBI stream.
     dbi: Dbi,
+    /// The source file info substream of the DBI stream.
+    sources: Option<SourceInfo<'static>>,
     /// The module stream of each module, or `None`.
     modules: Vec<Option<ModuleStream>>,
     /// The symbol record stream. It is empty if the PDB has none.
@@ -176,7 +178,7 @@ impl<S: ReadAt> Pdb<S> {
         let mut modules = Vec::new();
         let mut module_types = Vec::new();
         for module in dbi.modules() {
-            let module = module?;
+            let (_, module) = module?;
             if let Some(id) = module.stream {
                 claim(id)?;
             }
@@ -219,7 +221,7 @@ impl<S: ReadAt> Pdb<S> {
         for entry in info.named_streams() {
             claim(entry.stream)?;
             let bytes = self.stream_bytes(entry.stream)?;
-            match NamedStreamKind::classify(entry.name) {
+            match NamedStreamKind::classify(&entry.name) {
                 NamedStreamKind::Names => names_bytes = Some(bytes),
                 kind => {
                     if kind == NamedStreamKind::TmCache {
@@ -228,7 +230,7 @@ impl<S: ReadAt> Pdb<S> {
                     let mut name = Vec::new();
                     name.try_reserve_exact(entry.name.len())
                         .map_err(|_| no_memory())?;
-                    name.extend_from_slice(entry.name);
+                    name.extend_from_slice(&entry.name);
                     push(
                         &mut named,
                         NamedContent {
@@ -252,6 +254,7 @@ impl<S: ReadAt> Pdb<S> {
             names: names_bytes,
             tpi: (tpi, tpi_hash),
             ipi,
+            sources: dbi.source_info()?.map(SourceInfo::into_owned),
             dbi,
             modules,
             symbols,

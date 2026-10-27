@@ -7,31 +7,34 @@ use core::iter::FusedIterator;
 
 use super::super::Fields;
 use super::CpuType;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// An object file name record (`S_OBJNAME`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ObjectName<'a> {
     /// The signature of the object file. Compilers usually write 0.
     pub signature: u32,
     /// The path of the object file.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ObjectName { name; signature });
 
 impl<'a> ObjectName<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let signature = fields.u32()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self { signature, name })
     }
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.signature)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -135,7 +138,7 @@ impl CompileFlags {
 }
 
 /// A compile record, version 2 (`S_COMPILE2`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Compile2<'a> {
     /// The flags and the source language.
@@ -147,10 +150,12 @@ pub struct Compile2<'a> {
     /// The back-end version: major, minor and build.
     pub backend: [u16; 3],
     /// The compiler version string.
-    pub version: &'a [u8],
+    pub version: Bytes<'a>,
     /// The optional block of extra strings after the version string.
     pub extra_strings: StringList<'a>,
 }
+
+into_owned!(struct Compile2 { version, extra_strings; flags, machine, frontend, backend });
 
 impl<'a> Compile2<'a> {
     /// Read the fields.
@@ -159,7 +164,7 @@ impl<'a> Compile2<'a> {
         let machine = CpuType(fields.u16()?);
         let frontend = [fields.u16()?, fields.u16()?, fields.u16()?];
         let backend = [fields.u16()?, fields.u16()?, fields.u16()?];
-        let version = fields.name()?;
+        let version = Bytes::new(fields.name()?);
         let extra_strings = StringList::read(fields)?;
         Ok(Self {
             flags,
@@ -178,13 +183,13 @@ impl<'a> Compile2<'a> {
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
-        out.c_string(self.version)?;
+        out.c_string(&self.version)?;
         self.extra_strings.write(out)
     }
 }
 
 /// A compile record, version 3 (`S_COMPILE3`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Compile3<'a> {
     /// The flags and the source language.
@@ -196,7 +201,7 @@ pub struct Compile3<'a> {
     /// The back-end version: major, minor, build and QFE.
     pub backend: [u16; 4],
     /// The compiler version string.
-    pub version: &'a [u8],
+    pub version: Bytes<'a>,
     /// The count of zero bytes after the NUL terminator of the version
     /// string, with the record padding.
     ///
@@ -204,6 +209,8 @@ pub struct Compile3<'a> {
     /// producers write only the record padding; `ml64` writes one more NUL.
     pub trailing_zeros: usize,
 }
+
+into_owned!(struct Compile3 { version; flags, machine, frontend, backend, trailing_zeros });
 
 impl<'a> Compile3<'a> {
     /// Read the fields.
@@ -217,7 +224,7 @@ impl<'a> Compile3<'a> {
         let machine = CpuType(fields.u16()?);
         let frontend = [fields.u16()?, fields.u16()?, fields.u16()?, fields.u16()?];
         let backend = [fields.u16()?, fields.u16()?, fields.u16()?, fields.u16()?];
-        let version = fields.name()?;
+        let version = Bytes::new(fields.name()?);
         let rest = fields.bytes(fields.rest().len())?;
         if rest.iter().any(|&byte| byte != 0) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
@@ -240,7 +247,7 @@ impl<'a> Compile3<'a> {
         for value in self.frontend.into_iter().chain(self.backend) {
             out.u16(value)?;
         }
-        out.c_string(self.version)?;
+        out.c_string(&self.version)?;
         for _ in 0..self.trailing_zeros {
             out.u8(0)?;
         }
@@ -251,7 +258,7 @@ impl<'a> Compile3<'a> {
 /// A build environment record (`S_ENVBLOCK`).
 ///
 /// The strings are key and value pairs, for example `cwd` and a directory.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct EnvironmentBlock<'a> {
     /// The flags byte. Bit 0 is reserved (`rev`). `cvinfo.h` requires the
@@ -260,6 +267,8 @@ pub struct EnvironmentBlock<'a> {
     /// The strings.
     pub strings: StringList<'a>,
 }
+
+into_owned!(struct EnvironmentBlock { strings; flags });
 
 impl<'a> EnvironmentBlock<'a> {
     /// Read the fields.
@@ -282,13 +291,15 @@ impl<'a> EnvironmentBlock<'a> {
 /// bytes before the empty string. The sequence can also be absent: the
 /// record then ends without the empty string. [`StringList::is_terminated`]
 /// tells the two forms apart.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct StringList<'a> {
     /// The strings with their terminators, without the final empty string.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// `true` if the record holds the empty string that ends the sequence.
     terminated: bool,
 }
+
+into_owned!(struct StringList { bytes; terminated });
 
 impl<'a> StringList<'a> {
     /// Read the strings and the empty string that ends them.
@@ -315,7 +326,7 @@ impl<'a> StringList<'a> {
             }
             length += end + 1;
         }
-        let bytes = fields.bytes(length)?;
+        let bytes = Bytes::new(fields.bytes(length)?);
         // Consume the empty string that ends the sequence.
         fields.bytes(1)?;
         Ok(Self {
@@ -333,7 +344,8 @@ impl<'a> StringList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if `bytes` does not end with a
     /// NUL byte or holds an empty string.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let bytes = bytes.into();
         let valid = bytes.is_empty()
             || (bytes.first() != Some(&0)
                 && bytes.last() == Some(&0)
@@ -342,16 +354,14 @@ impl<'a> StringList<'a> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("symbol string list holds an empty or unterminated string"));
         }
-        Ok(Self {
-            bytes,
-            terminated: !bytes.is_empty(),
-        })
+        let terminated = !bytes.is_empty();
+        Ok(Self { bytes, terminated })
     }
 
     /// Write the strings and, if the sequence is present, the empty string
     /// that ends it.
     fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        out.bytes(self.bytes)?;
+        out.bytes(&self.bytes)?;
         if self.terminated || !self.bytes.is_empty() {
             out.u8(0)?;
         }
@@ -360,8 +370,8 @@ impl<'a> StringList<'a> {
 
     /// Return the raw bytes of the strings with their terminators.
     #[must_use]
-    pub const fn bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return `true` if the record holds the empty string that ends the
@@ -373,27 +383,18 @@ impl<'a> StringList<'a> {
 
     /// Return `true` if the list has no strings.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the strings, without their terminators.
     #[must_use]
-    pub const fn iter(&self) -> StringListIter<'a> {
-        StringListIter { bytes: self.bytes }
+    pub fn iter(&self) -> StringListIter<'_> {
+        StringListIter { bytes: &self.bytes }
     }
 }
 
-impl<'a> IntoIterator for StringList<'a> {
-    type Item = &'a [u8];
-    type IntoIter = StringListIter<'a>;
-
-    fn into_iter(self) -> StringListIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &StringList<'a> {
+impl<'a> IntoIterator for &'a StringList<'_> {
     type Item = &'a [u8];
     type IntoIter = StringListIter<'a>;
 

@@ -411,7 +411,7 @@ fn check_references(
         check_id(id, expected, offset, kind, context, report)?;
     }
     let functions = match symbol.data() {
-        SymbolData::Inlinees(list) => Some(*list),
+        SymbolData::Inlinees(list) => Some(list),
         SymbolData::Callees(list) | SymbolData::Callers(list) => Some(list.functions()),
         _ => None,
     };

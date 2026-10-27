@@ -300,7 +300,7 @@ impl<S: ReadAt> Pdb<S> {
             require_stream(&self.container, reference)?;
         }
         for module in dbi.modules() {
-            if let Some(reference) = module?.stream {
+            if let Some(reference) = module?.1.stream {
                 require_stream(&self.container, reference)?;
             }
         }

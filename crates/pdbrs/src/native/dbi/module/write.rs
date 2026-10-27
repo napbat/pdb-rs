@@ -6,33 +6,45 @@
 //! the C13 line region, the global reference size and the global
 //! references. It returns the region sizes for the DBI module record.
 
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use super::global_refs::REF_SIZE;
 use super::{ModuleRegionSizes, ModuleStream, SIGNATURE_C13, SIGNATURE_SIZE, Subsections};
 use crate::native::codeview::Records;
 use crate::native::symbols::SymbolOffset;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The regions of a module stream for [`ModuleStreamParts::encode`].
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ModuleStreamParts<'a> {
     /// The symbol records without the signature, or `None` for a module
     /// stream without a symbol region.
     ///
-    /// `Some(&[])` gives a symbol region with only the signature.
-    pub symbols: Option<&'a [u8]>,
+    /// An empty `Some` value gives a symbol region with only the signature.
+    pub symbols: Option<Bytes<'a>>,
     /// The C11 line region. The writer keeps it raw.
-    pub c11: &'a [u8],
+    pub c11: Bytes<'a>,
     /// The C13 line region: framed subsections, for example the output of
     /// [`ModuleLines::encode`](crate::native::lines::ModuleLines::encode).
-    pub c13: &'a [u8],
+    pub c13: Bytes<'a>,
     /// The global references: offsets into the symbol record stream.
-    pub global_refs: &'a [SymbolOffset],
+    pub global_refs: Cow<'a, [SymbolOffset]>,
 }
 
 impl ModuleStreamParts<'_> {
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> ModuleStreamParts<'static> {
+        ModuleStreamParts {
+            symbols: self.symbols.map(Bytes::into_owned),
+            c11: self.c11.into_owned(),
+            c13: self.c13.into_owned(),
+            global_refs: Cow::Owned(self.global_refs.into_owned()),
+        }
+    }
+
     /// Check the regions and append the module stream bytes to `out`.
     ///
     /// The function checks all sizes before it reserves space in `out`.
@@ -52,12 +64,20 @@ impl ModuleStreamParts<'_> {
     /// change `out` if it returns an error.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<ModuleRegionSizes> {
         write(
-            self.symbols,
-            self.c11,
-            self.c13,
+            self.symbols.as_deref(),
+            &self.c11,
+            &self.c13,
             self.global_refs.iter().copied(),
             out,
         )
+    }
+}
+
+impl crate::bytes::IntoOwned for ModuleStreamParts<'_> {
+    type Owned = ModuleStreamParts<'static>;
+
+    fn to_static(self) -> ModuleStreamParts<'static> {
+        self.into_owned()
     }
 }
 

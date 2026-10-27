@@ -8,13 +8,14 @@
 use core::iter::FusedIterator;
 
 use super::{TypeIndexList, fields};
+use crate::bytes::into_owned;
 use crate::native::codeview::index::{PrimitiveMode, TypeIndex};
 use crate::native::codeview::numeric::{Integer, Numeric};
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// An `LF_DIMARRAY` record: an array with a dimension record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DimensionedArray<'a> {
     /// The element type.
@@ -23,7 +24,7 @@ pub struct DimensionedArray<'a> {
     /// `LF_DIMVARLU`.
     pub dimensions: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
 impl<'a> DimensionedArray<'a> {
@@ -33,7 +34,7 @@ impl<'a> DimensionedArray<'a> {
         let value = Self {
             element_type: fields.type_index()?,
             dimensions: fields.type_index()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         };
         fields.finish_type_padding()?;
         Ok(value)
@@ -43,9 +44,11 @@ impl<'a> DimensionedArray<'a> {
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.element_type)?;
         writer.type_index(self.dimensions)?;
-        writer.c_string(self.name)
+        writer.c_string(&self.name)
     }
 }
+
+into_owned!(struct DimensionedArray { name; element_type, dimensions });
 
 /// The bounds of one dimension.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -69,7 +72,7 @@ impl DimensionBound {
 ///
 /// Each bound is a value of the index type. The index type must be a direct
 /// primitive integer type, because the record has no other size for a bound.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ConstantDimensions<'a> {
     /// `true` for `LF_DIMCONLU`: each dimension has a lower and an upper bound.
@@ -79,7 +82,7 @@ pub struct ConstantDimensions<'a> {
     /// The number of dimensions.
     pub rank: u16,
     /// The serialized bounds.
-    bounds: &'a [u8],
+    bounds: Bytes<'a>,
     /// The size of one bound in bytes.
     width: usize,
     /// `true` if the bounds are signed.
@@ -113,8 +116,9 @@ impl<'a> ConstantDimensions<'a> {
         lower_bounds: bool,
         index_type: TypeIndex,
         rank: u16,
-        bounds: &'a [u8],
+        bounds: impl Into<Bytes<'a>>,
     ) -> Result<Self> {
+        let bounds = bounds.into();
         let (width, signed) = bound_layout(index_type)?;
         let per_dimension = if lower_bounds { 2 } else { 1 };
         if bounds.len() != usize::from(rank) * per_dimension * width {
@@ -140,33 +144,35 @@ impl<'a> ConstantDimensions<'a> {
         let per_dimension = if lower_bounds { 2 } else { 1 };
         let bounds = fields.bytes(usize::from(rank) * per_dimension * width)?;
         fields.finish_type_padding()?;
-        Self::new(lower_bounds, index_type, rank, bounds)
+        Self::new(lower_bounds, index_type, rank, Bytes::new(bounds))
     }
 
     /// Append the payload fields.
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.index_type)?;
         writer.u16(self.rank)?;
-        writer.bytes(self.bounds)
+        writer.bytes(&self.bounds)
     }
 
     /// Return the serialized bounds.
     #[must_use]
-    pub const fn bound_bytes(&self) -> &'a [u8] {
-        self.bounds
+    pub fn bound_bytes(&self) -> &[u8] {
+        &self.bounds
     }
 
     /// Return an iterator over the bounds of each dimension.
     #[must_use]
-    pub fn bounds(&self) -> DimensionBounds<'a> {
+    pub fn bounds(&self) -> DimensionBounds<'_> {
         DimensionBounds {
-            bytes: self.bounds,
+            bytes: &self.bounds,
             width: self.width,
             signed: self.signed,
             lower_bounds: self.lower_bounds,
         }
     }
 }
+
+into_owned!(struct ConstantDimensions { bounds; lower_bounds, index_type, rank, width, signed });
 
 /// An iterator over the bounds of a [`ConstantDimensions`] record.
 #[derive(Clone, Debug)]
@@ -223,7 +229,7 @@ impl FusedIterator for DimensionBounds<'_> {}
 ///
 /// Each bound is a type index. `cvinfo.h` says that the referenced records
 /// are `LF_REFSYM` records or `T_VOID`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct VariableDimensions<'a> {
     /// `true` for `LF_DIMVARLU`: each dimension has a lower and an upper bound.
@@ -274,8 +280,10 @@ impl<'a> VariableDimensions<'a> {
     }
 }
 
+into_owned!(struct VariableDimensions { bounds; lower_bounds, rank, index_type });
+
 /// An `LF_STRIDED_ARRAY` record: an array with a stride between elements.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct StridedArray<'a> {
     /// The element type.
@@ -287,7 +295,7 @@ pub struct StridedArray<'a> {
     /// The size of the array in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
 impl<'a> StridedArray<'a> {
@@ -299,7 +307,7 @@ impl<'a> StridedArray<'a> {
             index_type: fields.type_index()?,
             stride: fields.u32()?,
             size: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         };
         fields.finish_type_padding()?;
         Ok(value)
@@ -311,6 +319,8 @@ impl<'a> StridedArray<'a> {
         writer.type_index(self.index_type)?;
         writer.u32(self.stride)?;
         self.size.encode(writer.out())?;
-        writer.c_string(self.name)
+        writer.c_string(&self.name)
     }
 }
+
+into_owned!(struct StridedArray { size, name; element_type, index_type, stride });

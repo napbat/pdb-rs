@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 
 use super::{entry_list, invalid, read_u32, to_u32, truncated};
 use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
 
@@ -122,11 +123,13 @@ entry_list!(
 
 /// A decoded `DEBUG_S_FUNC_MDTOKEN_MAP` or `DEBUG_S_TYPE_MDTOKEN_MAP`
 /// subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TokenMap<'a> {
     /// The entries.
     entries: TokenMapEntries<'a>,
 }
+
+into_owned!(struct TokenMap { entries; });
 
 impl<'a> TokenMap<'a> {
     /// Parse the data of a token map subsection.
@@ -159,8 +162,8 @@ impl<'a> TokenMap<'a> {
 
     /// Return the entries.
     #[must_use]
-    pub const fn entries(&self) -> TokenMapEntries<'a> {
-        self.entries
+    pub const fn entries(&self) -> &TokenMapEntries<'a> {
+        &self.entries
     }
 
     /// Append the subsection data to `out`: the count and the entries.

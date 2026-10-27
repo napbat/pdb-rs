@@ -4,9 +4,10 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::{invalid, pad4, too_large, truncated};
+use crate::bytes::into_owned;
 use crate::native::codeview::index::{ChecksumOffset, NameOffset};
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The size of an entry header: a name offset, a size and a kind.
 const ENTRY_HEADER_SIZE: usize = 6;
@@ -69,7 +70,7 @@ impl ChecksumKind {
 }
 
 /// One entry of a file checksum table.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FileChecksum<'a> {
     /// The byte offset of the entry in the subsection data.
@@ -81,8 +82,10 @@ pub struct FileChecksum<'a> {
     /// The checksum algorithm.
     pub kind: ChecksumKind,
     /// The checksum bytes. The length is [`ChecksumKind::size`].
-    pub checksum: &'a [u8],
+    pub checksum: Bytes<'a>,
 }
+
+into_owned!(struct FileChecksum { checksum; offset, name_offset, kind });
 
 /// A decoded `DEBUG_S_FILECHKSMS` subsection.
 ///
@@ -91,10 +94,12 @@ pub struct FileChecksum<'a> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FileChecksums<'a> {
     /// The validated subsection data.
-    data: &'a [u8],
+    data: Bytes<'a>,
     /// The offset of each entry, in increasing order.
     offsets: Vec<u32>,
 }
+
+into_owned!(struct FileChecksums { data; offsets });
 
 impl<'a> FileChecksums<'a> {
     /// Parse and validate the data of a `DEBUG_S_FILECHKSMS` subsection.
@@ -146,7 +151,10 @@ impl<'a> FileChecksums<'a> {
             offsets.push(offset);
             position = next;
         }
-        Ok(Self { data, offsets })
+        Ok(Self {
+            data: Bytes::new(data),
+            offsets,
+        })
     }
 
     /// Return the number of entries.
@@ -166,9 +174,9 @@ impl<'a> FileChecksums<'a> {
     /// Return `None` if no entry starts at `offset`. An offset inside an
     /// entry does not identify an entry.
     #[must_use]
-    pub fn get(&self, offset: ChecksumOffset) -> Option<FileChecksum<'a>> {
+    pub fn get(&self, offset: ChecksumOffset) -> Option<FileChecksum<'_>> {
         self.offsets.binary_search(&offset.0).ok()?;
-        parse_entry(self.data, offset.0)
+        parse_entry(&self.data, offset.0)
             .ok()
             .map(|(entry, _)| entry)
     }
@@ -181,9 +189,9 @@ impl<'a> FileChecksums<'a> {
 
     /// Return an iterator over the entries in subsection order.
     #[must_use]
-    pub fn iter(&self) -> FileChecksumsIter<'_, 'a> {
+    pub fn iter(&self) -> FileChecksumsIter<'_> {
         FileChecksumsIter {
-            data: self.data,
+            data: &self.data,
             offsets: self.offsets.iter(),
         }
     }
@@ -205,7 +213,7 @@ impl<'a> FileChecksums<'a> {
             .map(|&next| usize::try_from(next).unwrap_or(usize::MAX))
             .chain([self.data.len()]);
         for (entry, next) in self.iter().zip(ends) {
-            write_entry(entry.name_offset, entry.kind, entry.checksum, out)?;
+            write_entry(entry.name_offset, entry.kind, &entry.checksum, out)?;
             // `parse` checked that the entry and its padding end at `next`.
             let start = usize::try_from(entry.offset.0).unwrap_or(usize::MAX);
             let end = start.saturating_add(ENTRY_HEADER_SIZE + entry.checksum.len());
@@ -255,9 +263,9 @@ fn write_entry(
     Output::new(out).bytes(checksum)
 }
 
-impl<'s, 'a> IntoIterator for &'s FileChecksums<'a> {
-    type Item = FileChecksum<'a>;
-    type IntoIter = FileChecksumsIter<'s, 'a>;
+impl<'s> IntoIterator for &'s FileChecksums<'_> {
+    type Item = FileChecksum<'s>;
+    type IntoIter = FileChecksumsIter<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -266,14 +274,14 @@ impl<'s, 'a> IntoIterator for &'s FileChecksums<'a> {
 
 /// An iterator over the entries of a [`FileChecksums`] table.
 #[derive(Clone, Debug)]
-pub struct FileChecksumsIter<'s, 'a> {
+pub struct FileChecksumsIter<'a> {
     /// The validated subsection data.
     data: &'a [u8],
     /// The remaining entry offsets.
-    offsets: core::slice::Iter<'s, u32>,
+    offsets: core::slice::Iter<'a, u32>,
 }
 
-impl<'a> Iterator for FileChecksumsIter<'_, 'a> {
+impl<'a> Iterator for FileChecksumsIter<'a> {
     type Item = FileChecksum<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -287,9 +295,9 @@ impl<'a> Iterator for FileChecksumsIter<'_, 'a> {
     }
 }
 
-impl ExactSizeIterator for FileChecksumsIter<'_, '_> {}
+impl ExactSizeIterator for FileChecksumsIter<'_> {}
 
-impl FusedIterator for FileChecksumsIter<'_, '_> {}
+impl FusedIterator for FileChecksumsIter<'_> {}
 
 /// Decode the entry at `offset`; return it and the end of its checksum.
 fn parse_entry(data: &[u8], offset: u32) -> Result<(FileChecksum<'_>, usize)> {
@@ -318,7 +326,7 @@ fn parse_entry(data: &[u8], offset: u32) -> Result<(FileChecksum<'_>, usize)> {
         offset: ChecksumOffset(offset),
         name_offset: NameOffset(u32::from_le_bytes([n0, n1, n2, n3])),
         kind,
-        checksum,
+        checksum: Bytes::new(checksum),
     };
     Ok((entry, end))
 }

@@ -7,8 +7,9 @@
 use super::super::index::{ModuleIndex, ModuleSymbolOffset};
 use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of a reference to a data symbol in a module (`S_DATAREF`).
 pub const S_DATAREF: SymbolKind = SymbolKind(0x1126);
@@ -30,7 +31,7 @@ flags! {
 }
 
 /// A public symbol record (`S_PUB32`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Public<'a> {
     /// The flags.
@@ -38,15 +39,17 @@ pub struct Public<'a> {
     /// The address.
     pub address: SectionOffset,
     /// The name. It is usually a mangled linker name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Public { name; flags, address });
 
 impl<'a> Public<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let flags = PublicFlags(fields.u32()?);
         let address = SectionOffset::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             flags,
             address,
@@ -58,12 +61,12 @@ impl<'a> Public<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.u32(self.flags.0)?;
         self.address.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A reference to a procedure in a module (`S_PROCREF` and `S_LPROCREF`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ProcedureReference<'a> {
     /// The `SUC` name checksum. Linkers usually write 0.
@@ -75,8 +78,10 @@ pub struct ProcedureReference<'a> {
     /// record does not give a module. The record stores the index plus 1.
     pub module: Option<ModuleIndex>,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct ProcedureReference { name; name_checksum, offset, module });
 
 impl<'a> ProcedureReference<'a> {
     /// Read the fields.
@@ -87,7 +92,7 @@ impl<'a> ProcedureReference<'a> {
             .u16()?
             .checked_sub(1)
             .map(|index| ModuleIndex(u32::from(index)));
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             name_checksum,
             offset,
@@ -115,12 +120,12 @@ impl<'a> ProcedureReference<'a> {
         out.u32(self.name_checksum)?;
         out.u32(self.offset.0)?;
         out.u16(module)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// An image section record (`S_SECTION`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Section<'a> {
     /// The section number.
@@ -134,8 +139,10 @@ pub struct Section<'a> {
     /// The COFF section characteristics (`IMAGE_SCN_*`).
     pub characteristics: u32,
     /// The section name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Section { name; number, alignment, rva, length, characteristics });
 
 impl<'a> Section<'a> {
     /// Read the fields and check the reserved byte.
@@ -149,7 +156,7 @@ impl<'a> Section<'a> {
         let rva = fields.u32()?;
         let length = fields.u32()?;
         let characteristics = fields.u32()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             number,
             alignment,
@@ -168,14 +175,14 @@ impl<'a> Section<'a> {
         out.u32(self.rva)?;
         out.u32(self.length)?;
         out.u32(self.characteristics)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A COFF group record (`S_COFFGROUP`).
 ///
 /// A COFF group is a part of an image section, for example `.text$mn`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct CoffGroup<'a> {
     /// The length of the group in bytes.
@@ -185,8 +192,10 @@ pub struct CoffGroup<'a> {
     /// The start address.
     pub address: SectionOffset,
     /// The group name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct CoffGroup { name; length, characteristics, address });
 
 impl<'a> CoffGroup<'a> {
     /// Read the fields.
@@ -194,7 +203,7 @@ impl<'a> CoffGroup<'a> {
         let length = fields.u32()?;
         let characteristics = fields.u32()?;
         let address = SectionOffset::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             length,
             characteristics,
@@ -208,6 +217,6 @@ impl<'a> CoffGroup<'a> {
         out.u32(self.length)?;
         out.u32(self.characteristics)?;
         self.address.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }

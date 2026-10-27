@@ -17,7 +17,7 @@ use super::super::table::write::{HashEntry, allocation_failed, append_table, sca
 use super::{HEADER_SIZE, PublicSymbolIndex, SECTION_OFFSET_SIZE, SectionStart};
 use crate::native::Producer;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The incremental thunk table of a public symbol index.
 ///
@@ -38,14 +38,14 @@ pub struct ThunkTable<'a> {
 }
 
 /// The address of one `S_PUB32` record.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Address<'a> {
     /// The section number.
     section: u16,
     /// The offset in the section.
     offset: u32,
     /// The name without the NUL terminator.
-    name: &'a [u8],
+    name: Bytes<'a>,
     /// The symbol offset.
     symbol: u32,
 }
@@ -195,13 +195,13 @@ fn address_map<'a>(
         addresses.push(Address {
             section: public.address.section,
             offset: public.address.offset,
-            name: public.name,
+            name: public.name.clone(),
             symbol: entry.symbol.0,
         });
     }
     addresses.sort_unstable_by(|left, right| {
         compare_addresses(left, right, producer)
-            .then_with(|| left.name.cmp(right.name))
+            .then_with(|| left.name.cmp(&right.name))
             .then(left.symbol.cmp(&right.symbol))
     });
     Ok(addresses)

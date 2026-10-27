@@ -20,9 +20,10 @@ use alloc::vec::Vec;
 use super::field_list::FieldList;
 use super::index::TypeIndex;
 use super::writer::Padding;
-use super::{Fields, LeafKind, Record};
+use super::{Fields, LeafKind, RawRecord, Record};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{ErrorKind, Result};
+use crate::{Bytes, ErrorKind, Result};
 
 mod alias;
 mod array;
@@ -160,7 +161,7 @@ pub(crate) const fn fields(data: &[u8]) -> Fields<'_> {
 }
 
 /// A decoded TPI type record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum TypeLeaf<'a> {
     /// `LF_MODIFIER`.
@@ -230,7 +231,7 @@ pub enum TypeLeaf<'a> {
     /// `LF_DEFARG`.
     DefaultArgument(DefaultArgument<'a>),
     /// `LF_MANAGED`: the UTF-8 name of a managed type.
-    Managed(&'a [u8]),
+    Managed(Bytes<'a>),
     /// `LF_STRIDED_ARRAY`.
     StridedArray(StridedArray<'a>),
     /// `LF_HLSL`.
@@ -245,8 +246,17 @@ pub enum TypeLeaf<'a> {
     ///
     /// The record keeps the kind and the payload, including padding. ID
     /// records of the IPI stream also give this variant.
-    Unsupported(Record<'a>),
+    Unsupported(RawRecord<'a>),
 }
+
+into_owned!(enum TypeLeaf {
+    Pointer, ArgumentList, FieldList, MethodList, Array, Class, WideClass, Union, WideUnion,
+    Enum, VtableShape, VirtualFunctionTable, Cobol0, VirtualFunctionTablePath, Oem, Oem2, Skip,
+    DerivedClasses, ConstantDimensions, VariableDimensions, TypeServer, TypeServer2,
+    DimensionedArray, Precompiled, Alias, DefaultArgument, Managed, StridedArray, Hlsl,
+    ModifierEx, Vector, Matrix, Unsupported;
+    Modifier, Procedure, MemberFunction, Bitfield, Label, BasicArray, EndPrecompiled;
+});
 
 impl<'a> TypeLeaf<'a> {
     /// Decode one type record.
@@ -440,7 +450,7 @@ impl<'a> TypeLeaf<'a> {
                 return Ok(Padding::None);
             }
             Self::Unsupported(record) => {
-                writer.bytes(record.data)?;
+                writer.bytes(&record.data)?;
                 return Ok(Padding::None);
             }
         }
@@ -453,23 +463,23 @@ impl<'a> TypeLeaf<'a> {
     /// Microsoft Macro Assembler writes these bytes after some `LF_STRUCTURE` names, for
     /// example `f1 6d 65`. Other kinds always give an empty slice.
     #[must_use]
-    pub const fn trailing(&self) -> &'a [u8] {
+    pub fn trailing(&self) -> &[u8] {
         match self {
-            Self::Class(value) => value.trailing,
-            Self::WideClass(value) => value.trailing,
-            Self::Union(value) => value.trailing,
-            Self::WideUnion(value) => value.trailing,
-            Self::Enum(value) => value.trailing,
+            Self::Class(value) => &value.trailing,
+            Self::WideClass(value) => &value.trailing,
+            Self::Union(value) => &value.trailing,
+            Self::WideUnion(value) => &value.trailing,
+            Self::Enum(value) => &value.trailing,
             _ => &[],
         }
     }
 
-    /// Return the options, the name and the unique name of a user-defined type.
+    /// Return the options and a view of the names of a user-defined type.
     ///
     /// Returns `None` if the record is not a class, a structure, an
     /// interface, a union or an enumeration, in the normal or the wide form.
     #[must_use]
-    pub const fn tag(&self) -> Option<Tag<'a>> {
+    pub fn tag(&self) -> Option<Tag<'_>> {
         match self {
             Self::Class(value) => Some(value.tag()),
             Self::WideClass(value) => Some(value.tag()),
@@ -478,6 +488,28 @@ impl<'a> TypeLeaf<'a> {
             Self::Enum(value) => Some(value.tag()),
             _ => None,
         }
+    }
+
+    /// Return the options and the names of a user-defined type, and drop
+    /// the other fields.
+    ///
+    /// Returns `None` for the same records as [`TypeLeaf::tag`]. The tag
+    /// keeps the lifetime of the record bytes.
+    #[must_use]
+    pub fn into_tag(self) -> Option<Tag<'a>> {
+        let (options, name, unique_name) = match self {
+            Self::Class(value) => (value.options, value.name, value.unique_name),
+            Self::WideClass(value) => (value.tag().options, value.name, value.unique_name),
+            Self::Union(value) => (value.options, value.name, value.unique_name),
+            Self::WideUnion(value) => (value.tag().options, value.name, value.unique_name),
+            Self::Enum(value) => (value.options, value.name, value.unique_name),
+            _ => return None,
+        };
+        Some(Tag {
+            options,
+            name,
+            unique_name,
+        })
     }
 }
 
@@ -503,13 +535,13 @@ fn decode_other(record: Record<'_>) -> Result<TypeLeaf<'_>> {
         LF_ENDPRECOMP => TypeLeaf::EndPrecompiled(server::decode_end_precompiled(data)?),
         LF_ALIAS => TypeLeaf::Alias(Alias::decode(data)?),
         LF_DEFARG => TypeLeaf::DefaultArgument(DefaultArgument::decode(data)?),
-        LF_MANAGED => TypeLeaf::Managed(alias::decode_managed(data)?),
+        LF_MANAGED => TypeLeaf::Managed(Bytes::new(alias::decode_managed(data)?)),
         LF_STRIDED_ARRAY => TypeLeaf::StridedArray(StridedArray::decode(data)?),
         LF_HLSL => TypeLeaf::Hlsl(Hlsl::decode(data)?),
         LF_MODIFIER_EX => TypeLeaf::ModifierEx(ModifierEx::decode(data)?),
         LF_VECTOR => TypeLeaf::Vector(Vector::decode(data)?),
         LF_MATRIX => TypeLeaf::Matrix(Matrix::decode(data)?),
-        _ => TypeLeaf::Unsupported(record),
+        _ => TypeLeaf::Unsupported(RawRecord::from(record)),
     })
 }
 

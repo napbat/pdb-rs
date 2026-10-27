@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use super::blob::{Reader, Writer, invalid};
 use super::{Entries, count_to_end};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 use crate::portable::metadata::DocumentId;
 
 /// The documents of a type that has no other document information, for
@@ -17,13 +18,15 @@ use crate::portable::metadata::DocumentId;
 ///
 /// The blob is a `Document` row ID for each document, as a compressed unsigned
 /// integer, to the end of the blob.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TypeDefinitionDocuments<'a> {
     /// The row IDs. [`TypeDefinitionDocuments::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of row IDs.
     len: usize,
 }
+
+into_owned!(struct TypeDefinitionDocuments { bytes; len });
 
 impl<'a> TypeDefinitionDocuments<'a> {
     /// Decode a type definition documents blob.
@@ -36,13 +39,16 @@ impl<'a> TypeDefinitionDocuments<'a> {
     ///   compressed integer is not valid or a row ID is 0.
     pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let len = count_to_end(blob, 0, read_document)?;
-        Ok(Self { bytes: blob, len })
+        Ok(Self {
+            bytes: Bytes::new(blob),
+            len,
+        })
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of documents.
@@ -59,8 +65,8 @@ impl<'a> TypeDefinitionDocuments<'a> {
 
     /// Return an iterator over the documents.
     #[must_use]
-    pub const fn iter(&self) -> TypeDefinitionDocumentsIter<'a> {
-        TypeDefinitionDocumentsIter(Entries::new(self.bytes, self.len, 0, read_document))
+    pub fn iter(&self) -> TypeDefinitionDocumentsIter<'_> {
+        TypeDefinitionDocumentsIter(Entries::new(&self.bytes, self.len, 0, read_document))
     }
 
     /// Encode a type definition documents blob, and append it to `out`.

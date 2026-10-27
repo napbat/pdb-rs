@@ -8,10 +8,11 @@
 use core::iter::FusedIterator;
 
 use super::fields;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The size of one modifier value of `LF_MODIFIER_EX`.
 const MODIFIER_SIZE: usize = 2;
@@ -20,7 +21,7 @@ const MODIFIER_SIZE: usize = 2;
 const PROPERTY_COUNT_MASK: u16 = 0x000f;
 
 /// An `LF_HLSL` record: a built-in HLSL type.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Hlsl<'a> {
     /// The sub-type, if any.
@@ -35,7 +36,7 @@ pub struct Hlsl<'a> {
     /// again. [`Hlsl::unused_bits`] returns them.
     pub property_word: u16,
     /// The serialized numeric properties.
-    properties: &'a [u8],
+    properties: Bytes<'a>,
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
 }
@@ -52,10 +53,11 @@ impl<'a> Hlsl<'a> {
         subtype: TypeIndex,
         kind: u16,
         property_word: u16,
-        properties: &'a [u8],
+        properties: impl Into<Bytes<'a>>,
         size: Numeric<'a>,
     ) -> Result<Self> {
-        let mut rest = properties;
+        let properties = properties.into();
+        let mut rest: &[u8] = &properties;
         for _ in 0..property_word & PROPERTY_COUNT_MASK {
             rest = Numeric::parse_prefix(rest)?.1;
         }
@@ -85,7 +87,7 @@ impl<'a> Hlsl<'a> {
         let properties = &start[..start.len() - fields.rest().len()];
         let size = fields.numeric()?;
         fields.finish_type_padding()?;
-        Self::new(subtype, kind, property_word, properties, size)
+        Self::new(subtype, kind, property_word, Bytes::new(properties), size)
     }
 
     /// Append the payload fields.
@@ -93,15 +95,15 @@ impl<'a> Hlsl<'a> {
         writer.type_index(self.subtype)?;
         writer.u16(self.kind)?;
         writer.u16(self.property_word)?;
-        writer.bytes(self.properties)?;
+        writer.bytes(&self.properties)?;
         self.size.encode(writer.out())
     }
 
     /// Return an iterator over the numeric properties.
     #[must_use]
-    pub const fn properties(&self) -> NumericList<'a> {
+    pub fn properties(&self) -> NumericList<'_> {
         NumericList {
-            bytes: self.properties,
+            bytes: &self.properties,
         }
     }
 
@@ -120,6 +122,8 @@ impl<'a> Hlsl<'a> {
         self.property_word >> 4
     }
 }
+
+into_owned!(struct Hlsl { properties, size; subtype, kind, property_word });
 
 /// An iterator over a validated sequence of numeric leaves.
 #[derive(Clone, Debug)]
@@ -142,13 +146,13 @@ impl<'a> Iterator for NumericList<'a> {
 impl FusedIterator for NumericList<'_> {}
 
 /// An `LF_MODIFIER_EX` record: a type with a list of modifiers.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct ModifierEx<'a> {
     /// The modified type.
     pub modified_type: TypeIndex,
     /// The serialized `u16` modifier values (`CV_modifier_e`).
-    modifiers: &'a [u8],
+    modifiers: Bytes<'a>,
 }
 
 impl<'a> ModifierEx<'a> {
@@ -158,7 +162,8 @@ impl<'a> ModifierEx<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length is odd, and
     /// [`ErrorKind::LimitExceeded`] for more than `u16::MAX` values.
-    pub fn new(modified_type: TypeIndex, modifiers: &'a [u8]) -> Result<Self> {
+    pub fn new(modified_type: TypeIndex, modifiers: impl Into<Bytes<'a>>) -> Result<Self> {
+        let modifiers = modifiers.into();
         if !modifiers.len().is_multiple_of(MODIFIER_SIZE) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("modifier list has a partial value"));
@@ -182,7 +187,7 @@ impl<'a> ModifierEx<'a> {
         fields.finish_type_padding()?;
         Ok(Self {
             modified_type,
-            modifiers,
+            modifiers: Bytes::new(modifiers),
         })
     }
 
@@ -194,18 +199,20 @@ impl<'a> ModifierEx<'a> {
         })?;
         writer.type_index(self.modified_type)?;
         writer.u16(count)?;
-        writer.bytes(self.modifiers)
+        writer.bytes(&self.modifiers)
     }
 
     /// Return an iterator over the raw modifier values.
     #[must_use]
-    pub fn modifiers(&self) -> Modifiers<'a> {
+    pub fn modifiers(&self) -> Modifiers<'_> {
         Modifiers(self.modifiers.as_chunks::<MODIFIER_SIZE>().0.iter())
     }
 }
 
+into_owned!(struct ModifierEx { modifiers; modified_type });
+
 /// An `LF_VECTOR` record: a vector of elements.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Vector<'a> {
     /// The element type.
@@ -215,7 +222,7 @@ pub struct Vector<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
 impl<'a> Vector<'a> {
@@ -226,7 +233,7 @@ impl<'a> Vector<'a> {
             element_type: fields.type_index()?,
             count: fields.u32()?,
             size: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         };
         fields.finish_type_padding()?;
         Ok(value)
@@ -237,12 +244,14 @@ impl<'a> Vector<'a> {
         writer.type_index(self.element_type)?;
         writer.u32(self.count)?;
         self.size.encode(writer.out())?;
-        writer.c_string(self.name)
+        writer.c_string(&self.name)
     }
 }
 
+into_owned!(struct Vector { size, name; element_type, count });
+
 /// An `LF_MATRIX` record: a matrix of elements.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Matrix<'a> {
     /// The element type.
@@ -258,7 +267,7 @@ pub struct Matrix<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
 impl<'a> Matrix<'a> {
@@ -281,7 +290,7 @@ impl<'a> Matrix<'a> {
             major_stride: fields.u32()?,
             attributes: fields.u8()?,
             size: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         };
         fields.finish_type_padding()?;
         Ok(value)
@@ -295,9 +304,11 @@ impl<'a> Matrix<'a> {
         writer.u32(self.major_stride)?;
         writer.u8(self.attributes)?;
         self.size.encode(writer.out())?;
-        writer.c_string(self.name)
+        writer.c_string(&self.name)
     }
 }
+
+into_owned!(struct Matrix { size, name; element_type, rows, columns, major_stride, attributes });
 
 /// An iterator over the raw modifier values of a [`ModifierEx`] record.
 #[derive(Clone, Debug)]

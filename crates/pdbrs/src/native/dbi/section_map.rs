@@ -6,7 +6,6 @@
 //! are `OMFSegDescFlags` in LLVM `RawConstants.h`.
 
 use alloc::vec::Vec;
-use core::iter::FusedIterator;
 
 use super::super::words::{halves, word};
 use super::to_u16;
@@ -104,15 +103,16 @@ impl SectionMapEntry {
 }
 
 /// A decoded section map substream.
-#[derive(Clone, Copy, Debug)]
-pub struct SectionMap<'a> {
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct SectionMap {
     /// The number of logical segment descriptors from the header.
-    logical_count: u16,
-    /// The descriptors of [`WORDS`] words each.
-    records: &'a [[[u8; 4]; WORDS]],
+    pub logical_count: u16,
+    /// The descriptors in substream order.
+    pub entries: Vec<SectionMapEntry>,
 }
 
-impl<'a> SectionMap<'a> {
+impl SectionMap {
     /// Decode a non-empty section map substream.
     ///
     /// The descriptor count in the header must account for all bytes.
@@ -121,9 +121,10 @@ impl<'a> SectionMap<'a> {
     ///
     /// - [`ErrorKind::UnexpectedEof`] if the header or a descriptor is truncated.
     /// - [`ErrorKind::InvalidFormat`] if bytes follow the last descriptor.
+    /// - [`ErrorKind::LimitExceeded`] if the allocation fails.
     ///
     /// Errors do not have a stream location. The caller adds it.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
         let (header, rest) = bytes.split_first_chunk::<4>().ok_or_else(|| {
             Error::new(ErrorKind::UnexpectedEof, None)
                 .with_context("DBI section map header is truncated")
@@ -139,74 +140,33 @@ impl<'a> SectionMap<'a> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("DBI section map has bytes after the last descriptor"));
         }
+        let records = words.as_chunks::<WORDS>().0;
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(records.len())
+            .map_err(|_| no_memory())?;
+        entries.extend(records.iter().map(SectionMapEntry::decode));
         Ok(Self {
             logical_count,
-            records: words.as_chunks::<WORDS>().0,
+            entries,
         })
     }
 
-    /// Return the number of descriptors from the header.
+    /// Return the number of descriptors.
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.records.len()
+        self.entries.len()
     }
 
     /// Return `true` if the map has no descriptors.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.records.is_empty()
-    }
-
-    /// Return the number of logical segment descriptors from the header.
-    #[must_use]
-    pub const fn logical_count(&self) -> u16 {
-        self.logical_count
+        self.entries.is_empty()
     }
 
     /// Return an iterator over the descriptors in substream order.
-    #[must_use]
-    pub fn iter(&self) -> SectionMapIter<'a> {
-        SectionMapIter {
-            records: self.records.iter(),
-        }
-    }
-
-    /// Append the substream to `out`: the header and the descriptors.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::LimitExceeded`] if the output cannot grow.
-    pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        encode_section_map(self.logical_count, self.iter(), out)
-    }
-}
-
-/// An owned section map that a writer can fill.
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub struct OwnedSectionMap {
-    /// The number of logical segment descriptors for the header.
-    pub logical_count: u16,
-    /// The descriptors in substream order.
-    pub entries: Vec<SectionMapEntry>,
-}
-
-impl OwnedSectionMap {
-    /// Copy a decoded section map.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::LimitExceeded`] if the allocation fails.
-    pub fn from_map(map: &SectionMap<'_>) -> Result<Self> {
-        let mut entries = Vec::new();
-        entries
-            .try_reserve_exact(map.len())
-            .map_err(|_| no_memory())?;
-        entries.extend(map.iter());
-        Ok(Self {
-            logical_count: map.logical_count(),
-            entries,
-        })
+    pub fn iter(&self) -> core::slice::Iter<'_, SectionMapEntry> {
+        self.entries.iter()
     }
 
     /// Append the substream to `out`: the header and the descriptors.
@@ -216,68 +176,31 @@ impl OwnedSectionMap {
     /// Returns [`ErrorKind::LimitExceeded`] if the map has more than 65535
     /// descriptors or if the output cannot grow.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        encode_section_map(self.logical_count, self.entries.iter().copied(), out)
+        let count = to_u16(
+            self.entries.len(),
+            "DBI section map has more than 65535 descriptors",
+        )?;
+        let mut output = Output::new(out);
+        output.reserve(
+            self.entries
+                .len()
+                .saturating_mul(WORDS * 4)
+                .saturating_add(4),
+        )?;
+        output.u16(count)?;
+        output.u16(self.logical_count)?;
+        for entry in &self.entries {
+            entry.encode(out)?;
+        }
+        Ok(())
     }
 }
 
-/// Append a section map header and its descriptors to `out`.
-fn encode_section_map(
-    logical_count: u16,
-    entries: impl ExactSizeIterator<Item = SectionMapEntry>,
-    out: &mut Vec<u8>,
-) -> Result<()> {
-    let count = to_u16(
-        entries.len(),
-        "DBI section map has more than 65535 descriptors",
-    )?;
-    let mut output = Output::new(out);
-    output.reserve(entries.len().saturating_mul(WORDS * 4).saturating_add(4))?;
-    output.u16(count)?;
-    output.u16(logical_count)?;
-    for entry in entries {
-        entry.encode(out)?;
-    }
-    Ok(())
-}
-
-impl<'a> IntoIterator for &SectionMap<'a> {
-    type Item = SectionMapEntry;
-    type IntoIter = SectionMapIter<'a>;
+impl<'a> IntoIterator for &'a SectionMap {
+    type Item = &'a SectionMapEntry;
+    type IntoIter = core::slice::Iter<'a, SectionMapEntry>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.entries.iter()
     }
 }
-
-/// An iterator over section map descriptors.
-#[derive(Clone, Debug)]
-pub struct SectionMapIter<'a> {
-    /// The descriptors.
-    records: core::slice::Iter<'a, [[u8; 4]; WORDS]>,
-}
-
-impl Iterator for SectionMapIter<'_> {
-    type Item = SectionMapEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.records.next().map(SectionMapEntry::decode)
-    }
-
-    fn nth(&mut self, count: usize) -> Option<Self::Item> {
-        self.records.nth(count).map(SectionMapEntry::decode)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.records.size_hint()
-    }
-}
-
-impl DoubleEndedIterator for SectionMapIter<'_> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.records.next_back().map(SectionMapEntry::decode)
-    }
-}
-
-impl ExactSizeIterator for SectionMapIter<'_> {}
-
-impl FusedIterator for SectionMapIter<'_> {}

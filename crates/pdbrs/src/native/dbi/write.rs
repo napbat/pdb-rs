@@ -39,7 +39,7 @@ impl Dbi {
         match kind {
             Substream::ModuleInfo => {
                 for module in self.modules() {
-                    module?.encode(out)?;
+                    module?.1.encode(out)?;
                 }
             }
             Substream::SectionContributions => {

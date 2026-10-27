@@ -114,7 +114,7 @@ struct DefRange<'a> {
     /// scope of the variable.
     range: Option<AddressRange>,
     /// The gaps in the range.
-    gaps: Option<AddressGaps<'a>>,
+    gaps: Option<&'a AddressGaps<'a>>,
     /// `true` if the range attributes set the "may have no user name" bit
     /// (`CV_RANGEATTR::maybe`). The location is then valid also where the
     /// name of the variable is not in scope.
@@ -251,15 +251,15 @@ fn register_number(symbol: &Symbol<'_>) -> Option<u16> {
 ///
 /// The `_ON_ENTRY` kinds give a value at the procedure entry, so they have
 /// no code range.
-fn def_range<'a>(symbol: &Symbol<'a>) -> Option<DefRange<'a>> {
-    let (range, gaps) = match *symbol.data() {
-        SymbolData::DefRangeFramePointerRelative(value) => (value.range, value.gaps),
-        SymbolData::DefRangeRegister(value) => (value.range, value.gaps),
-        SymbolData::DefRangeSubfieldRegister(value) => (value.range, value.gaps),
-        SymbolData::DefRangeRegisterRelative(value) => (value.range, value.gaps),
-        SymbolData::DefRangeRegisterRelativeIndirect(value) => (value.range, value.gaps),
-        SymbolData::DefRangeProgram(value) => (value.range, value.gaps),
-        SymbolData::DefRangeHlsl(value) => (value.range, value.gaps),
+fn def_range<'a>(symbol: &'a Symbol<'_>) -> Option<DefRange<'a>> {
+    let (range, gaps) = match symbol.data() {
+        SymbolData::DefRangeFramePointerRelative(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeRegister(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeSubfieldRegister(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeRegisterRelative(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeRegisterRelativeIndirect(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeProgram(value) => (value.range, &value.gaps),
+        SymbolData::DefRangeHlsl(value) => (value.range, &value.gaps),
         SymbolData::DefRangeFramePointerRelativeFullScope(_)
         | SymbolData::DefRangeConstantOnEntry(_)
         | SymbolData::DefRangeGlobalOnEntry(_) => {
@@ -319,7 +319,7 @@ fn chunk(
 
 /// Return `true` if an inline site has code length annotations and all of
 /// them are 0.
-fn inline_site_is_empty(annotations: BinaryAnnotations<'_>) -> bool {
+fn inline_site_is_empty(annotations: &BinaryAnnotations<'_>) -> bool {
     let mut lengths = annotations
         .iter()
         .filter_map(|annotation| match annotation {
@@ -482,7 +482,7 @@ impl Checker<'_, '_> {
     fn inline_site(
         &mut self,
         range: AddressRange,
-        gaps: Option<AddressGaps<'_>>,
+        gaps: Option<&AddressGaps<'_>>,
         offset: u32,
         kind: SymbolKind,
     ) -> Result<()> {
@@ -551,7 +551,7 @@ impl Checker<'_, '_> {
     /// Check the gaps of a def-range with a range of `length` bytes.
     fn gaps(
         &mut self,
-        gaps: AddressGaps<'_>,
+        gaps: &AddressGaps<'_>,
         length: u16,
         offset: u32,
         kind: SymbolKind,
@@ -621,8 +621,8 @@ impl Checker<'_, '_> {
         let mut site = None;
         let empty = match symbol.data() {
             SymbolData::InlineSite(value) => {
-                site = Some(self.site_ranges(value.annotations, offset, kind)?);
-                inline_site_is_empty(value.annotations)
+                site = Some(self.site_ranges(&value.annotations, offset, kind)?);
+                inline_site_is_empty(&value.annotations)
             }
             _ => range.is_some_and(|code| code.start == code.end),
         };
@@ -640,7 +640,7 @@ impl Checker<'_, '_> {
     /// Compute the code ranges of an inline site from its annotations.
     fn site_ranges(
         &mut self,
-        annotations: BinaryAnnotations<'_>,
+        annotations: &BinaryAnnotations<'_>,
         offset: u32,
         kind: SymbolKind,
     ) -> Result<SiteRanges> {

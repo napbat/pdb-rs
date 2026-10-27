@@ -15,8 +15,9 @@ use super::super::index::TypeIndex;
 use super::super::numeric::Numeric;
 use super::super::{Fields, SymbolKind};
 use super::SectionOffset;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 flags! {
     /// The flags of a local variable (`CV_LVARFLAGS`).
@@ -49,7 +50,7 @@ flags! {
 /// A local variable record (`S_LOCAL`).
 ///
 /// The def-range records that follow give the location of the variable.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Local<'a> {
     /// The type index in the TPI stream.
@@ -57,15 +58,17 @@ pub struct Local<'a> {
     /// The flags.
     pub flags: LocalFlags,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Local { name; type_index, flags });
 
 impl<'a> Local<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
         let flags = LocalFlags(fields.u16()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             flags,
@@ -77,7 +80,7 @@ impl<'a> Local<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         out.u16(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -122,12 +125,14 @@ pub struct AddressGap {
 ///
 /// The gaps fill the rest of the record. Each gap has 4 bytes, so the
 /// record needs no padding.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct AddressGaps<'a> {
     /// The 4-byte gaps.
-    entries: &'a [[u8; 4]],
+    entries: Bytes<'a>,
 }
+
+into_owned!(struct AddressGaps { entries; });
 
 impl<'a> AddressGaps<'a> {
     /// Read all remaining bytes as gaps.
@@ -137,27 +142,27 @@ impl<'a> AddressGaps<'a> {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("def-range gap array is not a multiple of 4 bytes"));
         }
-        let (entries, _) = fields.bytes(length)?.as_chunks();
+        let entries = Bytes::new(fields.bytes(length)?);
         Ok(Self { entries })
     }
 
     /// Return the number of gaps.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.entries.len()
+    pub fn len(&self) -> usize {
+        self.entries.len() / 4
     }
 
     /// Return `true` if there are no gaps.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Return an iterator over the gaps.
     #[must_use]
-    pub fn iter(&self) -> AddressGapsIter<'a> {
+    pub fn iter(&self) -> AddressGapsIter<'_> {
         AddressGapsIter {
-            entries: self.entries.iter(),
+            entries: self.entries.as_chunks().0.iter(),
         }
     }
 
@@ -167,9 +172,9 @@ impl<'a> AddressGaps<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `bytes` is not
     /// a multiple of 4.
-    pub fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let (entries, rest) = bytes.as_chunks();
-        if !rest.is_empty() {
+    pub fn parse(bytes: impl Into<Bytes<'a>>) -> Result<Self> {
+        let entries = bytes.into();
+        if !entries.len().is_multiple_of(4) {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("def-range gap array is not a multiple of 4 bytes"));
         }
@@ -178,23 +183,11 @@ impl<'a> AddressGaps<'a> {
 
     /// Write all gaps.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
-        for entry in self.entries {
-            out.bytes(entry)?;
-        }
-        Ok(())
+        out.bytes(&self.entries)
     }
 }
 
-impl<'a> IntoIterator for AddressGaps<'a> {
-    type Item = AddressGap;
-    type IntoIter = AddressGapsIter<'a>;
-
-    fn into_iter(self) -> AddressGapsIter<'a> {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &AddressGaps<'a> {
+impl<'a> IntoIterator for &'a AddressGaps<'_> {
     type Item = AddressGap;
     type IntoIter = AddressGapsIter<'a>;
 
@@ -230,7 +223,7 @@ impl ExactSizeIterator for AddressGapsIter<'_> {}
 impl FusedIterator for AddressGapsIter<'_> {}
 
 /// A frame-pointer-relative def-range (`S_DEFRANGE_FRAMEPOINTER_REL`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeFramePointerRelative<'a> {
     /// The offset of the variable from the frame pointer.
@@ -240,6 +233,8 @@ pub struct DefRangeFramePointerRelative<'a> {
     /// The parts of the range where the location is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeFramePointerRelative { gaps; offset, range });
 
 impl<'a> DefRangeFramePointerRelative<'a> {
     /// Read the fields.
@@ -263,7 +258,7 @@ impl<'a> DefRangeFramePointerRelative<'a> {
 }
 
 /// A register def-range (`S_DEFRANGE_REGISTER`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeRegister<'a> {
     /// The register that holds the variable. See the module documentation.
@@ -276,6 +271,8 @@ pub struct DefRangeRegister<'a> {
     /// The parts of the range where the location is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeRegister { gaps; register, attributes, range });
 
 impl<'a> DefRangeRegister<'a> {
     /// Read the fields.
@@ -309,7 +306,7 @@ impl<'a> DefRangeRegister<'a> {
 
 /// A def-range for a part of a variable in a register
 /// (`S_DEFRANGE_SUBFIELD_REGISTER`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeSubfieldRegister<'a> {
     /// The register that holds the part. See the module documentation.
@@ -326,6 +323,8 @@ pub struct DefRangeSubfieldRegister<'a> {
     /// The parts of the range where the location is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeSubfieldRegister { gaps; register, attributes, parent_offset, range });
 
 impl<'a> DefRangeSubfieldRegister<'a> {
     /// Read the fields.
@@ -378,7 +377,7 @@ const fn offset_in_parent(flags: u16) -> u16 {
 }
 
 /// A register-relative def-range (`S_DEFRANGE_REGISTER_REL`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeRegisterRelative<'a> {
     /// The base register. See the module documentation.
@@ -393,6 +392,8 @@ pub struct DefRangeRegisterRelative<'a> {
     /// The parts of the range where the location is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeRegisterRelative { gaps; register, flags, base_offset, range });
 
 impl<'a> DefRangeRegisterRelative<'a> {
     /// Read the fields.
@@ -436,7 +437,7 @@ impl<'a> DefRangeRegisterRelative<'a> {
 /// An indirect register-relative def-range (`S_DEFRANGE_REGISTER_REL_INDIR`).
 ///
 /// The variable is at `*(register + base_offset) + offset_in_udt`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DefRangeRegisterRelativeIndirect<'a> {
     /// The base register. See the module documentation.
@@ -453,6 +454,11 @@ pub struct DefRangeRegisterRelativeIndirect<'a> {
     /// The parts of the range where the location is not valid.
     pub gaps: AddressGaps<'a>,
 }
+
+into_owned!(struct DefRangeRegisterRelativeIndirect {
+    gaps;
+    register, flags, base_offset, offset_in_udt, range
+});
 
 impl<'a> DefRangeRegisterRelativeIndirect<'a> {
     /// Read the fields.
@@ -502,7 +508,7 @@ impl<'a> DefRangeRegisterRelativeIndirect<'a> {
 /// `__$ReturnUdt`, in code compiled with `/ZI` (Edit and Continue). No
 /// reference gives its layout. The MSVC incremental fixture of #12 confirms
 /// the `S_REGREL32` layout (#13).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct RegisterRelative<'a> {
     /// The offset from the register. LLVM `RegRelativeSym` reads it as
@@ -513,8 +519,10 @@ pub struct RegisterRelative<'a> {
     /// The base register. See the module documentation.
     pub register: u16,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct RegisterRelative { name; offset, type_index, register });
 
 impl<'a> RegisterRelative<'a> {
     /// Read the fields.
@@ -522,7 +530,7 @@ impl<'a> RegisterRelative<'a> {
         let offset = fields.u32()?;
         let type_index = fields.type_index()?;
         let register = fields.u16()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             offset,
             type_index,
@@ -536,7 +544,7 @@ impl<'a> RegisterRelative<'a> {
         out.u32(self.offset)?;
         out.type_index(self.type_index)?;
         out.u16(self.register)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -544,7 +552,7 @@ impl<'a> RegisterRelative<'a> {
 ///
 /// For a thread-local record, the address is in the thread storage section,
 /// for example `.tls`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Data<'a> {
     /// The type index in the TPI stream.
@@ -552,15 +560,17 @@ pub struct Data<'a> {
     /// The address.
     pub address: SectionOffset,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Data { name; type_index, address });
 
 impl<'a> Data<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
         let address = SectionOffset::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             address,
@@ -572,12 +582,12 @@ impl<'a> Data<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         self.address.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A constant record (`S_CONSTANT`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Constant<'a> {
     /// The type index in the TPI stream.
@@ -585,15 +595,17 @@ pub struct Constant<'a> {
     /// The value: a numeric leaf with its exact encoding.
     pub value: Numeric<'a>,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Constant { value, name; type_index });
 
 impl<'a> Constant<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
         let value = fields.numeric()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             type_index,
             value,
@@ -605,7 +617,7 @@ impl<'a> Constant<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
         self.value.encode(out.out())?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -614,26 +626,28 @@ impl<'a> Constant<'a> {
 pub const S_COBOLUDT: SymbolKind = SymbolKind(0x1109);
 
 /// A user-defined type name record (`S_UDT` and [`S_COBOLUDT`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct UserDefinedType<'a> {
     /// The type index in the TPI stream.
     pub type_index: TypeIndex,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct UserDefinedType { name; type_index });
 
 impl<'a> UserDefinedType<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let type_index = fields.type_index()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self { type_index, name })
     }
 
     /// Write the fields.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         out.type_index(self.type_index)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }

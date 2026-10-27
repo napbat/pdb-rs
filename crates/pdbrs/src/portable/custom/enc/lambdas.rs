@@ -19,6 +19,7 @@ use super::super::Entries;
 use super::super::blob::{Reader, Writer, invalid, too_large};
 use super::{read_baseline, read_syntax_offset, write_baseline, write_syntax_offset};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 
 /// The baseline when no syntax offset is smaller than -1.
 const DEFAULT_BASELINE: i32 = -1;
@@ -60,23 +61,29 @@ entry_iter!(
 );
 
 /// An Edit and Continue lambda and closure map.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EncLambdaAndClosureMap<'a> {
     /// The blob.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The method ordinal.
     method_ordinal: i32,
     /// The syntax offset baseline.
     baseline: i32,
-    /// The closures. [`EncLambdaAndClosureMap::parse`] checked them.
-    closures: &'a [u8],
+    /// The blob offset of the closures. [`EncLambdaAndClosureMap::parse`] checked them.
+    closures: usize,
     /// The number of closures.
     closure_count: usize,
-    /// The lambdas. [`EncLambdaAndClosureMap::parse`] checked them.
-    lambdas: &'a [u8],
+    /// The blob offset of the lambdas, to the end of the blob.
+    /// [`EncLambdaAndClosureMap::parse`] checked them.
+    lambdas: usize,
     /// The number of lambdas.
     lambda_count: usize,
 }
+
+into_owned!(struct EncLambdaAndClosureMap {
+    bytes;
+    method_ordinal, baseline, closures, closure_count, lambdas, lambda_count
+});
 
 impl<'a> EncLambdaAndClosureMap<'a> {
     /// Decode a lambda and closure map blob.
@@ -94,14 +101,13 @@ impl<'a> EncLambdaAndClosureMap<'a> {
         let method_ordinal = reader.unsigned()?.cast_signed() - 1;
         let baseline = read_baseline(&mut reader)?;
         let declared = reader.unsigned()?;
-        let start = reader.rest();
+        let closures = blob.len() - reader.rest().len();
         let mut closure_count = 0;
         for _ in 0..declared {
             read_closure(&mut reader, baseline)?;
             closure_count += 1;
         }
-        let closures = &start[..start.len() - reader.rest().len()];
-        let lambdas = reader.rest();
+        let lambdas = blob.len() - reader.rest().len();
         let mut lambda_count = 0;
         while !reader.is_empty() {
             let lambda = read_lambda(&mut reader, baseline)?;
@@ -115,7 +121,7 @@ impl<'a> EncLambdaAndClosureMap<'a> {
             lambda_count += 1;
         }
         Ok(Self {
-            bytes: blob,
+            bytes: Bytes::new(blob),
             method_ordinal,
             baseline,
             closures,
@@ -127,8 +133,8 @@ impl<'a> EncLambdaAndClosureMap<'a> {
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the method ordinal: a number that Roslyn derives from the source
@@ -146,9 +152,9 @@ impl<'a> EncLambdaAndClosureMap<'a> {
 
     /// Return an iterator over the syntax offsets of the closures.
     #[must_use]
-    pub const fn closures(&self) -> Closures<'a> {
+    pub fn closures(&self) -> Closures<'_> {
         Closures(Entries::new(
-            self.closures,
+            &self.bytes[self.closures..self.lambdas],
             self.closure_count,
             self.baseline,
             read_closure,
@@ -157,9 +163,9 @@ impl<'a> EncLambdaAndClosureMap<'a> {
 
     /// Return an iterator over the lambdas.
     #[must_use]
-    pub const fn lambdas(&self) -> Lambdas<'a> {
+    pub fn lambdas(&self) -> Lambdas<'_> {
         Lambdas(Entries::new(
-            self.lambdas,
+            &self.bytes[self.lambdas..],
             self.lambda_count,
             self.baseline,
             read_lambda,

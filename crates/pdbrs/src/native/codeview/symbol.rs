@@ -1,9 +1,10 @@
 //! Typed decoding of `CodeView` symbol records in PDB symbol streams.
 //!
 //! [`Symbol::decode`] turns one framed [`Record`] into a [`Symbol`]. The
-//! symbol keeps the record and a [`SymbolData`] value with the typed fields
-//! of its kind. A kind that this crate does not decode gives
-//! [`SymbolData::Unsupported`] with the raw payload.
+//! symbol keeps the offset, the kind and the payload of the record, and a
+//! [`SymbolData`] value with the typed fields of its kind. A kind that this
+//! crate does not decode gives [`SymbolData::Unsupported`] with the raw
+//! payload.
 //!
 //! The kind values come from `CodeViewSymbols.def` and the layouts come from
 //! `SymbolRecord.h` and `SymbolRecordMapping.cpp` in LLVM (revision
@@ -22,9 +23,10 @@
 use super::id_record::IdList;
 use super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
 use super::{Fields, Record, SymbolKind};
+use crate::bytes::into_owned;
 use crate::native::address::SectionOffset;
 use crate::native::output::Output;
-use crate::{ErrorKind, Result};
+use crate::{Bytes, ErrorKind, Result};
 
 /// Define a newtype for a bit set with named bits.
 macro_rules! flags {
@@ -273,6 +275,16 @@ pub const S_REGREL32_ENCTMP: SymbolKind = SymbolKind(0x1179);
 /// The error context for a payload that is too short for its fields.
 const SHORT_PAYLOAD: &str = "symbol record payload is shorter than its fields";
 
+/// Keep the first `len` bytes of `bytes`. Do not copy borrowed bytes.
+fn truncate(bytes: Bytes<'_>, len: usize) -> Bytes<'_> {
+    if let Some(slice) = bytes.as_borrowed() {
+        return Bytes::new(&slice[..len]);
+    }
+    let mut vec = bytes.into_vec();
+    vec.truncate(len);
+    Bytes::from(vec)
+}
+
 impl SectionOffset {
     /// Read a `u32` offset and then a `u16` section number.
     fn read(fields: &mut Fields<'_>) -> Result<Self> {
@@ -302,21 +314,28 @@ pub struct ScopeLinks {
 }
 
 /// A decoded symbol record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Symbol<'a> {
-    /// The original record.
-    record: Record<'a>,
+    /// The offset of the original record in its framed sequence.
+    offset: u32,
+    /// The raw record kind.
+    kind: u16,
+    /// The payload of the original record after the kind field, with the
+    /// padding.
+    payload: Bytes<'a>,
     /// The typed fields of the kind.
     data: SymbolData<'a>,
     /// The number of zero bytes after the fields.
     trailing_zeros: usize,
 }
 
+into_owned!(struct Symbol { payload, data; offset, kind, trailing_zeros });
+
 /// The typed fields of a symbol record.
 ///
 /// Kinds that share a layout share a variant. Use [`Symbol::kind`] to tell
 /// them apart, for example [`S_GDATA32`] and [`S_LDATA32`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum SymbolData<'a> {
     /// [`S_OBJNAME`].
@@ -332,7 +351,7 @@ pub enum SymbolData<'a> {
     /// [`S_ENVBLOCK`].
     EnvironmentBlock(EnvironmentBlock<'a>),
     /// [`S_UNAMESPACE`]: the namespace name.
-    UsingNamespace(&'a [u8]),
+    UsingNamespace(Bytes<'a>),
     /// [`S_GPROC32`], [`S_LPROC32`], [`S_LPROC32_DPC`], their `_ID` kinds
     /// and the `EX` kinds, for example [`S_GPROC32EX`].
     Procedure(Procedure<'a>),
@@ -499,11 +518,30 @@ pub enum SymbolData<'a> {
     /// Microsoft tools use the record to reserve space for incremental
     /// builds. LLD replaces a record that it cannot remap with a zero-filled
     /// `S_SKIP` record of the same size. The value is the whole payload.
-    Skip(&'a [u8]),
+    Skip(Bytes<'a>),
     /// A kind that this crate does not decode. The value is the raw payload
     /// after the kind field, with its padding.
-    Unsupported(&'a [u8]),
+    Unsupported(Bytes<'a>),
 }
+
+into_owned!(enum SymbolData {
+    ObjectName, Compile2, Compile3, EnvironmentBlock, UsingNamespace, Procedure, MipsProcedure,
+    Ia64Procedure, Block, With, Label, Thunk, InlineSite, Inlinees, Callees, Callers,
+    HotPatchFunction, AnnotationStrings, Local, DefRangeProgram, DefRangeFramePointerRelative,
+    DefRangeRegister, DefRangeRegisterRelative, DefRangeRegisterRelativeIndirect,
+    DefRangeSubfieldRegister, DefRangeHlsl, DefRangeConstantOnEntry, RegisterRelative,
+    RegisterRelativeIndirect, BasePointerRelative, BasePointerRelativeIndirect, Register,
+    ManyRegisters, AttributedFrameRelative, AttributedRegister, AttributedRegisterRelative, Slot,
+    FileStatic, ThreadData, FastLink, Section, CoffGroup, Export, Discarded, PdbMap,
+    UserDefinedType, Data, ManagedData, HlslData, HlslDataEx, DpcGroupSharedLocal, DpcTagMap,
+    Constant, Public, ProcedureReference, SymbolReference, ManagedProcedure, ManagedSlot,
+    ManagedConstant, Oem, Skip, Unsupported;
+    BuildInfo, SourceLink, FrameProcedure, SeparatedCode, CallSiteInfo, JumpTable, ProfileData,
+    Association, HybridRange, DefRangeFramePointerRelativeFullScope, DefRangeGlobalOnEntry,
+    StaticLocal, FrameCookie, FrameRegister, HeapAllocationSite, Trampoline, ModuleTypeReference,
+    VirtualFunctionTable, ManagedTypeReference;
+    ScopeEnd, InlineSiteEnd
+});
 
 impl<'a> Symbol<'a> {
     /// Decode `record` as a symbol.
@@ -523,7 +561,7 @@ impl<'a> Symbol<'a> {
     pub fn decode(record: Record<'a>) -> Result<Self> {
         let mut fields = Fields::new(record.data, ErrorKind::InvalidFormat, SHORT_PAYLOAD);
         let data = decode_data(SymbolKind(record.kind), &mut fields)?;
-        let trailing_zeros = match data {
+        let trailing_zeros = match &data {
             SymbolData::Unsupported(_) | SymbolData::Skip(_) => 0,
             _ if fields.rest().iter().any(|&byte| byte != 0) => {
                 return Err(crate::Error::new(ErrorKind::InvalidFormat, None)
@@ -532,7 +570,9 @@ impl<'a> Symbol<'a> {
             _ => fields.rest().len(),
         };
         Ok(Self {
-            record,
+            offset: record.offset,
+            kind: record.kind,
+            payload: Bytes::new(record.data),
             data,
             trailing_zeros,
         })
@@ -547,16 +587,16 @@ impl<'a> Symbol<'a> {
         self.trailing_zeros
     }
 
-    /// Return the original record.
+    /// Return a view of the original record.
     #[must_use]
-    pub const fn record(&self) -> Record<'a> {
-        self.record
+    pub fn record(&self) -> Record<'_> {
+        Record::new(self.offset, self.kind, &self.payload)
     }
 
     /// Return the record kind, for example [`S_GPROC32`].
     #[must_use]
     pub const fn kind(&self) -> SymbolKind {
-        SymbolKind(self.record.kind)
+        SymbolKind(self.kind)
     }
 
     /// Return the typed fields.
@@ -578,7 +618,7 @@ fn decode_data<'a>(kind: SymbolKind, fields: &mut Fields<'a>) -> Result<SymbolDa
         S_BUILDINFO => SymbolData::BuildInfo(fields.id_index()?),
         S_SOURCELINK => SymbolData::SourceLink(fields.id_index()?),
         S_ENVBLOCK => SymbolData::EnvironmentBlock(EnvironmentBlock::read(fields)?),
-        S_UNAMESPACE => SymbolData::UsingNamespace(fields.name()?),
+        S_UNAMESPACE => SymbolData::UsingNamespace(Bytes::new(fields.name()?)),
         S_GPROC32 | S_LPROC32 | S_LPROC32_DPC => {
             SymbolData::Procedure(Procedure::read(fields, false, false)?)
         }
@@ -640,8 +680,8 @@ fn decode_data<'a>(kind: SymbolKind, fields: &mut Fields<'a>) -> Result<SymbolDa
         S_GMANPROC | S_LMANPROC => SymbolData::ManagedProcedure(ManagedProcedure::read(fields)?),
         S_MANTYPREF => SymbolData::ManagedTypeReference(fields.type_index()?),
         S_OEM => SymbolData::Oem(Oem::read(fields)?),
-        S_SKIP => SymbolData::Skip(fields.rest()),
-        _ => SymbolData::Unsupported(fields.rest()),
+        S_SKIP => SymbolData::Skip(Bytes::new(fields.rest())),
+        _ => SymbolData::Unsupported(Bytes::new(fields.rest())),
     })
 }
 

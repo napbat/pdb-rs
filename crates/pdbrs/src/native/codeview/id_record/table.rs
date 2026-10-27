@@ -7,7 +7,7 @@ use crate::native::codeview::index::{IdIndex, TypeIndex};
 use crate::native::codeview::{LeafKind, Record};
 use crate::native::msf::StreamId;
 use crate::native::types::{HEADER_SIZE, TypeStream, TypeTable};
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The fixed stream index of the IPI stream.
 const IPI_STREAM: u32 = 4;
@@ -29,12 +29,12 @@ pub struct IdTable<'a> {
 }
 
 /// One step of string resolution.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Pending<'a> {
     /// Resolve a string ID at a nesting depth.
     Id(IdIndex, usize),
     /// Append string bytes.
-    Bytes(&'a [u8]),
+    Bytes(Bytes<'a>),
 }
 
 impl<'a> IdTable<'a> {
@@ -126,7 +126,7 @@ impl<'a> IdTable<'a> {
                         Error::new(ErrorKind::LimitExceeded, None)
                             .with_context("resolved IPI string cannot be allocated")
                     })?;
-                    out.extend_from_slice(bytes);
+                    out.extend_from_slice(&bytes);
                     continue;
                 }
                 Pending::Id(id, depth) => (id, depth),

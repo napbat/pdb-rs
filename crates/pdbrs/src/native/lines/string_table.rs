@@ -10,15 +10,18 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::invalid;
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// A decoded `DEBUG_S_STRINGTABLE` subsection.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StringTableSubsection<'a> {
     /// The strings with their NUL terminators.
-    data: &'a [u8],
+    data: Bytes<'a>,
 }
+
+into_owned!(struct StringTableSubsection { data; });
 
 impl<'a> StringTableSubsection<'a> {
     /// Parse the data of a `DEBUG_S_STRINGTABLE` subsection.
@@ -36,12 +39,14 @@ impl<'a> StringTableSubsection<'a> {
         if data.last().is_some_and(|&byte| byte != 0) {
             return Err(invalid("string table does not end with a NUL byte"));
         }
-        Ok(Self { data })
+        Ok(Self {
+            data: Bytes::new(data),
+        })
     }
 
     /// Return the size of the table in bytes.
     #[must_use]
-    pub const fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.data.len()
     }
 
@@ -52,7 +57,7 @@ impl<'a> StringTableSubsection<'a> {
     /// `DebugStringTableSubsectionRef::getString` of LLVM. Return `None` if
     /// `offset` is not inside the table.
     #[must_use]
-    pub fn get(&self, offset: u32) -> Option<&'a [u8]> {
+    pub fn get(&self, offset: u32) -> Option<&[u8]> {
         let rest = self.data.get(usize::try_from(offset).ok()?..)?;
         // `parse` checked that the table ends with a NUL byte.
         let end = rest.iter().position(|&byte| byte == 0)?;
@@ -62,9 +67,9 @@ impl<'a> StringTableSubsection<'a> {
     /// Return an iterator over the strings and their offsets, in table
     /// order.
     #[must_use]
-    pub const fn iter(&self) -> StringTableSubsectionIter<'a> {
+    pub fn iter(&self) -> StringTableSubsectionIter<'_> {
         StringTableSubsectionIter {
-            data: self.data,
+            data: &self.data,
             position: 0,
         }
     }
@@ -102,18 +107,9 @@ impl<'a> StringTableSubsection<'a> {
     }
 }
 
-impl<'a> IntoIterator for StringTableSubsection<'a> {
-    type Item = (u32, &'a [u8]);
-    type IntoIter = StringTableSubsectionIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a> IntoIterator for &StringTableSubsection<'a> {
-    type Item = (u32, &'a [u8]);
-    type IntoIter = StringTableSubsectionIter<'a>;
+impl<'s> IntoIterator for &'s StringTableSubsection<'_> {
+    type Item = (u32, &'s [u8]);
+    type IntoIter = StringTableSubsectionIter<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()

@@ -543,11 +543,11 @@ fn is_anonymous(name: &[u8]) -> bool {
 /// references and anonymous types hash the full record bytes.
 pub(super) fn udt_hash(tag: &Tag<'_>, full: &[u8]) -> u32 {
     let forward = tag.options.is_forward_reference();
-    let anonymous = tag.unique_name.is_some() && is_anonymous(tag.name);
+    let anonymous = tag.unique_name.is_some() && is_anonymous(&tag.name);
     if !forward && !tag.options.is_scoped() && !anonymous {
-        return hash_string_v1(tag.name);
+        return hash_string_v1(&tag.name);
     }
-    match tag.unique_name {
+    match &tag.unique_name {
         Some(unique_name) if !forward && !anonymous => hash_string_v1(unique_name),
         _ => hash_buffer_v8(full),
     }
@@ -563,9 +563,9 @@ pub(super) fn tag_hash(tag: &Tag<'_>, full: &[u8]) -> u32 {
         return udt_hash(tag, full);
     }
     if tag.options.is_scoped() {
-        hash_string_v1(tag.unique_name.unwrap_or_default())
+        hash_string_v1(tag.unique_name.as_deref().unwrap_or_default())
     } else {
-        hash_string_v1(tag.name)
+        hash_string_v1(&tag.name)
     }
 }
 

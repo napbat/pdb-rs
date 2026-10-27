@@ -17,6 +17,7 @@ use super::super::blob::{Reader, Writer, invalid};
 use super::super::{Entries, count_to_end};
 use super::{read_baseline, read_syntax_offset, write_baseline, write_syntax_offset};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 
 /// The largest slot kind (`SynthesizedLocalKind`) that the map can hold.
 pub const MAX_LOCAL_SLOT_KIND: u8 = 0x7d;
@@ -52,17 +53,20 @@ pub enum LocalSlot {
 }
 
 /// An Edit and Continue local slot map.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EncLocalSlotMap<'a> {
     /// The blob.
-    bytes: &'a [u8],
-    /// The slots. [`EncLocalSlotMap::parse`] checked them.
-    slots: &'a [u8],
+    bytes: Bytes<'a>,
+    /// The blob offset of the slots, to the end of the blob.
+    /// [`EncLocalSlotMap::parse`] checked them.
+    slots: usize,
     /// The syntax offset baseline.
     baseline: i32,
     /// The number of slots.
     len: usize,
 }
+
+into_owned!(struct EncLocalSlotMap { bytes; slots, baseline, len });
 
 impl<'a> EncLocalSlotMap<'a> {
     /// Decode a local slot map blob.
@@ -85,8 +89,8 @@ impl<'a> EncLocalSlotMap<'a> {
         let slots = reader.rest();
         let len = count_to_end(slots, baseline, read_slot)?;
         Ok(Self {
-            bytes: blob,
-            slots,
+            bytes: Bytes::new(blob),
+            slots: blob.len() - slots.len(),
             baseline,
             len,
         })
@@ -94,8 +98,8 @@ impl<'a> EncLocalSlotMap<'a> {
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the syntax offset baseline: the stored value, or -1.
@@ -118,8 +122,13 @@ impl<'a> EncLocalSlotMap<'a> {
 
     /// Return an iterator over the slots.
     #[must_use]
-    pub const fn iter(&self) -> EncLocalSlotMapIter<'a> {
-        EncLocalSlotMapIter(Entries::new(self.slots, self.len, self.baseline, read_slot))
+    pub fn iter(&self) -> EncLocalSlotMapIter<'_> {
+        EncLocalSlotMapIter(Entries::new(
+            &self.bytes[self.slots..],
+            self.len,
+            self.baseline,
+            read_slot,
+        ))
     }
 
     /// Encode a local slot map blob as Roslyn does, and append it to `out`.

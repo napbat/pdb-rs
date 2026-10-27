@@ -7,8 +7,9 @@
 use super::super::index::ModuleSymbolOffset;
 use super::super::{Fields, SymbolKind};
 use super::{ProcedureFlags, ProcedureType, SectionOffset};
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// The kind of a module-local MIPS procedure start (`S_LPROCMIPS`).
 pub const S_LPROCMIPS: SymbolKind = SymbolKind(0x1114);
@@ -95,7 +96,7 @@ fn read_signature(fields: &mut Fields<'_>, id: bool) -> Result<ProcedureType> {
 
 /// A MIPS procedure start record ([`S_GPROCMIPS`], [`S_LPROCMIPS`] and their
 /// `_ID` kinds).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct MipsProcedure<'a> {
     /// The links and the code range.
@@ -117,8 +118,14 @@ pub struct MipsProcedure<'a> {
     /// The frame pointer register.
     pub frame_register: u8,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct MipsProcedure {
+    name;
+    header, integer_save_mask, float_save_mask, integer_save_offset, float_save_offset,
+    signature, address, return_register, frame_register
+});
 
 impl<'a> MipsProcedure<'a> {
     /// Make a record with `signature`. The other fields are zero or empty.
@@ -137,7 +144,7 @@ impl<'a> MipsProcedure<'a> {
             },
             return_register: 0,
             frame_register: 0,
-            name: &[],
+            name: Bytes::new(&[]),
         }
     }
 
@@ -152,7 +159,7 @@ impl<'a> MipsProcedure<'a> {
         let address = SectionOffset::read(fields)?;
         let return_register = fields.u8()?;
         let frame_register = fields.u8()?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             header,
             integer_save_mask,
@@ -178,13 +185,13 @@ impl<'a> MipsProcedure<'a> {
         self.address.write(out)?;
         out.u8(self.return_register)?;
         out.u8(self.frame_register)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// An IA64 procedure start record ([`S_GPROCIA64`], [`S_LPROCIA64`] and
 /// their `_ID` kinds).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Ia64Procedure<'a> {
     /// The links and the code range.
@@ -198,8 +205,10 @@ pub struct Ia64Procedure<'a> {
     /// The flags.
     pub flags: ProcedureFlags,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Ia64Procedure { name; header, signature, address, return_register, flags });
 
 impl<'a> Ia64Procedure<'a> {
     /// Make a record with `signature`. The other fields are zero or empty.
@@ -214,7 +223,7 @@ impl<'a> Ia64Procedure<'a> {
             },
             return_register: 0,
             flags: ProcedureFlags(0),
-            name: &[],
+            name: Bytes::new(&[]),
         }
     }
 
@@ -225,7 +234,7 @@ impl<'a> Ia64Procedure<'a> {
         let address = SectionOffset::read(fields)?;
         let return_register = fields.u16()?;
         let flags = ProcedureFlags(fields.u8()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             header,
             signature,
@@ -243,6 +252,6 @@ impl<'a> Ia64Procedure<'a> {
         self.address.write(out)?;
         out.u16(self.return_register)?;
         out.u8(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }

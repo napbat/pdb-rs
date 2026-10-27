@@ -10,8 +10,9 @@ use alloc::vec::Vec;
 use core::iter::FusedIterator;
 
 use super::blob::{Reader, Writer, too_large};
-use super::{Entries, Utf8Bytes, count_to_end};
+use super::{Entries, count_to_end};
 use crate::Result;
+use crate::bytes::{Bytes, into_owned};
 
 /// The `dynamic` flags of a local variable or constant.
 ///
@@ -19,50 +20,52 @@ use crate::Result;
 /// A set flag means that the source code used `dynamic` there. Bit 0 of the
 /// first byte is the first flag. The blob can omit trailing zero bytes, so a
 /// flag after the end of the blob is clear.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DynamicLocalVariables<'a> {
     /// The flag bytes.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct DynamicLocalVariables { bytes; });
 
 impl<'a> DynamicLocalVariables<'a> {
     /// Decode a dynamic local variables blob. All byte sequences are valid.
     #[must_use]
     pub const fn parse(blob: &'a [u8]) -> Self {
-        Self { bytes: blob }
+        Self {
+            bytes: Bytes::new(blob),
+        }
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of stored flags: 8 for each byte.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() * 8
     }
 
     /// Return `true` if the blob is empty.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return flag `index`. A flag after the end of the blob is clear.
     #[must_use]
     pub fn flag(&self, index: usize) -> bool {
-        self.bytes
-            .get(index / 8)
-            .is_some_and(|byte| byte & (1 << (index % 8)) != 0)
+        flag(&self.bytes, index)
     }
 
     /// Return an iterator over the stored flags.
     #[must_use]
-    pub const fn iter(&self) -> DynamicLocalVariablesIter<'a> {
+    pub fn iter(&self) -> DynamicLocalVariablesIter<'_> {
         DynamicLocalVariablesIter {
-            flags: *self,
+            bytes: &self.bytes,
             front: 0,
             back: self.len(),
         }
@@ -99,11 +102,18 @@ impl<'a> DynamicLocalVariables<'a> {
 
 iterable!(@into DynamicLocalVariables => DynamicLocalVariablesIter, bool);
 
+/// Return flag `index` of the flag bytes `bytes`. A flag after the end is clear.
+fn flag(bytes: &[u8], index: usize) -> bool {
+    bytes
+        .get(index / 8)
+        .is_some_and(|byte| byte & (1 << (index % 8)) != 0)
+}
+
 /// An iterator over [`DynamicLocalVariables`].
 #[derive(Clone, Debug)]
 pub struct DynamicLocalVariablesIter<'a> {
-    /// The flags.
-    flags: DynamicLocalVariables<'a>,
+    /// The flag bytes.
+    bytes: &'a [u8],
     /// The index of the next flag from the front.
     front: usize,
     /// The index after the next flag from the back.
@@ -118,7 +128,7 @@ impl Iterator for DynamicLocalVariablesIter<'_> {
             return None;
         }
         self.front += 1;
-        Some(self.flags.flag(self.front - 1))
+        Some(flag(self.bytes, self.front - 1))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -133,7 +143,7 @@ impl DoubleEndedIterator for DynamicLocalVariablesIter<'_> {
             return None;
         }
         self.back -= 1;
-        Some(self.flags.flag(self.back))
+        Some(flag(self.bytes, self.back))
     }
 }
 
@@ -145,13 +155,15 @@ impl FusedIterator for DynamicLocalVariablesIter<'_> {}
 ///
 /// The blob is a NUL-terminated UTF-8 name for each tuple element in the
 /// signature, in order. An empty name means that the element has no name.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TupleElementNames<'a> {
     /// The names. [`TupleElementNames::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of names.
     len: usize,
 }
+
+into_owned!(struct TupleElementNames { bytes; len });
 
 impl<'a> TupleElementNames<'a> {
     /// Decode a tuple element names blob.
@@ -162,13 +174,16 @@ impl<'a> TupleElementNames<'a> {
     /// the last name has no NUL terminator.
     pub fn parse(blob: &'a [u8]) -> Result<Self> {
         let len = count_to_end(blob, 0, read_name)?;
-        Ok(Self { bytes: blob, len })
+        Ok(Self {
+            bytes: Bytes::new(blob),
+            len,
+        })
     }
 
     /// Return the blob bytes.
     #[must_use]
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     /// Return the number of names.
@@ -185,8 +200,8 @@ impl<'a> TupleElementNames<'a> {
 
     /// Return an iterator over the names, without their NUL terminators.
     #[must_use]
-    pub const fn iter(&self) -> TupleElementNamesIter<'a> {
-        TupleElementNamesIter(Entries::new(self.bytes, self.len, 0, read_name))
+    pub fn iter(&self) -> TupleElementNamesIter<'_> {
+        TupleElementNamesIter(Entries::new(&self.bytes, self.len, 0, read_name))
     }
 
     /// Encode a tuple element names blob, and append it to `out`. Use an empty
@@ -200,24 +215,24 @@ impl<'a> TupleElementNames<'a> {
     ///   allocation fails.
     ///
     /// On error, `out` does not change.
-    pub fn encode_parts<'n>(
-        names: impl IntoIterator<Item = &'n [u8]>,
+    pub fn encode_parts(
+        names: impl IntoIterator<Item = impl AsRef<[u8]>>,
         out: &mut Vec<u8>,
     ) -> Result<()> {
         let mut writer = Writer::append(out);
         for name in names {
-            writer.c_string(name, "tuple element name has a NUL byte")?;
+            writer.c_string(name.as_ref(), "tuple element name has a NUL byte")?;
         }
         writer.finish();
         Ok(())
     }
 }
 
-iterable!(TupleElementNames => TupleElementNamesIter, Utf8Bytes<'a>);
+iterable!(TupleElementNames => TupleElementNamesIter, Bytes<'a>);
 
 /// Read one tuple element name.
-fn read_name<'a>(reader: &mut Reader<'a>, _: i32) -> Result<Utf8Bytes<'a>> {
+fn read_name<'a>(reader: &mut Reader<'a>, _: i32) -> Result<Bytes<'a>> {
     reader
         .c_string("tuple element name has no NUL terminator")
-        .map(Utf8Bytes::new)
+        .map(Bytes::new)
 }

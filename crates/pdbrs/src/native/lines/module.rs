@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 
 use super::{FileChecksums, LineSubsection, SubsectionKind, invalid, too_large};
+use crate::bytes::into_owned;
 use crate::native::codeview::index::ChecksumOffset;
 use crate::native::dbi::ModuleStream;
 use crate::native::msf::StreamId;
@@ -20,6 +21,8 @@ pub struct ModuleSubsection<'a> {
     pub data: LineSubsection<'a>,
 }
 
+into_owned!(struct ModuleSubsection { data; offset, kind });
+
 /// The decoded C13 line region of one module stream.
 ///
 /// A module has at most one file checksum subsection. Line blocks and
@@ -35,6 +38,8 @@ pub struct ModuleLines<'a> {
     /// The position of the file checksum subsection in `subsections`.
     checksums: Option<usize>,
 }
+
+into_owned!(struct ModuleLines { subsections; stream, c13_start, checksums });
 
 impl<'a> ModuleLines<'a> {
     /// Frame and decode all subsections of the C13 line region of `module`.
@@ -63,15 +68,16 @@ impl<'a> ModuleLines<'a> {
             subsections: Vec::new(),
             checksums: None,
         };
-        for subsection in module.c13_subsections() {
-            let subsection = subsection?;
-            let data = LineSubsection::decode(subsection.kind, subsection.data)
-                .map_err(|error| lines.locate(error, subsection.offset))?;
+        let mut subsections = module.c13_subsections();
+        while let Some(parts) = subsections.next_parts() {
+            let (offset, kind, data) = parts?;
+            let data =
+                LineSubsection::decode(kind, data).map_err(|error| lines.locate(error, offset))?;
             if matches!(data, LineSubsection::FileChecksums(_)) {
                 if lines.checksums.is_some() {
                     return Err(lines.locate(
                         invalid("module has more than one file checksum subsection"),
-                        subsection.offset,
+                        offset,
                     ));
                 }
                 lines.checksums = Some(lines.subsections.len());
@@ -79,14 +85,12 @@ impl<'a> ModuleLines<'a> {
             lines.subsections.try_reserve(1).map_err(|_| {
                 lines.locate(
                     too_large("module subsection list cannot be allocated"),
-                    subsection.offset,
+                    offset,
                 )
             })?;
-            lines.subsections.push(ModuleSubsection {
-                offset: subsection.offset,
-                kind: subsection.kind,
-                data,
-            });
+            lines
+                .subsections
+                .push(ModuleSubsection { offset, kind, data });
         }
         Ok(lines)
     }
@@ -164,7 +168,7 @@ impl<'a> ModuleLines<'a> {
                 LineSubsection::InlineeLines(inlinees) => {
                     for entry in inlinees {
                         check(entry.checksum_offset, subsection)?;
-                        for offset in entry.extra_files {
+                        for offset in &entry.extra_files {
                             check(offset, subsection)?;
                         }
                     }

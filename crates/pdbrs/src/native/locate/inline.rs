@@ -171,7 +171,7 @@ impl<'a> InlineRanges<'a> {
     /// inlinee, from its `DEBUG_S_INLINEELINES` entry
     /// ([`InlineeLine`](crate::native::lines::InlineeLine)).
     #[must_use]
-    pub fn new(annotations: &BinaryAnnotations<'a>, file: ChecksumOffset, line: u32) -> Self {
+    pub fn new(annotations: &'a BinaryAnnotations<'_>, file: ChecksumOffset, line: u32) -> Self {
         Self {
             annotations: annotations.iter(),
             code: CodeState::default(),

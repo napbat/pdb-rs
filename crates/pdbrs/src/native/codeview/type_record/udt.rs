@@ -18,26 +18,42 @@
 //! `trailing` field, and the encoders write them again (#29).
 
 use super::{ClassOptions, fields};
+use crate::bytes::into_owned;
 use crate::native::codeview::Fields;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
 use crate::native::codeview::writer::Padding;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The options and the names of a user-defined type.
 ///
 /// LLVM calls the records with these fields tag records. Type hashing and
 /// forward-reference resolution use only these fields.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Tag<'a> {
     /// The properties of the type.
     pub options: ClassOptions,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
+}
+
+into_owned!(struct Tag { name, unique_name; options });
+
+/// Return a tag that borrows the names of a record.
+fn borrowed_tag<'b>(
+    options: ClassOptions,
+    name: &'b [u8],
+    unique_name: Option<&'b [u8]>,
+) -> Tag<'b> {
+    Tag {
+        options,
+        name: Bytes::new(name),
+        unique_name: unique_name.map(Bytes::new),
+    }
 }
 
 /// The name, the unique name and the producer padding at the end of a UDT record.
@@ -122,7 +138,7 @@ pub enum ClassKind {
 }
 
 /// An `LF_CLASS`, `LF_STRUCTURE` or `LF_INTERFACE` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Class<'a> {
     /// The leaf kind.
@@ -140,14 +156,14 @@ pub struct Class<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
     /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
 
 impl<'a> Class<'a> {
@@ -162,9 +178,9 @@ impl<'a> Class<'a> {
             derivation_list: TypeIndex::NONE,
             vtable_shape: TypeIndex::NONE,
             size: Numeric::default(),
-            name: &[],
+            name: Bytes::default(),
             unique_name: None,
-            trailing: &[],
+            trailing: Bytes::default(),
         }
     }
 
@@ -186,9 +202,9 @@ impl<'a> Class<'a> {
             derivation_list,
             vtable_shape,
             size,
-            name,
-            unique_name,
-            trailing: producer_padding,
+            name: Bytes::new(name),
+            unique_name: unique_name.map(Bytes::new),
+            trailing: Bytes::new(producer_padding),
         })
     }
 
@@ -204,23 +220,24 @@ impl<'a> Class<'a> {
     }
 
     /// Return the names and the producer padding.
-    const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.trailing)
+    fn names(&self) -> Names<'_> {
+        (&self.name, self.unique_name.as_deref(), &self.trailing)
     }
 
-    /// Return the options and the names.
+    /// Return the options and a view of the names.
     #[must_use]
-    pub const fn tag(&self) -> Tag<'a> {
-        Tag {
-            options: self.options,
-            name: self.name,
-            unique_name: self.unique_name,
-        }
+    pub fn tag(&self) -> Tag<'_> {
+        borrowed_tag(self.options, &self.name, self.unique_name.as_deref())
     }
 }
 
+into_owned!(struct Class {
+    size, name, unique_name, trailing;
+    kind, member_count, options, field_list, derivation_list, vtable_shape
+});
+
 /// An `LF_CLASS2`, `LF_STRUCTURE2` or `LF_INTERFACE2` record.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct WideClass<'a> {
     /// The leaf kind.
@@ -238,14 +255,14 @@ pub struct WideClass<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
     /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
 
 impl<'a> WideClass<'a> {
@@ -260,9 +277,9 @@ impl<'a> WideClass<'a> {
             vtable_shape: TypeIndex::NONE,
             member_count: Numeric::default(),
             size: Numeric::default(),
-            name: &[],
+            name: Bytes::default(),
             unique_name: None,
-            trailing: &[],
+            trailing: Bytes::default(),
         }
     }
 
@@ -285,9 +302,9 @@ impl<'a> WideClass<'a> {
             vtable_shape,
             member_count,
             size,
-            name,
-            unique_name,
-            trailing: producer_padding,
+            name: Bytes::new(name),
+            unique_name: unique_name.map(Bytes::new),
+            trailing: Bytes::new(producer_padding),
         })
     }
 
@@ -303,23 +320,28 @@ impl<'a> WideClass<'a> {
     }
 
     /// Return the names and the producer padding.
-    const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.trailing)
+    fn names(&self) -> Names<'_> {
+        (&self.name, self.unique_name.as_deref(), &self.trailing)
     }
 
-    /// Return the low 16 bits of the options and the names.
+    /// Return the low 16 bits of the options and a view of the names.
     #[must_use]
-    pub const fn tag(&self) -> Tag<'a> {
-        Tag {
-            options: low_options(self.options),
-            name: self.name,
-            unique_name: self.unique_name,
-        }
+    pub fn tag(&self) -> Tag<'_> {
+        borrowed_tag(
+            low_options(self.options),
+            &self.name,
+            self.unique_name.as_deref(),
+        )
     }
 }
 
+into_owned!(struct WideClass {
+    member_count, size, name, unique_name, trailing;
+    kind, options, field_list, derivation_list, vtable_shape
+});
+
 /// An `LF_UNION` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Union<'a> {
     /// The number of members in the field list.
@@ -331,14 +353,14 @@ pub struct Union<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
     /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
 
 impl<'a> Union<'a> {
@@ -355,9 +377,9 @@ impl<'a> Union<'a> {
             options,
             field_list,
             size,
-            name,
-            unique_name,
-            trailing: producer_padding,
+            name: Bytes::new(name),
+            unique_name: unique_name.map(Bytes::new),
+            trailing: Bytes::new(producer_padding),
         })
     }
 
@@ -371,23 +393,21 @@ impl<'a> Union<'a> {
     }
 
     /// Return the names and the producer padding.
-    const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.trailing)
+    fn names(&self) -> Names<'_> {
+        (&self.name, self.unique_name.as_deref(), &self.trailing)
     }
 
-    /// Return the options and the names.
+    /// Return the options and a view of the names.
     #[must_use]
-    pub const fn tag(&self) -> Tag<'a> {
-        Tag {
-            options: self.options,
-            name: self.name,
-            unique_name: self.unique_name,
-        }
+    pub fn tag(&self) -> Tag<'_> {
+        borrowed_tag(self.options, &self.name, self.unique_name.as_deref())
     }
 }
 
+into_owned!(struct Union { size, name, unique_name, trailing; member_count, options, field_list });
+
 /// An `LF_UNION2` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct WideUnion<'a> {
     /// The 32-bit property word. The low 16 bits are [`ClassOptions`].
@@ -399,14 +419,14 @@ pub struct WideUnion<'a> {
     /// The size of the type in bytes.
     pub size: Numeric<'a>,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
     /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
 
 impl<'a> WideUnion<'a> {
@@ -424,9 +444,9 @@ impl<'a> WideUnion<'a> {
             field_list,
             member_count,
             size,
-            name,
-            unique_name,
-            trailing: producer_padding,
+            name: Bytes::new(name),
+            unique_name: unique_name.map(Bytes::new),
+            trailing: Bytes::new(producer_padding),
         })
     }
 
@@ -440,23 +460,28 @@ impl<'a> WideUnion<'a> {
     }
 
     /// Return the names and the producer padding.
-    const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.trailing)
+    fn names(&self) -> Names<'_> {
+        (&self.name, self.unique_name.as_deref(), &self.trailing)
     }
 
-    /// Return the low 16 bits of the options and the names.
+    /// Return the low 16 bits of the options and a view of the names.
     #[must_use]
-    pub const fn tag(&self) -> Tag<'a> {
-        Tag {
-            options: low_options(self.options),
-            name: self.name,
-            unique_name: self.unique_name,
-        }
+    pub fn tag(&self) -> Tag<'_> {
+        borrowed_tag(
+            low_options(self.options),
+            &self.name,
+            self.unique_name.as_deref(),
+        )
     }
 }
 
+into_owned!(struct WideUnion {
+    member_count, size, name, unique_name, trailing;
+    options, field_list
+});
+
 /// An `LF_ENUM` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Enum<'a> {
     /// The number of enumerators in the field list.
@@ -468,14 +493,14 @@ pub struct Enum<'a> {
     /// The `LF_FIELDLIST` record, or [`TypeIndex::NONE`] for a forward reference.
     pub field_list: TypeIndex,
     /// The name bytes.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The unique name bytes, present if the options have the unique-name flag.
-    pub unique_name: Option<&'a [u8]>,
+    pub unique_name: Option<Bytes<'a>>,
     /// The bytes after the names if they are not the standard `LF_PAD` run, or an empty slice.
     ///
     /// Only the MASM form is valid: 1 to 3 bytes that start with an `LF_PAD` byte, for
     /// example `f1 6d 65`. The encoder writes these bytes instead of the `LF_PAD` run.
-    pub trailing: &'a [u8],
+    pub trailing: Bytes<'a>,
 }
 
 impl<'a> Enum<'a> {
@@ -492,9 +517,9 @@ impl<'a> Enum<'a> {
             options,
             underlying_type,
             field_list,
-            name,
-            unique_name,
-            trailing: producer_padding,
+            name: Bytes::new(name),
+            unique_name: unique_name.map(Bytes::new),
+            trailing: Bytes::new(producer_padding),
         })
     }
 
@@ -508,17 +533,18 @@ impl<'a> Enum<'a> {
     }
 
     /// Return the names and the producer padding.
-    const fn names(&self) -> Names<'a> {
-        (self.name, self.unique_name, self.trailing)
+    fn names(&self) -> Names<'_> {
+        (&self.name, self.unique_name.as_deref(), &self.trailing)
     }
 
-    /// Return the options and the names.
+    /// Return the options and a view of the names.
     #[must_use]
-    pub const fn tag(&self) -> Tag<'a> {
-        Tag {
-            options: self.options,
-            name: self.name,
-            unique_name: self.unique_name,
-        }
+    pub fn tag(&self) -> Tag<'_> {
+        borrowed_tag(self.options, &self.name, self.unique_name.as_deref())
     }
 }
+
+into_owned!(struct Enum {
+    name, unique_name, trailing;
+    member_count, options, underlying_type, field_list
+});

@@ -8,12 +8,13 @@
 //! and the encoders add no padding.
 
 use super::{TypeIndexList, fields};
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// An `LF_OEM` record: a type that an OEM defines.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Oem<'a> {
     /// The OEM identifier that Microsoft assigned.
@@ -23,7 +24,7 @@ pub struct Oem<'a> {
     /// The type indices that the record refers to.
     pub indices: TypeIndexList<'a>,
     /// The OEM-defined data and the record padding.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
 
 impl<'a> Oem<'a> {
@@ -37,7 +38,7 @@ impl<'a> Oem<'a> {
             oem,
             record,
             indices,
-            data: fields.rest(),
+            data: Bytes::new(fields.rest()),
         })
     }
 
@@ -46,12 +47,14 @@ impl<'a> Oem<'a> {
         writer.u16(self.oem)?;
         writer.u16(self.record)?;
         self.indices.encode_counted(writer)?;
-        writer.bytes(self.data)
+        writer.bytes(&self.data)
     }
 }
 
+into_owned!(struct Oem { indices, data; oem, record });
+
 /// An `LF_OEM2` record: a type that an OEM with a GUID defines.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Oem2<'a> {
     /// The OEM GUID, in its serialized byte order.
@@ -59,7 +62,7 @@ pub struct Oem2<'a> {
     /// The type indices that the record refers to.
     pub indices: TypeIndexList<'a>,
     /// The OEM-defined data and the record padding.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
 
 impl<'a> Oem2<'a> {
@@ -71,7 +74,7 @@ impl<'a> Oem2<'a> {
         Ok(Self {
             oem,
             indices,
-            data: fields.rest(),
+            data: Bytes::new(fields.rest()),
         })
     }
 
@@ -79,18 +82,20 @@ impl<'a> Oem2<'a> {
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.bytes(&self.oem)?;
         self.indices.encode_counted(writer)?;
-        writer.bytes(self.data)
+        writer.bytes(&self.data)
     }
 }
 
+into_owned!(struct Oem2 { indices, data; oem });
+
 /// An `LF_COBOL0` record: a COBOL type.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Cobol0<'a> {
     /// The parent type.
     pub parent_type: TypeIndex,
     /// The COBOL data and the record padding.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
 
 impl<'a> Cobol0<'a> {
@@ -99,28 +104,30 @@ impl<'a> Cobol0<'a> {
         let mut fields = fields(data);
         Ok(Self {
             parent_type: fields.type_index()?,
-            data: fields.rest(),
+            data: Bytes::new(fields.rest()),
         })
     }
 
     /// Append the payload fields.
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.parent_type)?;
-        writer.bytes(self.data)
+        writer.bytes(&self.data)
     }
 }
+
+into_owned!(struct Cobol0 { data; parent_type });
 
 /// An `LF_SKIP` record: a record that reserves type indices.
 ///
 /// The next valid type index follows the record. This crate decodes the
 /// record. It does not change the indices of the next records.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Skip<'a> {
     /// The next valid type index.
     pub next_index: TypeIndex,
     /// The pad data.
-    pub data: &'a [u8],
+    pub data: Bytes<'a>,
 }
 
 impl<'a> Skip<'a> {
@@ -129,13 +136,15 @@ impl<'a> Skip<'a> {
         let mut fields = fields(data);
         Ok(Self {
             next_index: fields.type_index()?,
-            data: fields.rest(),
+            data: Bytes::new(fields.rest()),
         })
     }
 
     /// Append the payload fields.
     pub(super) fn encode(&self, writer: &mut Output<'_>) -> Result<()> {
         writer.type_index(self.next_index)?;
-        writer.bytes(self.data)
+        writer.bytes(&self.data)
     }
 }
+
+into_owned!(struct Skip { data; next_index });

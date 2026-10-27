@@ -7,7 +7,7 @@ use super::entry::{Entry, SymbolEntry};
 use super::handle::{ModuleHandle, ModuleSymbolHandle, Resolver, SymbolHandle};
 use crate::native::codeview::SymbolKind;
 use crate::native::codeview::symbol::{Symbol, SymbolData};
-use crate::native::dbi::OwnedModule;
+use crate::native::dbi::Module;
 use crate::native::lines::LineSubsection;
 use crate::native::output::no_memory;
 use crate::{Error, ErrorKind, Result};
@@ -26,7 +26,7 @@ pub struct ModuleBuilder<'a> {
     /// The position of the module.
     pub(super) index: u32,
     /// The module record. The plan sets the stream and the sizes.
-    pub(super) record: OwnedModule,
+    pub(super) record: Module<'static>,
     /// `true` if the module has a module stream.
     pub(super) has_stream: bool,
     /// The symbol records, or `None` for a module stream without a symbol region.
@@ -41,7 +41,7 @@ pub struct ModuleBuilder<'a> {
 
 impl<'a> ModuleBuilder<'a> {
     /// Create a module with `record`, a module stream and an empty symbol region.
-    pub(super) const fn new(index: u32, record: OwnedModule) -> Self {
+    pub(super) const fn new(index: u32, record: Module<'static>) -> Self {
         Self {
             index,
             record,
@@ -61,14 +61,14 @@ impl<'a> ModuleBuilder<'a> {
 
     /// Return the module record.
     #[must_use]
-    pub const fn record(&self) -> &OwnedModule {
+    pub const fn record(&self) -> &Module<'static> {
         &self.record
     }
 
     /// Return the module record for a change, for example of its flags.
     ///
     /// The plan replaces the stream, the region sizes and the source file count.
-    pub const fn record_mut(&mut self) -> &mut OwnedModule {
+    pub const fn record_mut(&mut self) -> &mut Module<'static> {
         &mut self.record
     }
 

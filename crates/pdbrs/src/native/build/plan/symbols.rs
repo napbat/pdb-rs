@@ -1,6 +1,7 @@
 //! The module streams, the symbol record stream and the symbol indexes of a
 //! write plan.
 
+use alloc::borrow::Cow;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -17,13 +18,13 @@ use crate::native::codeview::symbol::validate::{
     validate_shared_symbols,
 };
 use crate::native::codeview::{LeafKind, Records, SymbolKind};
-use crate::native::dbi::{ModuleStream, ModuleStreamParts, OwnedModule};
+use crate::native::dbi::{Module, ModuleStream, ModuleStreamParts};
 use crate::native::lines::ModuleLines;
 use crate::native::output::no_memory;
 use crate::native::symbols::{
     BucketCount, GlobalSymbolIndex, HashEntry, PublicSymbolIndex, SymbolOffset, SymbolRecordWriter,
 };
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The module stream offset of the first symbol record: after the signature.
 const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
@@ -31,7 +32,7 @@ const SYMBOL_BASE: ModuleSymbolOffset = ModuleSymbolOffset(4);
 /// A planned module: its record and its stream.
 pub(in crate::native::build) struct PlannedModule {
     /// The module record with the stream and the region sizes.
-    pub(in crate::native::build) record: OwnedModule,
+    pub(in crate::native::build) record: Module<'static>,
     /// The module stream, or `None`.
     pub(in crate::native::build) bytes: Option<Vec<u8>>,
 }
@@ -288,17 +289,17 @@ impl PdbBuilder<'_> {
             let refs = global_refs(module, symbol_offsets)?;
             let mut bytes = Vec::new();
             let sizes = ModuleStreamParts {
-                symbols: region.symbols.as_deref(),
-                c11: &[],
-                c13: &region.c13,
-                global_refs: &refs,
+                symbols: region.symbols.as_deref().map(Bytes::new),
+                c11: Bytes::default(),
+                c13: Bytes::new(&region.c13),
+                global_refs: Cow::Borrowed(&refs),
             }
             .encode(&mut bytes)
             .map_err(|error| error.with_stream(stream, 0))?;
             record.symbol_bytes = sizes.symbol_bytes;
             record.c11_bytes = sizes.c11_bytes;
             record.c13_bytes = sizes.c13_bytes;
-            let parsed = ModuleStream::parse(bytes, &record.as_module())?;
+            let parsed = ModuleStream::parse(bytes, &record)?;
             ModuleLines::parse(&parsed)?.check()?;
             planned.push(PlannedModule {
                 record,

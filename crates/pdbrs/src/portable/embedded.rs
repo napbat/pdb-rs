@@ -48,6 +48,7 @@ use alloc::vec::Vec;
 
 pub use source::{DocumentSource, SourceCheck};
 
+use crate::bytes::Bytes;
 use crate::compression::deflate;
 use crate::{Error, ErrorKind, Result};
 
@@ -150,22 +151,31 @@ pub enum EmbeddedFormat {
     Deflate,
 }
 
-/// A parsed embedded-source blob, borrowed from the blob bytes.
+/// A parsed embedded-source blob. It borrows the blob bytes until
+/// [`EmbeddedSource::into_owned`] copies them.
 ///
 /// [`EmbeddedSource::parse`] reads only the format field. Call
 /// [`EmbeddedSource::decode`] to get the source bytes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum EmbeddedSource<'a> {
     /// The format field is 0. The value is the source bytes.
-    Raw(&'a [u8]),
+    Raw(Bytes<'a>),
     /// The format field is positive. It is the decoded size.
     Deflate {
         /// The declared size of the decoded source in bytes.
         size: u32,
         /// The raw DEFLATE stream.
-        data: &'a [u8],
+        data: Bytes<'a>,
     },
+}
+
+impl crate::bytes::IntoOwned for EmbeddedSource<'_> {
+    type Owned = EmbeddedSource<'static>;
+
+    fn to_static(self) -> Self::Owned {
+        self.into_owned()
+    }
 }
 
 impl<'a> EmbeddedSource<'a> {
@@ -185,10 +195,25 @@ impl<'a> EmbeddedSource<'a> {
         })?;
         let format = i32::from_le_bytes(*format);
         match u32::try_from(format) {
-            Ok(0) => Ok(Self::Raw(data)),
-            Ok(size) => Ok(Self::Deflate { size, data }),
+            Ok(0) => Ok(Self::Raw(Bytes::new(data))),
+            Ok(size) => Ok(Self::Deflate {
+                size,
+                data: Bytes::new(data),
+            }),
             Err(_) => Err(Error::new(ErrorKind::UnsupportedVersion, None)
                 .with_context("embedded source format is reserved for future use")),
+        }
+    }
+
+    /// Return a record that owns its bytes. Copy borrowed bytes.
+    #[must_use]
+    pub fn into_owned(self) -> EmbeddedSource<'static> {
+        match self {
+            Self::Raw(data) => EmbeddedSource::Raw(data.into_owned()),
+            Self::Deflate { size, data } => EmbeddedSource::Deflate {
+                size,
+                data: data.into_owned(),
+            },
         }
     }
 
@@ -216,7 +241,7 @@ impl<'a> EmbeddedSource<'a> {
 
     /// Return the source bytes.
     ///
-    /// The raw form borrows the blob. The DEFLATE form checks the declared
+    /// The raw form borrows the blob bytes of `self`. The DEFLATE form checks the declared
     /// size against `limit` before it allocates, and then decodes into a
     /// buffer of the declared size.
     ///
@@ -230,8 +255,8 @@ impl<'a> EmbeddedSource<'a> {
     ///   final block.
     /// - [`ErrorKind::InvalidFormat`] if the DEFLATE stream is corrupt, gives
     ///   a size other than the declared size, or has bytes after its final block.
-    pub fn decode(&self, limit: usize) -> Result<Cow<'a, [u8]>> {
-        match *self {
+    pub fn decode(&self, limit: usize) -> Result<Cow<'_, [u8]>> {
+        match self {
             Self::Raw(data) => {
                 if data.len() > limit {
                     return Err(Error::new(ErrorKind::LimitExceeded, None)
@@ -240,7 +265,7 @@ impl<'a> EmbeddedSource<'a> {
                 Ok(Cow::Borrowed(data))
             }
             Self::Deflate { size, data } => {
-                Ok(Cow::Owned(deflate::decode(data, u64::from(size), limit)?))
+                Ok(Cow::Owned(deflate::decode(data, u64::from(*size), limit)?))
             }
         }
     }
@@ -253,9 +278,9 @@ impl<'a> EmbeddedSource<'a> {
     /// Return [`ErrorKind::LimitExceeded`] if an allocation fails. On error,
     /// `out` does not change.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
-        match *self {
+        match self {
             Self::Raw(data) => append_blob(0, data, out),
-            Self::Deflate { size, data } => append_blob(size, data, out),
+            Self::Deflate { size, data } => append_blob(*size, data, out),
         }
     }
 

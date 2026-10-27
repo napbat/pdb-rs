@@ -2,10 +2,11 @@
 //! and arrays.
 
 use super::{CallingConvention, FunctionOptions, ModifierOptions, fields};
-use crate::Result;
+use crate::bytes::into_owned;
 use crate::native::codeview::index::TypeIndex;
 use crate::native::codeview::numeric::Numeric;
 use crate::native::output::Output;
+use crate::{Bytes, Result};
 
 /// An `LF_MODIFIER` record: a type with `const`, `volatile` or `__unaligned`.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -193,7 +194,7 @@ impl Bitfield {
 }
 
 /// An `LF_ARRAY` record.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Array<'a> {
     /// The element type.
@@ -203,7 +204,7 @@ pub struct Array<'a> {
     /// The size of the array in bytes.
     pub size: Numeric<'a>,
     /// The name bytes. The name is usually empty.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
 
 impl<'a> Array<'a> {
@@ -214,7 +215,7 @@ impl<'a> Array<'a> {
             element_type: fields.type_index()?,
             index_type: fields.type_index()?,
             size: fields.numeric()?,
-            name: fields.name()?,
+            name: Bytes::new(fields.name()?),
         };
         fields.finish_type_padding()?;
         Ok(value)
@@ -225,6 +226,8 @@ impl<'a> Array<'a> {
         writer.type_index(self.element_type)?;
         writer.type_index(self.index_type)?;
         self.size.encode(writer.out())?;
-        writer.c_string(self.name)
+        writer.c_string(&self.name)
     }
 }
+
+into_owned!(struct Array { size, name; element_type, index_type });

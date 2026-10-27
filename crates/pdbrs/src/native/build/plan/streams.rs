@@ -7,7 +7,7 @@ use super::super::entry::Entry;
 use super::super::handle::Resolver;
 use super::{BuildOptions, StreamBytes, StreamIds};
 use crate::native::Identity;
-use crate::native::dbi::{DbiBuilder, OwnedModule, OwnedSourceInfo};
+use crate::native::dbi::{DbiBuilder, Module, SourceInfo};
 use crate::native::info::InfoBuilder;
 use crate::native::msf::MsfBuilder;
 use crate::native::output::no_memory;
@@ -32,7 +32,11 @@ fn stream_bytes<'b>(
 
 impl PdbBuilder<'_> {
     /// Encode the DBI stream.
-    pub(super) fn dbi_stream(&self, ids: &StreamIds, modules: Vec<OwnedModule>) -> Result<Vec<u8>> {
+    pub(super) fn dbi_stream(
+        &self,
+        ids: &StreamIds,
+        modules: Vec<Module<'static>>,
+    ) -> Result<Vec<u8>> {
         let mut header = self.dbi.header;
         header.age = self.dbi_age;
         header.global_stream = Some(ids.globals);
@@ -50,7 +54,7 @@ impl PdbBuilder<'_> {
         dbi.type_servers.clone_from(&self.dbi.type_servers);
         dbi.ec_names.clone_from(&self.dbi.ec_names);
         if !self.modules.is_empty() {
-            dbi.source_info = Some(OwnedSourceInfo::from_file_names(
+            dbi.source_info = Some(SourceInfo::from_file_names(
                 self.modules
                     .iter()
                     .map(|module| module.files.iter().copied()),

@@ -10,8 +10,9 @@ use core::iter::FusedIterator;
 
 use super::super::super::super::Fields;
 use super::super::{SHORT_VALUE, count, invalid, split_utf16, zero_padding};
+use crate::bytes::into_owned;
 use crate::portable::metadata::IlOffset;
-use crate::{ErrorKind, Result};
+use crate::{Bytes, ErrorKind, Result};
 
 /// The size of the flag field of a dynamic local.
 const FLAG_BYTES: usize = 64;
@@ -23,11 +24,13 @@ const NAME_BYTES: usize = 128;
 const DYNAMIC_LOCAL_SIZE: usize = FLAG_BYTES + 4 + 4 + NAME_BYTES;
 
 /// The `dynamic` flags of local variables and constants.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct DynamicLocals<'a> {
     /// The 200-byte entries.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
 }
+
+into_owned!(struct DynamicLocals { bytes; });
 
 impl<'a> DynamicLocals<'a> {
     /// Read an `i32` count, the entries and the zero padding.
@@ -37,26 +40,26 @@ impl<'a> DynamicLocals<'a> {
         let size = len
             .checked_mul(DYNAMIC_LOCAL_SIZE)
             .ok_or_else(|| invalid(SHORT_VALUE))?;
-        let bytes = fields.bytes(size)?;
+        let bytes = Bytes::new(fields.bytes(size)?);
         zero_padding(fields.rest(), "bytes follow the dynamic locals")?;
         Ok(Self { bytes })
     }
 
     /// Return the number of entries.
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bytes.len() / DYNAMIC_LOCAL_SIZE
     }
 
     /// Return `true` if there are no entries.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub fn iter(&self) -> DynamicLocalsIter<'a> {
+    pub fn iter(&self) -> DynamicLocalsIter<'_> {
         DynamicLocalsIter {
             chunks: self.bytes.as_chunks::<DYNAMIC_LOCAL_SIZE>().0.iter(),
         }
@@ -66,19 +69,21 @@ impl<'a> DynamicLocals<'a> {
 iterable!(DynamicLocals, DynamicLocalsIter);
 
 /// The `dynamic` flags of one local variable or constant.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct DynamicLocal<'a> {
     /// The flag bytes: one byte for each type in the signature, nonzero for
     /// `dynamic`. The slice has [`DynamicLocal::flag_count`] bytes, at most 64.
-    pub flags: &'a [u8],
+    pub flags: Bytes<'a>,
     /// The stored flag count. It can be larger than 64.
     pub flag_count: u32,
     /// The local variable slot. Roslyn writes 0 for a constant.
     pub slot: u32,
     /// The name as UTF-16LE bytes, without the NUL code unit and the zero fill.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct DynamicLocal { flags, name; flag_count, slot });
 
 /// An iterator over [`DynamicLocals`].
 #[derive(Clone, Debug)]
@@ -99,10 +104,10 @@ impl<'a> Iterator for DynamicLocalsIter<'a> {
         let used = usize::try_from(flag_count).map_or(FLAG_BYTES, |n| n.min(FLAG_BYTES));
         let name = split_utf16(name).map_or(name, |(name, _)| name);
         Some(DynamicLocal {
-            flags: &flags[..used],
+            flags: Bytes::new(&flags[..used]),
             flag_count,
             slot,
-            name,
+            name: Bytes::new(name),
         })
     }
 
@@ -116,13 +121,15 @@ impl ExactSizeIterator for DynamicLocalsIter<'_> {}
 impl FusedIterator for DynamicLocalsIter<'_> {}
 
 /// The tuple element names of local variables and constants.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TupleElementNames<'a> {
     /// The entries. [`TupleElementNames::parse`] checked them.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of entries.
     len: usize,
 }
+
+into_owned!(struct TupleElementNames { bytes; len });
 
 impl<'a> TupleElementNames<'a> {
     /// Read an `i32` count, the entries and the zero padding.
@@ -136,7 +143,7 @@ impl<'a> TupleElementNames<'a> {
         let rest = fields.rest();
         zero_padding(rest, "bytes follow the tuple element names")?;
         Ok(Self {
-            bytes: &start[..start.len() - rest.len()],
+            bytes: Bytes::new(&start[..start.len() - rest.len()]),
             len,
         })
     }
@@ -155,15 +162,15 @@ impl<'a> TupleElementNames<'a> {
 
     /// Return an iterator over the entries.
     #[must_use]
-    pub const fn iter(&self) -> TupleElementNamesIter<'a> {
-        TupleElementNamesIter { bytes: self.bytes }
+    pub fn iter(&self) -> TupleElementNamesIter<'_> {
+        TupleElementNamesIter { bytes: &self.bytes }
     }
 }
 
 iterable!(TupleElementNames, TupleElementNamesIter);
 
 /// The tuple element names of one local variable or constant.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct TupleElementNamesEntry<'a> {
     /// The element names. An empty name means that the element has no name.
@@ -175,8 +182,10 @@ pub struct TupleElementNamesEntry<'a> {
     /// The end IL offset of the scope of a constant, or 0 for a variable.
     pub scope_end: IlOffset,
     /// The UTF-8 name of the local variable or constant, not decoded as text.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct TupleElementNamesEntry { element_names, name; slot, scope_start, scope_end });
 
 impl<'a> TupleElementNamesEntry<'a> {
     /// Read one entry.
@@ -190,9 +199,12 @@ impl<'a> TupleElementNamesEntry<'a> {
         let slot = fields.i32()?;
         let scope_start = IlOffset(fields.u32()?);
         let scope_end = IlOffset(fields.u32()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
-            element_names: Utf8Names { bytes, len },
+            element_names: Utf8Names {
+                bytes: Bytes::new(bytes),
+                len,
+            },
             slot,
             scope_start,
             scope_end,
@@ -225,15 +237,17 @@ impl<'a> Iterator for TupleElementNamesIter<'a> {
 impl FusedIterator for TupleElementNamesIter<'_> {}
 
 /// A list of NUL-terminated UTF-8 names.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Utf8Names<'a> {
     /// The names with their NUL terminators.
-    bytes: &'a [u8],
+    bytes: Bytes<'a>,
     /// The number of names.
     len: usize,
 }
 
-impl<'a> Utf8Names<'a> {
+into_owned!(struct Utf8Names { bytes; len });
+
+impl Utf8Names<'_> {
     /// Return the number of names.
     #[must_use]
     pub const fn len(&self) -> usize {
@@ -248,8 +262,8 @@ impl<'a> Utf8Names<'a> {
 
     /// Return an iterator over the names, without their NUL terminators.
     #[must_use]
-    pub fn iter(&self) -> Utf8NamesIter<'a> {
-        Utf8NamesIter { bytes: self.bytes }
+    pub fn iter(&self) -> Utf8NamesIter<'_> {
+        Utf8NamesIter { bytes: &self.bytes }
     }
 }
 

@@ -17,8 +17,9 @@ use super::super::id_record::IdList;
 use super::super::index::{IdIndex, ModuleSymbolOffset, TypeIndex};
 use super::super::{Fields, SymbolKind};
 use super::{BinaryAnnotations, SectionOffset};
+use crate::bytes::into_owned;
 use crate::native::output::Output;
-use crate::{Error, ErrorKind, Result};
+use crate::{Bytes, Error, ErrorKind, Result};
 
 /// The kind of a module-local data-parallel C++ procedure start (`S_LPROC32_DPC`).
 pub const S_LPROC32_DPC: SymbolKind = SymbolKind(0x1155);
@@ -94,7 +95,7 @@ flags! {
 /// The kinds are [`S_GPROC32`](super::S_GPROC32),
 /// [`S_LPROC32`](super::S_LPROC32), [`S_LPROC32_DPC`], the `_ID` kinds of
 /// these and the `EX` kinds, for example [`S_GPROC32EX`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Procedure<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
@@ -119,8 +120,14 @@ pub struct Procedure<'a> {
     /// The second flags byte of the `EX` kinds, or `None` for the other kinds.
     pub extended_flags: Option<ExtendedProcedureFlags>,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Procedure {
+    name;
+    parent, end, next, code_length, debug_start, debug_end, signature, address, flags,
+    extended_flags
+});
 
 impl<'a> Procedure<'a> {
     /// Make a record with `signature`. The other fields are zero or empty.
@@ -140,7 +147,7 @@ impl<'a> Procedure<'a> {
             },
             flags: ProcedureFlags(0),
             extended_flags: None,
-            name: &[],
+            name: Bytes::new(&[]),
         }
     }
 
@@ -165,7 +172,7 @@ impl<'a> Procedure<'a> {
         } else {
             None
         };
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             parent,
             end,
@@ -195,7 +202,7 @@ impl<'a> Procedure<'a> {
         if let Some(flags) = self.extended_flags {
             out.u8(flags.0)?;
         }
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -338,7 +345,7 @@ impl FrameProcedure {
 }
 
 /// A block start record (`S_BLOCK32`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Block<'a> {
     /// The module stream offset of the enclosing scope record.
@@ -350,8 +357,10 @@ pub struct Block<'a> {
     /// The start address.
     pub address: SectionOffset,
     /// The name. It is often empty.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Block { name; parent, end, code_length, address });
 
 impl<'a> Block<'a> {
     /// Read the fields.
@@ -360,7 +369,7 @@ impl<'a> Block<'a> {
         let end = ModuleSymbolOffset(fields.u32()?);
         let code_length = fields.u32()?;
         let address = SectionOffset::read(fields)?;
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             parent,
             end,
@@ -376,12 +385,12 @@ impl<'a> Block<'a> {
         out.u32(self.end.0)?;
         out.u32(self.code_length)?;
         self.address.write(out)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
 /// A code label record (`S_LABEL32`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Label<'a> {
     /// The address.
@@ -389,15 +398,17 @@ pub struct Label<'a> {
     /// The flags.
     pub flags: ProcedureFlags,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
 }
+
+into_owned!(struct Label { name; address, flags });
 
 impl<'a> Label<'a> {
     /// Read the fields.
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let address = SectionOffset::read(fields)?;
         let flags = ProcedureFlags(fields.u8()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         Ok(Self {
             address,
             flags,
@@ -409,7 +420,7 @@ impl<'a> Label<'a> {
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         self.address.write(out)?;
         out.u8(self.flags.0)?;
-        out.c_string(self.name)
+        out.c_string(&self.name)
     }
 }
 
@@ -434,7 +445,7 @@ values! {
 }
 
 /// A thunk start record (`S_THUNK32`).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct Thunk<'a> {
     /// The module stream offset of the enclosing scope record, or 0.
@@ -450,15 +461,17 @@ pub struct Thunk<'a> {
     /// The kind of the thunk.
     pub ordinal: ThunkOrdinal,
     /// The name.
-    pub name: &'a [u8],
+    pub name: Bytes<'a>,
     /// The raw variant data after the name.
     ///
     /// A [`ThunkOrdinal::STANDARD`] thunk has no variant data, so the value
     /// is empty and the decoder checks the zero padding. For other kinds,
     /// the references do not give the variant length. The value then holds
     /// all bytes after the name, including the record padding.
-    pub variant: &'a [u8],
+    pub variant: Bytes<'a>,
 }
+
+into_owned!(struct Thunk { name, variant; parent, end, next, address, length, ordinal });
 
 impl<'a> Thunk<'a> {
     /// Read the fields.
@@ -469,11 +482,11 @@ impl<'a> Thunk<'a> {
         let address = SectionOffset::read(fields)?;
         let length = fields.u16()?;
         let ordinal = ThunkOrdinal(fields.u8()?);
-        let name = fields.name()?;
+        let name = Bytes::new(fields.name()?);
         let variant = if ordinal == ThunkOrdinal::STANDARD {
-            &[]
+            Bytes::default()
         } else {
-            fields.bytes(fields.rest().len())?
+            Bytes::new(fields.bytes(fields.rest().len())?)
         };
         Ok(Self {
             parent,
@@ -502,13 +515,13 @@ impl<'a> Thunk<'a> {
         self.address.write(out)?;
         out.u16(self.length)?;
         out.u8(self.ordinal.0)?;
-        out.c_string(self.name)?;
-        out.bytes(self.variant)
+        out.c_string(&self.name)?;
+        out.bytes(&self.variant)
     }
 }
 
 /// An inline site start record (`S_INLINESITE` and [`S_INLINESITE2`]).
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct InlineSite<'a> {
     /// The module stream offset of the enclosing scope record.
@@ -523,6 +536,8 @@ pub struct InlineSite<'a> {
     /// The binary annotations without the trailing padding.
     pub annotations: BinaryAnnotations<'a>,
 }
+
+into_owned!(struct InlineSite { annotations; parent, end, inlinee, invocations });
 
 impl<'a> InlineSite<'a> {
     /// Read the fields. Set `counted` for [`S_INLINESITE2`].
@@ -559,14 +574,16 @@ impl<'a> InlineSite<'a> {
 ///
 /// The counts parallel the functions. `cvinfo.h` says that the count array
 /// can be shorter than the function list: a missing count is zero.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub struct FunctionList<'a> {
     /// The ID indices of the functions.
     functions: IdList<'a>,
     /// The little-endian 32-bit invocation counts.
-    invocations: &'a [[u8; 4]],
+    invocations: Bytes<'a>,
 }
+
+into_owned!(struct FunctionList { functions, invocations; });
 
 impl<'a> FunctionList<'a> {
     /// Read the function list and the counts that follow it.
@@ -576,7 +593,7 @@ impl<'a> FunctionList<'a> {
     pub(super) fn read(fields: &mut Fields<'a>) -> Result<Self> {
         let functions = read_id_list(fields)?;
         let count = functions.len().min(fields.rest().len() / 4);
-        let (invocations, _) = fields.bytes(count * 4)?.as_chunks();
+        let invocations = Bytes::new(fields.bytes(count * 4)?);
         Ok(Self {
             functions,
             invocations,
@@ -589,9 +606,9 @@ impl<'a> FunctionList<'a> {
     ///
     /// Returns [`ErrorKind::InvalidFormat`] if the length of `invocations`
     /// is not a multiple of 4 or if it holds more counts than functions.
-    pub fn new(functions: IdList<'a>, invocations: &'a [u8]) -> Result<Self> {
-        let (invocations, rest) = invocations.as_chunks();
-        if !rest.is_empty() || invocations.len() > functions.len() {
+    pub fn new(functions: IdList<'a>, invocations: impl Into<Bytes<'a>>) -> Result<Self> {
+        let invocations = invocations.into();
+        if !invocations.len().is_multiple_of(4) || invocations.len() / 4 > functions.len() {
             return Err(Error::new(ErrorKind::InvalidFormat, None)
                 .with_context("function list has invalid invocation counts"));
         }
@@ -603,24 +620,21 @@ impl<'a> FunctionList<'a> {
 
     /// Return the ID indices of the functions.
     #[must_use]
-    pub const fn functions(&self) -> IdList<'a> {
-        self.functions
+    pub const fn functions(&self) -> &IdList<'a> {
+        &self.functions
     }
 
     /// Return the stored invocation counts. A function without a count has
     /// the count 0.
     #[must_use]
-    pub fn invocations(&self) -> Invocations<'a> {
-        Invocations(self.invocations.iter())
+    pub fn invocations(&self) -> Invocations<'_> {
+        Invocations(self.invocations.as_chunks().0.iter())
     }
 
     /// Write the count, the functions and the invocation counts.
     pub(super) fn write(&self, out: &mut Output<'_>) -> Result<()> {
         write_id_list(&self.functions, out)?;
-        for entry in self.invocations {
-            out.bytes(entry)?;
-        }
-        Ok(())
+        out.bytes(&self.invocations)
     }
 }
 
