@@ -5,6 +5,7 @@ pub mod editor;
 pub mod encode;
 pub mod info;
 pub mod named;
+pub mod remap;
 pub mod symbols;
 pub mod types;
 

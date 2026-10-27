@@ -89,7 +89,7 @@ With `std`, the cells are `OnceLock` values, so `Pdb<S>` is `Sync` if `S` is `Sy
 | DBI | Modern header with typed flags, module records with every field, debug-stream references, section contributions (VC++ 4.0, V60 and V2), section map, source file info, type server maps (also non-empty), EC names, an encoder for each substream and `DbiBuilder` (#32) | DBI versions other than V70 |
 | Optional debug streams | A decoder and an encoder for all 11 slots: FPO, exception data, fixups, OMAP in both directions, section headers, token/RID maps, `.xdata`, `.pdata`, new FPO (frame data) and original section headers (#32) | — |
 | String tables | `/names` and EC layout, offset lookup, version 1 and version 2 hash lookup and bucket checks, `StringTable::encode` and `StringTableBuilder` with the Microsoft `NMT` bucket rules (#32) | — |
-| Sections and addresses | Section header streams, section-offset to RVA translation in both directions, end-of-section offsets, and OMAP translation in both directions with explicit results for unmapped addresses (#32); `SymbolLocator` gives the procedure, source lines and inline chain of an address, also in separated code chunks (`S_SEPCODE`) as DIA does (#30) | OMAP evidence from a real producer (`external-input`) |
+| Sections and addresses | Section header streams, section-offset to RVA translation in both directions, end-of-section offsets, and OMAP translation in both directions with explicit results for unmapped addresses (#32); `SymbolLocator` gives the procedure, source lines and inline chain of an address, also in separated code chunks (`S_SEPCODE`) as DIA does (#30). The editor writes OMAP tables or new record addresses for a rewritten image ([Address remap](#address-remap), #43) | OMAP evidence from an independent producer (`external-input`) |
 | Symbol indexes | Global and public hash tables, bucket checks, name lookup candidates with the 16-bit bucket rule of minimal (FASTLINK) indexes, address maps, thunk maps and section starts. Writing: GSI and PSI builders with the producer bucket order and the MSVC or LLVM conventions for empty tables and address order (`native::Producer`); the GSI and PSI of every native fixture rebuild to the same bytes (#30) | Pre-compressed-bucket hash layouts |
 | Symbols | Typed decoders and encoders for 126 symbol kinds: every modern kind of `cvinfo.h` with a known layout and the later kinds of LLVM and the DIA SDK (#30), including the managed kinds of .NET Windows PDBs (#14) with the Roslyn `MD2` custom debug information and `asyncMethodInfo` attributes. The decoder keeps the count of zero padding bytes (fxc writes 4 or more). `ModuleSymbolWriter` and `SymbolRecordWriter` write the module symbol regions and the symbol record stream. `S_FRAMEREG`, `S_FASTLINK` and `S_REGREL32_ENCTMP` layouts come from fixtures (#13) | `S_ALTOBJNAME`, `S_LOCAL_2005`, `S_DEFRANGE_2005` and `S_DEFRANGE2_2005` have no layout in any source and stay raw |
 | Symbol validation | `codeview::symbol::validate` checks module and shared symbol records (#30): procedure end kinds, `next` links, scope code ranges, TPI and IPI references with IPI record kinds (`S_CALLERS` too; only the range for `S_SOURCELINK`), module references (`S_PROCREF`, `S_LPROCREF`, `S_TOKENREF`, `S_DATAREF`, `S_ANNOTATIONREF`), def-range locals, ranges and gaps (also program, HLSL and `_ON_ENTRY` def-ranges, and def-ranges in the `S_SEPCODE` code of their procedure), def-ranges against the code of their inline sites, subfield offsets against type sizes (`types::type_size`), local flags, section lengths and register numbers for the module CPU. In a `NOTM` PDB, the references of a module resolve against the module type streams that its `S_MOD_TYPEREF` names. It collects each broken rule in a report | — |
@@ -408,6 +408,79 @@ and then each task of #41 with `pdbstr -r` for `srcsrv` and `sourcelink` and DIA
 
 ```sh
 cargo run -p pdbrs-fixtures -- verify-native-edit
+```
+
+### Address remap
+
+A binary rewriter moves, splits or removes code after the link. `PdbEditor::remap_addresses(&ImageRemap, RemapMode)` makes the PDB describe the new image ([#43](https://github.com/napbat/pdbrs/issues/43)).
+The code is in `native/remap.rs`, `native/remap/` (the map, the OMAP tables and the address map of clean output) and `native/editor/remap.rs`, `native/editor/remap/` (the editor model).
+
+- `ImageRemap::new` takes the section headers of the new image. pdbrs has no PE parser, so the caller gives them.
+- `ImageRemap::with_range(old, length, new)` adds a range that maps the old RVAs `old .. old + length` to the new RVAs `new .. new + length`. The map is linear inside a range.
+- An old address without a range has no new address: the rewriter removed its code.
+- `with_range` rejects an empty range, an old or new RVA of 0 (OMAP uses the target 0 for "no mapping"), a range that overlaps an old or a new range of the map, and a new range that no new section holds. The error names the range (`Error::remap_range`).
+  Thus one old range at two new addresses (copied code) and two old ranges at one new address (folded code) are not possible.
+- The map keeps its ranges in address order. The same set of ranges gives the same output bytes, in any order of the calls.
+
+The mode selects the output:
+
+| Mode | Output |
+| --- | --- |
+| `RemapMode::Omap` | The records keep their addresses. The call writes 4 debug streams: slot 5 gets the section headers of the new image, slot 10 the section headers that the records use, and slots 3 and 4 the OMAP tables of `ImageRemap::address_tables`. The plan copies every other stream, so the report lists only the Info stream, the DBI stream and the 4 debug streams. `AddressMap` and DIA translate each address as the ranges say; an address without a range has no mapping. |
+| `RemapMode::Clean(RemovedCode)` | The plan writes the new address into each record. Slot 5 gets the section headers of the new image. The output has no OMAP stream and no original section headers: the plan removes slots 3, 4 and 10 (`DebugStreamList::remove` gives the same removal to callers). |
+
+A second call describes a second rewrite of the image: its old RVAs are the RVAs of the first new image.
+Two OMAP calls give one pair of composed tables. Clean output after OMAP output composes with the OMAP tables of the model, as for a source with OMAP.
+Two clean calls apply their maps in call order. OMAP output after clean output fails with `UnsupportedEdit`.
+
+Clean output has these rules:
+
+- Rule 6: the call checks the section headers and the OMAP tables of the model and the unwind streams. Then it keeps a copy of the map and the policy and does not change the records.
+  The plan applies the rewrite to a copy of the address-bearing parts. Thus records that other edits add or change, before or after the call, use the addresses of the source PDB, and the model keeps the source addresses.
+- An address is a section and an offset with a section from 1 to the number of section headers that the records use. Section 0 and larger section numbers (absolute symbols) keep their values. An RVA field with the value 0 has no address and keeps its value.
+- The plan rewrites the module symbols, the C13 line blocks (`DEBUG_S_LINES`), the module frame data (`DEBUG_S_FRAMEDATA`), the COFF symbol RVAs, the symbol record stream with the GSI and the PSI (address map, thunk table and section starts),
+  the DBI section contributions with the contribution of each module record, the section map, and the FPO, new FPO, exception data and fixup records. `DEBUG_S_IL_LINES` holds IL offsets: only its header start maps, as a point.
+- The plan sorts again what the format sorts by address: the PSI address map, the section contributions, and the FPO, new FPO and exception data records. The fixups keep their order.
+- In the copy-on-write layout, a stream whose bytes do not change stays `Copied`. An identity map thus keeps the source bytes of each stream except the Info stream and the DBI stream.
+
+A part is a piece of a record extent that one range maps. A record that a range cuts into parts gets the split form of its kind:
+
+| Kind | Split form |
+| --- | --- |
+| C13 line blocks | One `DEBUG_S_LINES` subsection for each part, with its own `LinesHeader`. A part that starts inside a line entry gets a first entry at offset 0 with the line and the column of that entry. |
+| Def-ranges (`S_DEFRANGE*`) | One record for each part, with the gaps inside that part. |
+| Procedures (`S_GPROC32` family, `S_GMANPROC`) | The part with the procedure start keeps the procedure, with the length of that part. Each other part becomes an `S_SEPCODE` scope without children after the procedure and its existing `S_SEPCODE` scopes, as MSVC writes separated code. |
+| Inline sites | The annotations stay if the procedure does not split. Else a site whose ranges all lie in one part gets new code offsets; a site with ranges in more than one part fails. |
+| Section contributions | One entry for each part. |
+| Points: labels, data, publics, `S_COFFGROUP`, `S_SECTION`, fixups, COFF symbol RVAs, thunk targets and the other single addresses | No split: the address maps or does not map. A length, for example of `S_COFFGROUP`, does not change. |
+| `S_SEPCODE`, `S_BLOCK32`, `S_WITH32`, `S_THUNK32`, `S_TRAMPOLINE`, `S_CALLSITEINFO`, `S_HEAPALLOCSITE`, FPO, new FPO, module frame data and exception data | No split form: the record moves with its range, and a split fails with `UnsupportedEdit`. |
+
+Removed code is an address or a part without a range. `RemovedCode` selects the policy:
+
+- `RemovedCode::Fail` (the default): the plan fails with `UnsupportedEdit` at the first record in stream order that holds removed code.
+- `RemovedCode::Drop`: the plan removes each record that holds removed code. A procedure, a block or an inline site goes away with its scope; a procedure also with its `S_SEPCODE` scopes. A record with a split form loses only its removed parts.
+  The plan also removes the references to the removed records: `S_PROCREF`, `S_LPROCREF`, `S_DATAREF`, `S_TOKENREF` and `S_ANNOTATIONREF`, their GSI entries and the module global references. The PSI address map comes from the remaining public symbols.
+- Both policies fail for a procedure whose start has no range while another part has a range, and for an inline site with some ranges removed and others kept.
+
+The error of a rejected record names the record and its address: `Error::remap_address` gives a `RemapAddress` with the kind (`RemapItem`) and the address in the address space of the source PDB (`PdbRva`).
+For a source record, `Error::stream_location` gives the stream and the offset.
+
+`PlanReport::remap` gives a `RemapReport` for clean output. For each `RemapItem` it counts the removed records (`removed`, `removed_items`) and the added parts (`added`, `added_items`).
+`cleared_crcs` counts the section contributions with new CRC values: a contribution (also in a DBI module record) whose section, offset or size changes gets data CRC 0 and relocation CRC 0, as the strip writes them. The CRCs describe the old code bytes.
+
+pdbrs does not decode `.xdata`, and the `.pdata` entries point into `.xdata`. Thus clean output takes the `.pdata` and `.xdata` streams of the new image from the caller: `ImageRemap::with_unwind_streams(pdata, xdata)`.
+The plan writes them into slots 8 and 7. Without them, clean output of a model with slot 7 or slot 8 fails with `UnsupportedEdit` at the call. OMAP output ignores them and copies the source streams.
+
+Opaque data that can hold an address makes the clean plan fail with `UnsupportedEdit`: a symbol record of a kind without a decoder, a module whose records do not form a scope tree, a `DEBUG_S_SYMBOLS` subsection, a subsection of an unknown kind and C11 line data.
+The opaque checks of the other edits that move records apply too.
+
+Caution: the new image matches the output only after the caller writes `PdbWritePlan::identity` into the `RSDS` debug entry of the image. The editor does not reject `IdentityPolicy::Preserve`.
+Use `IdentityPolicy::IncrementAge` or `IdentityPolicy::Replace` for a remap: the output describes another image.
+
+`verify-remap` writes the OMAP output of 5 range sets for each native fixture and compares it with DIA2Dump and `pdbtool` (see `fixtures/README.md`). The `native_remap` fuzz target compares OMAP output and clean output on a synthetic PDB (see [Fuzzing](../fuzzing.md)).
+
+```sh
+cargo run -p pdbrs-fixtures --release -- verify-remap
 ```
 
 ## Required formats and scope
@@ -958,6 +1031,8 @@ Use GUID field encoding from the format; do not assume UUID text order matches f
 Exact copy preserves all identity bytes. Native stream repack preserves the native identity.
 A native semantic edit requires an explicit policy: preserve identity or supply a replacement.
 Warn that preserving identity after semantic changes can misidentify symbols to debuggers.
+An address remap (#43, [Address remap](#address-remap)) is a semantic change: the output describes the rewritten image, not the old one.
+The editor does not reject `IdentityPolicy::Preserve` for a remap, as for the other semantic edits. Its documentation has the caution and recommends `IncrementAge` or `Replace`.
 Native builders receive identity values; do not hide random or clock-dependent input.
 Keep native PDB Info and DBI ages consistent.
 Represent native matching identity as a versioned value: modern GUID-and-age or legacy signature-and-age.
@@ -978,6 +1053,10 @@ Do not confuse a matching identity with cryptographic proof of unchanged content
 
 Keep section-relative addresses, original RVAs and transformed RVAs distinct.
 Use optional results for unmapped OMAP ranges; do not invent an address for deleted code.
+An `ImageRemap` maps old image RVAs (`Rva`) to new image RVAs. For a source with OMAP, the old RVAs are the RVAs of its image, and the records hold PDB RVAs (`PdbRva`) of the original image.
+OMAP output keeps the PDB RVAs in the records and maps them through the tables. Clean output writes new section-relative addresses into the records and maps each PDB RVA through the source OMAP (if present) and the ranges.
+Both modes give no address to removed code: OMAP output has no mapping for it, and clean output fails or removes the record (`RemovedCode`).
+`RemapAddress::address` names a rejected record by its PDB RVA, because the record has no new address.
 Do not treat every symbol as having an address or every PDB as having section headers.
 Keep portable IL offsets paired with MethodDef IDs. Native address conversion does not apply to them.
 Defer a shared source-location query API until actual consumers establish the common semantics.

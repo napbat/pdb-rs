@@ -334,6 +334,7 @@ pdbrs does not load external files. `Pdb::external_dependencies` lists the type 
 | 65536-byte pages | Read; not written, because consumers reject them (#15) |
 | Edits in place and incremental MSF commits | Not planned ([design](pdb.md#implemented-native-reading)); the editor writes a new file (#34) |
 | OMAP translation | Implemented (#32); the real-producer fixture needs `external-input`, because PDBs from a symbol server are not used ([decision](https://github.com/napbat/pdbrs/issues/32#issuecomment-6418682256)) |
+| OMAP writing and address remap | Implemented (#43): `PdbEditor::remap_addresses` writes OMAP tables (`RemapMode::Omap`) or new record addresses without OMAP (`RemapMode::Clean`) for a rewritten image ([design](pdb.md#address-remap)). pdbrs is not an independent producer, so the OMAP fixture cells stay `external-input` |
 | Compressed injected sources (run-length, Huffman, LZ) | Required (#32); no producer and no algorithm description (`external-input`) |
 | Natvis XML, Source Link JSON and `srcsrv` text | Decided in #32: pdbrs keeps and checks the bytes and does not interpret them ([decision](https://github.com/napbat/pdbrs/issues/32#issuecomment-6412876796)) |
 | `hlsl-dxc-debug` PDBs (declared page count too small) | Rejected, as `pdbtool` and DIA reject them (#27) |

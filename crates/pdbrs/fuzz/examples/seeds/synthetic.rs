@@ -86,5 +86,17 @@ pub fn extra_seeds(corpus: &mut Corpus) -> Outcome {
     commands.extend_from_slice(&[2, 0, 0, 0, 12, 0, 3, 0, 0, 1, 0, 1, b'x']);
     commands.extend_from_slice(&[6, 1, 0x11, 2, b'h', b'i']);
     corpus.add("portable_build", &commands)?;
+    // Range sets of `native_remap` (see `pdbrs_fuzz::native::remap`): `.text` at its old RVA;
+    // `.text` moved; `sum` after `main`, with `main` split by a gap; `sum` removed; the block
+    // of `main` split by a gap.
+    for input in [
+        &[0x00_u8][..],
+        &[0x01],
+        &[0x0d, 0x1f, 0x04, 0x00, 0x17, 0x00, 0x85, 0x17, 0x08, 0x00],
+        &[0x02, 0x1f, 0x03, 0x00],
+        &[0x00, 0x2f, 0x00, 0x00, 0x3f, 0x00, 0x81],
+    ] {
+        corpus.add("native_remap", input)?;
+    }
     Ok(())
 }

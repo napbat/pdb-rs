@@ -118,6 +118,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Use `IdentityPolicy::Preserve` for a change that does not change the symbols, for example
 only a Source Link or a `srcsrv` change: the image then keeps its match.
 
+A binary rewriter moves, splits or removes code after the link. `PdbEditor::remap_addresses`
+makes the PDB describe the new image (#43). The caller gives the section headers of the new
+image and one range for each moved piece: old RVA, length, new RVA. An old address without a
+range is removed code.
+
+```rust
+use pdbrs::native::address::Rva;
+use pdbrs::native::section::{SectionHeader, SectionHeaderStream};
+use pdbrs::native::{EditOptions, IdentityPolicy, ImageRemap, Pdb, RemapMode, RemovedCode};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // pdbrs has no PE parser: read the section headers from the new image.
+    let text = SectionHeader::new(*b".text\0\0\0", 0x3000, 0x1000); // name, size, RVA
+    let remap = ImageRemap::new(SectionHeaderStream::from_records(&[text])?)
+        .with_range(Rva(0x1000), 0x2a0, Rva(0x1400))? // old RVA, length, new RVA
+        .with_range(Rva(0x12a0), 0x40, Rva(0x1000))?;
+    let pdb = Pdb::open("app.pdb")?;
+    // The output describes another image: give it a new identity.
+    let mut editor = pdb.edit(IdentityPolicy::IncrementAge);
+    // OMAP output: the records keep their addresses, and OMAP tables translate them.
+    // Clean output: the plan writes the new addresses into the records.
+    editor.remap_addresses(&remap, RemapMode::Clean(RemovedCode::Drop))?;
+    let plan = editor.plan(EditOptions::default())?;
+    if let Some(report) = plan.report().remap() {
+        for (item, count) in report.removed_items() {
+            println!("removed {count} records of {item:?}");
+        }
+    }
+    plan.write_file("app.rewritten.pdb")?;
+    println!("write into the image: {:?}", plan.identity()?);
+    Ok(())
+}
+```
+
+- `RemapMode::Omap` writes the OMAP tables and the section headers of the new image, and
+  copies the other streams. DIA and `AddressMap` translate each address as the ranges say.
+- `RemapMode::Clean` writes the new addresses into the records, without OMAP. A record that a
+  range splits gets a split form, for example an `S_SEPCODE` scope for a procedure part. A
+  kind without a split form, for example `S_BLOCK32` or an FPO record, makes the plan fail.
+- `RemovedCode::Fail` (the default) makes the plan fail at the first record with removed
+  code. `RemovedCode::Drop` removes these records and the references to them.
+- The error of a rejected record names it: `Error::remap_address` gives the kind and the
+  address.
+- If the PDB has `.pdata` or `.xdata` streams, give the streams of the new image to
+  `ImageRemap::with_unwind_streams` for clean output. pdbrs does not decode `.xdata`.
+
+The [design](docs/design/pdb.md#address-remap) gives all rules of both modes.
+
 ## Features
 
 - `std` (default): file access through `Pdb::open` and standard I/O error integration.

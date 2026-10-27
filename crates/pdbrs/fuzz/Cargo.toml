@@ -312,3 +312,10 @@ path = "fuzz_targets/native_editor.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "native_remap"
+path = "fuzz_targets/native_remap.rs"
+test = false
+doc = false
+bench = false
